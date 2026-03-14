@@ -691,8 +691,6 @@ Templates:
 Fragments:
 
 - `prompts/fragments/worker-common.md`
-- `prompts/fragments/task-system-linear.md`
-- `prompts/fragments/task-system-file.md`
 - `prompts/fragments/task-system-linear-planning.md`
 - `prompts/fragments/task-system-file-planning.md`
 - `prompts/fragments/review-github.md`
@@ -701,6 +699,8 @@ Fragments:
 - `prompts/fragments/history-policy.md`
 
 `templates/plan.md` contains its own shared planning guidance directly and includes the task-system-specific planning fragment.
+
+Worker prompts use one shared runtime fragment for all task systems. Task-system-specific worker runtime fragments are intentionally not used in v1 because Foreman provides normalized task, comment, artifact, repo, and review context directly to the worker.
 
 ### Rendering Rules
 
