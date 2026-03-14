@@ -1,44 +1,46 @@
-# Foreman Consolidation Prompt
+# Consolidation Prompt
 
-{{workerCommon}}
+You are consolidating one terminal Foreman task.
 
-Consolidate terminal task state, memory, and cleanup.
+The task is already terminal and its linked PRs are already closed.
 
-## Task
+{{fragment:worker-common}}
 
-```json
-{{taskJson}}
-```
+{{fragment:learning-policy}}
 
-## Task Comments
+{{fragment:history-policy}}
 
-{{comments}}
+## Objective
 
-## Repo Context
+Capture the durable outcomes of the completed work.
 
-```json
-{{repoJson}}
-```
+Focus on:
 
-Worktree: `{{worktreePath}}`
-Base branch: `{{baseBranch}}`
+- extracting non-obvious reusable learnings,
+- recording a concise summary,
+- adding task-local commentary only when it materially helps future readers.
 
-## Repo Local Instructions
+Do not make repository code changes unless the provided context explicitly requires cleanup work in the task worktree.
 
-{{repoInstructions}}
+## Context
 
-## Task System Notes
+{{context:selected-task}}
 
-{{taskSystemFragment}}
+{{context:task-comments}}
 
-## Learning Policy
+{{context:repo}}
 
-{{learningPolicy}}
+{{context:repo-instructions}}
 
-## History Policy
+{{context:review}}
 
-{{historyPolicy}}
+## Consolidation Rules
 
-## Output Contract
+- Assume label-swapping and task-state handling are owned by Foreman.
+- For merged work, prefer learnings grounded in implementation outcomes, review adjustments, checks, and merged change history.
+- For terminal non-merged work, focus on reusable lessons from the stop-intent rationale and why the work should not proceed.
+- If consolidation yields no reusable learning delta, still return a concise completion summary rather than inventing one-off learnings.
+- Use learning mutations for reusable insights.
+- Prefer `completed` unless there is a real blocker to consolidation.
 
-{{outputSchema}}
+{{fragment:output-schema}}

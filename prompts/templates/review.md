@@ -1,54 +1,49 @@
-# Foreman Review Prompt
+# Review Prompt
 
-{{workerCommon}}
+You are addressing review-state work for one selected task in Foreman.
 
-Review the task and its current pull request state.
+The task and PR have already been selected. Do not scout, reprioritize, or choose a different task.
 
-## Task
+{{fragment:worker-common}}
 
-```json
-{{taskJson}}
-```
+{{fragment:review-github}}
 
-## Task Comments
+{{fragment:learning-policy}}
 
-{{comments}}
+{{fragment:history-policy}}
 
-## Repo Context
+## Objective
 
-```json
-{{repoJson}}
-```
+Resolve the selected PR's remaining actionable review work.
 
-Worktree: `{{worktreePath}}`
-Base branch: `{{baseBranch}}`
+Priority order inside this action:
 
-## Repo Local Instructions
+1. unresolved review threads,
+2. current-head top-level review summaries,
+3. post-head PR conversation comments,
+4. failing checks,
+5. merge conflicts.
 
-{{repoInstructions}}
+## Context
 
-## Review Context
+{{context:selected-task}}
 
-```json
-{{reviewContextJson}}
-```
+{{context:task-comments}}
 
-## Review System Notes
+{{context:repo}}
 
-{{reviewFragment}}
+{{context:repo-instructions}}
 
-## Task System Notes
+{{context:review}}
 
-{{taskSystemFragment}}
+## Review Rules
 
-## Learning Policy
+- Only address review summaries on the current PR head.
+- Only address conversation comments created after the current PR head became current.
+- Ignore obvious noise already filtered from the provided context.
+- If the PR has merge conflicts, resolve them by merging the latest base branch into the task branch; do not rebase or cherry-pick.
+- If you make code changes, run the relevant automated checks for the affected scope, then commit and push the task branch before returning `completed`.
+- If nothing needs to be changed or replied to for the current PR state, return `no_action_needed` and include `review_checkpoint_eligible`.
+- Resolve threads only when your code or reply truly addresses them.
 
-{{learningPolicy}}
-
-## History Policy
-
-{{historyPolicy}}
-
-## Output Contract
-
-{{outputSchema}}
+{{fragment:output-schema}}

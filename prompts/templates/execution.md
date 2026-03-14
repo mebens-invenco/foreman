@@ -1,46 +1,49 @@
-# Foreman Execution Prompt
+# Execution Prompt
 
-{{workerCommon}}
+You are executing one selected task in Foreman.
 
-## Action
+The task has already been selected. Do not scout, reprioritize, or choose a different task.
 
-Execute the task described below.
+{{fragment:worker-common}}
 
-## Task
+{{fragment:review-github}}
 
-```json
-{{taskJson}}
-```
+{{fragment:learning-policy}}
 
-## Task Comments
+{{fragment:history-policy}}
 
-{{comments}}
+## Objective
 
-## Repo Context
+Complete the selected task in the provided worktree.
 
-```json
-{{repoJson}}
-```
+- Understand the requested change and existing code.
+- Implement the smallest correct solution.
+- Run the relevant automated checks for the changed or affected scope.
+- Prepare pull request output if this action should open a PR.
+- Propose reusable learnings only when they are genuinely non-obvious.
 
-Worktree: `{{worktreePath}}`
-Base branch: `{{baseBranch}}`
+## Context
 
-## Repo Local Instructions
+{{context:selected-task}}
 
-{{repoInstructions}}
+{{context:task-comments}}
 
-## Task System Notes
+{{context:repo}}
 
-{{taskSystemFragment}}
+{{context:repo-instructions}}
 
-## Learning Policy
+{{context:review}}
 
-{{learningPolicy}}
+## Execution Rules
 
-## History Policy
+- Treat the resolved repo, worktree, and base branch as authoritative.
+- Do not perform task-system orchestration directly.
+- Do not perform review-system orchestration directly except through structured review mutations.
+- If you make code changes, commit and push the task branch before returning `completed`.
+- If this action opens a PR, prefer a draft PR.
+- PR titles should normally follow `<TASK-ID>: <short description>` and should not use conventional-commit prefixes like `feat:`, `fix:`, or `chore:`.
+- Follow repository PR templates and any repo-root instruction-file requirements when writing the PR body.
+- If you are blocked, return `blocked` with explicit blocker codes and messages.
+- If a PR should be created, provide the full title and body in the review mutations.
 
-{{historyPolicy}}
-
-## Output Contract
-
-{{outputSchema}}
+{{fragment:output-schema}}

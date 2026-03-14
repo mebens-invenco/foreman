@@ -1,50 +1,48 @@
-# Foreman Retry Prompt
+# Retry Prompt
 
-{{workerCommon}}
+You are retrying one selected task in Foreman after a previous PR was closed unmerged.
 
-Resume work for a closed, unmerged review task.
+Foreman has already determined that retry is appropriate.
 
-## Task
+{{fragment:worker-common}}
 
-```json
-{{taskJson}}
-```
+{{fragment:review-github}}
 
-## Task Comments
+{{fragment:learning-policy}}
 
-{{comments}}
+{{fragment:history-policy}}
 
-## Repo Context
+## Objective
 
-```json
-{{repoJson}}
-```
+Reattempt the task cleanly from fresh branch state while reusing only the prior review context.
 
-Worktree: `{{worktreePath}}`
-Base branch: `{{baseBranch}}`
+## Context
 
-## Repo Local Instructions
+{{context:selected-task}}
 
-{{repoInstructions}}
+{{context:task-comments}}
 
-## Review Context
+{{context:repo}}
 
-```json
-{{reviewContextJson}}
-```
+{{context:repo-instructions}}
 
-## Task System Notes
+{{context:review}}
 
-{{taskSystemFragment}}
+## Retry Rules
 
-## Learning Policy
+- Treat previous patch content as discarded.
+- Use only the provided task context, task comments, PR body, review context, and check context to guide the reimplementation.
+- Do not assume prior code changes are still present or should be preserved.
+- Reset the task branch to a fresh state from the resolved base branch before reimplementing.
+- You may reuse prior review intent only; you may not reuse prior implementation patches or file content.
+- Forbidden retry flows include cherry-pick, rebase, `git am`, `git apply`, piping prior diffs into apply tools, and checking out file content from old refs.
+- If safe reimplementation would require reusing prior patch content, return `blocked`.
+- Run the relevant automated checks for the changed or affected scope.
+- If you make code changes, commit and push the task branch before returning `completed`.
+- If retry reopens or recreates a PR, prefer draft mode.
+- PR titles should normally follow `<TASK-ID>: <short description>` and should not use conventional-commit prefixes like `feat:`, `fix:`, or `chore:`.
+- Follow repository PR templates and any repo-root instruction-file requirements when writing the PR body.
+- If the retry should reopen the prior PR, emit a `reopen_pull_request` mutation.
+- If retry should create a fresh PR instead, emit `create_pull_request` with a full title and body.
 
-{{learningPolicy}}
-
-## History Policy
-
-{{historyPolicy}}
-
-## Output Contract
-
-{{outputSchema}}
+{{fragment:output-schema}}

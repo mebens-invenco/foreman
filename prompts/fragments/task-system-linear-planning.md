@@ -1,1 +1,22 @@
-Highlight the configured Linear team, labels, and workflow mappings. Call out repo metadata blockers when tasks are missing the required `Repo` field.
+## Linear Planning Rules
+
+Produce tasks that can be created directly in Linear and executed later by Foreman.
+
+- Use the workspace's configured execution label and consolidation label conventions.
+- Place new execution-ready tasks into a provider state that maps to Foreman's internal `ready` state.
+- Include the required Foreman metadata block in each task description.
+
+Use this metadata syntax:
+
+```text
+Foreman:
+  Repo: <repo-key>
+  Depends on tasks: <ENG-123, ENG-124>
+  Base from task: <ENG-123>
+  Depends on branches: <feature/foo, eng-123>
+  Branch: <task-branch-name>
+```
+
+- `Repo` is required.
+- `Base from task` is required when there is more than one task dependency.
+- Omit dependency keys entirely when they are not needed.

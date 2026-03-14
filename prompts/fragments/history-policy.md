@@ -1,1 +1,8 @@
-Use the single summary as the durable history entry for the attempt. Keep it factual and outcome-oriented.
+## Summary Policy
+
+Your single `summary` field is used both for the attempt record and the durable history entry.
+
+- Keep it concise.
+- Describe the meaningful outcome, not every step.
+- Prefer one sentence.
+- If blocked, summarize the blocker clearly.

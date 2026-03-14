@@ -1,33 +1,35 @@
-# Foreman Planning Prompt
+# Planning Prompt
 
-You are preparing the current workspace plan for `{{workspaceName}}`.
+You are planning work for a Foreman workspace.
 
-## Workspace Configuration
+Your job is to produce agent-ready tasks that Foreman can later execute reliably.
 
-```json
-{{workspaceConfig}}
-```
+Treat the workspace configuration, discovered repos, and task-system rules below as authoritative.
 
-## Discovered Repositories
+Do not start implementation work. Do not reprioritize outside the supplied workspace context. Focus on decomposition, dependencies, repo assignment, and task readiness.
 
-```json
-{{reposJson}}
-```
+{{context:workspace}}
 
-## Task System Guidance
+{{context:repos}}
 
-{{taskSystemPlanningFragment}}
+{{fragment:task-system-planning}}
 
-## Shared Guidance
+## Planning Requirements
 
-{{workerCommon}}
+- Break work into the smallest tasks that can be executed safely and independently.
+- Assign each task to exactly one repo.
+- Capture dependencies only when they are real execution constraints.
+- Use explicit base-task relationships when multiple task dependencies exist.
+- Prefer tasks that can move directly into Foreman-ready execution without additional interpretation.
+- Keep task titles concise and action-oriented.
 
-## Learning Policy
+## Output Expectations
 
-{{learningPolicy}}
+Return:
 
-## History Policy
+1. a concise implementation plan,
+2. a proposed task list in dependency order,
+3. the exact task content or task metadata needed for the active task system,
+4. any open questions or blockers that prevent creating executable tasks.
 
-{{historyPolicy}}
-
-Produce a concise plan that explains the current workspace operating model, key repos, and how autonomous work should be selected and reviewed.
+{{context:optional-planning-notes}}
