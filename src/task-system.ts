@@ -654,6 +654,20 @@ export class LinearTaskSystem implements TaskSystem {
 
   async addArtifact(input: { taskId: string; artifact: TaskArtifact }): Promise<void> {
     const task = await this.getTask(input.taskId);
+    const existingArtifact = task.artifacts.find(
+      (artifact) => artifact.type === input.artifact.type && artifact.url === input.artifact.url,
+    );
+
+    if (existingArtifact?.externalId) {
+      await this.client.request(
+        `mutation ForemanAttachmentUpdate($id: String!, $title: String) {
+          attachmentUpdate(id: $id, input: { title: $title }) { success }
+        }`,
+        { id: existingArtifact.externalId, title: input.artifact.title ?? existingArtifact.title ?? null },
+      );
+      return;
+    }
+
     await this.client.request(
       `mutation ForemanAttachmentCreate($issueId: String!, $url: String!, $title: String) {
         attachmentCreate(input: { issueId: $issueId, url: $url, title: $title }) { success }

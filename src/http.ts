@@ -6,7 +6,7 @@ import Fastify from "fastify";
 import type { WorkspaceConfig, WorkspacePaths } from "./config.js";
 import type { ForemanDb } from "./db.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
-import type { RepoRef } from "./domain.js";
+import type { RepoRef, TaskState } from "./domain.js";
 import type { SchedulerService } from "./scheduler.js";
 import type { TaskSystem } from "./task-system.js";
 
@@ -37,6 +37,47 @@ const writeSseEvent = (reply: { raw: NodeJS.WritableStream }, event: string, dat
   }
   reply.raw.write("\n");
 };
+
+const parsePositiveIntegerQuery = (name: string, value: string | undefined): number | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new ForemanError("invalid_request", `Query parameter ${name} must be a positive integer.`, 400);
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return parsed;
+};
+
+const parseNonNegativeIntegerQuery = (name: string, value: string | undefined): number | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!/^\d+$/.test(value)) {
+    throw new ForemanError("invalid_request", `Query parameter ${name} must be a non-negative integer.`, 400);
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return parsed;
+};
+
+const parseEnumQuery = <T extends string>(name: string, value: string | undefined, allowed: readonly T[]): T | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!allowed.includes(value as T)) {
+    throw new ForemanError("invalid_request", `Query parameter ${name} must be one of: ${allowed.join(", ")}.`, 400);
+  }
+
+  return value as T;
+};
+
+const taskStates = ["ready", "in_progress", "in_review", "done", "canceled"] as const satisfies readonly TaskState[];
+const attemptStatuses = ["running", "completed", "failed", "blocked", "canceled", "timed_out"] as const;
 
 export const createHttpServer = (deps: HttpServerDeps) => {
   const server = Fastify({ logger: false });
@@ -72,9 +113,10 @@ export const createHttpServer = (deps: HttpServerDeps) => {
 
   server.get("/api/tasks", async (request) => {
     const query = request.query as { state?: string; search?: string; limit?: string };
-    const limit = query.limit ? Number(query.limit) : undefined;
+    const state = parseEnumQuery("state", query.state, taskStates);
+    const limit = parsePositiveIntegerQuery("limit", query.limit);
     const tasks = (await deps.taskSystem.listCandidates())
-      .filter((task) => (query.state ? task.state === query.state : true))
+      .filter((task) => (state ? task.state === state : true))
       .filter((task) => {
         if (!query.search) {
           return true;
@@ -144,15 +186,16 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   server.get("/api/attempts", async (request) => {
     const query = request.query as { status?: string; jobId?: string; limit?: string };
     const filters: { status?: "running" | "completed" | "failed" | "blocked" | "canceled" | "timed_out"; jobId?: string; limit?: number } = {};
-    const status = query.status as (typeof filters)["status"] | undefined;
+    const status = parseEnumQuery("status", query.status, attemptStatuses);
     if (status !== undefined) {
       filters.status = status;
     }
     if (query.jobId) {
       filters.jobId = query.jobId;
     }
-    if (query.limit) {
-      filters.limit = Number(query.limit);
+    const limit = parsePositiveIntegerQuery("limit", query.limit);
+    if (limit !== undefined) {
+      filters.limit = limit;
     }
     return {
       attempts: deps.db.listAttempts(filters),
@@ -279,11 +322,13 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     if (query.repo) {
       filters.repo = query.repo;
     }
-    if (query.limit) {
-      filters.limit = Number(query.limit);
+    const limit = parsePositiveIntegerQuery("limit", query.limit);
+    if (limit !== undefined) {
+      filters.limit = limit;
     }
-    if (query.offset) {
-      filters.offset = Number(query.offset);
+    const offset = parseNonNegativeIntegerQuery("offset", query.offset);
+    if (offset !== undefined) {
+      filters.offset = offset;
     }
     return {
       learnings: deps.db.listLearnings(filters),

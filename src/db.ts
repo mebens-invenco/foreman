@@ -419,15 +419,14 @@ export class ForemanDb {
     return Number(row.max_attempt ?? 0) + 1;
   }
 
-  createAttempt(input: {
+  private buildAttemptRecord(input: {
     jobId: string;
     workerId: string;
     runnerModel: string;
     runnerVariant: string;
   }): AttemptRecord {
-    const id = newId();
-    const record: AttemptRecord = {
-      id,
+    return {
+      id: newId(),
       jobId: input.jobId,
       workerId: input.workerId,
       attemptNumber: this.nextAttemptNumber(input.jobId),
@@ -442,7 +441,9 @@ export class ForemanDb {
       summary: "",
       errorMessage: null,
     };
+  }
 
+  private insertAttemptRecord(record: AttemptRecord): void {
     this.sqlite
       .prepare(
         `INSERT INTO execution_attempt(
@@ -466,8 +467,57 @@ export class ForemanDb {
         record.summary,
         null,
       );
+  }
+
+  createAttempt(input: {
+    jobId: string;
+    workerId: string;
+    runnerModel: string;
+    runnerVariant: string;
+  }): AttemptRecord {
+    const record = this.buildAttemptRecord(input);
+    this.insertAttemptRecord(record);
 
     return record;
+  }
+
+  createAttemptWithLeases(input: {
+    jobId: string;
+    workerId: string;
+    runnerModel: string;
+    runnerVariant: string;
+    expiresAt: string;
+    leases: Array<{ resourceType: "job" | "task" | "branch"; resourceKey: string }>;
+  }): AttemptRecord | null {
+    const record = this.buildAttemptRecord(input);
+
+    try {
+      const tx = this.sqlite.transaction(() => {
+        this.insertAttemptRecord(record);
+        const insertLease = this.sqlite.prepare(
+          `INSERT INTO lease(id, resource_type, resource_key, worker_id, execution_attempt_id, acquired_at, heartbeat_at, expires_at, released_at, release_reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+        );
+
+        for (const lease of input.leases) {
+          insertLease.run(
+            newId(),
+            lease.resourceType,
+            lease.resourceKey,
+            input.workerId,
+            record.id,
+            record.startedAt,
+            record.startedAt,
+            input.expiresAt,
+          );
+        }
+      });
+
+      tx();
+      return record;
+    } catch {
+      return null;
+    }
   }
 
   finalizeAttempt(attemptId: string, status: AttemptStatus, patch: { finishedAt?: string; exitCode?: number | null; signal?: string | null; summary?: string; errorMessage?: string | null } = {}): void {

@@ -37,10 +37,20 @@ const resolveDefaultBranch = async (repoPath: string): Promise<string> => {
 
 export const discoverRepos = async (config: WorkspaceConfig, paths: WorkspacePaths): Promise<RepoRef[]> => {
   const resolved = new Map<string, RepoRef>();
+  const isIgnoredRepoPath = (candidatePath: string): boolean => {
+    const relativePath = path.relative(paths.workspaceRoot, candidatePath) || ".";
+    return config.repos.ignore.some(
+      (pattern) => path.matchesGlob(relativePath, pattern) || path.matchesGlob(candidatePath, pattern),
+    );
+  };
 
   const addRepo = async (candidate: string): Promise<void> => {
     const absolute = path.resolve(paths.workspaceRoot, candidate);
     const real = await fs.realpath(absolute);
+
+    if (isIgnoredRepoPath(real)) {
+      return;
+    }
 
     if (!(await isGitRepo(real))) {
       throw new ForemanError("invalid_repo", `Configured repo path is not a git repo: ${candidate}`);
@@ -90,6 +100,10 @@ export const discoverRepos = async (config: WorkspaceConfig, paths: WorkspacePat
       }
 
       const childPath = path.join(rootPath, child.name);
+      if (isIgnoredRepoPath(childPath)) {
+        continue;
+      }
+
       if (await isGitRepo(childPath)) {
         await addRepo(childPath);
       }

@@ -31,6 +31,20 @@ type SchedulerDeps = {
   env: Record<string, string>;
 };
 
+const consolidationLabels = (config: WorkspaceConfig): { remove: string[]; add: string[] } => {
+  if (config.taskSystem.type === "linear") {
+    return {
+      remove: config.taskSystem.linear!.includeLabels,
+      add: [config.taskSystem.linear!.consolidatedLabel],
+    };
+  }
+
+  return {
+    remove: ["Agent"],
+    add: ["Agent Consolidated"],
+  };
+};
+
 export class SchedulerService extends EventEmitter {
   private status: SchedulerStatus = "stopped";
   private scoutInFlight = false;
@@ -260,26 +274,20 @@ export class SchedulerService extends EventEmitter {
       repo = assertTaskActionableRepo(task, this.deps.repos);
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
 
-      for (const lease of leaseResourceKeysForAction(task, job.action)) {
-        const acquired = this.deps.db.acquireLease({
-          resourceType: lease.resourceType,
-          resourceKey: lease.resourceKey,
-          workerId,
-          expiresAt: leaseExpiresAt,
-        });
-        if (!acquired) {
-          return;
-        }
-      }
-
-      this.deps.db.updateWorkerStatus(workerId, "leased", null);
-      this.deps.db.updateJobStatus(job.id, "leased", { leasedAt: isoNow() });
-      attempt = this.deps.db.createAttempt({
+      attempt = this.deps.db.createAttemptWithLeases({
         jobId: job.id,
         workerId,
         runnerModel: this.deps.config.runner.model,
         runnerVariant: this.deps.config.runner.variant,
+        expiresAt: leaseExpiresAt,
+        leases: leaseResourceKeysForAction(task, job.action),
       });
+      if (!attempt) {
+        return;
+      }
+
+      this.deps.db.updateWorkerStatus(workerId, "leased", null);
+      this.deps.db.updateJobStatus(job.id, "leased", { leasedAt: isoNow() });
       this.deps.db.updateWorkerStatus(workerId, "running", attempt.id);
       this.deps.db.updateJobStatus(job.id, "running", { startedAt: attempt.startedAt });
       this.deps.db.addAttemptEvent(attempt.id, "attempt_started", `Started ${job.action} for ${task.id}`);
@@ -561,6 +569,15 @@ export class SchedulerService extends EventEmitter {
       }
     }
 
+    if (input.job.action === "consolidation" && workerResult.outcome === "completed") {
+      const labels = consolidationLabels(this.deps.config);
+      await this.deps.taskSystem.updateLabels({
+        taskId: input.task.id,
+        add: labels.add,
+        remove: labels.remove,
+      });
+    }
+
     for (const mutation of workerResult.learningMutations) {
       if (mutation.type === "add") {
         this.deps.db.addLearning(mutation);
@@ -578,12 +595,20 @@ export class SchedulerService extends EventEmitter {
     ) {
       const reviewContext = await this.deps.reviewService.getContext(input.task, this.deps.config.workspace.agentPrefix);
       if (reviewContext) {
-        this.deps.db.upsertReviewCheckpoint({
-          taskId: input.task.id,
-          prUrl: pullRequestUrl,
-          reviewContext,
-          sourceAttemptId: input.attempt.id,
-        });
+        try {
+          this.deps.db.upsertReviewCheckpoint({
+            taskId: input.task.id,
+            prUrl: pullRequestUrl,
+            reviewContext,
+            sourceAttemptId: input.attempt.id,
+          });
+        } catch (error) {
+          this.deps.db.addAttemptEvent(
+            input.attempt.id,
+            "review_checkpoint_warning",
+            error instanceof Error ? error.message : String(error),
+          );
+        }
       }
     }
 
