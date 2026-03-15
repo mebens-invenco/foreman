@@ -4,6 +4,17 @@ import { createDefaultWorkspaceConfig } from "../src/config.js";
 import { LinearTaskSystem } from "../src/task-system.js";
 
 const originalFetch = global.fetch;
+const fakeLogger = {
+  child() {
+    return this;
+  },
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  line() {},
+  flush: async () => undefined,
+};
 
 afterEach(() => {
   global.fetch = originalFetch;
@@ -57,7 +68,7 @@ describe("LinearTaskSystem.addArtifact", () => {
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
-    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" });
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
     await taskSystem.addArtifact({
       taskId: "ENG-123",
       artifact: {
@@ -95,7 +106,7 @@ describe("LinearTaskSystem.addArtifact", () => {
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
-    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" });
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
     await taskSystem.addArtifact({
       taskId: "ENG-123",
       artifact: {

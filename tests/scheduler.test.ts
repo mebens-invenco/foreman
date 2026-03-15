@@ -55,6 +55,18 @@ const reviewContext: ReviewContext = {
   pendingChecks: [],
 };
 
+const fakeLogger = {
+  child() {
+    return this;
+  },
+  debug() {},
+  info() {},
+  warn() {},
+  error() {},
+  line() {},
+  flush: async () => undefined,
+};
+
 describe("SchedulerService applyWorkerResult", () => {
   test("swaps consolidation labels on completed consolidation jobs", async () => {
     const updateLabels = vi.fn(async () => undefined);
@@ -92,6 +104,7 @@ describe("SchedulerService applyWorkerResult", () => {
       runner: {} as any,
       repos: [],
       env: {},
+      logger: fakeLogger as any,
     });
 
     const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
@@ -150,6 +163,7 @@ describe("SchedulerService applyWorkerResult", () => {
       runner: {} as any,
       repos: [],
       env: {},
+      logger: fakeLogger as any,
     });
 
     const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;

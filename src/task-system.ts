@@ -10,6 +10,7 @@ import type { Task, TaskArtifact, TaskComment, TaskProvider, TaskState } from ".
 import { ForemanError } from "./lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists } from "./lib/fs.js";
 import { newId } from "./lib/ids.js";
+import { LoggerService } from "./logger.js";
 import { isoNow } from "./lib/time.js";
 
 export interface TaskSystem {
@@ -375,9 +376,19 @@ type LinearIssueNode = {
 };
 
 class LinearClient {
-  constructor(private readonly apiKey: string) {}
+  constructor(
+    private readonly apiKey: string,
+    private readonly logger: LoggerService,
+  ) {}
 
   async request<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+    const startedAt = Date.now();
+    const operationName = query.match(/\b(?:query|mutation)\s+(\w+)/)?.[1] ?? "anonymous";
+    this.logger.debug("sending Linear GraphQL request", {
+      operationName,
+      variableKeys: Object.keys(variables).sort().join(","),
+    });
+
     const response = await fetch("https://api.linear.app/graphql", {
       method: "POST",
       headers: {
@@ -388,11 +399,23 @@ class LinearClient {
     });
 
     if (!response.ok) {
+      this.logger.error("Linear GraphQL request failed", {
+        operationName,
+        status: response.status,
+        statusText: response.statusText,
+        durationMs: Date.now() - startedAt,
+      });
       throw new ForemanError("linear_request_failed", `Linear request failed: ${response.status} ${response.statusText}`, 502);
     }
 
     const json = (await response.json()) as { data?: T; errors?: Array<{ message: string }> };
     if (json.errors?.length) {
+      this.logger.error("Linear GraphQL request returned errors", {
+        operationName,
+        durationMs: Date.now() - startedAt,
+        errorCount: json.errors.length,
+        errors: json.errors.map((error) => error.message).join("; "),
+      });
       throw new ForemanError(
         "linear_request_failed",
         `Linear request failed: ${json.errors.map((error) => error.message).join("; ")}`,
@@ -401,8 +424,17 @@ class LinearClient {
     }
 
     if (!json.data) {
+      this.logger.error("Linear GraphQL request returned no data", {
+        operationName,
+        durationMs: Date.now() - startedAt,
+      });
       throw new ForemanError("linear_request_failed", "Linear request returned no data", 502);
     }
+
+    this.logger.debug("Linear GraphQL request completed", {
+      operationName,
+      durationMs: Date.now() - startedAt,
+    });
 
     return json.data;
   }
@@ -453,17 +485,23 @@ const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task
 
 export class LinearTaskSystem implements TaskSystem {
   private readonly client: LinearClient;
+  private readonly logger: LoggerService;
 
   constructor(
     private readonly config: WorkspaceConfig,
     private readonly env: Record<string, string>,
+    logger?: LoggerService,
   ) {
+    this.logger = (logger ?? LoggerService.create({ context: { component: "taskSystem.linear" }, colorMode: "never" })).child({
+      component: "taskSystem.linear",
+    });
     const apiKey = env.LINEAR_API_KEY;
     if (!apiKey) {
+      this.logger.error("Linear task system initialization failed because LINEAR_API_KEY is missing");
       throw new ForemanError("missing_linear_api_key", "LINEAR_API_KEY is required for Linear workspaces", 400);
     }
 
-    this.client = new LinearClient(apiKey);
+    this.client = new LinearClient(apiKey, this.logger.child({ component: "taskSystem.linear.client" }));
   }
 
   getProvider(): "linear" {
@@ -472,54 +510,79 @@ export class LinearTaskSystem implements TaskSystem {
 
   async validateStartup(): Promise<void> {
     const linear = this.config.taskSystem.linear!;
-    const response = await this.client.request<{
-      teams: { nodes: Array<{ id: string; name: string; states: { nodes: Array<{ id: string; name: string }> } }> };
-      issueLabels: { nodes: Array<{ id: string; name: string }> };
-    }>(
-      `query ValidateForemanStartup($teamName: String!) {
-        teams(filter: { name: { eq: $teamName } }) {
-          nodes {
-            id
-            name
-            states { nodes { id name } }
+    this.logger.info("validating Linear startup configuration", { team: linear.team });
+    try {
+      const response = await this.client.request<{
+        teams: { nodes: Array<{ id: string; name: string; states: { nodes: Array<{ id: string; name: string }> } }> };
+        issueLabels: { nodes: Array<{ id: string; name: string }> };
+      }>(
+        `query ValidateForemanStartup($teamName: String!) {
+          teams(filter: { name: { eq: $teamName } }) {
+            nodes {
+              id
+              name
+              states { nodes { id name } }
+            }
           }
-        }
-        issueLabels {
-          nodes { id name }
-        }
-      }`,
-      { teamName: linear.team },
-    );
+          issueLabels {
+            nodes { id name }
+          }
+        }`,
+        { teamName: linear.team },
+      );
 
-    const team = response.teams.nodes.find((item) => item.name === linear.team);
-    if (!team) {
-      throw new ForemanError("linear_team_not_found", `Linear team not found: ${linear.team}`);
-    }
-
-    const configuredStates = [
-      ...linear.states.ready,
-      ...linear.states.inProgress,
-      ...linear.states.inReview,
-      ...linear.states.done,
-      ...linear.states.canceled,
-    ];
-    const availableStates = new Set(team.states.nodes.map((state) => state.name));
-    for (const state of configuredStates) {
-      if (!availableStates.has(state)) {
-        throw new ForemanError("linear_state_not_found", `Configured Linear state not found: ${state}`);
+      const team = response.teams.nodes.find((item) => item.name === linear.team);
+      if (!team) {
+        this.logger.error("Linear startup validation failed because the configured team was not found", { team: linear.team });
+        throw new ForemanError("linear_team_not_found", `Linear team not found: ${linear.team}`);
       }
-    }
 
-    const availableLabels = new Set(response.issueLabels.nodes.map((label) => label.name));
-    for (const label of [...linear.includeLabels, linear.consolidatedLabel]) {
-      if (!availableLabels.has(label)) {
-        throw new ForemanError("linear_label_not_found", `Configured Linear label not found: ${label}`);
+      const configuredStates = [
+        ...linear.states.ready,
+        ...linear.states.inProgress,
+        ...linear.states.inReview,
+        ...linear.states.done,
+        ...linear.states.canceled,
+      ];
+      const availableStates = new Set(team.states.nodes.map((state) => state.name));
+      for (const state of configuredStates) {
+        if (!availableStates.has(state)) {
+          this.logger.error("Linear startup validation failed because a configured state was not found", { state, team: linear.team });
+          throw new ForemanError("linear_state_not_found", `Configured Linear state not found: ${state}`);
+        }
       }
+
+      const requiredLabels = [...linear.includeLabels, linear.consolidatedLabel];
+      const availableLabels = new Set(response.issueLabels.nodes.map((label) => label.name));
+      for (const label of requiredLabels) {
+        if (!availableLabels.has(label)) {
+          this.logger.error("Linear startup validation failed because a configured label was not found", { label, team: linear.team });
+          throw new ForemanError("linear_label_not_found", `Configured Linear label not found: ${label}`);
+        }
+      }
+
+      this.logger.info("validated Linear startup configuration", {
+        team: linear.team,
+        configuredStateCount: configuredStates.length,
+        requiredLabelCount: requiredLabels.length,
+        availableTeamStateCount: team.states.nodes.length,
+        availableLabelCount: response.issueLabels.nodes.length,
+      });
+    } catch (error) {
+      if (!(error instanceof ForemanError)) {
+        this.logger.error("Linear startup validation failed", { error: error instanceof Error ? error.message : String(error) });
+      }
+      throw error;
     }
   }
 
   async listCandidates(): Promise<Task[]> {
     const linear = this.config.taskSystem.linear!;
+    this.logger.debug("listing Linear candidate issues", {
+      team: linear.team,
+      assignee: linear.assignee,
+      labelCount: linear.includeLabels.length,
+    });
     const data = await this.client.request<{ issues: { nodes: LinearIssueNode[] } }>(
       `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeName: String!) {
         issues(
@@ -549,10 +612,12 @@ export class LinearTaskSystem implements TaskSystem {
       { teamName: linear.team, labels: linear.includeLabels, assigneeName: linear.assignee },
     );
 
+    this.logger.debug("listed Linear candidate issues", { count: data.issues.nodes.length });
     return data.issues.nodes.map((node) => linearIssueToTask(this.config, node));
   }
 
   async getTask(taskId: string): Promise<Task> {
+    this.logger.debug("fetching Linear issue", { taskId });
     const data = await this.client.request<{ issues: { nodes: LinearIssueNode[] } }>(
       `query ForemanIssue($identifier: String!) {
         issues(filter: { identifier: { eq: $identifier } }, first: 1) {
@@ -577,13 +642,16 @@ export class LinearTaskSystem implements TaskSystem {
 
     const issue = data.issues.nodes[0];
     if (!issue) {
+      this.logger.error("Linear issue was not found", { taskId });
       throw new ForemanError("task_not_found", `Linear task not found: ${taskId}`, 404);
     }
 
+    this.logger.debug("fetched Linear issue", { taskId, providerId: issue.id, state: issue.state.name });
     return linearIssueToTask(this.config, issue);
   }
 
   async listComments(taskId: string): Promise<TaskComment[]> {
+    this.logger.debug("listing Linear issue comments", { taskId });
     const task = await this.getTask(taskId);
     const data = await this.client.request<{
       issue: { comments: { nodes: Array<{ id: string; body: string; createdAt: string; updatedAt: string | null; user: { name: string } | null }> } } | null;
@@ -605,10 +673,11 @@ export class LinearTaskSystem implements TaskSystem {
     );
 
     if (!data.issue) {
+      this.logger.error("Linear issue was not found while listing comments", { taskId, providerId: task.providerId });
       throw new ForemanError("task_not_found", `Linear task not found: ${taskId}`, 404);
     }
 
-    return data.issue.comments.nodes.map((comment) => ({
+    const comments: TaskComment[] = data.issue.comments.nodes.map((comment) => ({
       id: comment.id,
       taskId,
       body: comment.body,
@@ -617,21 +686,32 @@ export class LinearTaskSystem implements TaskSystem {
       createdAt: comment.createdAt,
       updatedAt: comment.updatedAt,
     }));
+
+    this.logger.debug("listed Linear issue comments", { taskId, providerId: task.providerId, count: comments.length });
+    return comments;
   }
 
   async addComment(input: { taskId: string; body: string }): Promise<void> {
     const task = await this.getTask(input.taskId);
+    this.logger.info("adding Linear issue comment", { taskId: input.taskId, providerId: task.providerId, bodyLength: input.body.length });
     await this.client.request(
       `mutation ForemanIssueCommentCreate($issueId: String!, $body: String!) {
         commentCreate(input: { issueId: $issueId, body: $body }) { success }
       }`,
       { issueId: task.providerId, body: input.body },
     );
+    this.logger.info("added Linear issue comment", { taskId: input.taskId, providerId: task.providerId });
   }
 
   async transition(input: { taskId: string; toState: TaskState }): Promise<void> {
     const task = await this.getTask(input.taskId);
     const providerState = getProviderStateForNormalized(this.config, input.toState);
+    this.logger.info("transitioning Linear issue", {
+      taskId: input.taskId,
+      providerId: task.providerId,
+      toState: input.toState,
+      providerState,
+    });
     const teamData = await this.client.request<{
       workflowStates: { nodes: Array<{ id: string; name: string }> };
     }>(
@@ -641,6 +721,7 @@ export class LinearTaskSystem implements TaskSystem {
     );
     const target = teamData.workflowStates.nodes.find((state) => state.name === providerState);
     if (!target) {
+      this.logger.error("Linear workflow state was not found for transition", { taskId: input.taskId, providerState });
       throw new ForemanError("linear_state_not_found", `Linear state not found: ${providerState}`);
     }
 
@@ -650,6 +731,7 @@ export class LinearTaskSystem implements TaskSystem {
       }`,
       { id: task.providerId, stateId: target.id },
     );
+    this.logger.info("transitioned Linear issue", { taskId: input.taskId, providerId: task.providerId, stateId: target.id, providerState });
   }
 
   async addArtifact(input: { taskId: string; artifact: TaskArtifact }): Promise<void> {
@@ -659,25 +741,54 @@ export class LinearTaskSystem implements TaskSystem {
     );
 
     if (existingArtifact?.externalId) {
+      this.logger.info("updating Linear attachment title", {
+        taskId: input.taskId,
+        providerId: task.providerId,
+        artifactType: input.artifact.type,
+        attachmentId: existingArtifact.externalId,
+      });
       await this.client.request(
         `mutation ForemanAttachmentUpdate($id: String!, $title: String) {
           attachmentUpdate(id: $id, input: { title: $title }) { success }
         }`,
         { id: existingArtifact.externalId, title: input.artifact.title ?? existingArtifact.title ?? null },
       );
+      this.logger.info("updated Linear attachment title", {
+        taskId: input.taskId,
+        providerId: task.providerId,
+        artifactType: input.artifact.type,
+        attachmentId: existingArtifact.externalId,
+      });
       return;
     }
 
+    this.logger.info("creating Linear attachment", {
+      taskId: input.taskId,
+      providerId: task.providerId,
+      artifactType: input.artifact.type,
+      artifactUrl: input.artifact.url,
+    });
     await this.client.request(
       `mutation ForemanAttachmentCreate($issueId: String!, $url: String!, $title: String) {
         attachmentCreate(input: { issueId: $issueId, url: $url, title: $title }) { success }
       }`,
       { issueId: task.providerId, url: input.artifact.url, title: input.artifact.title ?? null },
     );
+    this.logger.info("created Linear attachment", {
+      taskId: input.taskId,
+      providerId: task.providerId,
+      artifactType: input.artifact.type,
+    });
   }
 
   async updateLabels(input: { taskId: string; add: string[]; remove: string[] }): Promise<void> {
     const task = await this.getTask(input.taskId);
+    this.logger.info("updating Linear issue labels", {
+      taskId: input.taskId,
+      providerId: task.providerId,
+      addCount: input.add.length,
+      removeCount: input.remove.length,
+    });
     const labelData = await this.client.request<{ issueLabels: { nodes: Array<{ id: string; name: string }> } }>(
       `query ForemanLabels {
         issueLabels(first: 250) { nodes { id name } }
@@ -699,6 +810,11 @@ export class LinearTaskSystem implements TaskSystem {
       }`,
       { id: task.providerId, labelIds },
     );
+    this.logger.info("updated Linear issue labels", {
+      taskId: input.taskId,
+      providerId: task.providerId,
+      finalLabelCount: labelIds.length,
+    });
   }
 }
 
@@ -706,10 +822,11 @@ export const createTaskSystem = (input: {
   config: WorkspaceConfig;
   paths: WorkspacePaths;
   env: Record<string, string>;
+  logger?: LoggerService;
 }): TaskSystem => {
   if (input.config.taskSystem.type === "file") {
     return new FileTaskSystem(input.config, input.paths);
   }
 
-  return new LinearTaskSystem(input.config, input.env);
+  return new LinearTaskSystem(input.config, input.env, input.logger?.child({ component: "taskSystem.linear" }));
 };

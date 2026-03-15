@@ -7,6 +7,7 @@ import { deriveAttemptStatus, type AttemptRecord, type ForemanDb, type JobRecord
 import type { ActionType, RepoRef, ReviewContext, Task, TaskComment, WorkerResult } from "./domain.js";
 import { ForemanError } from "./lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "./lib/fs.js";
+import type { LoggerService } from "./logger.js";
 import { isoNow, addMilliseconds, addSeconds } from "./lib/time.js";
 import { renderWorkerPrompt } from "./prompts.js";
 import type { ReviewService } from "./review.js";
@@ -29,6 +30,7 @@ type SchedulerDeps = {
   runner: OpenCodeRunner;
   repos: RepoRef[];
   env: Record<string, string>;
+  logger: LoggerService;
 };
 
 const consolidationLabels = (config: WorkspaceConfig): { remove: string[]; add: string[] } => {
@@ -54,10 +56,13 @@ export class SchedulerService extends EventEmitter {
   private reapTimer: NodeJS.Timeout | null = null;
   private nextPollAt: string | null = null;
   private readonly workerAbortControllers = new Map<string, AbortController>();
+  private readonly logger: LoggerService;
 
   constructor(private readonly deps: SchedulerDeps) {
     super();
+    this.logger = deps.logger.child({ component: "scheduler" });
     this.deps.db.ensureWorkerSlots(deps.config.scheduler.workerConcurrency);
+    this.logger.info("ensured worker slots", { workerConcurrency: deps.config.scheduler.workerConcurrency });
   }
 
   getStatus(): { status: SchedulerStatus; nextScoutPollAt: string | null } {
@@ -66,46 +71,61 @@ export class SchedulerService extends EventEmitter {
 
   start(): void {
     if (this.status === "running") {
+      this.logger.debug("scheduler start ignored because it is already running");
       return;
     }
 
     this.status = "running";
     this.emit("scheduler_status_changed", { status: this.status });
+    this.logger.info("scheduler started");
     this.armTimers();
     this.scheduleScout("startup");
   }
 
   pause(): void {
     if (this.status === "paused") {
+      this.logger.debug("scheduler pause ignored because it is already paused");
       return;
     }
 
     this.status = "paused";
     this.emit("scheduler_status_changed", { status: this.status });
+    this.logger.info("scheduler paused");
     this.clearPollTimer();
   }
 
   async stop(): Promise<void> {
     if (this.status === "stopped") {
+      this.logger.debug("scheduler stop ignored because it is already stopped");
       return;
     }
 
     this.status = "stopped";
     this.emit("scheduler_status_changed", { status: this.status });
+    this.logger.info("scheduler stopping", { activeWorkers: this.workerAbortControllers.size });
     this.clearTimers();
 
     for (const controller of this.workerAbortControllers.values()) {
       controller.abort();
     }
+
+    this.logger.info("scheduler stopped");
   }
 
   triggerManualScout(): void {
+    this.logger.info("manual scout requested");
     this.scheduleScout("manual");
   }
 
   private armTimers(): void {
     this.clearTimers();
     this.nextPollAt = addSeconds(new Date(), this.deps.config.scheduler.scoutPollIntervalSeconds);
+    this.logger.debug("armed scheduler timers", {
+      nextScoutPollAt: this.nextPollAt,
+      scoutPollIntervalSeconds: this.deps.config.scheduler.scoutPollIntervalSeconds,
+      schedulerLoopIntervalMs: this.deps.config.scheduler.schedulerLoopIntervalMs,
+      staleLeaseReapIntervalSeconds: this.deps.config.scheduler.staleLeaseReapIntervalSeconds,
+    });
     this.pollTimer = setTimeout(() => {
       this.scheduleScout("poll");
     }, this.deps.config.scheduler.scoutPollIntervalSeconds * 1000);
@@ -117,6 +137,7 @@ export class SchedulerService extends EventEmitter {
     this.reapTimer = setInterval(() => {
       const changes = this.deps.db.reapExpiredLeases(isoNow());
       if (changes > 0) {
+        this.logger.warn("reaped expired leases", { changes });
         this.scheduleScout("lease_change");
       }
     }, this.deps.config.scheduler.staleLeaseReapIntervalSeconds * 1000);
@@ -144,15 +165,18 @@ export class SchedulerService extends EventEmitter {
 
   private scheduleScout(trigger: ScoutTrigger): void {
     if (this.status !== "running" && trigger !== "manual") {
+      this.logger.debug("ignored scout scheduling because scheduler is not running", { trigger, status: this.status });
       return;
     }
 
     if (this.scoutInFlight) {
       this.pendingScoutTrigger = trigger;
+      this.logger.debug("queued follow-up scout trigger", { trigger });
       return;
     }
 
     const delay = trigger === "startup" ? 0 : this.deps.config.scheduler.scoutRerunDebounceMs;
+    this.logger.info("scheduled scout run", { trigger, delayMs: delay });
     setTimeout(() => {
       void this.runScout(trigger);
     }, delay);
@@ -161,10 +185,12 @@ export class SchedulerService extends EventEmitter {
   private async runScout(trigger: ScoutTrigger): Promise<void> {
     if (this.scoutInFlight) {
       this.pendingScoutTrigger = trigger;
+      this.logger.debug("runScout deferred because another scout is in flight", { trigger });
       return;
     }
 
     this.scoutInFlight = true;
+    this.logger.info("starting scout run", { trigger });
     try {
       const selection = await runScoutSelection({
         config: this.deps.config,
@@ -173,6 +199,7 @@ export class SchedulerService extends EventEmitter {
         reviewService: this.deps.reviewService,
         repos: this.deps.repos,
         triggerType: trigger,
+        logger: this.logger.child({ component: "scout", trigger }),
       });
 
       let firstJobId: string | null = null;
@@ -200,6 +227,15 @@ export class SchedulerService extends EventEmitter {
           firstTaskId = selected.task.id;
           firstReason = selected.selectionReason;
         }
+
+        this.logger.info("enqueued job from scout selection", {
+          trigger,
+          jobId: job.id,
+          taskId: selected.task.id,
+          action: selected.action,
+          repo: selected.repo.key,
+          reason: selected.selectionReason,
+        });
       }
 
       this.deps.db.completeScoutRun({
@@ -214,8 +250,17 @@ export class SchedulerService extends EventEmitter {
       if (selection.jobs.length > 0) {
         this.emit("scout_completed", { enqueued: selection.jobs.length });
       }
+      this.logger.info("completed scout run", {
+        trigger,
+        scoutRunId: selection.scoutRunId,
+        enqueued: selection.jobs.length,
+        selectedJobId: firstJobId,
+        selectedTaskId: firstTaskId,
+        selectedAction: firstAction,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      this.logger.error("scout run failed", { trigger, error: message });
       const scoutRuns = this.deps.db.listScoutRuns(1);
       const latestId = String(scoutRuns[0]?.id ?? "");
       if (latestId) {
@@ -235,6 +280,7 @@ export class SchedulerService extends EventEmitter {
       if (this.pendingScoutTrigger) {
         const followUp = this.pendingScoutTrigger;
         this.pendingScoutTrigger = null;
+        this.logger.info("running queued follow-up scout", { trigger: followUp });
         this.scheduleScout(followUp);
       }
     }
@@ -247,6 +293,9 @@ export class SchedulerService extends EventEmitter {
 
     const queuedJobs = this.deps.db.listJobsByStatus(["queued"]);
     const idleWorkers = this.deps.db.listWorkers().filter((worker) => worker.status === "idle");
+    if (queuedJobs.length > 0 || idleWorkers.length > 0) {
+      this.logger.debug("checked dispatch queue", { queuedJobs: queuedJobs.length, idleWorkers: idleWorkers.length });
+    }
 
     for (const worker of idleWorkers) {
       const job = queuedJobs.shift();
@@ -254,6 +303,7 @@ export class SchedulerService extends EventEmitter {
         break;
       }
 
+      this.logger.info("dispatching queued job to worker", { workerId: worker.id, jobId: job.id, taskId: job.taskId, action: job.action });
       void this.runJob(worker.id, job);
     }
   }
@@ -261,6 +311,8 @@ export class SchedulerService extends EventEmitter {
   private async runJob(workerId: string, job: JobRecord): Promise<void> {
     const controller = new AbortController();
     this.workerAbortControllers.set(workerId, controller);
+    let jobLogger = this.logger.child({ workerId, jobId: job.id, taskId: job.taskId, action: job.action, repo: job.repoKey });
+    jobLogger.info("starting job on worker");
 
     let attempt: AttemptRecord | null = null;
     let task: Task | null = null;
@@ -272,6 +324,8 @@ export class SchedulerService extends EventEmitter {
     try {
       task = await this.deps.taskSystem.getTask(job.taskId);
       repo = assertTaskActionableRepo(task, this.deps.repos);
+      jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
+      jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
 
       attempt = this.deps.db.createAttemptWithLeases({
@@ -283,24 +337,31 @@ export class SchedulerService extends EventEmitter {
         leases: leaseResourceKeysForAction(task, job.action),
       });
       if (!attempt) {
+        jobLogger.warn("skipped job because required leases could not be acquired");
         return;
       }
+
+      const attemptLogger = jobLogger.child({ attemptId: attempt.id });
+      attemptLogger.info("created execution attempt", { attemptNumber: attempt.attemptNumber, leaseExpiresAt });
 
       this.deps.db.updateWorkerStatus(workerId, "leased", null);
       this.deps.db.updateJobStatus(job.id, "leased", { leasedAt: isoNow() });
       this.deps.db.updateWorkerStatus(workerId, "running", attempt.id);
       this.deps.db.updateJobStatus(job.id, "running", { startedAt: attempt.startedAt });
       this.deps.db.addAttemptEvent(attempt.id, "attempt_started", `Started ${job.action} for ${task.id}`);
+      attemptLogger.info("worker leased and job marked running");
       this.emit("worker_updated", { workerId, status: "running", attemptId: attempt.id });
       this.emit("attempt_changed", { attemptId: attempt.id, status: "running" });
 
       const heartbeat = setInterval(() => {
         this.deps.db.heartbeatWorker(workerId, attempt?.id ?? null, addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds));
+        attemptLogger.debug("sent worker heartbeat");
       }, this.deps.config.scheduler.workerHeartbeatSeconds * 1000);
 
       try {
         if (job.action === "execution" || job.action === "retry") {
           await this.deps.taskSystem.transition({ taskId: task.id, toState: "in_progress" });
+          attemptLogger.info("transitioned task to in_progress");
         }
 
         worktreePath =
@@ -313,12 +374,18 @@ export class SchedulerService extends EventEmitter {
                 baseBranch: job.baseBranch ?? repo.defaultBranch,
                 action: job.action,
               });
+        attemptLogger.info("prepared worktree", {
+          worktreePath,
+          mode: job.action === "consolidation" ? "consolidation" : "task_worktree",
+        });
 
         if (await pathExists(worktreePath)) {
           beforeSha = await this.gitHead(worktreePath).catch(() => null);
+          attemptLogger.info("resolved worktree head", { beforeSha: beforeSha ?? "unknown" });
         } else {
           worktreePath = repo.rootPath;
           beforeSha = await this.gitHead(worktreePath).catch(() => null);
+          attemptLogger.warn("falling back to repository root for worktree path", { worktreePath, beforeSha: beforeSha ?? "unknown" });
         }
 
         const comments = await this.deps.taskSystem.listComments(task.id);
@@ -338,6 +405,7 @@ export class SchedulerService extends EventEmitter {
           ...(reviewContext ? { reviewContext } : {}),
         };
         const prompt = await renderWorkerPrompt(promptInput);
+        attemptLogger.info("rendered worker prompt", { commentCount: comments.length, hasReviewContext: Boolean(reviewContext) });
 
         const promptRelativePath = path.join("artifacts", `attempt-${attempt.id}-prompt.md`);
         const promptAbsolutePath = path.join(this.deps.paths.workspaceRoot, promptRelativePath);
@@ -352,6 +420,7 @@ export class SchedulerService extends EventEmitter {
           sizeBytes: promptStat.size,
           sha256: await sha256File(promptAbsolutePath),
         });
+        attemptLogger.info("wrote rendered prompt artifact", { promptPath: promptAbsolutePath, sizeBytes: promptStat.size });
 
         const runResult = await this.deps.runner.invoke({
           attemptId: attempt.id,
@@ -360,12 +429,24 @@ export class SchedulerService extends EventEmitter {
           prompt,
           timeoutMs: this.deps.config.runner.timeoutMs,
           abortSignal: controller.signal,
+          onStdoutLine: (line: string) => {
+            attemptLogger.line("runner.stdout", line);
+          },
+          onStderrLine: (line: string) => {
+            attemptLogger.line("runner.stderr", line);
+          },
         } as Parameters<OpenCodeRunner["invoke"]>[0]) as CapturedAgentRunResult;
+        attemptLogger.info("runner invocation completed", {
+          exitCode: runResult.exitCode,
+          signal: runResult.signal,
+          stdoutBytes: runResult.stdoutBytes,
+          stderrBytes: runResult.stderrBytes,
+        });
 
         const logRelativePath = path.join("logs", "attempts", `${attempt.id}.log`);
         const logAbsolutePath = path.join(this.deps.paths.workspaceRoot, logRelativePath);
         await ensureDir(path.dirname(logAbsolutePath));
-        await atomicWriteFile(logAbsolutePath, `${runResult.stdout}${runResult.stderr ? `\n[stderr]\n${runResult.stderr}` : ""}`);
+        await attemptLogger.flush();
         const logStat = await fs.stat(logAbsolutePath);
         this.deps.db.createArtifact({
           ownerType: "execution_attempt",
@@ -376,6 +457,7 @@ export class SchedulerService extends EventEmitter {
           sizeBytes: logStat.size,
           sha256: await sha256File(logAbsolutePath),
         });
+        attemptLogger.info("recorded attempt log artifact", { logPath: logAbsolutePath, sizeBytes: logStat.size });
 
         let workerResult: WorkerResult;
         try {
@@ -383,6 +465,7 @@ export class SchedulerService extends EventEmitter {
         } catch (error) {
           throw new ForemanError("worker_result_invalid", error instanceof Error ? error.message : String(error), 500);
         }
+        attemptLogger.info("parsed worker result", { outcome: workerResult.outcome });
 
         const resultRelativePath = path.join("artifacts", `attempt-${attempt.id}-result.json`);
         const resultAbsolutePath = path.join(this.deps.paths.workspaceRoot, resultRelativePath);
@@ -398,6 +481,7 @@ export class SchedulerService extends EventEmitter {
           sha256: await sha256File(resultAbsolutePath),
         });
         this.deps.db.addAttemptEvent(attempt.id, "worker_result_parsed", workerResult.summary, { outcome: workerResult.outcome });
+        attemptLogger.info("wrote parsed worker result artifact", { resultPath: resultAbsolutePath, sizeBytes: resultStat.size });
 
         currentPrUrl = await this.applyWorkerResult({
           attempt,
@@ -407,6 +491,7 @@ export class SchedulerService extends EventEmitter {
           worktreePath,
           workerResult,
         });
+        attemptLogger.info("applied worker result", { currentPrUrl });
 
         const attemptStatus = deriveAttemptStatus(workerResult);
         const jobStatus = attemptStatus === "timed_out" ? "failed" : attemptStatus;
@@ -432,9 +517,11 @@ export class SchedulerService extends EventEmitter {
           historyInput.repos = [{ path: repo.rootPath, beforeSha, afterSha }];
         }
         this.deps.db.addHistoryStep(historyInput);
+        attemptLogger.info("finalized attempt and job", { attemptStatus, jobStatus, afterSha: afterSha ?? "unknown" });
 
         if (job.action === "consolidation" && workerResult.outcome === "completed" && worktreePath !== repo.rootPath) {
-          await removeCleanWorktree(repo, worktreePath);
+          const removed = await removeCleanWorktree(repo, worktreePath);
+          attemptLogger.info("finished consolidation worktree cleanup", { removed, worktreePath });
         }
       } finally {
         clearInterval(heartbeat);
@@ -442,6 +529,8 @@ export class SchedulerService extends EventEmitter {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (attempt) {
+        const attemptLogger = jobLogger.child({ attemptId: attempt.id });
+        attemptLogger.error("attempt failed", { error: message, aborted: controller.signal.aborted });
         this.deps.db.addAttemptEvent(attempt.id, "attempt_failed", message);
         this.deps.db.finalizeAttempt(attempt.id, controller.signal.aborted ? "canceled" : "failed", {
           finishedAt: isoNow(),
@@ -454,18 +543,24 @@ export class SchedulerService extends EventEmitter {
         finishedAt: isoNow(),
         errorMessage: message,
       });
+      jobLogger.error("job failed", { error: message, aborted: controller.signal.aborted });
     } finally {
       if (attempt) {
         this.deps.db.releaseLeasesForAttempt(attempt.id, controller.signal.aborted ? "stopped" : "completed");
+        jobLogger.child({ attemptId: attempt.id }).info("released attempt leases", {
+          releaseReason: controller.signal.aborted ? "stopped" : "completed",
+        });
       } else if (task) {
         for (const lease of leaseResourceKeysForAction(task, job.action)) {
           this.deps.db.releaseLeaseByResource(lease.resourceType, lease.resourceKey, "skipped");
         }
+        jobLogger.warn("released provisional leases after skipped attempt");
       }
 
       this.deps.db.updateWorkerStatus(workerId, "idle", null);
       this.emit("worker_updated", { workerId, status: "idle" });
       this.workerAbortControllers.delete(workerId);
+      jobLogger.info("worker returned to idle");
       this.scheduleScout("worker_finished");
     }
   }
@@ -480,6 +575,15 @@ export class SchedulerService extends EventEmitter {
   }): Promise<string | null> {
     const { workerResult } = input;
     let pullRequestUrl = input.task.artifacts.find((artifact) => artifact.type === "pull_request")?.url ?? null;
+    const logger = this.logger.child({
+      component: "scheduler.applyWorkerResult",
+      attemptId: input.attempt.id,
+      jobId: input.job.id,
+      taskId: input.task.id,
+      action: input.job.action,
+      outcome: workerResult.outcome,
+    });
+    logger.info("applying worker result mutations");
 
     if (workerResult.outcome === "blocked") {
       for (const blocker of workerResult.blockers) {
@@ -487,11 +591,13 @@ export class SchedulerService extends EventEmitter {
           taskId: input.task.id,
           body: `${this.deps.config.workspace.agentPrefix}${blocker.code}: ${blocker.message}`,
         });
+        logger.warn("posted blocker comment", { blockerCode: blocker.code });
       }
       return pullRequestUrl;
     }
 
     if (workerResult.outcome === "failed") {
+      logger.warn("worker result marked attempt as failed; skipping side effects");
       return pullRequestUrl;
     }
 
@@ -515,6 +621,7 @@ export class SchedulerService extends EventEmitter {
           artifact: { type: "pull_request", url: created.url, title: mutation.title, externalId: String(created.number) },
         });
         await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
+        logger.info("created pull request", { pullRequestUrl: created.url, pullRequestNumber: created.number });
       }
 
       if (mutation.type === "reopen_pull_request") {
@@ -537,6 +644,7 @@ export class SchedulerService extends EventEmitter {
           },
         });
         await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
+        logger.info("reopened pull request", { pullRequestUrl: reopened.url, pullRequestNumber: reopened.number });
       }
     }
 
@@ -551,21 +659,26 @@ export class SchedulerService extends EventEmitter {
 
       if (mutation.type === "reply_to_review_summary") {
         await this.deps.reviewService.replyToReviewSummary(pullRequestUrl, mutation.reviewId, mutation.body);
+        logger.info("replied to review summary", { reviewId: mutation.reviewId });
       }
       if (mutation.type === "reply_to_pr_comment") {
         await this.deps.reviewService.replyToPrComment(pullRequestUrl, mutation.commentId, mutation.body);
+        logger.info("replied to pull request comment", { commentId: mutation.commentId });
       }
       if (mutation.type === "resolve_threads") {
         await this.deps.reviewService.resolveThreads(pullRequestUrl, mutation.threadIds);
+        logger.info("resolved review threads", { threadCount: mutation.threadIds.length });
       }
     }
 
     for (const mutation of workerResult.taskMutations) {
       if (mutation.type === "add_comment") {
         await this.deps.taskSystem.addComment({ taskId: input.task.id, body: mutation.body });
+        logger.info("added task comment from worker mutation");
       }
       if (mutation.type === "upsert_artifact") {
         await this.deps.taskSystem.addArtifact({ taskId: input.task.id, artifact: mutation.artifact });
+        logger.info("upserted task artifact from worker mutation", { artifactType: mutation.artifact.type, artifactUrl: mutation.artifact.url });
       }
     }
 
@@ -576,14 +689,17 @@ export class SchedulerService extends EventEmitter {
         add: labels.add,
         remove: labels.remove,
       });
+      logger.info("updated consolidation labels", { addCount: labels.add.length, removeCount: labels.remove.length });
     }
 
     for (const mutation of workerResult.learningMutations) {
       if (mutation.type === "add") {
         this.deps.db.addLearning(mutation);
+        logger.info("added learning mutation", { learningTitle: mutation.title, repo: mutation.repo });
       }
       if (mutation.type === "update") {
         this.deps.db.updateLearning(mutation);
+        logger.info("updated learning mutation", { learningId: mutation.id });
       }
     }
 
@@ -602,17 +718,20 @@ export class SchedulerService extends EventEmitter {
             reviewContext,
             sourceAttemptId: input.attempt.id,
           });
+          logger.info("saved review checkpoint", { pullRequestUrl });
         } catch (error) {
           this.deps.db.addAttemptEvent(
             input.attempt.id,
             "review_checkpoint_warning",
             error instanceof Error ? error.message : String(error),
           );
+          logger.warn("failed to save review checkpoint", { error: error instanceof Error ? error.message : String(error) });
         }
       }
     }
 
     this.scheduleScout("task_mutation");
+    logger.info("scheduled follow-up scout after task mutations", { pullRequestUrl });
     return pullRequestUrl;
   }
 

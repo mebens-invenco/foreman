@@ -3,6 +3,11 @@ import { spawn } from "node:child_process";
 import type { AgentRunRequest, AgentRunResult } from "./domain.js";
 import { isoNow } from "./lib/time.js";
 
+type AgentRunLineCallbacks = {
+  onStdoutLine?: (line: string) => void;
+  onStderrLine?: (line: string) => void;
+};
+
 export interface AgentRunner {
   invoke(request: AgentRunRequest): Promise<AgentRunResult>;
 }
@@ -18,7 +23,7 @@ export class OpenCodeRunner implements AgentRunner {
     private readonly variant: string,
   ) {}
 
-  async invoke(request: AgentRunRequest & { abortSignal?: AbortSignal }): Promise<CapturedAgentRunResult> {
+  async invoke(request: AgentRunRequest & { abortSignal?: AbortSignal } & AgentRunLineCallbacks): Promise<CapturedAgentRunResult> {
     const startedAt = isoNow();
     const command = process.env.FOREMAN_OPENCODE_BIN ?? "opencode";
     const args = [
@@ -38,6 +43,8 @@ export class OpenCodeRunner implements AgentRunner {
 
     let stdout = "";
     let stderr = "";
+    let stdoutLineBuffer = "";
+    let stderrLineBuffer = "";
     let signal: string | null = null;
     let timeout: NodeJS.Timeout | undefined;
     let timedOut = false;
@@ -49,11 +56,28 @@ export class OpenCodeRunner implements AgentRunner {
     request.abortSignal?.addEventListener("abort", abortHandler, { once: true });
 
     child.stdin.end(request.prompt);
+    const emitLines = (chunk: string, buffer: string, callback?: (line: string) => void): string => {
+      const combined = `${buffer}${chunk}`;
+      const parts = combined.split(/\r?\n/);
+      const remainder = parts.pop() ?? "";
+      if (callback) {
+        for (const part of parts) {
+          if (part) {
+            callback(part);
+          }
+        }
+      }
+      return remainder;
+    };
     child.stdout.on("data", (chunk) => {
-      stdout += String(chunk);
+      const text = String(chunk);
+      stdout += text;
+      stdoutLineBuffer = emitLines(text, stdoutLineBuffer, request.onStdoutLine);
     });
     child.stderr.on("data", (chunk) => {
-      stderr += String(chunk);
+      const text = String(chunk);
+      stderr += text;
+      stderrLineBuffer = emitLines(text, stderrLineBuffer, request.onStderrLine);
     });
 
     if (request.timeoutMs > 0) {
@@ -74,6 +98,12 @@ export class OpenCodeRunner implements AgentRunner {
         clearTimeout(timeout);
       }
       request.abortSignal?.removeEventListener("abort", abortHandler);
+      if (stdoutLineBuffer) {
+        request.onStdoutLine?.(stdoutLineBuffer);
+      }
+      if (stderrLineBuffer) {
+        request.onStderrLine?.(stderrLineBuffer);
+      }
     });
 
     return {

@@ -3,6 +3,7 @@ import type { ActionType, RepoRef, ReviewContext, Task, TaskComment } from "./do
 import { priorityToRank, type ForemanDb, type ScoutRunTrigger } from "./db.js";
 import { ForemanError } from "./lib/errors.js";
 import { stableStringify } from "./lib/json.js";
+import type { LoggerService } from "./logger.js";
 import type { ReviewService } from "./review.js";
 import type { TaskSystem } from "./task-system.js";
 import { branchExistsOnOrigin, isAncestorOnOrigin, resolveTaskBranchName } from "./worktrees.js";
@@ -143,7 +144,9 @@ export const runScoutSelection = async (input: {
   reviewService: ReviewService;
   repos: RepoRef[];
   triggerType: ScoutRunTrigger;
+  logger?: LoggerService;
 }): Promise<{ scoutRunId: string; jobs: Selection[] }> => {
+  const logger = input.logger?.child({ component: "scout.selection", trigger: input.triggerType });
   const allTasks = await input.taskSystem.listCandidates();
   const reposByKey = new Map(input.repos.map((repo) => [repo.key, repo]));
   const activeCandidates = allTasks.filter(
@@ -161,6 +164,13 @@ export const runScoutSelection = async (input: {
   const availableCapacity = Math.max(0, input.config.scheduler.workerConcurrency - input.db.activeJobCount());
   const jobs: Selection[] = [];
   const blockedComments = new Set<string>();
+  logger?.info("loaded scout candidates", {
+    scoutRunId,
+    candidateCount: allTasks.length,
+    activeCount: activeCandidates.length,
+    terminalCount: terminalCandidates.length,
+    availableCapacity,
+  });
 
   const canSchedule = (task: Task, action: ActionType): boolean => {
     const dedupeKey = `${task.id}:${action}`;
@@ -176,6 +186,7 @@ export const runScoutSelection = async (input: {
       return;
     }
     blockedComments.add(key);
+    logger?.warn("blocking task during scout selection", { taskId, reason: body });
     await input.taskSystem.addComment({ taskId, body: `${input.config.workspace.agentPrefix}${body}` });
   };
 
@@ -362,13 +373,21 @@ export const runScoutSelection = async (input: {
       }
     }
 
-    if (!chosen) {
-      break;
-    }
+      if (!chosen) {
+        break;
+      }
 
-    jobs.push(chosen);
+      jobs.push(chosen);
+      logger?.info("selected task for execution", {
+        scoutRunId,
+        taskId: chosen.task.id,
+        action: chosen.action,
+        repo: chosen.repo.key,
+        reason: chosen.selectionReason,
+      });
   }
 
+  logger?.info("completed scout selection", { scoutRunId, selectedJobs: jobs.length });
   return { scoutRunId, jobs };
 };
 
