@@ -21,7 +21,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-const linearIssue = (attachments: Array<{ id: string; title: string | null; url: string }>) => ({
+const linearIssue = (
+  attachments: Array<{ id: string; title: string | null; url: string }>,
+  assigneeName = "Michael Ebens",
+) => ({
   issues: {
     nodes: [
       {
@@ -34,12 +37,112 @@ const linearIssue = (attachments: Array<{ id: string; title: string | null; url:
         url: "https://linear.app/acme/issue/ENG-123/task",
         priorityLabel: "high",
         state: { id: "state-1", name: "Todo" },
-        assignee: { name: "me" },
+        assignee: { name: assigneeName },
         labels: { nodes: [{ id: "label-1", name: "Agent" }] },
         attachments: { nodes: attachments },
       },
     ],
   },
+});
+
+describe("LinearTaskSystem.listCandidates", () => {
+  test("resolves assignee 'me' from the authenticated Linear user", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanViewer")) {
+        return new Response(JSON.stringify({ data: { viewer: { id: "user-123", name: "Michael Ebens" } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (body.query.includes("query ForemanIssueCandidates")) {
+        return new Response(JSON.stringify({ data: linearIssue([], "Michael Ebens") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    const tasks = await taskSystem.listCandidates();
+
+    expect(tasks).toHaveLength(1);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.query).toContain("query ForemanViewer");
+    expect(requests[1]?.query).toContain("$assigneeId: ID!");
+    expect(requests[1]?.query).toContain("assignee: { id: { eq: $assigneeId } }");
+    expect(requests[1]?.variables).toEqual({
+      teamName: "Engineering",
+      labels: ["Agent"],
+      assigneeId: "user-123",
+    });
+  });
+
+  test("uses the configured assignee name directly when it is explicit", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanIssueCandidates")) {
+        return new Response(JSON.stringify({ data: linearIssue([], "Jane Doe") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    const tasks = await taskSystem.listCandidates();
+
+    expect(tasks).toHaveLength(1);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.query).not.toContain("query ForemanViewer");
+    expect(requests[0]?.query).toContain("assignee: { name: { eq: $assigneeName } }");
+    expect(requests[0]?.variables).toEqual({
+      teamName: "Engineering",
+      labels: ["Agent"],
+      assigneeName: "Jane Doe",
+    });
+  });
+});
+
+describe("LinearTaskSystem.getTask", () => {
+  test("looks up identifier-style task ids by team key and number", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanIssue")) {
+        return new Response(JSON.stringify({ data: linearIssue([], "Michael Ebens") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    const task = await taskSystem.getTask("ENG-123");
+
+    expect(task.id).toBe("ENG-123");
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.query).toContain("team: { key: { eq: $teamKey } }");
+    expect(requests[0]?.query).toContain("number: { eq: $number }");
+    expect(requests[0]?.variables).toEqual({ teamKey: "ENG", number: 123 });
+  });
 });
 
 describe("LinearTaskSystem.addArtifact", () => {

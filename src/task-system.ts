@@ -375,6 +375,23 @@ type LinearIssueNode = {
   attachments: { nodes: Array<{ id: string; title: string | null; url: string }> };
 };
 
+type LinearViewer = {
+  id: string;
+  name: string;
+};
+
+const parseLinearIssueIdentifier = (taskId: string): { teamKey: string; number: number } | null => {
+  const match = taskId.match(/^([A-Za-z0-9]+)-(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    teamKey: match[1]!,
+    number: Number.parseInt(match[2]!, 10),
+  };
+};
+
 class LinearClient {
   constructor(
     private readonly apiKey: string,
@@ -486,6 +503,7 @@ const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task
 export class LinearTaskSystem implements TaskSystem {
   private readonly client: LinearClient;
   private readonly logger: LoggerService;
+  private viewerPromise: Promise<LinearViewer> | null = null;
 
   constructor(
     private readonly config: WorkspaceConfig,
@@ -506,6 +524,38 @@ export class LinearTaskSystem implements TaskSystem {
 
   getProvider(): "linear" {
     return "linear";
+  }
+
+  private async getViewer(): Promise<LinearViewer> {
+    if (!this.viewerPromise) {
+      this.viewerPromise = this.client
+        .request<{ viewer: LinearViewer }>(
+          `query ForemanViewer {
+            viewer {
+              id
+              name
+            }
+          }`,
+        )
+        .then((data) => data.viewer);
+    }
+
+    return this.viewerPromise;
+  }
+
+  private async resolveAssigneeFilter(): Promise<{ assigneeId?: string; assigneeName?: string }> {
+    const assignee = this.config.taskSystem.linear!.assignee;
+    if (assignee !== "me") {
+      return { assigneeName: assignee };
+    }
+
+    const viewer = await this.getViewer();
+    this.logger.debug("resolved Linear assignee from API token", {
+      configuredAssignee: assignee,
+      resolvedAssigneeId: viewer.id,
+      resolvedAssigneeName: viewer.name,
+    });
+    return { assigneeId: viewer.id };
   }
 
   async validateStartup(): Promise<void> {
@@ -561,8 +611,16 @@ export class LinearTaskSystem implements TaskSystem {
         }
       }
 
+      let resolvedAssignee: { id: string; name: string } | null = null;
+      if (linear.assignee === "me") {
+        resolvedAssignee = await this.getViewer();
+      }
+
       this.logger.info("validated Linear startup configuration", {
         team: linear.team,
+        assignee: linear.assignee,
+        resolvedAssigneeId: resolvedAssignee?.id,
+        resolvedAssigneeName: resolvedAssignee?.name,
         configuredStateCount: configuredStates.length,
         requiredLabelCount: requiredLabels.length,
         availableTeamStateCount: team.states.nodes.length,
@@ -578,13 +636,40 @@ export class LinearTaskSystem implements TaskSystem {
 
   async listCandidates(): Promise<Task[]> {
     const linear = this.config.taskSystem.linear!;
+    const assigneeFilter = await this.resolveAssigneeFilter();
     this.logger.debug("listing Linear candidate issues", {
       team: linear.team,
-      assignee: linear.assignee,
+      assignee: assigneeFilter.assigneeName ?? assigneeFilter.assigneeId,
       labelCount: linear.includeLabels.length,
     });
     const data = await this.client.request<{ issues: { nodes: LinearIssueNode[] } }>(
-      `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeName: String!) {
+      assigneeFilter.assigneeId
+        ? `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeId: ID!) {
+        issues(
+          filter: {
+            team: { name: { eq: $teamName } },
+            assignee: { id: { eq: $assigneeId } },
+            labels: { some: { name: { in: $labels } } }
+          },
+          first: 250
+        ) {
+          nodes {
+            id
+            identifier
+            title
+            description
+            branchName
+            updatedAt
+            url
+            priorityLabel
+            state { id name }
+            assignee { name }
+            labels { nodes { id name } }
+            attachments { nodes { id title url } }
+          }
+        }
+      }`
+        : `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeName: String!) {
         issues(
           filter: {
             team: { name: { eq: $teamName } },
@@ -609,7 +694,11 @@ export class LinearTaskSystem implements TaskSystem {
           }
         }
       }`,
-      { teamName: linear.team, labels: linear.includeLabels, assigneeName: linear.assignee },
+      {
+        teamName: linear.team,
+        labels: linear.includeLabels,
+        ...(assigneeFilter.assigneeId ? { assigneeId: assigneeFilter.assigneeId } : { assigneeName: assigneeFilter.assigneeName! }),
+      },
     );
 
     this.logger.debug("listed Linear candidate issues", { count: data.issues.nodes.length });
@@ -618,9 +707,30 @@ export class LinearTaskSystem implements TaskSystem {
 
   async getTask(taskId: string): Promise<Task> {
     this.logger.debug("fetching Linear issue", { taskId });
+    const identifier = parseLinearIssueIdentifier(taskId);
+
     const data = await this.client.request<{ issues: { nodes: LinearIssueNode[] } }>(
-      `query ForemanIssue($identifier: String!) {
-        issues(filter: { identifier: { eq: $identifier } }, first: 1) {
+      identifier
+        ? `query ForemanIssue($teamKey: String!, $number: Float!) {
+        issues(filter: { team: { key: { eq: $teamKey } }, number: { eq: $number } }, first: 1) {
+          nodes {
+            id
+            identifier
+            title
+            description
+            branchName
+            updatedAt
+            url
+            priorityLabel
+            state { id name }
+            assignee { name }
+            labels { nodes { id name } }
+            attachments { nodes { id title url } }
+          }
+        }
+      }`
+        : `query ForemanIssue($id: ID!) {
+        issues(filter: { id: { eq: $id } }, first: 1) {
           nodes {
             id
             identifier
@@ -637,7 +747,7 @@ export class LinearTaskSystem implements TaskSystem {
           }
         }
       }`,
-      { identifier: taskId },
+      identifier ? { teamKey: identifier.teamKey, number: identifier.number } : { id: taskId },
     );
 
     const issue = data.issues.nodes[0];
