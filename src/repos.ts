@@ -15,6 +15,31 @@ const isGitRepo = async (repoPath: string): Promise<boolean> => {
   }
 };
 
+const isWithinPath = (parentPath: string, childPath: string): boolean => {
+  const relative = path.relative(parentPath, childPath);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+};
+
+const isLinkedGitWorktree = async (repoPath: string): Promise<boolean> => {
+  try {
+    const output = await exec("git", ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"], {
+      cwd: repoPath,
+    });
+    const [gitDir, gitCommonDir] = output.stdout
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+
+    if (!gitDir || !gitCommonDir || gitDir === gitCommonDir) {
+      return false;
+    }
+
+    return isWithinPath(path.join(gitCommonDir, "worktrees"), gitDir);
+  } catch {
+    return false;
+  }
+};
+
 const resolveDefaultBranch = async (repoPath: string): Promise<string> => {
   try {
     const remoteHead = await exec("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], { cwd: repoPath });
@@ -89,7 +114,7 @@ export const discoverRepos = async (config: WorkspaceConfig, paths: WorkspacePat
       throw new ForemanError("invalid_repo_root", `Configured repo root is not a directory: ${rootEntry}`);
     }
 
-    if (await isGitRepo(rootPath)) {
+    if ((await isGitRepo(rootPath)) && !(await isLinkedGitWorktree(rootPath))) {
       await addRepo(rootPath);
     }
 
@@ -104,7 +129,7 @@ export const discoverRepos = async (config: WorkspaceConfig, paths: WorkspacePat
         continue;
       }
 
-      if (await isGitRepo(childPath)) {
+      if ((await isGitRepo(childPath)) && !(await isLinkedGitWorktree(childPath))) {
         await addRepo(childPath);
       }
     }
