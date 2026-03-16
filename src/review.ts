@@ -1,6 +1,7 @@
 import { exec } from "./lib/process.js";
 import { ForemanError } from "./lib/errors.js";
 import type { ConversationComment, ReviewContext, ReviewThread, ReviewSummary, Task } from "./domain.js";
+import { LoggerService } from "./logger.js";
 
 type RepoDescriptor = { owner: string; repo: string };
 
@@ -53,10 +54,15 @@ export interface ReviewService {
 
 export class GitHubReviewService implements ReviewService {
   private readonly token: string;
+  private readonly logger: LoggerService;
 
-  constructor(env: Record<string, string>) {
+  constructor(env: Record<string, string>, logger?: LoggerService) {
+    this.logger = (logger ?? LoggerService.create({ context: { component: "review.github" }, colorMode: "never" })).child({
+      component: "review.github",
+    });
     const token = env.GH_TOKEN;
     if (!token) {
+      this.logger.error("GitHub review service initialization failed because GH_TOKEN is missing");
       throw new ForemanError("missing_github_token", "GH_TOKEN is required for GitHub review operations", 400);
     }
 
@@ -64,6 +70,9 @@ export class GitHubReviewService implements ReviewService {
   }
 
   private async rest<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const startedAt = Date.now();
+    const method = init.method ?? "GET";
+    this.logger.debug("sending GitHub REST request", { method, path });
     const response = await fetch(`https://api.github.com${path}`, {
       ...init,
       headers: {
@@ -76,17 +85,31 @@ export class GitHubReviewService implements ReviewService {
 
     if (!response.ok) {
       const body = await response.text();
+      this.logger.error("GitHub REST request failed", {
+        method,
+        path,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+      });
       throw new ForemanError("github_request_failed", `GitHub request failed: ${response.status} ${body}`, 502);
     }
 
     if (response.status === 204) {
+      this.logger.debug("GitHub REST request completed", { method, path, status: response.status, durationMs: Date.now() - startedAt });
       return undefined as T;
     }
 
+    this.logger.debug("GitHub REST request completed", { method, path, status: response.status, durationMs: Date.now() - startedAt });
     return (await response.json()) as T;
   }
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
+    const startedAt = Date.now();
+    const operationName = query.match(/\b(?:query|mutation)\s+(\w+)/)?.[1] ?? "anonymous";
+    this.logger.debug("sending GitHub GraphQL request", {
+      operationName,
+      variableKeys: Object.keys(variables).sort().join(","),
+    });
     const response = await fetch("https://api.github.com/graphql", {
       method: "POST",
       headers: {
@@ -100,11 +123,22 @@ export class GitHubReviewService implements ReviewService {
 
     if (!response.ok) {
       const body = await response.text();
+      this.logger.error("GitHub GraphQL request failed", {
+        operationName,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+      });
       throw new ForemanError("github_request_failed", `GitHub GraphQL request failed: ${response.status} ${body}`, 502);
     }
 
     const json = (await response.json()) as GitHubGraphqlResponse<T>;
     if (json.errors?.length) {
+      this.logger.error("GitHub GraphQL request returned errors", {
+        operationName,
+        errorCount: json.errors.length,
+        errors: json.errors.map((error) => error.message).join("; "),
+        durationMs: Date.now() - startedAt,
+      });
       throw new ForemanError(
         "github_request_failed",
         `GitHub GraphQL request failed: ${json.errors.map((error) => error.message).join("; ")}`,
@@ -113,9 +147,11 @@ export class GitHubReviewService implements ReviewService {
     }
 
     if (!json.data) {
+      this.logger.error("GitHub GraphQL request returned no data", { operationName, durationMs: Date.now() - startedAt });
       throw new ForemanError("github_request_failed", "GitHub GraphQL response returned no data", 502);
     }
 
+    this.logger.debug("GitHub GraphQL request completed", { operationName, durationMs: Date.now() - startedAt });
     return json.data;
   }
 
@@ -126,10 +162,12 @@ export class GitHubReviewService implements ReviewService {
   async getContext(task: Task, agentPrefix: string): Promise<ReviewContext | null> {
     const prUrl = this.pullRequestArtifact(task);
     if (!prUrl) {
+      this.logger.debug("skipping GitHub review context lookup because task has no pull request artifact", { taskId: task.id });
       return null;
     }
 
     const { owner, repo, number } = parseGitHubUrl(prUrl);
+    this.logger.debug("fetching GitHub pull request context", { taskId: task.id, owner, repo, pullRequestNumber: number });
     const data = await this.graphql<{
       repository: {
         pullRequest: {
@@ -179,6 +217,7 @@ export class GitHubReviewService implements ReviewService {
 
     const pullRequest = data.repository?.pullRequest;
     if (!pullRequest) {
+      this.logger.debug("GitHub pull request context not found", { taskId: task.id, owner, repo, pullRequestNumber: number });
       return null;
     }
 
@@ -227,6 +266,19 @@ export class GitHubReviewService implements ReviewService {
       .filter((check) => check.status !== "completed")
       .map((check) => ({ name: check.name, state: "pending" as const }));
 
+    this.logger.debug("fetched GitHub pull request context", {
+      taskId: task.id,
+      owner,
+      repo,
+      pullRequestNumber: pullRequest.number,
+      state: pullRequest.merged ? "merged" : pullRequest.state === "OPEN" ? "open" : "closed",
+      reviewSummaryCount: actionableReviewSummaries.length,
+      conversationCommentCount: actionableConversationComments.length,
+      unresolvedThreadCount: unresolvedThreads.length,
+      failingCheckCount: failingChecks.length,
+      pendingCheckCount: pendingChecks.length,
+    });
+
     return {
       provider: "github",
       pullRequestUrl: pullRequest.url,
@@ -264,30 +316,40 @@ export class GitHubReviewService implements ReviewService {
   async findLatestOpenPullRequestBranch(task: Task): Promise<string | null> {
     const prUrl = this.pullRequestArtifact(task);
     if (!prUrl) {
+      this.logger.debug("skipping open pull request branch lookup because task has no pull request artifact", { taskId: task.id });
       return null;
     }
 
     const context = await this.getContext(task, "");
-    return context?.state === "open" ? context.headBranch : null;
+    const branch = context?.state === "open" ? context.headBranch : null;
+    this.logger.debug("resolved latest open pull request branch", { taskId: task.id, branch: branch ?? null });
+    return branch;
   }
 
   async listConversationComments(prUrl: string): Promise<ConversationComment[]> {
     const { owner, repo, number } = parseGitHubUrl(prUrl);
+    this.logger.debug("listing GitHub pull request conversation comments", { owner, repo, pullRequestNumber: number });
     const comments = await this.rest<Array<{ id: number; body: string; created_at: string; user: { login: string | null } | null }>>(
       `/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`,
     );
 
-    return comments.map((comment) => ({
+    const mapped = comments.map((comment) => ({
       id: String(comment.id),
       body: comment.body,
       authorName: comment.user?.login ?? null,
       createdAt: comment.created_at,
     }));
+
+    this.logger.debug("listed GitHub pull request conversation comments", { owner, repo, pullRequestNumber: number, count: mapped.length });
+    return mapped;
   }
 
   private async repoDescriptorFromCwd(cwd: string): Promise<RepoDescriptor> {
+    this.logger.debug("resolving GitHub repository from git remote", { cwd });
     const remote = await exec("git", ["config", "--get", "remote.origin.url"], { cwd });
-    return parseGitRemote(remote.stdout);
+    const repo = parseGitRemote(remote.stdout);
+    this.logger.debug("resolved GitHub repository from git remote", { cwd, owner: repo.owner, repo: repo.repo });
+    return repo;
   }
 
   async createPullRequest(input: {
@@ -299,6 +361,16 @@ export class GitHubReviewService implements ReviewService {
     headBranch: string;
   }): Promise<{ url: string; number: number }> {
     const repo = await this.repoDescriptorFromCwd(input.cwd);
+    this.logger.info("creating GitHub pull request", {
+      cwd: input.cwd,
+      owner: repo.owner,
+      repo: repo.repo,
+      baseBranch: input.baseBranch,
+      headBranch: input.headBranch,
+      draft: input.draft,
+      titleLength: input.title.length,
+      bodyLength: input.body.length,
+    });
     const result = await this.rest<{ html_url: string; number: number }>(`/repos/${repo.owner}/${repo.repo}/pulls`, {
       method: "POST",
       body: JSON.stringify({
@@ -312,6 +384,7 @@ export class GitHubReviewService implements ReviewService {
         "content-type": "application/json",
       },
     });
+    this.logger.info("created GitHub pull request", { owner: repo.owner, repo: repo.repo, pullRequestUrl: result.html_url, pullRequestNumber: result.number });
     return { url: result.html_url, number: result.number };
   }
 
@@ -326,8 +399,19 @@ export class GitHubReviewService implements ReviewService {
     const repo = await this.repoDescriptorFromCwd(input.cwd);
     const number = input.pullRequestNumber ?? (input.pullRequestUrl ? parseGitHubUrl(input.pullRequestUrl).number : null);
     if (!number) {
+      this.logger.error("cannot reopen GitHub pull request because no target was provided", { cwd: input.cwd });
       throw new ForemanError("invalid_pr_target", "Reopen pull request requires a number or URL");
     }
+
+    this.logger.info("reopening GitHub pull request", {
+      cwd: input.cwd,
+      owner: repo.owner,
+      repo: repo.repo,
+      pullRequestNumber: number,
+      draft: input.draft,
+      titleLength: input.title?.length ?? 0,
+      bodyLength: input.body?.length ?? 0,
+    });
 
     const pr = await this.rest<{ html_url: string; number: number }>(`/repos/${repo.owner}/${repo.repo}/pulls/${number}`, {
       method: "PATCH",
@@ -336,39 +420,65 @@ export class GitHubReviewService implements ReviewService {
     });
 
     if (input.draft === false) {
+      this.logger.info("reopened GitHub pull request", { owner: repo.owner, repo: repo.repo, pullRequestUrl: pr.html_url, pullRequestNumber: pr.number });
       return { url: pr.html_url, number: pr.number };
     }
 
+    this.logger.info("reopened GitHub pull request", { owner: repo.owner, repo: repo.repo, pullRequestUrl: pr.html_url, pullRequestNumber: pr.number });
     return { url: pr.html_url, number: pr.number };
   }
 
   async replyToReviewSummary(prUrl: string, reviewId: string, body: string): Promise<void> {
     const { owner, repo } = parseGitHubUrl(prUrl);
+    this.logger.info("replying to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl, bodyLength: body.length });
     await this.rest(`/repos/${owner}/${repo}/pulls/${reviewId}/comments`, {
       method: "POST",
       body: JSON.stringify({ body }),
       headers: { "content-type": "application/json" },
     }).catch(async () => {
       const issue = parseGitHubUrl(prUrl);
+      this.logger.warn("falling back to issue comment while replying to GitHub review summary", {
+        owner,
+        repo,
+        reviewId,
+        pullRequestNumber: issue.number,
+      });
       await this.rest(`/repos/${owner}/${repo}/issues/${issue.number}/comments`, {
         method: "POST",
         body: JSON.stringify({ body: `In reply to review ${reviewId}:\n\n${body}` }),
         headers: { "content-type": "application/json" },
       });
     });
+    this.logger.info("replied to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl });
   }
 
-  async replyToPrComment(prUrl: string, _commentId: string, body: string): Promise<void> {
+  async replyToPrComment(prUrl: string, commentId: string, body: string): Promise<void> {
     const { owner, repo, number } = parseGitHubUrl(prUrl);
+    this.logger.info("replying to GitHub pull request comment", {
+      owner,
+      repo,
+      pullRequestNumber: number,
+      commentId,
+      bodyLength: body.length,
+    });
     await this.rest(`/repos/${owner}/${repo}/issues/${number}/comments`, {
       method: "POST",
       body: JSON.stringify({ body }),
       headers: { "content-type": "application/json" },
     });
+    this.logger.info("replied to GitHub pull request comment", { owner, repo, pullRequestNumber: number, commentId });
   }
 
   async resolveThreads(prUrl: string, threadIds: string[]): Promise<void> {
+    const { owner, repo, number } = parseGitHubUrl(prUrl);
+    this.logger.info("resolving GitHub review threads", {
+      owner,
+      repo,
+      pullRequestNumber: number,
+      threadCount: threadIds.length,
+    });
     for (const threadId of threadIds) {
+      this.logger.debug("resolving GitHub review thread", { owner, repo, pullRequestNumber: number, threadId });
       await this.graphql(
         `mutation ResolveReviewThread($threadId: ID!) {
           resolveReviewThread(input: { threadId: $threadId }) { thread { id isResolved } }
@@ -376,20 +486,30 @@ export class GitHubReviewService implements ReviewService {
         { threadId },
       );
     }
+    this.logger.info("resolved GitHub review threads", { owner, repo, pullRequestNumber: number, threadCount: threadIds.length });
   }
 }
 
-export const resolveGitHubAuthEnv = async (env: Record<string, string>): Promise<Record<string, string>> => {
+export const resolveGitHubAuthEnv = async (env: Record<string, string>, logger?: LoggerService): Promise<Record<string, string>> => {
+  const authLogger = (logger ?? LoggerService.create({ context: { component: "review.github.auth" }, colorMode: "never" })).child({
+    component: "review.github.auth",
+  });
   if (env.GH_TOKEN) {
+    authLogger.debug("using GitHub token from environment");
     return env;
   }
 
   if (env.GH_CONFIG_DIR) {
+    authLogger.debug("attempting to resolve GitHub token via gh auth token", { hasGhConfigDir: true });
     const token = (await exec("gh", ["auth", "token"], { env })).stdout.trim();
     if (token) {
+      authLogger.info("resolved GitHub token via gh auth token");
       return { ...env, GH_TOKEN: token };
     }
+
+    authLogger.warn("gh auth token did not return a GitHub token");
   }
 
+  authLogger.warn("GitHub token was not resolved from the environment or gh auth token");
   return env;
 };

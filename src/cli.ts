@@ -53,7 +53,7 @@ program
       minLevel: options.logLevel,
     });
     logger.info("starting foreman service", { host: config.http.host, port: config.http.port });
-    const resolvedEnv = await resolveGitHubAuthEnv(env);
+    const resolvedEnv = await resolveGitHubAuthEnv(env, logger.child({ component: "review.github.auth" }));
     const db = new ForemanDb(await openDatabase(paths.dbPath));
     await applyMigrations(db.sqlite, paths.projectRoot);
     const repos = await discoverRepos(config, paths);
@@ -73,7 +73,7 @@ program
       paths,
       db,
       taskSystem,
-      reviewService: new GitHubReviewService(resolvedEnv),
+      reviewService: new GitHubReviewService(resolvedEnv, logger.child({ component: "review.github" })),
       runner: new OpenCodeRunner(config.runner.model, config.runner.variant),
       repos,
       env: resolvedEnv,
