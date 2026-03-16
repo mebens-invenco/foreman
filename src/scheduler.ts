@@ -379,7 +379,9 @@ export class SchedulerService extends EventEmitter {
     }
 
     const queuedJobs = this.deps.db.listJobsByStatus(["queued"]);
-    const idleWorkers = this.deps.db.listWorkers().filter((worker) => worker.status === "idle");
+    const idleWorkers = this.deps.db
+      .listWorkers()
+      .filter((worker) => worker.status === "idle" && !this.activeWorkerRuns.has(worker.id));
     if (queuedJobs.length > 0 || idleWorkers.length > 0) {
       this.logger.debug("checked dispatch queue", { queuedJobs: queuedJobs.length, idleWorkers: idleWorkers.length });
     }
@@ -392,6 +394,17 @@ export class SchedulerService extends EventEmitter {
       const job = queuedJobs.shift();
       if (!job) {
         break;
+      }
+
+      const claimed = this.deps.db.claimQueuedJobForWorker(job.id, worker.id);
+      if (!claimed) {
+        this.logger.debug("skipped dispatch because worker or job was already claimed", {
+          workerId: worker.id,
+          jobId: job.id,
+          taskId: job.taskId,
+          action: job.action,
+        });
+        continue;
       }
 
       this.logger.info("dispatching queued job to worker", { workerId: worker.id, jobId: job.id, taskId: job.taskId, action: job.action });
@@ -442,15 +455,14 @@ export class SchedulerService extends EventEmitter {
         leases: leaseResourceKeysForAction(task, job.action),
       });
       if (!attempt) {
-        jobLogger.warn("skipped job because required leases could not be acquired");
+        this.deps.db.returnLeasedJobToQueue(job.id);
+        jobLogger.warn("returned leased job to queue because required execution leases could not be acquired");
         return;
       }
 
       const attemptLogger = jobLogger.child({ attemptId: attempt.id });
       attemptLogger.info("created execution attempt", { attemptNumber: attempt.attemptNumber, leaseExpiresAt });
 
-      this.deps.db.updateWorkerStatus(workerId, "leased", null);
-      this.deps.db.updateJobStatus(job.id, "leased", { leasedAt: isoNow() });
       this.deps.db.updateWorkerStatus(workerId, "running", attempt.id);
       this.deps.db.updateJobStatus(job.id, "running", { startedAt: attempt.startedAt });
       this.deps.db.addAttemptEvent(attempt.id, "attempt_started", `Started ${job.action} for ${task.id}`);
@@ -655,11 +667,6 @@ export class SchedulerService extends EventEmitter {
         jobLogger.child({ attemptId: attempt.id }).info("released attempt leases", {
           releaseReason: controller.signal.aborted ? "stopped" : "completed",
         });
-      } else if (task) {
-        for (const lease of leaseResourceKeysForAction(task, job.action)) {
-          this.deps.db.releaseLeaseByResource(lease.resourceType, lease.resourceKey, "skipped");
-        }
-        jobLogger.warn("released provisional leases after skipped attempt");
       }
 
       this.deps.db.updateWorkerStatus(workerId, "idle", null);

@@ -302,4 +302,129 @@ describe("SchedulerService applyWorkerResult", () => {
     resolveRun();
     await stopPromise;
   });
+
+  test("does not redispatch workers that already have an in-flight run", async () => {
+    const claimQueuedJobForWorker = vi.fn(() => true);
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      db: {
+        ensureWorkerSlots: vi.fn(),
+        listWorkers: vi.fn(() => [
+          {
+            id: "worker-1",
+            slot: 1,
+            status: "idle",
+            currentAttemptId: null,
+            lastHeartbeatAt: "2026-03-16T00:00:00Z",
+          },
+        ]),
+        listJobsByStatus: vi.fn(() => [
+          {
+            id: "job-1",
+            taskId: "TASK-0001",
+            action: "execution",
+            repoKey: "repo-a",
+          },
+        ]),
+        claimQueuedJobForWorker,
+      } as any,
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      runner: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    let resolveRun!: () => void;
+    const runPromise = new Promise<void>((resolve) => {
+      resolveRun = resolve;
+    });
+    const runJob = vi.fn(() => runPromise);
+    (scheduler as any).runJob = runJob;
+    (scheduler as any).status = "running";
+
+    await (scheduler as any).dispatchQueuedJobs();
+    await (scheduler as any).dispatchQueuedJobs();
+
+    expect(claimQueuedJobForWorker).toHaveBeenCalledTimes(1);
+    expect(runJob).toHaveBeenCalledTimes(1);
+
+    resolveRun();
+    await runPromise;
+  });
+
+  test("returns leased job to queue when execution leases cannot be acquired", async () => {
+    const updateWorkerStatus = vi.fn();
+    const returnLeasedJobToQueue = vi.fn();
+    const releaseLeaseByResource = vi.fn();
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      db: {
+        ensureWorkerSlots: vi.fn(),
+        createAttemptWithLeases: vi.fn(() => null),
+        updateWorkerStatus,
+        updateJobStatus: vi.fn(),
+        addAttemptEvent: vi.fn(),
+        releaseLeasesForAttempt: vi.fn(),
+        returnLeasedJobToQueue,
+        releaseLeaseByResource,
+      } as any,
+      taskSystem: {
+        getTask: vi.fn(async () => sampleTask({ state: "in_progress", providerState: "in_progress" })),
+      } as any,
+      reviewService: {} as any,
+      runner: {} as any,
+      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    await (scheduler as any).runJob(
+      {
+        id: "worker-1",
+        slot: 1,
+        status: "leased",
+        currentAttemptId: null,
+        lastHeartbeatAt: "2026-03-16T00:00:00Z",
+      },
+      {
+        id: "job-1",
+        taskId: "TASK-0001",
+        action: "execution",
+        repoKey: "repo-a",
+        baseBranch: "main",
+      },
+    );
+
+    expect(returnLeasedJobToQueue).toHaveBeenCalledWith("job-1");
+    expect(releaseLeaseByResource).not.toHaveBeenCalled();
+    expect(updateWorkerStatus).toHaveBeenLastCalledWith("worker-1", "idle", null);
+  });
 });

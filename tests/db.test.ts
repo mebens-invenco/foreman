@@ -128,4 +128,40 @@ describe("ForemanDb leases", () => {
       db.close();
     }
   });
+
+  test("claims queued jobs for idle workers atomically", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.ensureWorkerSlots(1);
+      const worker = db.listWorkers()[0];
+      expect(worker).toBeDefined();
+
+      const job = db.createJob({
+        taskId: "TASK-0003",
+        taskProvider: "file",
+        action: "execution",
+        priorityRank: priorityToRank("high"),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: "TASK-0003:execution",
+        selectionReason: "test",
+      });
+
+      expect(db.claimQueuedJobForWorker(job.id, worker!.id)).toBe(true);
+      expect(db.claimQueuedJobForWorker(job.id, worker!.id)).toBe(false);
+
+      expect(db.getJob(job.id).status).toBe("leased");
+      expect(db.listWorkers()[0]?.status).toBe("leased");
+
+      db.returnLeasedJobToQueue(job.id);
+
+      expect(db.getJob(job.id).status).toBe("queued");
+      expect(db.getJob(job.id).leasedAt).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
 });

@@ -211,6 +211,50 @@ export class ForemanDb {
       .run(status, currentAttemptId, isoNow(), isoNow(), workerId);
   }
 
+  claimQueuedJobForWorker(jobId: string, workerId: string): boolean {
+    const now = isoNow();
+
+    try {
+      const tx = this.sqlite.transaction(() => {
+        const workerResult = this.sqlite
+          .prepare(
+            `UPDATE worker
+                SET status = 'leased',
+                    current_attempt_id = NULL,
+                    last_heartbeat_at = ?,
+                    updated_at = ?
+              WHERE id = ?
+                AND status = 'idle'
+                AND current_attempt_id IS NULL`,
+          )
+          .run(now, now, workerId);
+        if (workerResult.changes !== 1) {
+          throw new Error("worker_not_idle");
+        }
+
+        const jobResult = this.sqlite
+          .prepare(
+            `UPDATE job
+                SET status = 'leased',
+                    updated_at = ?,
+                    leased_at = ?,
+                    error_message = NULL
+              WHERE id = ?
+                AND status = 'queued'`,
+          )
+          .run(now, now, jobId);
+        if (jobResult.changes !== 1) {
+          throw new Error("job_not_queued");
+        }
+      });
+
+      tx();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   heartbeatWorker(workerId: string, attemptId: string | null, expiresAt: string): void {
     const now = isoNow();
     const tx = this.sqlite.transaction(() => {
@@ -416,6 +460,22 @@ export class ForemanDb {
           WHERE id = ?`,
       )
       .run(status, isoNow(), patch.startedAt ?? null, patch.leasedAt ?? null, patch.finishedAt ?? null, patch.errorMessage ?? null, jobId);
+  }
+
+  returnLeasedJobToQueue(jobId: string): void {
+    this.sqlite
+      .prepare(
+        `UPDATE job
+            SET status = 'queued',
+                updated_at = ?,
+                leased_at = NULL,
+                started_at = NULL,
+                finished_at = NULL,
+                error_message = NULL
+          WHERE id = ?
+            AND status = 'leased'`,
+      )
+      .run(isoNow(), jobId);
   }
 
   nextAttemptNumber(jobId: string): number {
