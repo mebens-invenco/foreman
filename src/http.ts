@@ -337,7 +337,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   server.get("/api/scout/runs", async () => ({ runs: deps.db.listScoutRuns() }));
 
   server.post("/api/scheduler/start", async () => {
-    deps.scheduler.start();
+    await deps.scheduler.start();
     return { scheduler: { status: deps.scheduler.getStatus().status } };
   });
 

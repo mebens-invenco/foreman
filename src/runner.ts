@@ -3,6 +3,8 @@ import { spawn } from "node:child_process";
 import type { AgentRunRequest, AgentRunResult } from "./domain.js";
 import { isoNow } from "./lib/time.js";
 
+const forceKillAfterMs = 1_000;
+
 type AgentRunLineCallbacks = {
   onStdoutLine?: (line: string) => void;
   onStderrLine?: (line: string) => void;
@@ -46,10 +48,26 @@ export class OpenCodeRunner implements AgentRunner {
     let stderrLineBuffer = "";
     let signal: string | null = null;
     let timeout: NodeJS.Timeout | undefined;
+    let forcedKillTimeout: NodeJS.Timeout | undefined;
     let timedOut = false;
+    let terminateRequested = false;
+
+    const terminateChild = (): void => {
+      if (terminateRequested) {
+        return;
+      }
+
+      terminateRequested = true;
+      child.kill("SIGTERM");
+      forcedKillTimeout = setTimeout(() => {
+        if (child.exitCode === null) {
+          child.kill("SIGKILL");
+        }
+      }, forceKillAfterMs);
+    };
 
     const abortHandler = (): void => {
-      child.kill("SIGTERM");
+      terminateChild();
     };
 
     request.abortSignal?.addEventListener("abort", abortHandler, { once: true });
@@ -80,7 +98,7 @@ export class OpenCodeRunner implements AgentRunner {
     if (request.timeoutMs > 0) {
       timeout = setTimeout(() => {
         timedOut = true;
-        child.kill("SIGTERM");
+        terminateChild();
       }, request.timeoutMs);
     }
 
@@ -93,6 +111,9 @@ export class OpenCodeRunner implements AgentRunner {
     }).finally(() => {
       if (timeout) {
         clearTimeout(timeout);
+      }
+      if (forcedKillTimeout) {
+        clearTimeout(forcedKillTimeout);
       }
       request.abortSignal?.removeEventListener("abort", abortHandler);
       if (stdoutLineBuffer) {

@@ -79,4 +79,53 @@ describe("ForemanDb leases", () => {
       db.close();
     }
   });
+
+  test("recovers orphaned running attempts without active leases", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.ensureWorkerSlots(1);
+      const worker = db.listWorkers()[0];
+      expect(worker).toBeDefined();
+
+      const job = db.createJob({
+        taskId: "TASK-0002",
+        taskProvider: "file",
+        action: "execution",
+        priorityRank: priorityToRank("high"),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: "TASK-0002:execution",
+        selectionReason: "test",
+      });
+      const attempt = db.createAttemptWithLeases({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+        expiresAt: addSeconds(new Date(), 120),
+        leases: [{ resourceType: "task", resourceKey: "TASK-0002" }],
+      });
+
+      expect(attempt).not.toBeNull();
+      db.updateWorkerStatus(worker!.id, "running", attempt!.id);
+      db.updateJobStatus(job.id, "running", { startedAt: attempt!.startedAt });
+      db.releaseLeasesForAttempt(attempt!.id, "expired");
+
+      const recovered = db.recoverOrphanedRunningAttempts("Recovered abandoned attempt on scheduler startup after prior shutdown");
+      expect(recovered).toEqual([{ attemptId: attempt!.id, jobId: job.id, workerId: worker!.id }]);
+
+      expect(db.getAttempt(attempt!.id).status).toBe("canceled");
+      expect(db.getJob(job.id).status).toBe("canceled");
+      expect(db.listWorkers()[0]?.status).toBe("idle");
+      expect(db.listWorkers()[0]?.currentAttemptId).toBeNull();
+
+      const events = db.listAttemptEvents(attempt!.id);
+      expect(events.some((event) => event.eventType === "attempt_recovered")).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
 });

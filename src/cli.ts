@@ -83,23 +83,32 @@ program
     const server = createHttpServer({ config, paths, repos, db, taskSystem, scheduler });
     await server.listen({ host: config.http.host, port: config.http.port });
     logger.info("http server listening", { host: config.http.host, port: config.http.port });
-    scheduler.start();
+    await scheduler.start();
     logger.info("scheduler started from serve command");
 
     process.stdout.write(`Foreman serving workspace ${workspace} on http://${config.http.host}:${config.http.port}\n`);
 
+    let shutdownPromise: Promise<void> | null = null;
     const shutdown = async (): Promise<void> => {
-      logger.info("shutting down foreman service");
-      await scheduler.stop();
-      await server.close();
-      db.close();
-      logger.info("foreman service stopped");
-      await logger.flush();
-      process.exit(0);
+      if (shutdownPromise) {
+        return shutdownPromise;
+      }
+
+      shutdownPromise = (async () => {
+        logger.info("shutting down foreman service");
+        await scheduler.stop();
+        await server.close();
+        db.close();
+        logger.info("foreman service stopped");
+        await logger.flush();
+        process.exit(0);
+      })();
+
+      return shutdownPromise;
     };
 
-    process.on("SIGINT", () => void shutdown());
-    process.on("SIGTERM", () => void shutdown());
+    process.once("SIGINT", () => void shutdown());
+    process.once("SIGTERM", () => void shutdown());
   });
 
 const plan = program.command("plan");

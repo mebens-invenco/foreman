@@ -65,6 +65,12 @@ export type WorkerRecord = {
   lastHeartbeatAt: string;
 };
 
+export type RecoveredAttemptRecord = {
+  attemptId: string;
+  jobId: string;
+  workerId: string | null;
+};
+
 export type ScoutRunTrigger = "startup" | "poll" | "worker_finished" | "task_mutation" | "lease_change" | "manual";
 
 const mapJob = (row: Record<string, unknown>): JobRecord => ({
@@ -725,6 +731,70 @@ export class ForemanDb {
       )
       .run(now, now);
     return result.changes;
+  }
+
+  recoverOrphanedRunningAttempts(reason: string): RecoveredAttemptRecord[] {
+    const now = isoNow();
+    const recovered: RecoveredAttemptRecord[] = [];
+    const rows = this.sqlite
+      .prepare(
+        `SELECT ea.id AS attempt_id, ea.job_id, ea.worker_id
+           FROM execution_attempt ea
+      LEFT JOIN lease l
+             ON l.execution_attempt_id = ea.id
+            AND l.released_at IS NULL
+          WHERE ea.status = 'running'
+            AND l.id IS NULL
+       ORDER BY ea.started_at ASC`,
+      )
+      .all() as Array<{ attempt_id: string; job_id: string; worker_id: string | null }>;
+
+    const tx = this.sqlite.transaction(() => {
+      const finalizeAttempt = this.sqlite.prepare(
+        `UPDATE execution_attempt
+            SET status = 'canceled',
+                finished_at = ?,
+                summary = ?,
+                error_message = ?
+          WHERE id = ?
+            AND status = 'running'`,
+      );
+      const finalizeJob = this.sqlite.prepare(
+        `UPDATE job
+            SET status = 'canceled',
+                updated_at = ?,
+                finished_at = ?,
+                error_message = ?
+          WHERE id = ?
+            AND status IN ('leased', 'running')`,
+      );
+      const addEvent = this.sqlite.prepare(
+        "INSERT INTO execution_attempt_event(id, execution_attempt_id, event_type, message, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      );
+      const releaseLeases = this.sqlite.prepare(
+        "UPDATE lease SET released_at = ?, release_reason = 'startup_recovery' WHERE execution_attempt_id = ? AND released_at IS NULL",
+      );
+      const resetWorker = this.sqlite.prepare(
+        `UPDATE worker
+            SET status = 'idle',
+                current_attempt_id = NULL,
+                last_heartbeat_at = ?,
+                updated_at = ?
+          WHERE current_attempt_id = ?`,
+      );
+
+      for (const row of rows) {
+        finalizeAttempt.run(now, reason, reason, row.attempt_id);
+        finalizeJob.run(now, now, reason, row.job_id);
+        addEvent.run(newId(), row.attempt_id, "attempt_recovered", reason, stableStringify({ recovery: "startup" }), now);
+        releaseLeases.run(now, row.attempt_id);
+        resetWorker.run(now, now, row.attempt_id);
+        recovered.push({ attemptId: row.attempt_id, jobId: row.job_id, workerId: row.worker_id });
+      }
+    });
+
+    tx();
+    return recovered;
   }
 
   getReviewCheckpoint(taskId: string, prUrl: string): Record<string, unknown> | null {

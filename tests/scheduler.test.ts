@@ -245,4 +245,61 @@ describe("SchedulerService applyWorkerResult", () => {
       }),
     ).rejects.toThrow("Execution results with code changes must include a create_pull_request or reopen_pull_request mutation");
   });
+
+  test("drains active worker runs during stop", async () => {
+    const updateWorkerStatus = vi.fn();
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      db: {
+        ensureWorkerSlots: vi.fn(),
+        listWorkers: vi.fn(() => [
+          {
+            id: "worker-1",
+            slot: 1,
+            status: "running",
+            currentAttemptId: "attempt-4",
+            lastHeartbeatAt: "2026-03-16T00:00:00Z",
+          },
+        ]),
+        updateWorkerStatus,
+      } as any,
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      runner: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    let resolveRun!: () => void;
+    const activeRun = new Promise<void>((resolve) => {
+      resolveRun = resolve;
+    });
+    const controller = new AbortController();
+    (scheduler as any).status = "running";
+    (scheduler as any).workerAbortControllers.set("worker-1", controller);
+    (scheduler as any).activeWorkerRuns.set("worker-1", activeRun);
+
+    const stopPromise = scheduler.stop();
+    await Promise.resolve();
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(updateWorkerStatus).toHaveBeenCalledWith("worker-1", "stopping", "attempt-4");
+
+    resolveRun();
+    await stopPromise;
+  });
 });

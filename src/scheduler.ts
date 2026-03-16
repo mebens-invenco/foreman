@@ -56,6 +56,9 @@ export class SchedulerService extends EventEmitter {
   private reapTimer: NodeJS.Timeout | null = null;
   private nextPollAt: string | null = null;
   private readonly workerAbortControllers = new Map<string, AbortController>();
+  private readonly activeWorkerRuns = new Map<string, Promise<void>>();
+  private currentScoutPromise: Promise<void> | null = null;
+  private stopPromise: Promise<void> | null = null;
   private readonly logger: LoggerService;
 
   constructor(private readonly deps: SchedulerDeps) {
@@ -69,10 +72,25 @@ export class SchedulerService extends EventEmitter {
     return { status: this.status, nextScoutPollAt: this.nextPollAt };
   }
 
-  start(): void {
+  async start(): Promise<void> {
     if (this.status === "running") {
       this.logger.debug("scheduler start ignored because it is already running");
       return;
+    }
+
+    if (this.stopPromise) {
+      this.logger.info("waiting for scheduler stop to finish before starting again");
+      await this.stopPromise;
+    }
+
+    const recovered = this.deps.db.recoverOrphanedRunningAttempts(
+      "Recovered abandoned attempt on scheduler startup after prior shutdown",
+    );
+    if (recovered.length > 0) {
+      this.logger.warn("recovered orphaned running attempts on startup", {
+        recoveredCount: recovered.length,
+        attemptIds: recovered.map((entry) => entry.attemptId).join(","),
+      });
     }
 
     this.status = "running";
@@ -95,7 +113,11 @@ export class SchedulerService extends EventEmitter {
   }
 
   async stop(): Promise<void> {
-    if (this.status === "stopped") {
+    if (this.stopPromise) {
+      return this.stopPromise;
+    }
+
+    if (this.status === "stopped" && this.activeWorkerRuns.size === 0 && !this.currentScoutPromise) {
       this.logger.debug("scheduler stop ignored because it is already stopped");
       return;
     }
@@ -104,12 +126,54 @@ export class SchedulerService extends EventEmitter {
     this.emit("scheduler_status_changed", { status: this.status });
     this.logger.info("scheduler stopping", { activeWorkers: this.workerAbortControllers.size });
     this.clearTimers();
+    this.pendingScoutTrigger = null;
+
+    for (const worker of this.deps.db.listWorkers()) {
+      if (this.workerAbortControllers.has(worker.id)) {
+        this.deps.db.updateWorkerStatus(worker.id, "stopping", worker.currentAttemptId);
+      }
+    }
 
     for (const controller of this.workerAbortControllers.values()) {
       controller.abort();
     }
 
-    this.logger.info("scheduler stopped");
+    this.stopPromise = (async () => {
+      if (this.currentScoutPromise) {
+        this.logger.info("waiting for in-flight scout run to finish during shutdown");
+        await this.currentScoutPromise;
+      }
+
+      const activeRuns = [...this.activeWorkerRuns.values()];
+      if (activeRuns.length > 0) {
+        const drainPromise = Promise.allSettled(activeRuns);
+        const gracePeriodMs = this.deps.config.scheduler.shutdownGracePeriodSeconds * 1000;
+        let graceTimer: NodeJS.Timeout | null = null;
+        const completedWithinGrace = await Promise.race([
+          drainPromise.then(() => true),
+          new Promise<boolean>((resolve) => {
+            graceTimer = setTimeout(() => resolve(false), gracePeriodMs);
+          }),
+        ]);
+        if (graceTimer) {
+          clearTimeout(graceTimer);
+        }
+
+        if (!completedWithinGrace) {
+          this.logger.warn("shutdown grace period exceeded while waiting for worker cleanup", {
+            activeWorkers: activeRuns.length,
+            shutdownGracePeriodSeconds: this.deps.config.scheduler.shutdownGracePeriodSeconds,
+          });
+          await drainPromise;
+        }
+      }
+
+      this.logger.info("scheduler stopped");
+    })().finally(() => {
+      this.stopPromise = null;
+    });
+
+    await this.stopPromise;
   }
 
   triggerManualScout(): void {
@@ -178,11 +242,22 @@ export class SchedulerService extends EventEmitter {
     const delay = trigger === "startup" ? 0 : this.deps.config.scheduler.scoutRerunDebounceMs;
     this.logger.info("scheduled scout run", { trigger, delayMs: delay });
     setTimeout(() => {
-      void this.runScout(trigger);
+      const runPromise = this.runScout(trigger).finally(() => {
+        if (this.currentScoutPromise === runPromise) {
+          this.currentScoutPromise = null;
+        }
+      });
+      this.currentScoutPromise = runPromise;
+      void runPromise;
     }, delay);
   }
 
   private async runScout(trigger: ScoutTrigger): Promise<void> {
+    if (this.status !== "running" && trigger !== "manual") {
+      this.logger.debug("skipped scout run because scheduler is not running", { trigger, status: this.status });
+      return;
+    }
+
     if (this.scoutInFlight) {
       this.pendingScoutTrigger = trigger;
       this.logger.debug("runScout deferred because another scout is in flight", { trigger });
@@ -201,6 +276,18 @@ export class SchedulerService extends EventEmitter {
         triggerType: trigger,
         logger: this.logger.child({ component: "scout", trigger }),
       });
+
+      if (this.status !== "running" && trigger !== "manual") {
+        this.deps.db.completeScoutRun({
+          id: selection.scoutRunId,
+          summary: { enqueued: 0, skippedBecauseStopped: true },
+        });
+        this.logger.info("discarded scout selection because scheduler stopped", {
+          trigger,
+          scoutRunId: selection.scoutRunId,
+        });
+        return;
+      }
 
       let firstJobId: string | null = null;
       let firstAction: ActionType | null = null;
@@ -298,13 +385,23 @@ export class SchedulerService extends EventEmitter {
     }
 
     for (const worker of idleWorkers) {
+      if (this.status !== "running") {
+        break;
+      }
+
       const job = queuedJobs.shift();
       if (!job) {
         break;
       }
 
       this.logger.info("dispatching queued job to worker", { workerId: worker.id, jobId: job.id, taskId: job.taskId, action: job.action });
-      void this.runJob(worker, job);
+      const runPromise = this.runJob(worker, job).finally(() => {
+        if (this.activeWorkerRuns.get(worker.id) === runPromise) {
+          this.activeWorkerRuns.delete(worker.id);
+        }
+      });
+      this.activeWorkerRuns.set(worker.id, runPromise);
+      void runPromise;
     }
   }
 
