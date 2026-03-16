@@ -32,7 +32,6 @@ export class OpenCodeRunner implements AgentRunner {
       this.model,
       "--variant",
       this.variant,
-      "--non-interactive",
     ];
 
     const child = spawn(command, args, {
