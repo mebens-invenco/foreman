@@ -14,9 +14,9 @@ Agent:
   Depends on tasks: <ENG-123, ENG-124>
   Base from task: <ENG-123>
   Depends on branches: <feature/foo, eng-123>
-  Branch: <task-branch-name>
 ```
 
 - `Repo` is required.
 - `Base from task` is required when there is more than one task dependency.
+- `Branch` is optional. Omit it to use the default branch naming convention for the task system/executor.
 - Omit dependency keys entirely when they are not needed.
