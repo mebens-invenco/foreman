@@ -430,10 +430,10 @@ export class SchedulerService extends EventEmitter {
           timeoutMs: this.deps.config.runner.timeoutMs,
           abortSignal: controller.signal,
           onStdoutLine: (line: string) => {
-            attemptLogger.line("runner.stdout", line);
+            attemptLogger.runnerLine(line);
           },
           onStderrLine: (line: string) => {
-            attemptLogger.line("runner.stderr", line);
+            attemptLogger.runnerLine(line);
           },
         } as Parameters<OpenCodeRunner["invoke"]>[0]) as CapturedAgentRunResult;
         attemptLogger.info("runner invocation completed", {

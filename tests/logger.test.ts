@@ -66,14 +66,41 @@ describe("LoggerService", () => {
     });
 
     const attemptLogger = logger.child({ component: "scheduler", attemptId: "attempt-123", workerId: "worker-1" });
-    attemptLogger.line("runner.stdout", "worker output");
+    attemptLogger.info("worker state changed", { jobId: "job-1" });
     await logger.flush();
 
     const attemptLog = await readFile(path.join(workspaceRoot, "logs", "attempts", "attempt-123.log"), "utf8");
     expect(attemptLog).toContain('attemptId="attempt-123"');
     expect(attemptLog).toContain('workerId="worker-1"');
-    expect(attemptLog).toContain('source="runner.stdout"');
-    expect(attemptLog).toContain('message="worker output"');
+    expect(attemptLog).toContain('jobId="job-1"');
+    expect(attemptLog).toContain('message="worker state changed"');
+  });
+
+  test("writes raw runner output to the attempt log and only shows a worker badge in stdout", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "foreman-runner-line-"));
+    const stdout = new PassThrough();
+    let captured = "";
+    stdout.on("data", (chunk) => {
+      captured += String(chunk);
+    });
+
+    const logger = LoggerService.create({
+      paths: workspacePaths(workspaceRoot),
+      stdout,
+      context: { workspace: "test-workspace" },
+      colorMode: "never",
+      minLevel: "error",
+    });
+
+    const attemptLogger = logger.child({ component: "scheduler", attemptId: "attempt-456", workerId: "worker-2" });
+    attemptLogger.runnerLine("runner output line");
+    await logger.flush();
+
+    const attemptLog = await readFile(path.join(workspaceRoot, "logs", "attempts", "attempt-456.log"), "utf8");
+    const workspaceLogPath = path.join(workspaceRoot, "logs", "foreman.log");
+    expect(attemptLog).toBe("runner output line\n");
+    expect(captured).toBe("[worker-2] runner output line\n");
+    await expect(readFile(workspaceLogPath, "utf8")).rejects.toThrow();
   });
 
   test("uses ANSI styling for stdout when color is enabled", async () => {

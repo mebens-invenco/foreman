@@ -62,9 +62,7 @@ export class OpenCodeRunner implements AgentRunner {
       const remainder = parts.pop() ?? "";
       if (callback) {
         for (const part of parts) {
-          if (part) {
-            callback(part);
-          }
+          callback(part);
         }
       }
       return remainder;

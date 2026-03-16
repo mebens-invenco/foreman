@@ -13,6 +13,7 @@ const fakeLogger = {
   warn() {},
   error() {},
   line() {},
+  runnerLine() {},
   flush: async () => undefined,
 };
 

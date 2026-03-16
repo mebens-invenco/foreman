@@ -32,6 +32,7 @@ const ANSI = {
   bold: "\u001B[1m",
   italic: "\u001B[3m",
   dimGray: "\u001B[90m",
+  bgGray: "\u001B[100m",
   fgBlack: "\u001B[30m",
   fgWhite: "\u001B[37m",
   bgCyan: "\u001B[46m",
@@ -113,6 +114,11 @@ const formatStdoutLine = (
   return `${segments.join(" ")}\n`;
 };
 
+const formatRunnerBadge = (workerId: string, colorEnabled: boolean): string => {
+  const label = ` ${workerId} `;
+  return colorEnabled ? `${ANSI.bgGray}${ANSI.fgWhite}${ANSI.bold}${label}${ANSI.reset}` : `[${workerId}]`;
+};
+
 const shouldUseColor = (stdout: NodeJS.WritableStream, colorMode: ColorMode): boolean => {
   if (colorMode === "always") {
     return true;
@@ -192,6 +198,44 @@ export class LoggerService {
 
   line(source: string, message: string, context: LogContext = {}): void {
     this.write("INFO", message, { ...context, source });
+  }
+
+  runnerLine(message: string, context: LogContext = {}): void {
+    const merged = { ...this.context, ...normalizeContext(context) };
+    const attemptId = typeof merged.attemptId === "string" && merged.attemptId ? merged.attemptId : null;
+    const workerId = typeof merged.workerId === "string" && merged.workerId ? merged.workerId : null;
+    const fileLine = `${message}\n`;
+    const stdoutLine = workerId ? `${formatRunnerBadge(workerId, this.state.colorEnabled)} ${message}\n` : `${message}\n`;
+
+    const appendAttempt = async (): Promise<void> => {
+      if (!attemptId || !this.state.paths) {
+        return;
+      }
+
+      const attemptLogPath = path.join(this.state.paths.attemptsLogDir, `${attemptId}.log`);
+      await ensureDir(path.dirname(attemptLogPath));
+      await fs.appendFile(attemptLogPath, fileLine, "utf8");
+    };
+
+    const next = this.state.queue.catch(() => undefined).then(async () => {
+      try {
+        this.state.stdout.write(stdoutLine);
+      } catch {
+        // ignore stdout write failures
+      }
+
+      await appendAttempt().catch(async (error) => {
+        try {
+          this.state.stdout.write(
+            formatLine("ERROR", `failed to append attempt log: ${error instanceof Error ? error.message : String(error)}`, this.context),
+          );
+        } catch {
+          // ignore secondary logging failure
+        }
+      });
+    });
+
+    this.state.queue = next;
   }
 
   flush(): Promise<void> {
