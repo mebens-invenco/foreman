@@ -146,6 +146,7 @@ export type ReviewMutation =
       body?: string;
     }
   | { type: "reply_to_review_summary"; reviewId: string; body: string }
+  | { type: "reply_to_thread_comment"; threadId: string; body: string }
   | { type: "reply_to_pr_comment"; commentId: string; body: string }
   | { type: "resolve_threads"; threadIds: string[] };
 

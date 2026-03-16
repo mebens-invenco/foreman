@@ -329,3 +329,29 @@ describe("GitHubReviewService.getContext", () => {
     expect(vi.mocked(global.fetch).mock.calls[2]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=2");
   });
 });
+
+describe("GitHubReviewService reply mutations", () => {
+  test("replies to review threads via GitHub GraphQL", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            addPullRequestReviewThreadReply: {
+              comment: { id: "reply-1" },
+            },
+          },
+        }),
+      ) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks");
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe("https://api.github.com/graphql");
+    const init = vi.mocked(global.fetch).mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      variables: { threadId: "thread-1", body: "[agent] Thanks" },
+    });
+  });
+});

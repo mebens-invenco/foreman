@@ -47,6 +47,9 @@ const consolidationLabels = (config: WorkspaceConfig): { remove: string[]; add: 
   };
 };
 
+const ensureAgentPrefix = (body: string, agentPrefix: string): string =>
+  body.startsWith(agentPrefix) ? body : `${agentPrefix}${body}`;
+
 export class SchedulerService extends EventEmitter {
   private status: SchedulerStatus = "stopped";
   private scoutInFlight = false;
@@ -786,11 +789,27 @@ export class SchedulerService extends EventEmitter {
       }
 
       if (mutation.type === "reply_to_review_summary") {
-        await this.deps.reviewService.replyToReviewSummary(pullRequestUrl, mutation.reviewId, mutation.body);
+        await this.deps.reviewService.replyToReviewSummary(
+          pullRequestUrl,
+          mutation.reviewId,
+          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+        );
         logger.info("replied to review summary", { reviewId: mutation.reviewId });
       }
+      if (mutation.type === "reply_to_thread_comment") {
+        await this.deps.reviewService.replyToThreadComment(
+          pullRequestUrl,
+          mutation.threadId,
+          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+        );
+        logger.info("replied to review thread", { threadId: mutation.threadId });
+      }
       if (mutation.type === "reply_to_pr_comment") {
-        await this.deps.reviewService.replyToPrComment(pullRequestUrl, mutation.commentId, mutation.body);
+        await this.deps.reviewService.replyToPrComment(
+          pullRequestUrl,
+          mutation.commentId,
+          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+        );
         logger.info("replied to pull request comment", { commentId: mutation.commentId });
       }
       if (mutation.type === "resolve_threads") {

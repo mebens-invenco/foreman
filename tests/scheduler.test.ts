@@ -246,6 +246,77 @@ describe("SchedulerService applyWorkerResult", () => {
     ).rejects.toThrow("Execution results with code changes must include a create_pull_request or reopen_pull_request mutation");
   });
 
+  test("prefixes review replies and routes thread replies explicitly", async () => {
+    const replyToReviewSummary = vi.fn(async () => undefined);
+    const replyToThreadComment = vi.fn(async () => undefined);
+    const replyToPrComment = vi.fn(async () => undefined);
+    const resolveThreads = vi.fn(async () => undefined);
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      db: {
+        ensureWorkerSlots: vi.fn(),
+        addLearning: vi.fn(),
+        updateLearning: vi.fn(),
+        addAttemptEvent: vi.fn(),
+        upsertReviewCheckpoint: vi.fn(),
+      } as any,
+      taskSystem: {
+        addComment: vi.fn(async () => undefined),
+        addArtifact: vi.fn(async () => undefined),
+        transition: vi.fn(async () => undefined),
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        replyToReviewSummary,
+        replyToThreadComment,
+        replyToPrComment,
+        resolveThreads,
+      } as any,
+      runner: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-3b" },
+        job: { action: "review" },
+        task: sampleTask({ artifacts: [{ type: "pull_request", url: reviewContext.pullRequestUrl }] }),
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        workerResult: baseWorkerResult({
+          reviewMutations: [
+            { type: "reply_to_review_summary", reviewId: "review-1", body: "Looks good now" },
+            { type: "reply_to_thread_comment", threadId: "thread-1", body: "[agent] Addressed in latest head" },
+            { type: "reply_to_pr_comment", commentId: "comment-1", body: "Please take another look" },
+            { type: "resolve_threads", threadIds: ["thread-1"] },
+          ],
+        }),
+      }),
+    ).resolves.toBe(reviewContext.pullRequestUrl);
+
+    expect(replyToReviewSummary).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "review-1", "[agent] Looks good now");
+    expect(replyToThreadComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "thread-1", "[agent] Addressed in latest head");
+    expect(replyToPrComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "comment-1", "[agent] Please take another look");
+    expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
+  });
+
   test("drains active worker runs during stop", async () => {
     const updateWorkerStatus = vi.fn();
     const scheduler = new SchedulerService({

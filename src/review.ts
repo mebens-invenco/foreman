@@ -125,6 +125,7 @@ export interface ReviewService {
     body?: string;
   }): Promise<{ url: string; number: number }>;
   replyToReviewSummary(prUrl: string, reviewId: string, body: string): Promise<void>;
+  replyToThreadComment(prUrl: string, threadId: string, body: string): Promise<void>;
   replyToPrComment(prUrl: string, commentId: string, body: string): Promise<void>;
   resolveThreads(prUrl: string, threadIds: string[]): Promise<void>;
 }
@@ -663,6 +664,26 @@ export class GitHubReviewService implements ReviewService {
       });
     });
     this.logger.info("replied to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl });
+  }
+
+  async replyToThreadComment(prUrl: string, threadId: string, body: string): Promise<void> {
+    const { owner, repo, number } = parseGitHubUrl(prUrl);
+    this.logger.info("replying to GitHub review thread", {
+      owner,
+      repo,
+      pullRequestNumber: number,
+      threadId,
+      bodyLength: body.length,
+    });
+    await this.graphql(
+      `mutation AddPullRequestReviewThreadReply($threadId: ID!, $body: String!) {
+        addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
+          comment { id }
+        }
+      }`,
+      { threadId, body },
+    );
+    this.logger.info("replied to GitHub review thread", { owner, repo, pullRequestNumber: number, threadId });
   }
 
   async replyToPrComment(prUrl: string, commentId: string, body: string): Promise<void> {

@@ -37,6 +37,7 @@ Allowed review mutation types:
 - `create_pull_request`
 - `reopen_pull_request`
 - `reply_to_review_summary`
+- `reply_to_thread_comment`
 - `reply_to_pr_comment`
 - `resolve_threads`
 

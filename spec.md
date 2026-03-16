@@ -568,7 +568,7 @@ Responsibilities:
 - fetch top-level PR conversation comments
 - fetch checks and merge state
 - create/reopen PRs
-- reply to review summaries and PR comments
+- reply to review summaries, review threads, and PR comments
 - resolve threads
 
 Foreman does not attempt a fully generic multi-provider review abstraction in v1.
@@ -823,9 +823,12 @@ type ReviewMutation =
       body?: string
     }
   | { type: "reply_to_review_summary"; reviewId: string; body: string }
+  | { type: "reply_to_thread_comment"; threadId: string; body: string }
   | { type: "reply_to_pr_comment"; commentId: string; body: string }
   | { type: "resolve_threads"; threadIds: string[] }
 ```
+
+Foreman prepends `workspace.agentPrefix` to outbound review replies if the worker body does not already include it.
 
 ### Learning Mutations
 

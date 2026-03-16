@@ -32,6 +32,7 @@ const reviewMutationSchema = z.discriminatedUnion("type", [
     body: z.string().optional(),
   }),
   z.object({ type: z.literal("reply_to_review_summary"), reviewId: z.string().min(1), body: z.string().min(1) }),
+  z.object({ type: z.literal("reply_to_thread_comment"), threadId: z.string().min(1), body: z.string().min(1) }),
   z.object({ type: z.literal("reply_to_pr_comment"), commentId: z.string().min(1), body: z.string().min(1) }),
   z.object({ type: z.literal("resolve_threads"), threadIds: z.array(z.string().min(1)).min(1) }),
 ]);
