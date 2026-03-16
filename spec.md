@@ -563,6 +563,7 @@ Responsibilities:
 - resolve linked PRs from task artifacts
 - fetch current PR state
 - fetch review threads
+- fetch nested comments for unresolved review threads
 - fetch top-level review summaries
 - fetch top-level PR conversation comments
 - fetch checks and merge state
@@ -606,6 +607,7 @@ type ConversationComment = {
   body: string
   authorName: string | null
   createdAt: string
+  url?: string
 }
 
 type ReviewThread = {
@@ -613,6 +615,7 @@ type ReviewThread = {
   path: string | null
   line: number | null
   isResolved: boolean
+  comments: ConversationComment[]
 }
 
 type CheckState = {
@@ -625,7 +628,7 @@ Review filtering rules:
 
 - actionable review summaries are top-level review summaries whose `commitId` equals the current PR `headSha`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
 - actionable conversation comments are top-level PR conversation comments created after `headIntroducedAt`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
-- unresolved threads are file/line review threads where `isResolved == false`
+- unresolved threads are file/line review threads where `isResolved == false`, enriched with their nested thread comments
 - checks fingerprinting only considers failing and pending checks
 
 ## Agent Runner

@@ -73,6 +73,7 @@ export type ConversationComment = {
   body: string;
   authorName: string | null;
   createdAt: string;
+  url?: string;
 };
 
 export type ReviewThread = {
@@ -80,6 +81,7 @@ export type ReviewThread = {
   path: string | null;
   line: number | null;
   isResolved: boolean;
+  comments: ConversationComment[];
 };
 
 export type CheckState = {
