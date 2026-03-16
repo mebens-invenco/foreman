@@ -76,7 +76,7 @@ describe("LoggerService", () => {
     expect(attemptLog).toContain('message="worker state changed"');
   });
 
-  test("writes raw runner output to the attempt log and prefers the worker slot in stdout", async () => {
+  test("writes raw runner output to the attempt log and shows worker slot plus task id in stdout", async () => {
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "foreman-runner-line-"));
     const stdout = new PassThrough();
     let captured = "";
@@ -92,14 +92,20 @@ describe("LoggerService", () => {
       minLevel: "error",
     });
 
-    const attemptLogger = logger.child({ component: "scheduler", attemptId: "attempt-456", workerId: "worker-2", workerSlot: 2 });
+    const attemptLogger = logger.child({
+      component: "scheduler",
+      attemptId: "attempt-456",
+      workerId: "worker-2",
+      workerSlot: 2,
+      taskId: "TASK-42",
+    });
     attemptLogger.runnerLine("runner output line");
     await logger.flush();
 
     const attemptLog = await readFile(path.join(workspaceRoot, "logs", "attempts", "attempt-456.log"), "utf8");
     const workspaceLogPath = path.join(workspaceRoot, "logs", "foreman.log");
     expect(attemptLog).toBe("runner output line\n");
-    expect(captured).toBe("[2] runner output line\n");
+    expect(captured).toBe("[W2 TASK-42] runner output line\n");
     await expect(readFile(workspaceLogPath, "utf8")).rejects.toThrow();
   });
 

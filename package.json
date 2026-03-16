@@ -7,8 +7,8 @@
     "foreman": "dist/cli.js"
   },
   "scripts": {
-    "dev": "yarn build && yarn run",
-    "run": "node dist/cli.js",
+    "dev": "yarn build && yarn start",
+    "start": "node dist/cli.js",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

@@ -119,6 +119,27 @@ const formatBadge = (label: string, colorEnabled: boolean): string => {
   return colorEnabled ? `${ANSI.bgGray}${ANSI.fgWhite}${ANSI.bold}${padded}${ANSI.reset}` : `[${label}]`;
 };
 
+const formatRunnerBadgeLabel = (context: Record<string, string | number | boolean | null>): string | null => {
+  const workerSlot =
+    typeof context.workerSlot === "number" && Number.isFinite(context.workerSlot)
+      ? String(context.workerSlot)
+      : typeof context.workerSlot === "string" && context.workerSlot
+        ? context.workerSlot
+        : null;
+  const taskId = typeof context.taskId === "string" && context.taskId ? context.taskId : null;
+  const workerId = typeof context.workerId === "string" && context.workerId ? context.workerId : null;
+
+  if (workerSlot && taskId) {
+    return `W${workerSlot} ${taskId}`;
+  }
+
+  if (workerSlot) {
+    return `W${workerSlot}`;
+  }
+
+  return workerId;
+};
+
 const shouldUseColor = (stdout: NodeJS.WritableStream, colorMode: ColorMode): boolean => {
   if (colorMode === "always") {
     return true;
@@ -203,15 +224,8 @@ export class LoggerService {
   runnerLine(message: string, context: LogContext = {}): void {
     const merged = { ...this.context, ...normalizeContext(context) };
     const attemptId = typeof merged.attemptId === "string" && merged.attemptId ? merged.attemptId : null;
-    const workerId = typeof merged.workerId === "string" && merged.workerId ? merged.workerId : null;
-    const workerSlot =
-      typeof merged.workerSlot === "number" && Number.isFinite(merged.workerSlot)
-        ? String(merged.workerSlot)
-        : typeof merged.workerSlot === "string" && merged.workerSlot
-          ? merged.workerSlot
-          : null;
     const fileLine = `${message}\n`;
-    const badgeLabel = workerSlot ?? workerId;
+    const badgeLabel = formatRunnerBadgeLabel(merged);
     const stdoutLine = badgeLabel ? `${formatBadge(badgeLabel, this.state.colorEnabled)} ${message}\n` : `${message}\n`;
 
     const appendAttempt = async (): Promise<void> => {
