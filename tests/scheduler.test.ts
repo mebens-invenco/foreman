@@ -189,4 +189,60 @@ describe("SchedulerService applyWorkerResult", () => {
       "checkpoint write failed",
     );
   });
+
+  test("rejects execution results with code changes when no pull request mutation or artifact is present", async () => {
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      db: {
+        ensureWorkerSlots: vi.fn(),
+        addLearning: vi.fn(),
+        updateLearning: vi.fn(),
+        addAttemptEvent: vi.fn(),
+        upsertReviewCheckpoint: vi.fn(),
+      } as any,
+      taskSystem: {
+        addComment: vi.fn(async () => undefined),
+        addArtifact: vi.fn(async () => undefined),
+        transition: vi.fn(async () => undefined),
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        getContext: vi.fn(async () => reviewContext),
+      } as any,
+      runner: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-3" },
+        job: { action: "execution" },
+        task: sampleTask({ state: "in_progress", providerState: "in_progress", artifacts: [] }),
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        workerResult: baseWorkerResult({
+          action: "execution",
+          outcome: "completed",
+          signals: ["code_changed"],
+        }),
+      }),
+    ).rejects.toThrow("Execution results with code changes must include a create_pull_request or reopen_pull_request mutation");
+  });
 });

@@ -241,6 +241,27 @@ describe("LinearTaskSystem.transition", () => {
 });
 
 describe("LinearTaskSystem.addArtifact", () => {
+  test("skips GitHub pull request artifacts because Linear auto-links them", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    await taskSystem.addArtifact({
+      taskId: "ENG-123",
+      artifact: {
+        type: "pull_request",
+        url: "https://github.com/acme/repo-a/pull/1",
+        title: "PR 1",
+      },
+    });
+
+    expect(requests).toHaveLength(0);
+  });
+
   test("updates matching artifacts instead of creating duplicates", async () => {
     const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
     global.fetch = vi.fn(async (_url, init) => {
@@ -250,7 +271,7 @@ describe("LinearTaskSystem.addArtifact", () => {
       if (body.query.includes("query ForemanIssue")) {
         return new Response(
           JSON.stringify({
-            data: linearIssue([{ id: "att-1", title: "Old title", url: "https://github.com/acme/repo-a/pull/1" }]),
+            data: linearIssue([{ id: "att-1", title: "Old title", url: "https://example.com/pull/1" }]),
           }),
           { status: 200, headers: { "content-type": "application/json" } },
         );
@@ -271,7 +292,7 @@ describe("LinearTaskSystem.addArtifact", () => {
       taskId: "ENG-123",
       artifact: {
         type: "pull_request",
-        url: "https://github.com/acme/repo-a/pull/1",
+        url: "https://example.com/pull/1",
         title: "New title",
       },
     });
@@ -309,7 +330,7 @@ describe("LinearTaskSystem.addArtifact", () => {
       taskId: "ENG-123",
       artifact: {
         type: "pull_request",
-        url: "https://github.com/acme/repo-a/pull/2",
+        url: "https://example.com/pull/2",
         title: "PR 2",
       },
     });
@@ -318,7 +339,7 @@ describe("LinearTaskSystem.addArtifact", () => {
     expect(requests[1]?.query).toContain("mutation ForemanAttachmentCreate");
     expect(requests[1]?.variables).toEqual({
       issueId: "issue-1",
-      url: "https://github.com/acme/repo-a/pull/2",
+      url: "https://example.com/pull/2",
       title: "PR 2",
     });
   });

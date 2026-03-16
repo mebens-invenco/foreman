@@ -612,6 +612,10 @@ export class SchedulerService extends EventEmitter {
     const createOrReopen = workerResult.reviewMutations.filter(
       (mutation) => mutation.type === "create_pull_request" || mutation.type === "reopen_pull_request",
     );
+    const requiresPullRequest =
+      input.job.action === "execution" &&
+      workerResult.outcome === "completed" &&
+      workerResult.signals.includes("code_changed");
 
     for (const mutation of createOrReopen) {
       if (mutation.type === "create_pull_request") {
@@ -654,6 +658,18 @@ export class SchedulerService extends EventEmitter {
         await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
         logger.info("reopened pull request", { pullRequestUrl: reopened.url, pullRequestNumber: reopened.number });
       }
+    }
+
+    if (requiresPullRequest && createOrReopen.length === 0) {
+      if (!pullRequestUrl) {
+        throw new ForemanError(
+          "missing_pull_request",
+          "Execution results with code changes must include a create_pull_request or reopen_pull_request mutation",
+        );
+      }
+
+      await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
+      logger.info("transitioned task to in_review using existing pull request artifact", { pullRequestUrl });
     }
 
     for (const mutation of workerResult.reviewMutations) {

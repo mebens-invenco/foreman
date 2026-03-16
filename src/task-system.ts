@@ -85,6 +85,19 @@ const normalizePriority = (value: unknown): Task["priority"] => {
   }
 };
 
+const isGithubPullRequestArtifact = (artifact: Pick<TaskArtifact, "type" | "url">): boolean => {
+  if (artifact.type !== "pull_request") {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(artifact.url);
+    return (parsed.hostname === "github.com" || parsed.hostname.endsWith(".github.com")) && /\/pull\/\d+$/.test(parsed.pathname);
+  } catch {
+    return false;
+  }
+};
+
 const normalizeAuthorKind = (value: unknown): TaskComment["authorKind"] => {
   const normalized = String(value ?? "unknown").toLowerCase();
   switch (normalized) {
@@ -863,6 +876,15 @@ export class LinearTaskSystem implements TaskSystem {
   }
 
   async addArtifact(input: { taskId: string; artifact: TaskArtifact }): Promise<void> {
+    if (isGithubPullRequestArtifact(input.artifact)) {
+      this.logger.info("skipping Linear attachment for GitHub pull request artifact", {
+        taskId: input.taskId,
+        artifactType: input.artifact.type,
+        artifactUrl: input.artifact.url,
+      });
+      return;
+    }
+
     const task = await this.getTask(input.taskId);
     const existingArtifact = task.artifacts.find(
       (artifact) => artifact.type === input.artifact.type && artifact.url === input.artifact.url,
