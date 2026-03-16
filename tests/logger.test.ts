@@ -47,7 +47,7 @@ describe("LoggerService", () => {
     expect(workspaceLog).toContain('component="test"');
     expect(workspaceLog).toContain('message="logger initialized"');
     expect(captured).toContain("INFO");
-    expect(captured).toContain("test logger initialized");
+    expect(captured).toContain("[test] logger initialized");
     expect(captured).toContain('workspace="test-workspace"');
     expect(captured).not.toContain("component=");
     expect(captured).not.toContain("message=");
@@ -76,7 +76,7 @@ describe("LoggerService", () => {
     expect(attemptLog).toContain('message="worker state changed"');
   });
 
-  test("writes raw runner output to the attempt log and only shows a worker badge in stdout", async () => {
+  test("writes raw runner output to the attempt log and prefers the worker slot in stdout", async () => {
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "foreman-runner-line-"));
     const stdout = new PassThrough();
     let captured = "";
@@ -92,14 +92,14 @@ describe("LoggerService", () => {
       minLevel: "error",
     });
 
-    const attemptLogger = logger.child({ component: "scheduler", attemptId: "attempt-456", workerId: "worker-2" });
+    const attemptLogger = logger.child({ component: "scheduler", attemptId: "attempt-456", workerId: "worker-2", workerSlot: 2 });
     attemptLogger.runnerLine("runner output line");
     await logger.flush();
 
     const attemptLog = await readFile(path.join(workspaceRoot, "logs", "attempts", "attempt-456.log"), "utf8");
     const workspaceLogPath = path.join(workspaceRoot, "logs", "foreman.log");
     expect(attemptLog).toBe("runner output line\n");
-    expect(captured).toBe("[worker-2] runner output line\n");
+    expect(captured).toBe("[2] runner output line\n");
     await expect(readFile(workspaceLogPath, "utf8")).rejects.toThrow();
   });
 
@@ -121,7 +121,7 @@ describe("LoggerService", () => {
 
     expect(captured).toContain("\u001B[43m");
     expect(captured).toContain("\u001B[30m");
-    expect(captured).toContain("\u001B[1mroot\u001B[0m");
+    expect(captured).toContain("\u001B[100m\u001B[37m\u001B[1m root \u001B[0m");
     expect(captured).toContain("something happened");
     expect(captured).toContain("\u001B[90m\u001B[3mtaskId=\u001B[0m");
     expect(captured).toContain('"TASK-1"');

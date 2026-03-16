@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import type { WorkspaceConfig, WorkspacePaths } from "./config.js";
-import { deriveAttemptStatus, type AttemptRecord, type ForemanDb, type JobRecord } from "./db.js";
+import { deriveAttemptStatus, type AttemptRecord, type ForemanDb, type JobRecord, type WorkerRecord } from "./db.js";
 import type { ActionType, RepoRef, ReviewContext, Task, TaskComment, WorkerResult } from "./domain.js";
 import { ForemanError } from "./lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "./lib/fs.js";
@@ -304,14 +304,22 @@ export class SchedulerService extends EventEmitter {
       }
 
       this.logger.info("dispatching queued job to worker", { workerId: worker.id, jobId: job.id, taskId: job.taskId, action: job.action });
-      void this.runJob(worker.id, job);
+      void this.runJob(worker, job);
     }
   }
 
-  private async runJob(workerId: string, job: JobRecord): Promise<void> {
+  private async runJob(worker: WorkerRecord, job: JobRecord): Promise<void> {
+    const workerId = worker.id;
     const controller = new AbortController();
     this.workerAbortControllers.set(workerId, controller);
-    let jobLogger = this.logger.child({ workerId, jobId: job.id, taskId: job.taskId, action: job.action, repo: job.repoKey });
+    let jobLogger = this.logger.child({
+      workerId,
+      workerSlot: worker.slot,
+      jobId: job.id,
+      taskId: job.taskId,
+      action: job.action,
+      repo: job.repoKey,
+    });
     jobLogger.info("starting job on worker");
 
     let attempt: AttemptRecord | null = null;

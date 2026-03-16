@@ -103,7 +103,7 @@ const formatStdoutLine = (
   const segments = [
     style(colorEnabled, isoNow(), ANSI.dimGray),
     severityBadge(colorEnabled, level),
-    style(colorEnabled, component, ANSI.dimGray, ANSI.bold),
+    formatBadge(component, colorEnabled),
     message,
   ];
 
@@ -114,9 +114,9 @@ const formatStdoutLine = (
   return `${segments.join(" ")}\n`;
 };
 
-const formatRunnerBadge = (workerId: string, colorEnabled: boolean): string => {
-  const label = ` ${workerId} `;
-  return colorEnabled ? `${ANSI.bgGray}${ANSI.fgWhite}${ANSI.bold}${label}${ANSI.reset}` : `[${workerId}]`;
+const formatBadge = (label: string, colorEnabled: boolean): string => {
+  const padded = ` ${label} `;
+  return colorEnabled ? `${ANSI.bgGray}${ANSI.fgWhite}${ANSI.bold}${padded}${ANSI.reset}` : `[${label}]`;
 };
 
 const shouldUseColor = (stdout: NodeJS.WritableStream, colorMode: ColorMode): boolean => {
@@ -204,8 +204,15 @@ export class LoggerService {
     const merged = { ...this.context, ...normalizeContext(context) };
     const attemptId = typeof merged.attemptId === "string" && merged.attemptId ? merged.attemptId : null;
     const workerId = typeof merged.workerId === "string" && merged.workerId ? merged.workerId : null;
+    const workerSlot =
+      typeof merged.workerSlot === "number" && Number.isFinite(merged.workerSlot)
+        ? String(merged.workerSlot)
+        : typeof merged.workerSlot === "string" && merged.workerSlot
+          ? merged.workerSlot
+          : null;
     const fileLine = `${message}\n`;
-    const stdoutLine = workerId ? `${formatRunnerBadge(workerId, this.state.colorEnabled)} ${message}\n` : `${message}\n`;
+    const badgeLabel = workerSlot ?? workerId;
+    const stdoutLine = badgeLabel ? `${formatBadge(badgeLabel, this.state.colorEnabled)} ${message}\n` : `${message}\n`;
 
     const appendAttempt = async (): Promise<void> => {
       if (!attemptId || !this.state.paths) {
