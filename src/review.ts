@@ -1,6 +1,6 @@
 import { exec } from "./lib/process.js";
 import { ForemanError } from "./lib/errors.js";
-import type { ConversationComment, ReviewContext, ReviewThread, ReviewSummary, Task } from "./domain.js";
+import type { CheckState, ConversationComment, ReviewContext, ReviewThread, ReviewSummary, Task } from "./domain.js";
 import { LoggerService } from "./logger.js";
 
 type RepoDescriptor = { owner: string; repo: string };
@@ -26,6 +26,49 @@ const parseGitRemote = (remoteUrl: string): RepoDescriptor => {
 };
 
 type GitHubGraphqlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
+
+const mergeCheckStates = (input: {
+  checkRuns: Array<{ name: string; status: string; conclusion: string | null }>;
+  statuses: Array<{ context: string; state: string }>;
+}): { failingChecks: CheckState[]; pendingChecks: CheckState[] } => {
+  const checksByName = new Map<string, CheckState>();
+  const priority: Record<CheckState["state"], number> = { pending: 1, failure: 2 };
+
+  const upsert = (name: string, state: CheckState["state"]): void => {
+    const existing = checksByName.get(name);
+    if (!existing || priority[state] > priority[existing.state]) {
+      checksByName.set(name, { name, state });
+    }
+  };
+
+  for (const check of input.checkRuns) {
+    if (check.status === "completed") {
+      if (check.conclusion && check.conclusion !== "success" && check.conclusion !== "neutral" && check.conclusion !== "skipped") {
+        upsert(check.name, "failure");
+      }
+      continue;
+    }
+
+    upsert(check.name, "pending");
+  }
+
+  for (const status of input.statuses) {
+    if (status.state === "failure" || status.state === "error") {
+      upsert(status.context, "failure");
+      continue;
+    }
+
+    if (status.state === "pending") {
+      upsert(status.context, "pending");
+    }
+  }
+
+  const checks = [...checksByName.values()].sort((left, right) => left.name.localeCompare(right.name) || left.state.localeCompare(right.state));
+  return {
+    failingChecks: checks.filter((check) => check.state === "failure"),
+    pendingChecks: checks.filter((check) => check.state === "pending"),
+  };
+};
 
 export interface ReviewService {
   getContext(task: Task, agentPrefix: string): Promise<ReviewContext | null>;
@@ -257,14 +300,11 @@ export class GitHubReviewService implements ReviewService {
     const checks = await this.rest<{ check_runs: Array<{ name: string; status: string; conclusion: string | null }> }>(
       `/repos/${owner}/${repo}/commits/${pullRequest.headRefOid}/check-runs`,
     );
+    const statuses = await this.rest<{ statuses: Array<{ context: string; state: string }> }>(
+      `/repos/${owner}/${repo}/commits/${pullRequest.headRefOid}/status`,
+    );
 
-    const failingChecks = checks.check_runs
-      .filter((check) => check.status === "completed" && check.conclusion && check.conclusion !== "success" && check.conclusion !== "neutral" && check.conclusion !== "skipped")
-      .map((check) => ({ name: check.name, state: "failure" as const }));
-
-    const pendingChecks = checks.check_runs
-      .filter((check) => check.status !== "completed")
-      .map((check) => ({ name: check.name, state: "pending" as const }));
+    const { failingChecks, pendingChecks } = mergeCheckStates({ checkRuns: checks.check_runs, statuses: statuses.statuses });
 
     this.logger.debug("fetched GitHub pull request context", {
       taskId: task.id,
