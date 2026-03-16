@@ -2,19 +2,21 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { ConversationComment, ReviewContext, Task, TaskArtifact, TaskComment } from "../src/domain.js";
 import { runScoutSelection } from "../src/scout.js";
 import type { ReviewService } from "../src/review.js";
 import type { TaskSystem } from "../src/task-system.js";
 import { createDefaultWorkspaceConfig } from "../src/config.js";
+import * as worktrees from "../src/worktrees.js";
 import { createMigratedDb, createTempDir } from "./helpers.js";
 
 const cleanupDirs: string[] = [];
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -70,7 +72,7 @@ class FakeReviewService implements ReviewService {
   }
 
   async findLatestOpenPullRequestBranch(task: Task): Promise<string | null> {
-    return this.contexts[task.id]?.headBranch ?? null;
+    return this.contexts[task.id]?.state === "open" ? this.contexts[task.id]?.headBranch ?? null : null;
   }
 
   async listConversationComments(_prUrl: string): Promise<ConversationComment[]> {
@@ -172,6 +174,78 @@ describe("runScoutSelection", () => {
       expect(result.jobs[0]?.action).toBe("review");
       expect(result.jobs[0]?.task.id).toBe("TASK-0002");
       expect(result.jobs[1]?.action).toBe("execution");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("uses a merged dependency pull request base branch when the dependency branch no longer exists", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    vi.spyOn(worktrees, "branchExistsOnOrigin").mockImplementation(async (_repo, branchName) => branchName !== "eng-4680");
+    vi.spyOn(worktrees, "isAncestorOnOrigin").mockResolvedValue(true);
+
+    const mergedDependency = task({
+      id: "ENG-4680",
+      title: "Merged dependency",
+      state: "done",
+      providerState: "done",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:00:00Z",
+      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/10" } satisfies TaskArtifact],
+    });
+    const dependentTask = task({
+      id: "ENG-4681",
+      title: "Dependent task",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      dependencies: { taskIds: ["ENG-4680"], baseTaskId: null, branchNames: ["eng-4680"] },
+    });
+
+    const taskSystem = new FakeTaskSystem([mergedDependency, dependentTask]);
+    const reviewService = new FakeReviewService({
+      [mergedDependency.id]: {
+        provider: "github",
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/10",
+        pullRequestNumber: 10,
+        state: "merged",
+        isDraft: false,
+        headSha: "abc",
+        headBranch: "eng-4680",
+        baseBranch: "master",
+        headIntroducedAt: "2026-03-14T10:00:00Z",
+        mergeState: "clean",
+        actionableReviewSummaries: [],
+        actionableConversationComments: [],
+        unresolvedThreads: [],
+        failingChecks: [],
+        pendingChecks: [],
+      },
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.task.id).toBe("ENG-4681");
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.baseBranch).toBe("master");
+      expect(taskSystem.comments.get("ENG-4681") ?? []).toHaveLength(0);
+      expect(worktrees.branchExistsOnOrigin).toHaveBeenCalledWith({ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }, "eng-4680");
+      expect(worktrees.isAncestorOnOrigin).toHaveBeenCalledWith({ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }, "master", "master");
     } finally {
       db.close();
     }

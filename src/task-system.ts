@@ -504,6 +504,7 @@ export class LinearTaskSystem implements TaskSystem {
   private readonly client: LinearClient;
   private readonly logger: LoggerService;
   private viewerPromise: Promise<LinearViewer> | null = null;
+  private teamInfoPromise: Promise<{ id: string; name: string; states: Array<{ id: string; name: string }> }> | null = null;
 
   constructor(
     private readonly config: WorkspaceConfig,
@@ -543,6 +544,42 @@ export class LinearTaskSystem implements TaskSystem {
     return this.viewerPromise;
   }
 
+  private async getConfiguredTeamInfo(): Promise<{ id: string; name: string; states: Array<{ id: string; name: string }> }> {
+    if (!this.teamInfoPromise) {
+      const teamName = this.config.taskSystem.linear!.team;
+      this.teamInfoPromise = this.client
+        .request<{
+          teams: { nodes: Array<{ id: string; name: string; states: { nodes: Array<{ id: string; name: string }> } }> };
+        }>(
+          `query ForemanTeamInfo($teamName: String!) {
+            teams(filter: { name: { eq: $teamName } }) {
+              nodes {
+                id
+                name
+                states { nodes { id name } }
+              }
+            }
+          }`,
+          { teamName },
+        )
+        .then((data) => {
+          const team = data.teams.nodes.find((item) => item.name === teamName);
+          if (!team) {
+            this.logger.error("Linear startup validation failed because the configured team was not found", { team: teamName });
+            throw new ForemanError("linear_team_not_found", `Linear team not found: ${teamName}`);
+          }
+
+          return {
+            id: team.id,
+            name: team.name,
+            states: team.states.nodes,
+          };
+        });
+    }
+
+    return this.teamInfoPromise;
+  }
+
   private async resolveAssigneeFilter(): Promise<{ assigneeId?: string; assigneeName?: string }> {
     const assignee = this.config.taskSystem.linear!.assignee;
     if (assignee !== "me") {
@@ -562,30 +599,17 @@ export class LinearTaskSystem implements TaskSystem {
     const linear = this.config.taskSystem.linear!;
     this.logger.info("validating Linear startup configuration", { team: linear.team });
     try {
+      const team = await this.getConfiguredTeamInfo();
       const response = await this.client.request<{
-        teams: { nodes: Array<{ id: string; name: string; states: { nodes: Array<{ id: string; name: string }> } }> };
         issueLabels: { nodes: Array<{ id: string; name: string }> };
       }>(
-        `query ValidateForemanStartup($teamName: String!) {
-          teams(filter: { name: { eq: $teamName } }) {
-            nodes {
-              id
-              name
-              states { nodes { id name } }
-            }
-          }
+        `query ValidateForemanStartup {
           issueLabels {
             nodes { id name }
           }
         }`,
-        { teamName: linear.team },
+        {},
       );
-
-      const team = response.teams.nodes.find((item) => item.name === linear.team);
-      if (!team) {
-        this.logger.error("Linear startup validation failed because the configured team was not found", { team: linear.team });
-        throw new ForemanError("linear_team_not_found", `Linear team not found: ${linear.team}`);
-      }
 
       const configuredStates = [
         ...linear.states.ready,
@@ -594,7 +618,7 @@ export class LinearTaskSystem implements TaskSystem {
         ...linear.states.done,
         ...linear.states.canceled,
       ];
-      const availableStates = new Set(team.states.nodes.map((state) => state.name));
+      const availableStates = new Set(team.states.map((state) => state.name));
       for (const state of configuredStates) {
         if (!availableStates.has(state)) {
           this.logger.error("Linear startup validation failed because a configured state was not found", { state, team: linear.team });
@@ -623,7 +647,7 @@ export class LinearTaskSystem implements TaskSystem {
         resolvedAssigneeName: resolvedAssignee?.name,
         configuredStateCount: configuredStates.length,
         requiredLabelCount: requiredLabels.length,
-        availableTeamStateCount: team.states.nodes.length,
+        availableTeamStateCount: team.states.length,
         availableLabelCount: response.issueLabels.nodes.length,
       });
     } catch (error) {
@@ -822,14 +846,8 @@ export class LinearTaskSystem implements TaskSystem {
       toState: input.toState,
       providerState,
     });
-    const teamData = await this.client.request<{
-      workflowStates: { nodes: Array<{ id: string; name: string }> };
-    }>(
-      `query ForemanWorkflowStates {
-        workflowStates(first: 250) { nodes { id name } }
-      }`,
-    );
-    const target = teamData.workflowStates.nodes.find((state) => state.name === providerState);
+    const team = await this.getConfiguredTeamInfo();
+    const target = team.states.find((state) => state.name === providerState);
     if (!target) {
       this.logger.error("Linear workflow state was not found for transition", { taskId: input.taskId, providerState });
       throw new ForemanError("linear_state_not_found", `Linear state not found: ${providerState}`);

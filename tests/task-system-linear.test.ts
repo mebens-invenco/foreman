@@ -173,6 +173,72 @@ describe("LinearTaskSystem.getTask", () => {
   });
 });
 
+describe("LinearTaskSystem.transition", () => {
+  test("uses the configured team's workflow state when state names overlap across teams", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanIssue")) {
+        return new Response(JSON.stringify({ data: linearIssue([], "Test User") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (body.query.includes("query ForemanTeamInfo")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              teams: {
+                nodes: [
+                  {
+                    id: "team-engineering",
+                    name: "Engineering",
+                    states: {
+                      nodes: [
+                        { id: "state-todo", name: "Todo" },
+                        { id: "state-in-progress-engineering", name: "In Progress" },
+                      ],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+
+      if (body.query.includes("mutation ForemanIssueUpdate")) {
+        return new Response(JSON.stringify({ data: { issueUpdate: { success: true } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    await taskSystem.transition({ taskId: "ENG-123", toState: "in_progress" });
+
+    expect(requests).toHaveLength(3);
+    expect(requests[1]?.query).toContain("query ForemanTeamInfo");
+    expect(requests[1]?.query).not.toContain("workflowStates");
+    expect(requests[1]?.variables).toEqual({ teamName: "Engineering" });
+    expect(requests[2]?.query).toContain("mutation ForemanIssueUpdate");
+    expect(requests[2]?.variables).toEqual({
+      id: "issue-1",
+      stateId: "state-in-progress-engineering",
+    });
+  });
+});
+
 describe("LinearTaskSystem.addArtifact", () => {
   test("updates matching artifacts instead of creating duplicates", async () => {
     const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];

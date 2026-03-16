@@ -83,17 +83,59 @@ export const resolveBaseBranch = async (input: {
   const blockers: string[] = [];
   const dependencies = input.task.dependencies.taskIds;
 
+  const dependencyTaskCache = new Map<string, Promise<Task>>();
+  const dependencyContextCache = new Map<string, Promise<ReviewContext | null>>();
+
+  const getDependencyTask = async (taskId: string): Promise<Task> => {
+    let promise = dependencyTaskCache.get(taskId);
+    if (!promise) {
+      promise = input.taskSystem.getTask(taskId);
+      dependencyTaskCache.set(taskId, promise);
+    }
+    return promise;
+  };
+
+  const getDependencyReviewContext = async (taskId: string): Promise<ReviewContext | null> => {
+    let promise = dependencyContextCache.get(taskId);
+    if (!promise) {
+      promise = getDependencyTask(taskId).then((task) => input.reviewService.getContext(task, ""));
+      dependencyContextCache.set(taskId, promise);
+    }
+    return promise;
+  };
+
   const resolveDependencyBranch = async (taskId: string): Promise<string> => {
-    const dependencyTask = await input.taskSystem.getTask(taskId);
-    const prBranch = await input.reviewService.findLatestOpenPullRequestBranch(dependencyTask);
-    return prBranch ?? dependencyTask.branchName ?? dependencyTask.id.toLowerCase();
+    const dependencyTask = await getDependencyTask(taskId);
+    const context = await getDependencyReviewContext(taskId);
+    if (context?.state === "open") {
+      return context.headBranch;
+    }
+    if (context?.state === "merged") {
+      return context.baseBranch;
+    }
+    return dependencyTask.branchName ?? dependencyTask.id.toLowerCase();
+  };
+
+  const resolveMergedDependencyBaseBranch = async (branchName: string): Promise<string | null> => {
+    for (const taskId of dependencies) {
+      const dependencyTask = await getDependencyTask(taskId);
+      const context = await getDependencyReviewContext(taskId);
+      if (context?.state !== "merged") {
+        continue;
+      }
+      if (resolveTaskBranchName(dependencyTask) === branchName || context.headBranch === branchName) {
+        return context.baseBranch;
+      }
+    }
+    return null;
   };
 
   let baseBranch = input.repo.defaultBranch;
 
   if (dependencies.length === 1) {
-    const dependencyTask = await input.taskSystem.getTask(dependencies[0]!);
-    if (!isTerminal(dependencyTask)) {
+    const dependencyTask = await getDependencyTask(dependencies[0]!);
+    const dependencyContext = await getDependencyReviewContext(dependencyTask.id);
+    if (!isTerminal(dependencyTask) || dependencyContext?.state === "merged") {
       baseBranch = await resolveDependencyBranch(dependencyTask.id);
     }
   } else if (dependencies.length > 1) {
@@ -109,28 +151,39 @@ export const resolveBaseBranch = async (input: {
     }
 
     for (const dependencyId of dependencies.filter((item) => item !== baseTaskId)) {
-      const dependencyTask = await input.taskSystem.getTask(dependencyId);
+      const dependencyTask = await getDependencyTask(dependencyId);
       if (!isTerminal(dependencyTask)) {
         blockers.push(`Non-base dependency ${dependencyId} must be terminal before scheduling.`);
       }
     }
 
-    const baseTask = await input.taskSystem.getTask(baseTaskId);
-    if (!isTerminal(baseTask)) {
+    const baseTask = await getDependencyTask(baseTaskId);
+    const baseTaskContext = await getDependencyReviewContext(baseTask.id);
+    if (!isTerminal(baseTask) || baseTaskContext?.state === "merged") {
       baseBranch = await resolveDependencyBranch(baseTask.id);
     }
   }
 
   for (const branchName of input.task.dependencies.branchNames) {
+    let effectiveBranchName = branchName;
     const exists = await branchExistsOnOrigin(input.repo, branchName);
     if (!exists) {
-      blockers.push(`Dependency branch ${branchName} does not exist on origin.`);
-      continue;
+      const mergedBaseBranch = await resolveMergedDependencyBaseBranch(branchName);
+      if (mergedBaseBranch) {
+        effectiveBranchName = mergedBaseBranch;
+      } else {
+        blockers.push(`Dependency branch ${branchName} does not exist on origin.`);
+        continue;
+      }
     }
 
-    const ancestor = await isAncestorOnOrigin(input.repo, branchName, baseBranch);
+    const ancestor = await isAncestorOnOrigin(input.repo, effectiveBranchName, baseBranch);
     if (!ancestor) {
-      blockers.push(`Dependency branch ${branchName} is not an ancestor of ${baseBranch}.`);
+      if (effectiveBranchName === branchName) {
+        blockers.push(`Dependency branch ${branchName} is not an ancestor of ${baseBranch}.`);
+      } else {
+        blockers.push(`Merged dependency branch ${branchName} resolves to ${effectiveBranchName}, which is not an ancestor of ${baseBranch}.`);
+      }
     }
   }
 
