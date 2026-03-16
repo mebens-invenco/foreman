@@ -164,4 +164,116 @@ describe("ForemanDb leases", () => {
       db.close();
     }
   });
+
+  test("upserts review checkpoints without changing row identity", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      const taskId = "TASK-0004";
+      const prUrl = "https://github.com/acme/repo/pull/123";
+      db.ensureWorkerSlots(1);
+      const worker = db.listWorkers()[0];
+      expect(worker).toBeDefined();
+
+      const job = db.createJob({
+        taskId,
+        taskProvider: "file",
+        action: "review",
+        priorityRank: priorityToRank("high"),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: `${taskId}:review`,
+        selectionReason: "test",
+      });
+
+      const attemptOne = db.createAttemptWithLeases({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+        expiresAt: addSeconds(new Date(), 120),
+        leases: [],
+      });
+      const attemptTwo = db.createAttemptWithLeases({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+        expiresAt: addSeconds(new Date(), 240),
+        leases: [],
+      });
+
+      expect(attemptOne).not.toBeNull();
+      expect(attemptTwo).not.toBeNull();
+
+      db.upsertReviewCheckpoint({
+        taskId,
+        prUrl,
+        sourceAttemptId: attemptOne!.id,
+        reviewContext: {
+          provider: "github",
+          pullRequestUrl: prUrl,
+          pullRequestNumber: 123,
+          state: "open",
+          isDraft: false,
+          headSha: "sha-1",
+          headBranch: "feature/task-0004",
+          baseBranch: "main",
+          headIntroducedAt: "2026-03-16T00:00:00Z",
+          mergeState: "clean",
+          actionableReviewSummaries: [{ id: "review-1", body: "Needs work", authorName: "reviewer", createdAt: "2026-03-16T00:00:00Z", commitId: "sha-1" }],
+          actionableConversationComments: [{ id: "comment-1", body: "Please fix", authorName: "reviewer", createdAt: "2026-03-16T00:00:01Z" }],
+          unresolvedThreads: [],
+          failingChecks: [{ name: "test", state: "failure" }],
+          pendingChecks: [{ name: "lint", state: "pending" }],
+        },
+      });
+
+      const firstCheckpoint = db.getReviewCheckpoint(taskId, prUrl) as Record<string, unknown>;
+      expect(firstCheckpoint).not.toBeNull();
+      expect(firstCheckpoint.id).toBeDefined();
+      expect(firstCheckpoint.head_sha).toBe("sha-1");
+      expect(firstCheckpoint.source_attempt_id).toBe(attemptOne!.id);
+
+      db.upsertReviewCheckpoint({
+        taskId,
+        prUrl,
+        sourceAttemptId: attemptTwo!.id,
+        reviewContext: {
+          provider: "github",
+          pullRequestUrl: prUrl,
+          pullRequestNumber: 123,
+          state: "open",
+          isDraft: false,
+          headSha: "sha-2",
+          headBranch: "feature/task-0004",
+          baseBranch: "main",
+          headIntroducedAt: "2026-03-16T00:05:00Z",
+          mergeState: "dirty",
+          actionableReviewSummaries: [],
+          actionableConversationComments: [],
+          unresolvedThreads: [],
+          failingChecks: [],
+          pendingChecks: [],
+        },
+      });
+
+      const secondCheckpoint = db.getReviewCheckpoint(taskId, prUrl) as Record<string, unknown>;
+      expect(secondCheckpoint.id).toBe(firstCheckpoint.id);
+      expect(secondCheckpoint.head_sha).toBe("sha-2");
+      expect(secondCheckpoint.merge_state).toBe("dirty");
+      expect(secondCheckpoint.latest_review_summary_id).toBeNull();
+      expect(secondCheckpoint.latest_conversation_comment_id).toBeNull();
+      expect(secondCheckpoint.source_attempt_id).toBe(attemptTwo!.id);
+
+      const rowCount = db.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM review_checkpoint WHERE task_id = ? AND pr_url = ?")
+        .get(taskId, prUrl) as { count: number };
+      expect(rowCount.count).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
 });

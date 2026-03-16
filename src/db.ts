@@ -883,9 +883,7 @@ export class ForemanDb {
         `INSERT INTO review_checkpoint(
           id, task_id, pr_url, head_sha, latest_review_summary_id, latest_conversation_comment_id,
           checks_fingerprint, merge_state, recorded_at, source_attempt_id
-        ) VALUES (
-          COALESCE((SELECT id FROM review_checkpoint WHERE task_id = ? AND pr_url = ?), ?), ?, ?, ?, ?, ?, ?, ?, ?
-        )
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(task_id, pr_url) DO UPDATE SET
           head_sha = excluded.head_sha,
           latest_review_summary_id = excluded.latest_review_summary_id,
@@ -896,8 +894,6 @@ export class ForemanDb {
           source_attempt_id = excluded.source_attempt_id`,
       )
       .run(
-        input.taskId,
-        input.prUrl,
         newId(),
         input.taskId,
         input.prUrl,
