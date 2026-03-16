@@ -104,7 +104,7 @@ const parseCsv = (value: string): string[] =>
     .filter(Boolean);
 
 export const parseLinearMetadata = (description: string): Pick<Task, "repo" | "branchName" | "dependencies"> => {
-  const match = description.match(/(^|\n)Foreman:\s*\n((?:\s{2,}.+\n?)*)/i);
+  const match = description.match(/(^|\n)Agent:\s*\n((?:\s{2,}.+\n?)*)/i);
   const lines = match?.[2]
     ?.split(/\r?\n/)
     .map((line) => line.trim())

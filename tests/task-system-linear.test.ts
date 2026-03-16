@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../src/config.js";
-import { LinearTaskSystem } from "../src/task-system.js";
+import { LinearTaskSystem, parseLinearMetadata } from "../src/task-system.js";
 
 const originalFetch = global.fetch;
 const fakeLogger = {
@@ -31,7 +31,7 @@ const linearIssue = (
         id: "issue-1",
         identifier: "ENG-123",
         title: "Task",
-        description: "Foreman:\n  Repo: repo-a\n",
+        description: "Agent:\n  Repo: repo-a\n",
         branchName: "eng-123",
         updatedAt: "2026-03-14T12:00:00Z",
         url: "https://linear.app/acme/issue/ENG-123/task",
@@ -113,6 +113,34 @@ describe("LinearTaskSystem.listCandidates", () => {
       teamName: "Engineering",
       labels: ["Agent"],
       assigneeName: "Jane Doe",
+    });
+  });
+});
+
+describe("parseLinearMetadata", () => {
+  test("parses Agent metadata blocks", () => {
+    expect(
+      parseLinearMetadata("Agent:\n  Repo: repo-a\n  Depends on tasks: ENG-123\n  Depends on branches: eng-123\n  Branch: eng-124\n"),
+    ).toEqual({
+      repo: "repo-a",
+      branchName: "eng-124",
+      dependencies: {
+        taskIds: ["ENG-123"],
+        baseTaskId: null,
+        branchNames: ["eng-123"],
+      },
+    });
+  });
+
+  test("ignores legacy Foreman metadata blocks", () => {
+    expect(parseLinearMetadata("Foreman:\n  Repo: repo-a\n  Depends on tasks: ENG-123\n")).toEqual({
+      repo: null,
+      branchName: null,
+      dependencies: {
+        taskIds: [],
+        baseTaskId: null,
+        branchNames: [],
+      },
     });
   });
 });

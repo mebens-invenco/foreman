@@ -421,7 +421,7 @@ Execution metadata is parsed from the task description. Required execution metad
 The metadata block syntax is:
 
 ```text
-Foreman:
+Agent:
   Repo: <repo-key>
   Depends on tasks: <ENG-123, ENG-124>
   Base from task: <ENG-123>

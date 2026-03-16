@@ -4,12 +4,12 @@ Produce tasks that can be created directly in Linear and executed later by Forem
 
 - Use the workspace's configured execution label and consolidation label conventions.
 - Place new execution-ready tasks into a provider state that maps to Foreman's internal `ready` state.
-- Include the required Foreman metadata block in each task description.
+- Include the required Agent metadata block in each task description.
 
 Use this metadata syntax:
 
 ```text
-Foreman:
+Agent:
   Repo: <repo-key>
   Depends on tasks: <ENG-123, ENG-124>
   Base from task: <ENG-123>

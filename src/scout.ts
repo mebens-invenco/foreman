@@ -299,7 +299,7 @@ export const runScoutSelection = async (input: {
         }
 
         if (!task.repo) {
-          await addBlockerComment(task.id, "Execution blocked because Foreman Repo metadata is missing.");
+          await addBlockerComment(task.id, "Execution blocked because Agent Repo metadata is missing.");
           continue;
         }
 
