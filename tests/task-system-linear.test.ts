@@ -23,7 +23,7 @@ afterEach(() => {
 
 const linearIssue = (
   attachments: Array<{ id: string; title: string | null; url: string }>,
-  assigneeName = "Michael Ebens",
+  assigneeName = "Test User",
 ) => ({
   issues: {
     nodes: [
@@ -53,14 +53,14 @@ describe("LinearTaskSystem.listCandidates", () => {
       requests.push(body);
 
       if (body.query.includes("query ForemanViewer")) {
-        return new Response(JSON.stringify({ data: { viewer: { id: "user-123", name: "Michael Ebens" } } }), {
+        return new Response(JSON.stringify({ data: { viewer: { id: "user-123", name: "Test User" } } }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
       }
 
       if (body.query.includes("query ForemanIssueCandidates")) {
-        return new Response(JSON.stringify({ data: linearIssue([], "Michael Ebens") }), {
+        return new Response(JSON.stringify({ data: linearIssue([], "Test User") }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
@@ -153,7 +153,7 @@ describe("LinearTaskSystem.getTask", () => {
       requests.push(body);
 
       if (body.query.includes("query ForemanIssue")) {
-        return new Response(JSON.stringify({ data: linearIssue([], "Michael Ebens") }), {
+        return new Response(JSON.stringify({ data: linearIssue([], "Test User") }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });
