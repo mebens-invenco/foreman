@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { Task } from "../src/domain.js";
+import type { RepoRef, Task } from "../src/domain.js";
+import * as processLib from "../src/lib/process.js";
 import { GitHubReviewService } from "../src/review.js";
 
 const fakeLogger = {
@@ -41,11 +42,86 @@ const jsonResponse = (body: unknown, status = 200): Response =>
     text: async () => JSON.stringify(body),
   }) as Response;
 
+const sampleRepo: RepoRef = {
+  key: "repo-a",
+  rootPath: "/repos/repo-a",
+  defaultBranch: "master",
+};
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
 
 describe("GitHubReviewService.getContext", () => {
+  test("discovers an unlinked pull request by repo and branch before loading full context", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            html_url: "https://github.com/acme/repo/pull/946",
+            number: 946,
+            state: "open",
+            draft: false,
+            merged_at: null,
+            head: { ref: "eng-4737" },
+            base: { ref: "master" },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                url: "https://github.com/acme/repo/pull/946",
+                number: 946,
+                state: "OPEN",
+                isDraft: false,
+                merged: false,
+                headRefOid: "abc123",
+                headRefName: "eng-4737",
+                baseRefName: "master",
+                mergeStateStatus: "CLEAN",
+                commits: { nodes: [{ commit: { committedDate: "2026-03-16T02:28:58Z" } }] },
+                reviews: { nodes: [] },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ check_runs: [] }))
+      .mockResolvedValueOnce(jsonResponse({ statuses: [] })) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const context = await service.getContext(sampleTask({ artifacts: [] }), "[agent]", sampleRepo);
+
+    expect(context).not.toBeNull();
+    expect(context?.pullRequestUrl).toBe("https://github.com/acme/repo/pull/946");
+    expect(context?.headBranch).toBe("eng-4737");
+    expect(processLib.exec).toHaveBeenCalledWith("git", ["config", "--get", "remote.origin.url"], { cwd: "/repos/repo-a" });
+    expect(global.fetch).toHaveBeenCalledTimes(6);
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe(
+      "https://api.github.com/repos/acme/repo/pulls?state=all&head=acme%3Aeng-4737&per_page=20",
+    );
+  });
+
   test("includes status contexts in failing and pending checks", async () => {
     global.fetch = vi
       .fn()

@@ -511,7 +511,7 @@ export class SchedulerService extends EventEmitter {
         const comments = await this.deps.taskSystem.listComments(task.id);
         const reviewContext =
           job.action === "review" || job.action === "retry"
-            ? (await this.deps.reviewService.getContext(task, this.deps.config.workspace.agentPrefix)) ?? undefined
+            ? (await this.deps.reviewService.getContext(task, this.deps.config.workspace.agentPrefix, repo)) ?? undefined
             : undefined;
         const promptInput = {
           action: job.action,
@@ -852,7 +852,7 @@ export class SchedulerService extends EventEmitter {
       workerResult.signals.includes("review_checkpoint_eligible") &&
       pullRequestUrl
     ) {
-      const reviewContext = await this.deps.reviewService.getContext(input.task, this.deps.config.workspace.agentPrefix);
+      const reviewContext = await this.deps.reviewService.getContext(input.task, this.deps.config.workspace.agentPrefix, input.repo);
       if (reviewContext) {
         try {
           this.deps.db.upsertReviewCheckpoint({

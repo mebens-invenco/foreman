@@ -1,5 +1,5 @@
 import type { WorkspaceConfig } from "./config.js";
-import type { ActionType, RepoRef, ReviewContext, Task, TaskComment } from "./domain.js";
+import type { ActionType, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskComment } from "./domain.js";
 import { priorityToRank, type ForemanDb, type ScoutRunTrigger } from "./db.js";
 import { ForemanError } from "./lib/errors.js";
 import { stableStringify } from "./lib/json.js";
@@ -77,6 +77,7 @@ const compareExecutionTasks = (left: Task, right: Task): number => {
 export const resolveBaseBranch = async (input: {
   task: Task;
   repo: RepoRef;
+  repos: RepoRef[];
   taskSystem: TaskSystem;
   reviewService: ReviewService;
 }): Promise<{ baseBranch: string; blockers: string[] }> => {
@@ -84,7 +85,7 @@ export const resolveBaseBranch = async (input: {
   const dependencies = input.task.dependencies.taskIds;
 
   const dependencyTaskCache = new Map<string, Promise<Task>>();
-  const dependencyContextCache = new Map<string, Promise<ReviewContext | null>>();
+  const dependencyPullRequestCache = new Map<string, Promise<ResolvedPullRequest | null>>();
 
   const getDependencyTask = async (taskId: string): Promise<Task> => {
     let promise = dependencyTaskCache.get(taskId);
@@ -95,11 +96,14 @@ export const resolveBaseBranch = async (input: {
     return promise;
   };
 
-  const getDependencyReviewContext = async (taskId: string): Promise<ReviewContext | null> => {
-    let promise = dependencyContextCache.get(taskId);
+  const getDependencyReviewContext = async (taskId: string): Promise<ResolvedPullRequest | null> => {
+    let promise = dependencyPullRequestCache.get(taskId);
     if (!promise) {
-      promise = getDependencyTask(taskId).then((task) => input.reviewService.getContext(task, ""));
-      dependencyContextCache.set(taskId, promise);
+      promise = getDependencyTask(taskId).then(async (task) => {
+        const dependencyRepo = task.repo ? input.repos.find((item) => item.key === task.repo) : undefined;
+        return input.reviewService.resolvePullRequest(task, dependencyRepo);
+      });
+      dependencyPullRequestCache.set(taskId, promise);
     }
     return promise;
   };
@@ -305,7 +309,7 @@ export const runScoutSelection = async (input: {
         continue;
       }
 
-      const context = await input.reviewService.getContext(task, input.config.workspace.agentPrefix);
+      const context = await input.reviewService.getContext(task, input.config.workspace.agentPrefix, repo);
       if (!context || context.state !== "open") {
         continue;
       }
@@ -356,7 +360,7 @@ export const runScoutSelection = async (input: {
           continue;
         }
 
-        const reviewContext = await input.reviewService.getContext(task, input.config.workspace.agentPrefix);
+        const reviewContext = await input.reviewService.getContext(task, input.config.workspace.agentPrefix, repo);
         if (!reviewContext || reviewContext.state !== "closed") {
           continue;
         }
@@ -368,7 +372,7 @@ export const runScoutSelection = async (input: {
           continue;
         }
 
-        const base = await resolveBaseBranch({ task, repo, taskSystem: input.taskSystem, reviewService: input.reviewService });
+        const base = await resolveBaseBranch({ task, repo, repos: input.repos, taskSystem: input.taskSystem, reviewService: input.reviewService });
         if (base.blockers.length > 0) {
           for (const blocker of base.blockers) {
             await recordBlocker(task.id, blocker);
@@ -410,7 +414,7 @@ export const runScoutSelection = async (input: {
           continue;
         }
 
-        const base = await resolveBaseBranch({ task, repo, taskSystem: input.taskSystem, reviewService: input.reviewService });
+        const base = await resolveBaseBranch({ task, repo, repos: input.repos, taskSystem: input.taskSystem, reviewService: input.reviewService });
         if (base.blockers.length > 0) {
           for (const blocker of base.blockers) {
             await recordBlocker(task.id, blocker, { postComment: false });
@@ -450,7 +454,11 @@ export const runScoutSelection = async (input: {
         const prUrls = task.artifacts.filter((artifact) => artifact.type === "pull_request").map((artifact) => artifact.url);
         let allClosed = true;
         for (const prUrl of prUrls) {
-          const context = await input.reviewService.getContext({ ...task, artifacts: [{ type: "pull_request", url: prUrl }] }, input.config.workspace.agentPrefix);
+          const context = await input.reviewService.getContext(
+            { ...task, artifacts: [{ type: "pull_request", url: prUrl }] },
+            input.config.workspace.agentPrefix,
+            repo,
+          );
           if (context?.state === "open") {
             allClosed = false;
             break;

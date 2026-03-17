@@ -89,6 +89,15 @@ export type CheckState = {
   state: "pending" | "failure";
 };
 
+export type ResolvedPullRequest = {
+  pullRequestUrl: string;
+  pullRequestNumber: number;
+  state: "open" | "closed" | "merged";
+  isDraft: boolean;
+  headBranch: string;
+  baseBranch: string;
+};
+
 export type ReviewContext = {
   provider: ReviewProvider;
   pullRequestUrl: string;
