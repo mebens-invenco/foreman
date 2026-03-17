@@ -198,6 +198,61 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test("treats conflicting pull requests as review work", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0003",
+      title: "Conflicting review task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/2" } satisfies TaskArtifact],
+    });
+
+    const taskSystem = new FakeTaskSystem([reviewTask]);
+    const reviewService = new FakeReviewService({
+      [reviewTask.id]: {
+        provider: "github",
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/2",
+        pullRequestNumber: 2,
+        state: "open",
+        isDraft: false,
+        headSha: "def",
+        headBranch: "task-0003",
+        baseBranch: "main",
+        headIntroducedAt: "2026-03-14T12:00:00Z",
+        mergeState: "conflicting",
+        actionableReviewSummaries: [],
+        actionableConversationComments: [],
+        unresolvedThreads: [],
+        failingChecks: [],
+        pendingChecks: [],
+      },
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("review");
+      expect(result.jobs[0]?.task.id).toBe("TASK-0003");
+    } finally {
+      db.close();
+    }
+  });
+
   test("blocks dependent chains until upstream tasks are in review with an open pull request or merged", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);

@@ -84,6 +84,7 @@ describe("GitHubReviewService.getContext", () => {
                 headRefName: "eng-4737",
                 baseRefName: "master",
                 mergeStateStatus: "CLEAN",
+                mergeable: "MERGEABLE",
                 commits: { nodes: [{ commit: { committedDate: "2026-03-16T02:28:58Z" } }] },
                 reviews: { nodes: [] },
               },
@@ -139,6 +140,7 @@ describe("GitHubReviewService.getContext", () => {
                 headRefName: "eng-4737",
                 baseRefName: "master",
                 mergeStateStatus: "UNSTABLE",
+                mergeable: "MERGEABLE",
                 commits: { nodes: [{ commit: { committedDate: "2026-03-16T02:28:58Z" } }] },
                 reviews: { nodes: [] },
               },
@@ -192,6 +194,56 @@ describe("GitHubReviewService.getContext", () => {
     expect(vi.mocked(global.fetch).mock.calls[4]?.[0]).toBe("https://api.github.com/repos/acme/repo/commits/abc123/status");
   });
 
+  test("maps dirty or conflicting pull requests to conflicting review state", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                url: "https://github.com/acme/repo/pull/946",
+                number: 946,
+                state: "OPEN",
+                isDraft: false,
+                merged: false,
+                headRefOid: "abc123",
+                headRefName: "eng-4737",
+                baseRefName: "master",
+                mergeStateStatus: "DIRTY",
+                mergeable: "CONFLICTING",
+                commits: { nodes: [{ commit: { committedDate: "2026-03-16T02:28:58Z" } }] },
+                reviews: { nodes: [] },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ check_runs: [] }))
+      .mockResolvedValueOnce(jsonResponse({ statuses: [] })) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const context = await service.getContext(sampleTask(), "[agent]");
+
+    expect(context).not.toBeNull();
+    expect(context?.mergeState).toBe("conflicting");
+  });
+
   test("enriches actionable comments and unresolved threads across pages", async () => {
     const pageOneComments = Array.from({ length: 100 }, (_, index) => {
       const hour = 3 + Math.floor(index / 60);
@@ -221,6 +273,7 @@ describe("GitHubReviewService.getContext", () => {
                 headRefName: "eng-4737",
                 baseRefName: "master",
                 mergeStateStatus: "CLEAN",
+                mergeable: "MERGEABLE",
                 commits: { nodes: [{ commit: { committedDate: "2026-03-16T03:00:00Z" } }] },
                 reviews: { nodes: [] },
               },

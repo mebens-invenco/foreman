@@ -64,6 +64,8 @@ type GitHubRestPullRequest = {
   };
 };
 
+type GitHubPullRequestMergeable = "MERGEABLE" | "CONFLICTING" | "UNKNOWN" | null;
+
 type GitHubReviewThreadNode = {
   id: string;
   isResolved: boolean;
@@ -577,21 +579,22 @@ export class GitHubReviewService implements ReviewService {
     this.logger.debug("fetching GitHub pull request context", { taskId: task.id, owner, repo: repoName, pullRequestNumber: number });
     const data = await this.graphql<{
       repository: {
-        pullRequest: {
-          url: string;
-          number: number;
-          state: "OPEN" | "CLOSED" | "MERGED";
-          isDraft: boolean;
-          merged: boolean;
-          headRefOid: string;
-          headRefName: string;
-          baseRefName: string;
-          mergeStateStatus: string;
-          commits: { nodes: Array<{ commit: { committedDate: string } }> };
-          reviews: { nodes: Array<{ id: string; body: string; submittedAt: string; author: { login: string | null } | null; commit: { oid: string } | null }> };
+          pullRequest: {
+            url: string;
+            number: number;
+            state: "OPEN" | "CLOSED" | "MERGED";
+            isDraft: boolean;
+            merged: boolean;
+            headRefOid: string;
+            headRefName: string;
+            baseRefName: string;
+            mergeStateStatus: string;
+            mergeable: GitHubPullRequestMergeable;
+            commits: { nodes: Array<{ commit: { committedDate: string } }> };
+            reviews: { nodes: Array<{ id: string; body: string; submittedAt: string; author: { login: string | null } | null; commit: { oid: string } | null }> };
+          } | null;
         } | null;
-      } | null;
-    }>(
+      }>(
       `query ForemanPullRequest($owner: String!, $repo: String!, $number: Int!) {
         repository(owner: $owner, name: $repo) {
           pullRequest(number: $number) {
@@ -604,6 +607,7 @@ export class GitHubReviewService implements ReviewService {
             headRefName
             baseRefName
             mergeStateStatus
+            mergeable
             commits(last: 1) { nodes { commit { committedDate } } }
             reviews(last: 100) {
               nodes { id body submittedAt author { login } commit { oid } }
@@ -675,7 +679,7 @@ export class GitHubReviewService implements ReviewService {
       headBranch: pullRequest.headRefName,
       baseBranch: pullRequest.baseRefName,
       headIntroducedAt,
-      mergeState: this.mapMergeState(pullRequest.mergeStateStatus),
+      mergeState: this.mapMergeState(pullRequest.mergeStateStatus, pullRequest.mergeable),
       actionableReviewSummaries,
       actionableConversationComments,
       unresolvedThreads,
@@ -684,14 +688,17 @@ export class GitHubReviewService implements ReviewService {
     };
   }
 
-  private mapMergeState(value: string): ReviewContext["mergeState"] {
+  private mapMergeState(value: string, mergeable: GitHubPullRequestMergeable): ReviewContext["mergeState"] {
+    if (mergeable === "CONFLICTING") {
+      return "conflicting";
+    }
+
     switch (value) {
       case "CLEAN":
       case "HAS_HOOKS":
       case "UNSTABLE":
         return "clean";
       case "DIRTY":
-        return "dirty";
       case "CONFLICTING":
         return "conflicting";
       default:
