@@ -1,4 +1,4 @@
-import type { LeaseResourceType } from "./records.js";
+export type LeaseResourceType = "job" | "task" | "branch";
 
 export interface LeaseRepo {
   acquireLease(input: {

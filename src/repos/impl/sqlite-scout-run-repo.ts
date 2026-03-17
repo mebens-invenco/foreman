@@ -1,9 +1,8 @@
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import { newId } from "../../lib/ids.js";
-import type { ScoutRunRepo } from "../scout-run-repo.js";
 import type { ActionType } from "../../domain/index.js";
-import type { ScoutRunRecord, ScoutRunTrigger } from "../records.js";
+import type { ScoutRunRecord, ScoutRunRepo, ScoutRunTrigger } from "../scout-run-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 export class SqliteScoutRunRepo implements ScoutRunRepo {

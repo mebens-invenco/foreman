@@ -13,8 +13,8 @@ import type { TaskSystem } from "./tasking/index.js";
 type HttpServerDeps = {
   config: WorkspaceConfig;
   paths: WorkspacePaths;
-  repos: RepoRef[];
-  foremanRepos: ForemanRepos;
+  repoRefs: RepoRef[];
+  repos: ForemanRepos;
   taskSystem: TaskSystem;
   scheduler: SchedulerService;
 };
@@ -97,7 +97,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       status: deps.scheduler.getStatus().status,
       workerConcurrency: deps.config.scheduler.workerConcurrency,
       scoutPollIntervalSeconds: deps.config.scheduler.scoutPollIntervalSeconds,
-      lastScoutRunAt: deps.foremanRepos.scoutRuns.listScoutRuns(1)[0]?.startedAt ?? null,
+      lastScoutRunAt: deps.repos.scoutRuns.listScoutRuns(1)[0]?.startedAt ?? null,
       nextScoutPollAt: deps.scheduler.getStatus().nextScoutPollAt,
     },
     integrations: {
@@ -106,8 +106,8 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       runner: { type: deps.config.runner.type, status: "ok" },
     },
     repos: {
-      count: deps.repos.length,
-      keys: deps.repos.map((repo) => repo.key),
+      count: deps.repoRefs.length,
+      keys: deps.repoRefs.map((repo) => repo.key),
     },
   }));
 
@@ -149,7 +149,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   });
 
   server.get("/api/queue", async () => ({
-    jobs: deps.foremanRepos.jobs.listQueue().map((job) => ({
+    jobs: deps.repos.jobs.listQueue().map((job) => ({
       id: job.id,
       taskId: job.taskId,
       action: job.action,
@@ -162,9 +162,9 @@ export const createHttpServer = (deps: HttpServerDeps) => {
 
   server.get("/api/jobs/:jobId", async (request) => {
     const params = request.params as { jobId: string };
-    const job = deps.foremanRepos.jobs.getJob(params.jobId);
-    const latestAttempt = deps.foremanRepos.attempts.latestAttemptForJob(job.id);
-    const artifacts = deps.foremanRepos.artifacts.listArtifacts("job", job.id);
+    const job = deps.repos.jobs.getJob(params.jobId);
+    const latestAttempt = deps.repos.attempts.latestAttemptForJob(job.id);
+    const artifacts = deps.repos.artifacts.listArtifacts("job", job.id);
     return {
       job: {
         id: job.id,
@@ -198,16 +198,16 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       filters.limit = limit;
     }
     return {
-      attempts: deps.foremanRepos.attempts.listAttempts(filters),
+      attempts: deps.repos.attempts.listAttempts(filters),
     };
   });
 
   server.get("/api/attempts/:attemptId", async (request) => {
     const params = request.params as { attemptId: string };
     return {
-      attempt: deps.foremanRepos.attempts.getAttempt(params.attemptId),
-      events: deps.foremanRepos.attempts.listAttemptEvents(params.attemptId),
-      artifacts: deps.foremanRepos.artifacts.listArtifacts("execution_attempt", params.attemptId),
+      attempt: deps.repos.attempts.getAttempt(params.attemptId),
+      events: deps.repos.attempts.listAttemptEvents(params.attemptId),
+      artifacts: deps.repos.artifacts.listArtifacts("execution_attempt", params.attemptId),
     };
   });
 
@@ -255,7 +255,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   });
 
   server.get("/api/workers", async () => ({
-    workers: deps.foremanRepos.workers.listWorkers().map((worker) => ({
+    workers: deps.repos.workers.listWorkers().map((worker) => ({
       id: worker.id,
       slot: worker.slot,
       status: worker.status,
@@ -276,7 +276,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     let offset = 0;
 
     const interval = setInterval(async () => {
-      const worker = deps.foremanRepos.workers.listWorkers().find((item) => item.id === params.workerId);
+      const worker = deps.repos.workers.listWorkers().find((item) => item.id === params.workerId);
       if (!worker) {
         writeSseEvent(reply, "ping", "{}");
         return;
@@ -312,7 +312,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     });
   });
 
-  server.get("/api/history", async () => ({ history: deps.foremanRepos.history.listHistory() }));
+  server.get("/api/history", async () => ({ history: deps.repos.history.listHistory() }));
   server.get("/api/learnings", async (request) => {
     const query = request.query as { search?: string; repo?: string; limit?: string; offset?: string };
     const filters: { search?: string; repo?: string; limit?: number; offset?: number } = {};
@@ -331,10 +331,10 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       filters.offset = offset;
     }
     return {
-      learnings: deps.foremanRepos.learnings.listLearnings(filters),
+      learnings: deps.repos.learnings.listLearnings(filters),
     };
   });
-  server.get("/api/scout/runs", async () => ({ runs: deps.foremanRepos.scoutRuns.listScoutRuns() }));
+  server.get("/api/scout/runs", async () => ({ runs: deps.repos.scoutRuns.listScoutRuns() }));
 
   server.post("/api/scheduler/start", async () => {
     await deps.scheduler.start();

@@ -1,9 +1,8 @@
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import { newId } from "../../lib/ids.js";
-import type { ReviewCheckpointRepo } from "../review-checkpoint-repo.js";
-import type { ReviewCheckpointRecord } from "../records.js";
 import type { ReviewContext } from "../../domain/index.js";
+import type { ReviewCheckpointRecord, ReviewCheckpointRepo } from "../review-checkpoint-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 const mapReviewCheckpoint = (row: SqliteRow): ReviewCheckpointRecord => ({

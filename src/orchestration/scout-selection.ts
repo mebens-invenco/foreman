@@ -324,7 +324,7 @@ export const runScoutSelection = async (input: {
         continue;
       }
 
-      const checkpoint = input.foremanRepos.reviewCheckpoints.getReviewCheckpoint(task.id, context.pullRequestUrl);
+       const checkpoint = input.foremanRepos.reviewCheckpoints.getReviewCheckpoint(task.id, context.pullRequestUrl);
       const checkpointMatches = checkpoint
         ? checkpoint.headSha === context.headSha &&
           checkpoint.latestReviewSummaryId === (context.actionableReviewSummaries.at(-1)?.id ?? null) &&
@@ -334,7 +334,7 @@ export const runScoutSelection = async (input: {
         : false;
 
       if (checkpoint && !checkpointMatches) {
-        input.foremanRepos.reviewCheckpoints.deleteReviewCheckpoint(task.id, context.pullRequestUrl);
+         input.foremanRepos.reviewCheckpoints.deleteReviewCheckpoint(task.id, context.pullRequestUrl);
       }
 
       if (checkpointMatches) {

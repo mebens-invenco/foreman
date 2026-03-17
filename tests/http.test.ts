@@ -45,8 +45,8 @@ describe("HTTP query validation", () => {
     const server = createHttpServer({
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths,
-      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
-      foremanRepos: db,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
       taskSystem: {
         listCandidates: vi.fn(async () => [sampleTask]),
         getTask: vi.fn(async () => sampleTask),

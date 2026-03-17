@@ -1,4 +1,10 @@
-import type { WorkerRecord } from "./records.js";
+export type WorkerRecord = {
+  id: string;
+  slot: number;
+  status: "idle" | "leased" | "running" | "stopping" | "offline";
+  currentAttemptId: string | null;
+  lastHeartbeatAt: string;
+};
 
 export interface WorkerRepo {
   ensureWorkerSlots(concurrency: number): void;

@@ -1,5 +1,19 @@
 import type { ActionType } from "../domain/index.js";
-import type { ScoutRunRecord, ScoutRunTrigger } from "./records.js";
+
+export type ScoutRunTrigger = "startup" | "poll" | "worker_finished" | "task_mutation" | "lease_change" | "manual";
+
+export type ScoutRunRecord = {
+  id: string;
+  triggerType: ScoutRunTrigger;
+  status: "running" | "completed" | "failed";
+  startedAt: string;
+  finishedAt: string | null;
+  selectedAction: ActionType | null;
+  selectedTaskId: string | null;
+  candidateCount: number;
+  activeCount: number;
+  terminalCount: number;
+};
 
 export interface ScoutRunRepo {
   createScoutRun(input: {

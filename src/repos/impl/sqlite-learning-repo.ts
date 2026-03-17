@@ -1,8 +1,7 @@
 import { ForemanError } from "../../lib/errors.js";
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
-import type { LearningRepo } from "../learning-repo.js";
-import type { LearningRecord } from "../records.js";
+import type { LearningRecord, LearningRepo } from "../learning-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 export class SqliteLearningRepo implements LearningRepo {
