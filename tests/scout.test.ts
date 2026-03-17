@@ -253,18 +253,10 @@ describe("runScoutSelection", () => {
       expect(result.jobs).toHaveLength(1);
       expect(result.jobs[0]?.task.id).toBe("ENG-4746");
       expect(result.jobs[0]?.action).toBe("execution");
-      expect(taskSystem.comments.get("ENG-4747")?.[0]?.body).toContain(
-        "Dependency task ENG-4746 must be in review with an open pull request or merged before scheduling.",
-      );
-      expect(taskSystem.comments.get("ENG-4748")?.[0]?.body).toContain(
-        "Dependency task ENG-4747 must be in review with an open pull request or merged before scheduling.",
-      );
-      expect(taskSystem.comments.get("ENG-4749")?.[0]?.body).toContain(
-        "Dependency task ENG-4748 must be in review with an open pull request or merged before scheduling.",
-      );
-      expect(taskSystem.comments.get("ENG-4750")?.[0]?.body).toContain(
-        "Dependency task ENG-4749 must be in review with an open pull request or merged before scheduling.",
-      );
+      expect(taskSystem.comments.get("ENG-4747") ?? []).toHaveLength(0);
+      expect(taskSystem.comments.get("ENG-4748") ?? []).toHaveLength(0);
+      expect(taskSystem.comments.get("ENG-4749") ?? []).toHaveLength(0);
+      expect(taskSystem.comments.get("ENG-4750") ?? []).toHaveLength(0);
     } finally {
       db.close();
     }
@@ -330,9 +322,7 @@ describe("runScoutSelection", () => {
       });
 
       expect(result.jobs).toHaveLength(0);
-      expect(taskSystem.comments.get("ENG-4681")?.[0]?.body).toContain(
-        "Dependency task ENG-4680 pull request head branch eng-4680 does not exist on origin.",
-      );
+      expect(taskSystem.comments.get("ENG-4681") ?? []).toHaveLength(0);
     } finally {
       db.close();
     }
@@ -424,9 +414,55 @@ describe("runScoutSelection", () => {
       });
 
       expect(result.jobs).toHaveLength(0);
-      expect(taskSystem.comments.get("ENG-4702")?.[0]?.body).toContain(
-        "Non-base dependency ENG-4701 must be merged before scheduling.",
-      );
+      expect(taskSystem.comments.get("ENG-4702") ?? []).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips posting a blocker comment when it matches the latest existing comment", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const blockerBody = `${config.workspace.agentPrefix}Execution blocked because Agent Repo metadata is missing.`;
+
+    const blockedTask = task({
+      id: "TASK-0003",
+      title: "Missing repo metadata",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T10:00:00Z",
+      repo: null,
+    });
+
+    const taskSystem = new FakeTaskSystem([blockedTask]);
+    taskSystem.comments.set(blockedTask.id, [
+      {
+        id: `${blockedTask.id}-1`,
+        taskId: blockedTask.id,
+        body: blockerBody,
+        authorName: "agent",
+        authorKind: "agent",
+        createdAt: "2026-03-14T10:05:00Z",
+        updatedAt: null,
+      },
+    ]);
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.comments.get(blockedTask.id) ?? []).toHaveLength(1);
+      expect(taskSystem.comments.get(blockedTask.id)?.[0]?.body).toBe(blockerBody);
     } finally {
       db.close();
     }

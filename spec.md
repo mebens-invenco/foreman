@@ -474,8 +474,13 @@ Branch dependency rules:
 - a branch dependency is satisfied only when the branch exists on origin and its tip is an ancestor of the resolved base branch tip
 - if a required dependency branch does not exist on origin, the dependency is unsatisfied
 
-If required metadata is missing or invalid for a task that would otherwise be selected, Foreman must add a task comment describing the blocker and not schedule that action.
-This includes task dependencies that are not yet review-ready or whose required remote branch does not exist on origin.
+If required metadata is missing or invalid for a task that would otherwise be selected, Foreman must not schedule that action.
+
+Blocker comment rules:
+
+- Foreman may add a task comment describing the blocker for actionable task-level problems such as missing repo metadata
+- Foreman must not add a task comment for execution blockers caused by unsatisfied dependencies or missing dependency branches
+- before adding a blocker comment, Foreman must compare it to the latest existing task comment and skip posting when the bodies are identical
 
 ## File Task System
 
