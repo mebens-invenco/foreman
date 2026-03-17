@@ -510,7 +510,7 @@ export class SchedulerService extends EventEmitter {
         const comments = await this.deps.taskSystem.listComments(task.id);
         const reviewContext =
           job.action === "review" || job.action === "retry"
-            ? (await this.deps.reviewService.getContext(task, this.deps.config.workspace.agentPrefix)) ?? undefined
+            ? (await this.deps.reviewService.getContext(task, this.deps.config.workspace.agentPrefix, repo)) ?? undefined
             : undefined;
         const promptInput = {
           action: job.action,
@@ -778,6 +778,15 @@ export class SchedulerService extends EventEmitter {
       logger.info("transitioned task to in_review using existing pull request artifact", { pullRequestUrl });
     }
 
+    if (input.job.action === "execution" && workerResult.outcome === "no_action_needed") {
+      const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(input.task, input.repo);
+      if (resolvedPullRequest?.state === "open") {
+        pullRequestUrl = resolvedPullRequest.pullRequestUrl;
+        await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
+        logger.info("transitioned task to in_review after execution no-op on open pull request", { pullRequestUrl });
+      }
+    }
+
     for (const mutation of workerResult.reviewMutations) {
       if (mutation.type === "create_pull_request" || mutation.type === "reopen_pull_request") {
         continue;
@@ -851,7 +860,7 @@ export class SchedulerService extends EventEmitter {
       workerResult.signals.includes("review_checkpoint_eligible") &&
       pullRequestUrl
     ) {
-      const reviewContext = await this.deps.reviewService.getContext(input.task, this.deps.config.workspace.agentPrefix);
+      const reviewContext = await this.deps.reviewService.getContext(input.task, this.deps.config.workspace.agentPrefix, input.repo);
       if (reviewContext) {
         try {
           this.deps.db.upsertReviewCheckpoint({

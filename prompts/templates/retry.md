@@ -43,6 +43,8 @@ Reattempt the task cleanly from fresh branch state while reusing only the prior 
 - PR titles should normally follow `<TASK-ID>: <short description>` and should not use conventional-commit prefixes like `feat:`, `fix:`, or `chore:`.
 - Follow repository PR templates and any repo-root instruction-file requirements when writing the PR body.
 - If the retry should reopen the prior PR, emit a `reopen_pull_request` mutation.
-- If retry should create a fresh PR instead, emit `create_pull_request` with a full title and body.
+- If retry should create a fresh PR instead, emit a full `create_pull_request` object with `title`, `body`, `draft`, `baseBranch`, and `headBranch`.
+- Copy `baseBranch` from the provided Repository Context and `headBranch` from `Selected Task.branchName`.
+- Do not omit `baseBranch` or `headBranch` even if they seem obvious from the current git state.
 
 {{fragment:output-schema}}

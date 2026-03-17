@@ -10,21 +10,24 @@ export const createTaskSystem = (input: {
   env: Record<string, string>;
   logger?: LoggerService;
 }): TaskSystem => {
-  if (input.config.taskSystem.type === "file") {
-    if (!input.config.taskSystem.file) {
-      throw new Error("File task system config is required when type=file");
+  switch (input.config.taskSystem.type) {
+    case "file": {
+      if (!input.config.taskSystem.file) {
+        throw new Error("File task system config is required when type=file");
+      }
+
+      return new FileTaskSystem(input.config, input.paths);
     }
 
-    return new FileTaskSystem(input.config, input.paths);
-  }
+    case "linear": {
+      if (!input.config.taskSystem.linear) {
+        throw new Error("Linear task system config is required when type=linear");
+      }
 
-  if (input.config.taskSystem.type === "linear") {
-    if (!input.config.taskSystem.linear) {
-      throw new Error("Linear task system config is required when type=linear");
+      return new LinearTaskSystem(input.config, input.env, input.logger?.child({ component: "taskSystem.linear" }));
     }
 
-    return new LinearTaskSystem(input.config, input.env, input.logger?.child({ component: "taskSystem.linear" }));
+    default:
+      throw new Error(`Unsupported task system type: ${String((input.config.taskSystem as { type?: unknown }).type)}`);
   }
-
-  throw new Error(`Unsupported task system type: ${String((input.config.taskSystem as { type?: unknown }).type)}`);
 };

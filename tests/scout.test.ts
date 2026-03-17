@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { ConversationComment, ReviewContext, Task, TaskArtifact, TaskComment } from "../src/domain.js";
+import type { ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskArtifact, TaskComment } from "../src/domain.js";
 import { runScoutSelection } from "../src/scout.js";
 import type { ReviewService } from "../src/review/index.js";
 import type { TaskSystem } from "../src/tasking/index.js";
@@ -67,11 +67,26 @@ class FakeTaskSystem implements TaskSystem {
 class FakeReviewService implements ReviewService {
   constructor(private readonly contexts: Record<string, ReviewContext | null>) {}
 
-  async getContext(task: Task, _agentPrefix: string): Promise<ReviewContext | null> {
+  async resolvePullRequest(task: Task, _repo?: RepoRef): Promise<ResolvedPullRequest | null> {
+    const context = this.contexts[task.id];
+    if (!context) {
+      return null;
+    }
+    return {
+      pullRequestUrl: context.pullRequestUrl,
+      pullRequestNumber: context.pullRequestNumber,
+      state: context.state,
+      isDraft: context.isDraft,
+      headBranch: context.headBranch,
+      baseBranch: context.baseBranch,
+    };
+  }
+
+  async getContext(task: Task, _agentPrefix: string, _repo?: RepoRef): Promise<ReviewContext | null> {
     return this.contexts[task.id] ?? null;
   }
 
-  async findLatestOpenPullRequestBranch(task: Task): Promise<string | null> {
+  async findLatestOpenPullRequestBranch(task: Task, _repo?: RepoRef): Promise<string | null> {
     return this.contexts[task.id]?.state === "open" ? this.contexts[task.id]?.headBranch ?? null : null;
   }
 
@@ -178,6 +193,134 @@ describe("runScoutSelection", () => {
       expect(result.jobs[0]?.action).toBe("review");
       expect(result.jobs[0]?.task.id).toBe("TASK-0002");
       expect(result.jobs[1]?.action).toBe("execution");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("prioritizes actionable review work for in-progress tasks with open pull requests", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0003",
+      title: "In-progress review task",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/2" } satisfies TaskArtifact],
+    });
+    const readyTask = task({
+      id: "TASK-0004",
+      title: "Ready task",
+      state: "ready",
+      providerState: "ready",
+      priority: "urgent",
+      updatedAt: "2026-03-14T11:00:00Z",
+    });
+
+    const taskSystem = new FakeTaskSystem([readyTask, reviewTask]);
+    const reviewService = new FakeReviewService({
+      [reviewTask.id]: {
+        provider: "github",
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/2",
+        pullRequestNumber: 2,
+        state: "open",
+        isDraft: false,
+        headSha: "abc",
+        headBranch: "task-0003",
+        baseBranch: "main",
+        headIntroducedAt: "2026-03-14T12:00:00Z",
+        mergeState: "clean",
+        actionableReviewSummaries: [],
+        actionableConversationComments: [
+          {
+            id: "comment-1",
+            body: "Please remove this extra step.",
+            authorName: "reviewer",
+            createdAt: "2026-03-14T12:05:00Z",
+            url: "https://github.com/acme/repo-a/pull/2#issuecomment-1",
+          },
+        ],
+        unresolvedThreads: [],
+        failingChecks: [],
+        pendingChecks: [],
+      },
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(2);
+      expect(result.jobs[0]?.action).toBe("review");
+      expect(result.jobs[0]?.task.id).toBe("TASK-0003");
+      expect(result.jobs[1]?.action).toBe("execution");
+      expect(result.jobs[1]?.task.id).toBe("TASK-0004");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("treats conflicting pull requests as review work", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0003",
+      title: "Conflicting review task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/2" } satisfies TaskArtifact],
+    });
+
+    const taskSystem = new FakeTaskSystem([reviewTask]);
+    const reviewService = new FakeReviewService({
+      [reviewTask.id]: {
+        provider: "github",
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/2",
+        pullRequestNumber: 2,
+        state: "open",
+        isDraft: false,
+        headSha: "def",
+        headBranch: "task-0003",
+        baseBranch: "main",
+        headIntroducedAt: "2026-03-14T12:00:00Z",
+        mergeState: "conflicting",
+        actionableReviewSummaries: [],
+        actionableConversationComments: [],
+        unresolvedThreads: [],
+        failingChecks: [],
+        pendingChecks: [],
+      },
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("review");
+      expect(result.jobs[0]?.task.id).toBe("TASK-0003");
     } finally {
       db.close();
     }
@@ -322,6 +465,75 @@ describe("runScoutSelection", () => {
       });
 
       expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.comments.get("ENG-4681") ?? []).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("uses branch-discovered dependency pull requests when the upstream task is in review without a linked artifact", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    vi.spyOn(worktrees, "branchExistsOnOrigin").mockResolvedValue(true);
+
+    const dependencyTask = task({
+      id: "ENG-4680",
+      title: "Dependency in review",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:00:00Z",
+      artifacts: [],
+    });
+    const dependentTask = task({
+      id: "ENG-4681",
+      title: "Dependent task",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      dependencies: { taskIds: ["ENG-4680"], baseTaskId: null, branchNames: [] },
+    });
+
+    const taskSystem = new FakeTaskSystem([dependencyTask, dependentTask]);
+    const reviewService = new FakeReviewService({
+      [dependencyTask.id]: {
+        provider: "github",
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/10",
+        pullRequestNumber: 10,
+        state: "open",
+        isDraft: false,
+        headSha: "abc",
+        headBranch: "eng-4680",
+        baseBranch: "main",
+        headIntroducedAt: "2026-03-14T10:00:00Z",
+        mergeState: "clean",
+        actionableReviewSummaries: [],
+        actionableConversationComments: [],
+        unresolvedThreads: [],
+        failingChecks: [],
+        pendingChecks: [],
+      },
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.task.id).toBe("ENG-4681");
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.baseBranch).toBe("eng-4680");
       expect(taskSystem.comments.get("ENG-4681") ?? []).toHaveLength(0);
     } finally {
       db.close();

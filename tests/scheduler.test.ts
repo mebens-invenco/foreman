@@ -247,6 +247,78 @@ describe("SchedulerService applyWorkerResult", () => {
     ).rejects.toThrow("Execution results with code changes must include a create_pull_request or reopen_pull_request mutation");
   });
 
+  test("returns execution no-op tasks to in_review when an open pull request already exists", async () => {
+    const transition = vi.fn(async () => undefined);
+    const resolvePullRequest = vi.fn(async () => ({
+      pullRequestUrl: reviewContext.pullRequestUrl,
+      pullRequestNumber: reviewContext.pullRequestNumber,
+      state: "open" as const,
+      isDraft: false,
+      headBranch: reviewContext.headBranch,
+      baseBranch: reviewContext.baseBranch,
+    }));
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      db: {
+        ensureWorkerSlots: vi.fn(),
+        addLearning: vi.fn(),
+        updateLearning: vi.fn(),
+        addAttemptEvent: vi.fn(),
+        upsertReviewCheckpoint: vi.fn(),
+      } as any,
+      taskSystem: {
+        addComment: vi.fn(async () => undefined),
+        addArtifact: vi.fn(async () => undefined),
+        transition,
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        getContext: vi.fn(async () => reviewContext),
+        resolvePullRequest,
+      } as any,
+      runner: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-4" },
+        job: { action: "execution" },
+        task: sampleTask({
+          state: "in_progress",
+          providerState: "in_progress",
+          artifacts: [{ type: "pull_request", url: reviewContext.pullRequestUrl }],
+        }),
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        workerResult: baseWorkerResult({
+          action: "execution",
+          outcome: "no_action_needed",
+        }),
+      }),
+    ).resolves.toBe(reviewContext.pullRequestUrl);
+
+    expect(resolvePullRequest).toHaveBeenCalled();
+    expect(transition).toHaveBeenCalledWith({ taskId: "TASK-0001", toState: "in_review" });
+  });
+
   test("prefixes review replies and routes thread replies explicitly", async () => {
     const replyToReviewSummary = vi.fn(async () => undefined);
     const replyToThreadComment = vi.fn(async () => undefined);

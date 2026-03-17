@@ -40,6 +40,28 @@ Allowed review mutation types:
 - `reply_to_pr_comment`
 - `resolve_threads`
 
+Review mutation field requirements:
+
+- `create_pull_request` requires `title`, `body`, `draft`, `baseBranch`, and `headBranch`
+- `reopen_pull_request` requires `draft` and at least one of `pullRequestUrl` or `pullRequestNumber`; `title` and `body` are optional
+- `reply_to_review_summary` requires `reviewId` and `body`
+- `reply_to_thread_comment` requires `threadId` and `body`
+- `reply_to_pr_comment` requires `commentId` and `body`
+- `resolve_threads` requires a non-empty `threadIds` array
+
+Example `create_pull_request` mutation:
+
+```json
+{
+  "type": "create_pull_request",
+  "title": "ENG-4753: Upgrade default Node image to 24.14",
+  "body": "## Summary\n- ...",
+  "draft": true,
+  "baseBranch": "<Repository Context.baseBranch>",
+  "headBranch": "<Selected Task.branchName>"
+}
+```
+
 Allowed learning mutation types:
 
 - `add`
@@ -55,3 +77,4 @@ Rules:
 - use `review_checkpoint_eligible` only for `review` actions returning `no_action_needed`
 - include blockers only when `outcome` is `blocked`
 - keep mutation arrays ordered exactly as you want Foreman to apply them
+- before returning, verify that every mutation includes all fields required by its type; a missing required field causes the entire attempt to fail schema validation
