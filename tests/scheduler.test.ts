@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../src/config.js";
 import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../src/domain/index.js";
-import { SchedulerService } from "../src/scheduler.js";
+import { SchedulerService } from "../src/orchestration/index.js";
 import * as worktrees from "../src/worktrees.js";
 
 const sampleTask = (overrides: Partial<Task> = {}): Task => ({
@@ -174,7 +174,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      repos: createMockRepos(),
+      foremanRepos: createMockRepos(),
       taskSystem: {
         addComment: vi.fn(async () => undefined),
         addArtifact: vi.fn(async () => undefined),
@@ -186,7 +186,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
       runner: {} as any,
-      repoRefs: [],
+      repos: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -226,7 +226,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      repos: createMockRepos({
+      foremanRepos: createMockRepos({
         attempts: { addAttemptEvent },
         reviewCheckpoints: {
           upsertReviewCheckpoint: vi.fn(() => {
@@ -245,7 +245,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
       runner: {} as any,
-      repoRefs: [],
+      repos: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -289,7 +289,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      repos: createMockRepos(),
+      foremanRepos: createMockRepos(),
       taskSystem: {
         addComment: vi.fn(async () => undefined),
         addArtifact: vi.fn(async () => undefined),
@@ -301,7 +301,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
       runner: {} as any,
-      repoRefs: [],
+      repos: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -342,7 +342,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      repos: createMockRepos(),
+      foremanRepos: createMockRepos(),
       taskSystem: {
         addComment: vi.fn(async () => undefined),
         addArtifact: vi.fn(async () => undefined),
@@ -354,7 +354,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolvePullRequest,
       } as any,
       runner: {} as any,
-      repoRefs: [],
+      repos: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -404,7 +404,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      repos: createMockRepos(),
+      foremanRepos: createMockRepos(),
       taskSystem: {
         addComment: vi.fn(async () => undefined),
         addArtifact: vi.fn(async () => undefined),
@@ -419,7 +419,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolveThreads,
       } as any,
       runner: {} as any,
-      repoRefs: [],
+      repos: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -470,7 +470,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      repos: createMockRepos(),
+      foremanRepos: createMockRepos(),
       taskSystem: {
         addComment: vi.fn(async () => undefined),
         addArtifact: vi.fn(async () => undefined),
@@ -483,7 +483,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolveThreads,
       } as any,
       runner: {} as any,
-      repoRefs: [],
+      repos: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -532,7 +532,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      repos: createMockRepos({
+      foremanRepos: createMockRepos({
         workers: {
           listWorkers: vi.fn(() => [
             {
@@ -549,7 +549,7 @@ describe("SchedulerService applyWorkerResult", () => {
       taskSystem: {} as any,
       reviewService: {} as any,
       runner: {} as any,
-      repoRefs: [],
+      repos: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -590,7 +590,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      repos: createMockRepos({
+      foremanRepos: createMockRepos({
         workers: {
           listWorkers: vi.fn(() => [
             {
@@ -617,7 +617,7 @@ describe("SchedulerService applyWorkerResult", () => {
       taskSystem: {} as any,
       reviewService: {} as any,
       runner: {} as any,
-      repoRefs: [],
+      repos: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -659,7 +659,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      repos: createMockRepos({
+      foremanRepos: createMockRepos({
         attempts: {
           createAttemptWithLeases: vi.fn(() => null),
         },
@@ -672,7 +672,7 @@ describe("SchedulerService applyWorkerResult", () => {
       } as any,
       reviewService: {} as any,
       runner: {} as any,
-      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
       env: {},
       logger: fakeLogger as any,
     });
@@ -723,7 +723,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      repos: createMockRepos({
+      foremanRepos: createMockRepos({
         attempts: {
           createAttemptWithLeases: vi.fn(() => ({
             id: "attempt-5",
@@ -743,7 +743,7 @@ describe("SchedulerService applyWorkerResult", () => {
       } as any,
       reviewService: {} as any,
       runner: {} as any,
-      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
       env: {},
       logger: fakeLogger as any,
     });
