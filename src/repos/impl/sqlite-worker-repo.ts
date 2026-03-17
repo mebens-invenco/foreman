@@ -1,8 +1,7 @@
 import { isoNow } from "../../lib/time.js";
 import { newId } from "../../lib/ids.js";
-import type { WorkerRepo } from "../worker-repo.js";
+import type { WorkerRecord, WorkerRepo } from "../worker-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
-import type { WorkerRecord } from "../records.js";
 
 const mapWorker = (row: SqliteRow): WorkerRecord => ({
   id: String(row.id),

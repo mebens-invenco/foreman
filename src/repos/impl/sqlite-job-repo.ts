@@ -2,9 +2,8 @@ import { ForemanError } from "../../lib/errors.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import { newId } from "../../lib/ids.js";
-import type { JobRepo } from "../job-repo.js";
-import type { JobRecord } from "../records.js";
 import type { ActionType, JobStatus } from "../../domain/index.js";
+import type { JobRecord, JobRepo } from "../job-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 const mapJob = (row: SqliteRow): JobRecord => ({

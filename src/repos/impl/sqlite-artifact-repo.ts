@@ -1,7 +1,6 @@
 import { isoNow } from "../../lib/time.js";
 import { newId } from "../../lib/ids.js";
-import type { ArtifactRepo } from "../artifact-repo.js";
-import type { ArtifactRecord } from "../records.js";
+import type { ArtifactRecord, ArtifactRepo } from "../artifact-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 export class SqliteArtifactRepo implements ArtifactRepo {

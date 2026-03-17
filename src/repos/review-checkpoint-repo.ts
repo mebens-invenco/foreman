@@ -1,5 +1,17 @@
 import type { ReviewContext } from "../domain/index.js";
-import type { ReviewCheckpointRecord } from "./records.js";
+
+export type ReviewCheckpointRecord = {
+  id: string;
+  taskId: string;
+  prUrl: string;
+  headSha: string;
+  latestReviewSummaryId: string | null;
+  latestConversationCommentId: string | null;
+  checksFingerprint: string;
+  mergeState: ReviewContext["mergeState"];
+  recordedAt: string;
+  sourceAttemptId: string;
+};
 
 export interface ReviewCheckpointRepo {
   getReviewCheckpoint(taskId: string, prUrl: string): ReviewCheckpointRecord | null;

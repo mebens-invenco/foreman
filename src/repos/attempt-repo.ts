@@ -1,5 +1,36 @@
 import type { AttemptStatus } from "../domain/index.js";
-import type { AttemptEventRecord, AttemptRecord, LeaseResourceType, RecoveredAttemptRecord } from "./records.js";
+import type { LeaseResourceType } from "./lease-repo.js";
+
+export type AttemptRecord = {
+  id: string;
+  jobId: string;
+  workerId: string | null;
+  attemptNumber: number;
+  runnerName: "opencode";
+  runnerModel: string;
+  runnerVariant: string;
+  status: AttemptStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  exitCode: number | null;
+  signal: string | null;
+  summary: string;
+  errorMessage: string | null;
+};
+
+export type AttemptEventRecord = {
+  id: string;
+  eventType: string;
+  message: string;
+  payload: Record<string, unknown>;
+  createdAt: string;
+};
+
+export type RecoveredAttemptRecord = {
+  attemptId: string;
+  jobId: string;
+  workerId: string | null;
+};
 
 export interface AttemptRepo {
   createAttempt(input: {

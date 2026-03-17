@@ -1,5 +1,25 @@
 import type { ActionType, JobStatus } from "../domain/index.js";
-import type { JobRecord } from "./records.js";
+
+export type JobRecord = {
+  id: string;
+  taskId: string;
+  taskProvider: "linear" | "file";
+  action: ActionType;
+  status: JobStatus;
+  priorityRank: number;
+  repoKey: string;
+  baseBranch: string | null;
+  dedupeKey: string;
+  selectionReason: string;
+  selectionContext: Record<string, unknown>;
+  scoutRunId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  leasedAt: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  errorMessage: string | null;
+};
 
 export interface JobRepo {
   activeJobCount(): number;

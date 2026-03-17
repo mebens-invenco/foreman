@@ -1,4 +1,15 @@
-import type { LearningRecord } from "./records.js";
+export type LearningRecord = {
+  id: string;
+  title: string;
+  repo: string;
+  tags: string[];
+  confidence: "emerging" | "established" | "proven";
+  content: string;
+  appliedCount: number;
+  readCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
 
 export interface LearningRepo {
   addLearning(input: {

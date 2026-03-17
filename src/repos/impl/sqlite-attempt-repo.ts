@@ -3,8 +3,8 @@ import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import type { AttemptStatus } from "../../domain/index.js";
-import type { AttemptRepo } from "../attempt-repo.js";
-import type { AttemptEventRecord, AttemptRecord, LeaseResourceType, RecoveredAttemptRecord } from "../records.js";
+import type { AttemptEventRecord, AttemptRecord, AttemptRepo, RecoveredAttemptRecord } from "../attempt-repo.js";
+import type { LeaseResourceType } from "../lease-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 const mapAttempt = (row: SqliteRow): AttemptRecord => ({

@@ -315,7 +315,7 @@ export const runScoutSelection = async (input: {
 
       const repo = task.repo ? reposByKey.get(task.repo) : null;
       if (!repo) {
-          await recordBlocker(task.id, "Review blocked because the task repo is missing or invalid.");
+        await recordBlocker(task.id, "Review blocked because the task repo is missing or invalid.");
         continue;
       }
 
