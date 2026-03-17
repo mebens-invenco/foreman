@@ -21,7 +21,7 @@ export type AttemptStatus =
   | "timed_out";
 
 export type TaskArtifact = {
-  type: "pull_request" | "commit" | "doc" | "link" | "other";
+  type: "pull_request";
   url: string;
   title?: string;
   externalId?: string;
@@ -73,6 +73,7 @@ export type ConversationComment = {
   body: string;
   authorName: string | null;
   createdAt: string;
+  url?: string;
 };
 
 export type ReviewThread = {
@@ -80,6 +81,7 @@ export type ReviewThread = {
   path: string | null;
   line: number | null;
   isResolved: boolean;
+  comments: ConversationComment[];
 };
 
 export type CheckState = {
@@ -122,9 +124,7 @@ export type AgentRunResult = {
   stderrBytes: number;
 };
 
-export type TaskMutation =
-  | { type: "add_comment"; body: string }
-  | { type: "upsert_artifact"; artifact: TaskArtifact };
+export type TaskMutation = { type: "add_comment"; body: string };
 
 export type ReviewMutation =
   | {
@@ -144,6 +144,7 @@ export type ReviewMutation =
       body?: string;
     }
   | { type: "reply_to_review_summary"; reviewId: string; body: string }
+  | { type: "reply_to_thread_comment"; threadId: string; body: string }
   | { type: "reply_to_pr_comment"; commentId: string; body: string }
   | { type: "resolve_threads"; threadIds: string[] };
 

@@ -104,16 +104,51 @@ export const resolveBaseBranch = async (input: {
     return promise;
   };
 
-  const resolveDependencyBranch = async (taskId: string): Promise<string> => {
+  const ensureOriginBranch = async (branchName: string, blocker: string): Promise<boolean> => {
+    const exists = await branchExistsOnOrigin(input.repo, branchName);
+    if (!exists) {
+      blockers.push(blocker);
+    }
+    return exists;
+  };
+
+  const resolveDependencyBaseBranch = async (taskId: string): Promise<{ branch: string | null; merged: boolean }> => {
     const dependencyTask = await getDependencyTask(taskId);
     const context = await getDependencyReviewContext(taskId);
     if (context?.state === "open") {
-      return context.headBranch;
+      const exists = await ensureOriginBranch(
+        context.headBranch,
+        `Dependency task ${taskId} pull request head branch ${context.headBranch} does not exist on origin.`,
+      );
+      return { branch: exists ? context.headBranch : null, merged: false };
     }
     if (context?.state === "merged") {
-      return context.baseBranch;
+      const exists = await ensureOriginBranch(
+        context.baseBranch,
+        `Merged dependency task ${taskId} base branch ${context.baseBranch} does not exist on origin.`,
+      );
+      return { branch: exists ? context.baseBranch : null, merged: true };
     }
-    return dependencyTask.branchName ?? dependencyTask.id.toLowerCase();
+    if (dependencyTask.state === "in_review") {
+      blockers.push(`Dependency task ${taskId} must have an open pull request before scheduling.`);
+      return { branch: null, merged: false };
+    }
+
+    blockers.push(`Dependency task ${taskId} must be in review with an open pull request or merged before scheduling.`);
+    return { branch: null, merged: false };
+  };
+
+  const ensureMergedDependency = async (taskId: string): Promise<void> => {
+    const context = await getDependencyReviewContext(taskId);
+    if (context?.state === "merged") {
+      await ensureOriginBranch(
+        context.baseBranch,
+        `Merged dependency task ${taskId} base branch ${context.baseBranch} does not exist on origin.`,
+      );
+      return;
+    }
+
+    blockers.push(`Non-base dependency ${taskId} must be merged before scheduling.`);
   };
 
   const resolveMergedDependencyBaseBranch = async (branchName: string): Promise<string | null> => {
@@ -133,10 +168,9 @@ export const resolveBaseBranch = async (input: {
   let baseBranch = input.repo.defaultBranch;
 
   if (dependencies.length === 1) {
-    const dependencyTask = await getDependencyTask(dependencies[0]!);
-    const dependencyContext = await getDependencyReviewContext(dependencyTask.id);
-    if (!isTerminal(dependencyTask) || dependencyContext?.state === "merged") {
-      baseBranch = await resolveDependencyBranch(dependencyTask.id);
+    const resolved = await resolveDependencyBaseBranch(dependencies[0]!);
+    if (resolved.branch) {
+      baseBranch = resolved.branch;
     }
   } else if (dependencies.length > 1) {
     const baseTaskId = input.task.dependencies.baseTaskId;
@@ -151,17 +185,17 @@ export const resolveBaseBranch = async (input: {
     }
 
     for (const dependencyId of dependencies.filter((item) => item !== baseTaskId)) {
-      const dependencyTask = await getDependencyTask(dependencyId);
-      if (!isTerminal(dependencyTask)) {
-        blockers.push(`Non-base dependency ${dependencyId} must be terminal before scheduling.`);
-      }
+      await ensureMergedDependency(dependencyId);
     }
 
-    const baseTask = await getDependencyTask(baseTaskId);
-    const baseTaskContext = await getDependencyReviewContext(baseTask.id);
-    if (!isTerminal(baseTask) || baseTaskContext?.state === "merged") {
-      baseBranch = await resolveDependencyBranch(baseTask.id);
+    const resolved = await resolveDependencyBaseBranch(baseTaskId);
+    if (resolved.branch) {
+      baseBranch = resolved.branch;
     }
+  }
+
+  if (blockers.length > 0) {
+    return { baseBranch, blockers };
   }
 
   for (const branchName of input.task.dependencies.branchNames) {
@@ -216,7 +250,7 @@ export const runScoutSelection = async (input: {
 
   const availableCapacity = Math.max(0, input.config.scheduler.workerConcurrency - input.db.activeJobCount());
   const jobs: Selection[] = [];
-  const blockedComments = new Set<string>();
+  const blockedReasons = new Set<string>();
   logger?.info("loaded scout candidates", {
     scoutRunId,
     candidateCount: allTasks.length,
@@ -233,14 +267,28 @@ export const runScoutSelection = async (input: {
     return !input.db.hasActiveDedupeKey(dedupeKey);
   };
 
-  const addBlockerComment = async (taskId: string, body: string): Promise<void> => {
+  const recordBlocker = async (taskId: string, body: string, options?: { postComment?: boolean }): Promise<void> => {
+    const postComment = options?.postComment ?? true;
     const key = `${taskId}:${body}`;
-    if (blockedComments.has(key)) {
+    if (blockedReasons.has(key)) {
       return;
     }
-    blockedComments.add(key);
-    logger?.warn("blocking task during scout selection", { taskId, reason: body });
-    await input.taskSystem.addComment({ taskId, body: `${input.config.workspace.agentPrefix}${body}` });
+    blockedReasons.add(key);
+    logger?.info("blocking task during scout selection", { taskId, reason: body });
+    if (!postComment) {
+      return;
+    }
+
+    const commentBody = `${input.config.workspace.agentPrefix}${body}`;
+    const latestComment = (await input.taskSystem.listComments(taskId))
+      .slice()
+      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())[0];
+    if (latestComment?.body === commentBody) {
+      logger?.debug("skipping duplicate blocker comment during scout selection", { taskId, reason: body });
+      return;
+    }
+
+    await input.taskSystem.addComment({ taskId, body: commentBody });
   };
 
   for (let index = 0; index < availableCapacity; index += 1) {
@@ -253,7 +301,7 @@ export const runScoutSelection = async (input: {
 
       const repo = task.repo ? reposByKey.get(task.repo) : null;
       if (!repo) {
-        await addBlockerComment(task.id, "Review blocked because the task repo is missing or invalid.");
+          await recordBlocker(task.id, "Review blocked because the task repo is missing or invalid.");
         continue;
       }
 
@@ -304,7 +352,7 @@ export const runScoutSelection = async (input: {
 
         const repo = task.repo ? reposByKey.get(task.repo) : null;
         if (!repo) {
-          await addBlockerComment(task.id, "Retry blocked because the task repo is missing or invalid.");
+          await recordBlocker(task.id, "Retry blocked because the task repo is missing or invalid.");
           continue;
         }
 
@@ -323,7 +371,7 @@ export const runScoutSelection = async (input: {
         const base = await resolveBaseBranch({ task, repo, taskSystem: input.taskSystem, reviewService: input.reviewService });
         if (base.blockers.length > 0) {
           for (const blocker of base.blockers) {
-            await addBlockerComment(task.id, blocker);
+            await recordBlocker(task.id, blocker);
           }
           continue;
         }
@@ -352,20 +400,20 @@ export const runScoutSelection = async (input: {
         }
 
         if (!task.repo) {
-          await addBlockerComment(task.id, "Execution blocked because Agent Repo metadata is missing.");
+          await recordBlocker(task.id, "Execution blocked because Agent Repo metadata is missing.");
           continue;
         }
 
         const repo = reposByKey.get(task.repo);
         if (!repo) {
-          await addBlockerComment(task.id, `Execution blocked because repo ${task.repo} was not discovered.`);
+          await recordBlocker(task.id, `Execution blocked because repo ${task.repo} was not discovered.`);
           continue;
         }
 
         const base = await resolveBaseBranch({ task, repo, taskSystem: input.taskSystem, reviewService: input.reviewService });
         if (base.blockers.length > 0) {
           for (const blocker of base.blockers) {
-            await addBlockerComment(task.id, blocker);
+            await recordBlocker(task.id, blocker, { postComment: false });
           }
           continue;
         }

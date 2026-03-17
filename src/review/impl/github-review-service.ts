@@ -28,6 +28,40 @@ const parseGitRemote = (remoteUrl: string): RepoDescriptor => {
 
 type GitHubGraphqlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
+type PageInfo = {
+  hasNextPage: boolean;
+  endCursor: string | null;
+};
+
+type GitHubAuthor = { login: string | null } | null;
+
+type GitHubGraphqlComment = {
+  id: string;
+  body: string;
+  createdAt: string;
+  url: string;
+  author: GitHubAuthor;
+};
+
+type GitHubRestIssueComment = {
+  id: number;
+  body: string;
+  created_at: string;
+  html_url?: string;
+  user: { login: string | null } | null;
+};
+
+type GitHubReviewThreadNode = {
+  id: string;
+  isResolved: boolean;
+  path: string | null;
+  line: number | null;
+  comments: {
+    nodes: GitHubGraphqlComment[];
+    pageInfo: PageInfo;
+  };
+};
+
 const mergeCheckStates = (input: {
   checkRuns: Array<{ name: string; status: string; conclusion: string | null }>;
   statuses: Array<{ context: string; state: string }>;
@@ -174,6 +208,172 @@ export class GitHubReviewService implements ReviewService {
     return json.data;
   }
 
+  private mapConversationComment(input: {
+    id: string;
+    body: string;
+    createdAt: string;
+    url?: string;
+    author: GitHubAuthor;
+  }): ConversationComment {
+    return {
+      id: input.id,
+      body: input.body,
+      authorName: input.author?.login ?? null,
+      createdAt: input.createdAt,
+      ...(input.url ? { url: input.url } : {}),
+    };
+  }
+
+  private async listConversationCommentsByIssue(owner: string, repo: string, number: number): Promise<ConversationComment[]> {
+    const comments: ConversationComment[] = [];
+
+    for (let page = 1; ; page += 1) {
+      const response = await this.rest<GitHubRestIssueComment[]>(`/repos/${owner}/${repo}/issues/${number}/comments?per_page=100&page=${page}`);
+      comments.push(
+        ...response.map((comment) => ({
+          id: String(comment.id),
+          body: comment.body,
+          authorName: comment.user?.login ?? null,
+          createdAt: comment.created_at,
+          ...(comment.html_url ? { url: comment.html_url } : {}),
+        })),
+      );
+
+      if (response.length < 100) {
+        break;
+      }
+    }
+
+    comments.sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
+    return comments;
+  }
+
+  private async listReviewThreadComments(threadId: string, initialComments: GitHubGraphqlComment[], initialPageInfo: PageInfo): Promise<ConversationComment[]> {
+    const comments = initialComments.map((comment) => this.mapConversationComment(comment));
+    let cursor = initialPageInfo.hasNextPage ? initialPageInfo.endCursor : null;
+
+    while (cursor) {
+      const data = await this.graphql<{
+        node: {
+          comments: {
+            nodes: GitHubGraphqlComment[];
+            pageInfo: PageInfo;
+          };
+        } | null;
+      }>(
+        `query ForemanReviewThreadComments($threadId: ID!, $cursor: String) {
+          node(id: $threadId) {
+            ... on PullRequestReviewThread {
+              comments(first: 100, after: $cursor) {
+                nodes {
+                  id
+                  body
+                  createdAt
+                  url
+                  author { login }
+                }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+            }
+          }
+        }`,
+        { threadId, cursor },
+      );
+
+      const thread = data.node;
+      if (!thread) {
+        break;
+      }
+
+      comments.push(...thread.comments.nodes.map((comment) => this.mapConversationComment(comment)));
+      cursor = thread.comments.pageInfo.hasNextPage ? thread.comments.pageInfo.endCursor : null;
+    }
+
+    return comments;
+  }
+
+  private async listUnresolvedReviewThreads(owner: string, repo: string, number: number): Promise<ReviewThread[]> {
+    const threads: ReviewThread[] = [];
+    let cursor: string | null = null;
+
+    while (true) {
+      const data: {
+        repository: {
+          pullRequest: {
+            reviewThreads: {
+              nodes: GitHubReviewThreadNode[];
+              pageInfo: PageInfo;
+            };
+          } | null;
+        } | null;
+      } = await this.graphql(
+        `query ForemanPullRequestReviewThreads($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $number) {
+              reviewThreads(first: 100, after: $cursor) {
+                nodes {
+                  id
+                  isResolved
+                  path
+                  line
+                  comments(first: 100) {
+                    nodes {
+                      id
+                      body
+                      createdAt
+                      url
+                      author { login }
+                    }
+                    pageInfo {
+                      hasNextPage
+                      endCursor
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+            }
+          }
+        }`,
+        { owner, repo, number, cursor },
+      );
+
+      const reviewThreadConnection: { nodes: GitHubReviewThreadNode[]; pageInfo: PageInfo } | null =
+        data.repository?.pullRequest?.reviewThreads ?? null;
+      if (!reviewThreadConnection) {
+        break;
+      }
+
+      for (const thread of reviewThreadConnection.nodes) {
+        if (thread.isResolved) {
+          continue;
+        }
+
+        threads.push({
+          id: thread.id,
+          path: thread.path,
+          line: thread.line,
+          isResolved: thread.isResolved,
+          comments: await this.listReviewThreadComments(thread.id, thread.comments.nodes, thread.comments.pageInfo),
+        });
+      }
+
+      if (!reviewThreadConnection.pageInfo.hasNextPage) {
+        break;
+      }
+
+      cursor = reviewThreadConnection.pageInfo.endCursor;
+    }
+
+    return threads;
+  }
+
   private pullRequestArtifact(task: Task): string | null {
     return task.artifacts.find((artifact) => artifact.type === "pull_request")?.url ?? null;
   }
@@ -201,8 +401,6 @@ export class GitHubReviewService implements ReviewService {
           mergeStateStatus: string;
           commits: { nodes: Array<{ commit: { committedDate: string } }> };
           reviews: { nodes: Array<{ id: string; body: string; submittedAt: string; author: { login: string | null } | null; commit: { oid: string } | null }> };
-          comments: { nodes: Array<{ id: string; body: string; createdAt: string; author: { login: string | null } | null }> };
-          reviewThreads: { nodes: Array<{ id: string; isResolved: boolean; path: string | null; line: number | null }> };
         } | null;
       } | null;
     }>(
@@ -221,12 +419,6 @@ export class GitHubReviewService implements ReviewService {
             commits(last: 1) { nodes { commit { committedDate } } }
             reviews(last: 100) {
               nodes { id body submittedAt author { login } commit { oid } }
-            }
-            comments(last: 100) {
-              nodes { id body createdAt author { login } }
-            }
-            reviewThreads(last: 100) {
-              nodes { id isResolved path line }
             }
           }
         }
@@ -253,25 +445,15 @@ export class GitHubReviewService implements ReviewService {
         commitId: review.commit?.oid ?? "",
       }));
 
-    const actionableConversationComments: ConversationComment[] = pullRequest.comments.nodes
+    const conversationComments = await this.listConversationCommentsByIssue(owner, repo, number);
+
+    const actionableConversationComments: ConversationComment[] = conversationComments
       .filter((comment) => Boolean(comment.body?.trim()))
       .filter((comment) => !comment.body.startsWith(agentPrefix))
       .filter((comment) => new Date(comment.createdAt).getTime() >= new Date(headIntroducedAt).getTime())
-      .map((comment) => ({
-        id: comment.id,
-        body: comment.body,
-        authorName: comment.author?.login ?? null,
-        createdAt: comment.createdAt,
-      }));
+      .map((comment) => ({ ...comment }));
 
-    const unresolvedThreads: ReviewThread[] = pullRequest.reviewThreads.nodes
-      .filter((thread) => !thread.isResolved)
-      .map((thread) => ({
-        id: thread.id,
-        path: thread.path,
-        line: thread.line,
-        isResolved: thread.isResolved,
-      }));
+    const unresolvedThreads = await this.listUnresolvedReviewThreads(owner, repo, number);
 
     const checks = await this.rest<{ check_runs: Array<{ name: string; status: string; conclusion: string | null }> }>(
       `/repos/${owner}/${repo}/commits/${pullRequest.headRefOid}/check-runs`,
@@ -345,16 +527,7 @@ export class GitHubReviewService implements ReviewService {
   async listConversationComments(prUrl: string): Promise<ConversationComment[]> {
     const { owner, repo, number } = parseGitHubUrl(prUrl);
     this.logger.debug("listing GitHub pull request conversation comments", { owner, repo, pullRequestNumber: number });
-    const comments = await this.rest<Array<{ id: number; body: string; created_at: string; user: { login: string | null } | null }>>(
-      `/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`,
-    );
-
-    const mapped = comments.map((comment) => ({
-      id: String(comment.id),
-      body: comment.body,
-      authorName: comment.user?.login ?? null,
-      createdAt: comment.created_at,
-    }));
+    const mapped = await this.listConversationCommentsByIssue(owner, repo, number);
 
     this.logger.debug("listed GitHub pull request conversation comments", { owner, repo, pullRequestNumber: number, count: mapped.length });
     return mapped;
@@ -466,6 +639,26 @@ export class GitHubReviewService implements ReviewService {
       });
     });
     this.logger.info("replied to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl });
+  }
+
+  async replyToThreadComment(prUrl: string, threadId: string, body: string): Promise<void> {
+    const { owner, repo, number } = parseGitHubUrl(prUrl);
+    this.logger.info("replying to GitHub review thread", {
+      owner,
+      repo,
+      pullRequestNumber: number,
+      threadId,
+      bodyLength: body.length,
+    });
+    await this.graphql(
+      `mutation AddPullRequestReviewThreadReply($threadId: ID!, $body: String!) {
+        addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
+          comment { id }
+        }
+      }`,
+      { threadId, body },
+    );
+    this.logger.info("replied to GitHub review thread", { owner, repo, pullRequestNumber: number, threadId });
   }
 
   async replyToPrComment(prUrl: string, commentId: string, body: string): Promise<void> {

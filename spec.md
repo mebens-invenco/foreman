@@ -347,7 +347,7 @@ type Task = {
 }
 
 type TaskArtifact = {
-  type: "pull_request" | "commit" | "doc" | "link" | "other"
+  type: "pull_request"
   url: string
   title?: string
   externalId?: string
@@ -450,19 +450,23 @@ Rules:
 
 1. no task dependencies -> use the repo default branch
 2. exactly one task dependency:
-   - if the dependency is terminal, use the repo default branch
-   - otherwise resolve the dependency branch in this order:
-     1. latest open linked PR head branch for that dependency task
-     2. dependency task `branchName`
-     3. lowercase dependency task id
+   - the dependency is satisfied only when that dependency task is either:
+     1. in review with an open linked PR, or
+     2. merged
+   - if the dependency has an open linked PR, use that PR head branch
+   - if the dependency is merged, use that PR base branch
+   - the resolved branch must exist on origin
+   - otherwise the dependency is unsatisfied
 3. more than one task dependency:
    - require valid `Base from task`
-   - all non-base task dependencies must be terminal
-   - if the selected base task is terminal, use the repo default branch
-   - otherwise resolve the selected base branch in this order:
-     1. latest open linked PR head branch for the base task
-     2. base task `branchName`
-     3. lowercase base task id
+   - all non-base task dependencies must be merged
+   - the selected base task is satisfied only when it is either:
+     1. in review with an open linked PR, or
+     2. merged
+   - if the selected base task has an open linked PR, use that PR head branch
+   - if the selected base task is merged, use that PR base branch
+   - the resolved branch must exist on origin
+   - otherwise the dependency set is unsatisfied
 
 Branch dependency rules:
 
@@ -470,7 +474,13 @@ Branch dependency rules:
 - a branch dependency is satisfied only when the branch exists on origin and its tip is an ancestor of the resolved base branch tip
 - if a required dependency branch does not exist on origin, the dependency is unsatisfied
 
-If required metadata is missing or invalid for a task that would otherwise be selected, Foreman must add a task comment describing the blocker and not schedule that action.
+If required metadata is missing or invalid for a task that would otherwise be selected, Foreman must not schedule that action.
+
+Blocker comment rules:
+
+- Foreman may add a task comment describing the blocker for actionable task-level problems such as missing repo metadata
+- Foreman must not add a task comment for execution blockers caused by unsatisfied dependencies or missing dependency branches
+- before adding a blocker comment, Foreman must compare it to the latest existing task comment and skip posting when the bodies are identical
 
 ## File Task System
 
@@ -563,11 +573,12 @@ Responsibilities:
 - resolve linked PRs from task artifacts
 - fetch current PR state
 - fetch review threads
+- fetch nested comments for unresolved review threads
 - fetch top-level review summaries
 - fetch top-level PR conversation comments
 - fetch checks and merge state
 - create/reopen PRs
-- reply to review summaries and PR comments
+- reply to review summaries, review threads, and PR comments
 - resolve threads
 
 Foreman does not attempt a fully generic multi-provider review abstraction in v1.
@@ -606,6 +617,7 @@ type ConversationComment = {
   body: string
   authorName: string | null
   createdAt: string
+  url?: string
 }
 
 type ReviewThread = {
@@ -613,6 +625,7 @@ type ReviewThread = {
   path: string | null
   line: number | null
   isResolved: boolean
+  comments: ConversationComment[]
 }
 
 type CheckState = {
@@ -625,7 +638,7 @@ Review filtering rules:
 
 - actionable review summaries are top-level review summaries whose `commitId` equals the current PR `headSha`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
 - actionable conversation comments are top-level PR conversation comments created after `headIntroducedAt`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
-- unresolved threads are file/line review threads where `isResolved == false`
+- unresolved threads are file/line review threads where `isResolved == false`, enriched with their nested thread comments
 - checks fingerprinting only considers failing and pending checks
 
 ## Agent Runner
@@ -786,18 +799,7 @@ type Signal =
 ```ts
 type TaskMutation =
   | { type: "add_comment"; body: string }
-  | {
-      type: "upsert_artifact"
-      artifact: {
-        type: "pull_request" | "commit" | "doc" | "link" | "other"
-        url: string
-        title?: string
-        externalId?: string
-      }
-    }
 ```
-
-Task artifact upsert identity is `(type, url)` within a task. If an existing artifact has the same `type` and `url`, adapter code must update its optional metadata (`title`, `externalId`) rather than appending a duplicate.
 
 ### Review Mutations
 
@@ -820,9 +822,12 @@ type ReviewMutation =
       body?: string
     }
   | { type: "reply_to_review_summary"; reviewId: string; body: string }
+  | { type: "reply_to_thread_comment"; threadId: string; body: string }
   | { type: "reply_to_pr_comment"; commentId: string; body: string }
   | { type: "resolve_threads"; threadIds: string[] }
 ```
+
+Foreman prepends `workspace.agentPrefix` to outbound review replies if the worker body does not already include it.
 
 ### Learning Mutations
 
@@ -1042,8 +1047,8 @@ Consolidation swaps labels:
 
 ### System-Owned State Transitions
 
-- `execution` start -> `in_progress`
-- `retry` start -> `in_progress`
+- `execution` start -> `in_progress` after task worktree preparation succeeds
+- `retry` start -> `in_progress` after task worktree preparation succeeds
 - PR created/reopened -> `in_review`
 - `review` remains `in_review`
 - `consolidation` changes labels only

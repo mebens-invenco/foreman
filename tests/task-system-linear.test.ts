@@ -172,6 +172,43 @@ describe("LinearTaskSystem.getTask", () => {
     expect(requests[0]?.query).toContain("number: { eq: $number }");
     expect(requests[0]?.variables).toEqual({ teamKey: "ENG", number: 123 });
   });
+
+  test("ignores non-GitHub attachments when hydrating task artifacts", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanIssue")) {
+        return new Response(
+          JSON.stringify({
+            data: linearIssue([
+              { id: "att-pr", title: "PR 1", url: "https://github.com/acme/repo-a/pull/1" },
+              { id: "att-doc", title: "Design doc", url: "https://docs.example.com/spec" },
+            ]),
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    const task = await taskSystem.getTask("ENG-123");
+
+    expect(task.artifacts).toEqual([
+      {
+        type: "pull_request",
+        url: "https://github.com/acme/repo-a/pull/1",
+        title: "PR 1",
+        externalId: "att-pr",
+      },
+    ]);
+  });
 });
 
 describe("LinearTaskSystem.transition", () => {
@@ -241,7 +278,7 @@ describe("LinearTaskSystem.transition", () => {
 });
 
 describe("LinearTaskSystem.addArtifact", () => {
-  test("skips GitHub pull request artifacts because Linear auto-links them", async () => {
+  test("skips pull request artifacts because Linear auto-links them", async () => {
     const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
     global.fetch = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
@@ -262,28 +299,11 @@ describe("LinearTaskSystem.addArtifact", () => {
     expect(requests).toHaveLength(0);
   });
 
-  test("updates matching artifacts instead of creating duplicates", async () => {
+  test("does not create Linear attachments for non-GitHub pull request URLs", async () => {
     const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
     global.fetch = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
       requests.push(body);
-
-      if (body.query.includes("query ForemanIssue")) {
-        return new Response(
-          JSON.stringify({
-            data: linearIssue([{ id: "att-1", title: "Old title", url: "https://example.com/pull/1" }]),
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-
-      if (body.query.includes("mutation ForemanAttachmentUpdate")) {
-        return new Response(JSON.stringify({ data: { attachmentUpdate: { success: true } } }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
@@ -293,54 +313,10 @@ describe("LinearTaskSystem.addArtifact", () => {
       artifact: {
         type: "pull_request",
         url: "https://example.com/pull/1",
-        title: "New title",
+        title: "PR 1",
       },
     });
 
-    expect(requests).toHaveLength(2);
-    expect(requests[1]?.query).toContain("mutation ForemanAttachmentUpdate");
-    expect(requests[1]?.variables).toEqual({ id: "att-1", title: "New title" });
-  });
-
-  test("creates artifacts when no existing match is found", async () => {
-    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
-    global.fetch = vi.fn(async (_url, init) => {
-      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
-      requests.push(body);
-
-      if (body.query.includes("query ForemanIssue")) {
-        return new Response(JSON.stringify({ data: linearIssue([]) }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-
-      if (body.query.includes("mutation ForemanAttachmentCreate")) {
-        return new Response(JSON.stringify({ data: { attachmentCreate: { success: true } } }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-
-      throw new Error(`Unexpected query: ${body.query}`);
-    }) as typeof fetch;
-
-    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
-    await taskSystem.addArtifact({
-      taskId: "ENG-123",
-      artifact: {
-        type: "pull_request",
-        url: "https://example.com/pull/2",
-        title: "PR 2",
-      },
-    });
-
-    expect(requests).toHaveLength(2);
-    expect(requests[1]?.query).toContain("mutation ForemanAttachmentCreate");
-    expect(requests[1]?.variables).toEqual({
-      issueId: "issue-1",
-      url: "https://example.com/pull/2",
-      title: "PR 2",
-    });
+    expect(requests).toHaveLength(0);
   });
 });

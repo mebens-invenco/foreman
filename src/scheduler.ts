@@ -46,6 +46,9 @@ const consolidationLabels = (config: WorkspaceConfig): { remove: string[]; add: 
   };
 };
 
+const ensureAgentPrefix = (body: string, agentPrefix: string): string =>
+  body.startsWith(agentPrefix) ? body : `${agentPrefix}${body}`;
+
 export class SchedulerService extends EventEmitter {
   private status: SchedulerStatus = "stopped";
   private scoutInFlight = false;
@@ -475,11 +478,6 @@ export class SchedulerService extends EventEmitter {
       }, this.deps.config.scheduler.workerHeartbeatSeconds * 1000);
 
       try {
-        if (job.action === "execution" || job.action === "retry") {
-          await this.deps.taskSystem.transition({ taskId: task.id, toState: "in_progress" });
-          attemptLogger.info("transitioned task to in_progress");
-        }
-
         worktreePath =
           job.action === "consolidation"
             ? path.join(this.deps.paths.worktreesDir, repo.key, task.id)
@@ -494,6 +492,11 @@ export class SchedulerService extends EventEmitter {
           worktreePath,
           mode: job.action === "consolidation" ? "consolidation" : "task_worktree",
         });
+
+        if (job.action === "execution" || job.action === "retry") {
+          await this.deps.taskSystem.transition({ taskId: task.id, toState: "in_progress" });
+          attemptLogger.info("transitioned task to in_progress");
+        }
 
         if (await pathExists(worktreePath)) {
           beforeSha = await this.gitHead(worktreePath).catch(() => null);
@@ -785,11 +788,27 @@ export class SchedulerService extends EventEmitter {
       }
 
       if (mutation.type === "reply_to_review_summary") {
-        await this.deps.reviewService.replyToReviewSummary(pullRequestUrl, mutation.reviewId, mutation.body);
+        await this.deps.reviewService.replyToReviewSummary(
+          pullRequestUrl,
+          mutation.reviewId,
+          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+        );
         logger.info("replied to review summary", { reviewId: mutation.reviewId });
       }
+      if (mutation.type === "reply_to_thread_comment") {
+        await this.deps.reviewService.replyToThreadComment(
+          pullRequestUrl,
+          mutation.threadId,
+          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+        );
+        logger.info("replied to review thread", { threadId: mutation.threadId });
+      }
       if (mutation.type === "reply_to_pr_comment") {
-        await this.deps.reviewService.replyToPrComment(pullRequestUrl, mutation.commentId, mutation.body);
+        await this.deps.reviewService.replyToPrComment(
+          pullRequestUrl,
+          mutation.commentId,
+          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+        );
         logger.info("replied to pull request comment", { commentId: mutation.commentId });
       }
       if (mutation.type === "resolve_threads") {
@@ -802,10 +821,6 @@ export class SchedulerService extends EventEmitter {
       if (mutation.type === "add_comment") {
         await this.deps.taskSystem.addComment({ taskId: input.task.id, body: mutation.body });
         logger.info("added task comment from worker mutation");
-      }
-      if (mutation.type === "upsert_artifact") {
-        await this.deps.taskSystem.addArtifact({ taskId: input.task.id, artifact: mutation.artifact });
-        logger.info("upserted task artifact from worker mutation", { artifactType: mutation.artifact.type, artifactUrl: mutation.artifact.url });
       }
     }
 

@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import { createDefaultWorkspaceConfig } from "../src/config.js";
 import type { ReviewContext, Task, WorkerResult } from "../src/domain.js";
 import { SchedulerService } from "../src/scheduler.js";
+import * as worktrees from "../src/worktrees.js";
 
 const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   id: "TASK-0001",
@@ -246,6 +247,77 @@ describe("SchedulerService applyWorkerResult", () => {
     ).rejects.toThrow("Execution results with code changes must include a create_pull_request or reopen_pull_request mutation");
   });
 
+  test("prefixes review replies and routes thread replies explicitly", async () => {
+    const replyToReviewSummary = vi.fn(async () => undefined);
+    const replyToThreadComment = vi.fn(async () => undefined);
+    const replyToPrComment = vi.fn(async () => undefined);
+    const resolveThreads = vi.fn(async () => undefined);
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      db: {
+        ensureWorkerSlots: vi.fn(),
+        addLearning: vi.fn(),
+        updateLearning: vi.fn(),
+        addAttemptEvent: vi.fn(),
+        upsertReviewCheckpoint: vi.fn(),
+      } as any,
+      taskSystem: {
+        addComment: vi.fn(async () => undefined),
+        addArtifact: vi.fn(async () => undefined),
+        transition: vi.fn(async () => undefined),
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        replyToReviewSummary,
+        replyToThreadComment,
+        replyToPrComment,
+        resolveThreads,
+      } as any,
+      runner: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-3b" },
+        job: { action: "review" },
+        task: sampleTask({ artifacts: [{ type: "pull_request", url: reviewContext.pullRequestUrl }] }),
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        workerResult: baseWorkerResult({
+          reviewMutations: [
+            { type: "reply_to_review_summary", reviewId: "review-1", body: "Looks good now" },
+            { type: "reply_to_thread_comment", threadId: "thread-1", body: "[agent] Addressed in latest head" },
+            { type: "reply_to_pr_comment", commentId: "comment-1", body: "Please take another look" },
+            { type: "resolve_threads", threadIds: ["thread-1"] },
+          ],
+        }),
+      }),
+    ).resolves.toBe(reviewContext.pullRequestUrl);
+
+    expect(replyToReviewSummary).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "review-1", "[agent] Looks good now");
+    expect(replyToThreadComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "thread-1", "[agent] Addressed in latest head");
+    expect(replyToPrComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "comment-1", "[agent] Please take another look");
+    expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
+  });
+
   test("drains active worker runs during stop", async () => {
     const updateWorkerStatus = vi.fn();
     const scheduler = new SchedulerService({
@@ -425,6 +497,88 @@ describe("SchedulerService applyWorkerResult", () => {
 
     expect(returnLeasedJobToQueue).toHaveBeenCalledWith("job-1");
     expect(releaseLeaseByResource).not.toHaveBeenCalled();
+    expect(updateWorkerStatus).toHaveBeenLastCalledWith("worker-1", "idle", null);
+  });
+
+  test("does not transition a task to in_progress when worktree preparation fails", async () => {
+    vi.spyOn(worktrees, "ensureTaskWorktree").mockRejectedValue(new Error("worktree setup failed"));
+
+    const transition = vi.fn(async () => undefined);
+    const finalizeAttempt = vi.fn();
+    const updateJobStatus = vi.fn();
+    const releaseLeasesForAttempt = vi.fn();
+    const addAttemptEvent = vi.fn();
+    const updateWorkerStatus = vi.fn();
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      db: {
+        ensureWorkerSlots: vi.fn(),
+        createAttemptWithLeases: vi.fn(() => ({
+          id: "attempt-5",
+          attemptNumber: 1,
+          startedAt: "2026-03-16T00:00:00Z",
+        })),
+        updateWorkerStatus,
+        updateJobStatus,
+        addAttemptEvent,
+        finalizeAttempt,
+        releaseLeasesForAttempt,
+      } as any,
+      taskSystem: {
+        getTask: vi.fn(async () => sampleTask({ state: "ready", providerState: "ready" })),
+        transition,
+      } as any,
+      reviewService: {} as any,
+      runner: {} as any,
+      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    await (scheduler as any).runJob(
+      {
+        id: "worker-1",
+        slot: 1,
+        status: "leased",
+        currentAttemptId: null,
+        lastHeartbeatAt: "2026-03-16T00:00:00Z",
+      },
+      {
+        id: "job-1",
+        taskId: "TASK-0001",
+        action: "execution",
+        repoKey: "repo-a",
+        baseBranch: "main",
+      },
+    );
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(addAttemptEvent).toHaveBeenCalledWith("attempt-5", "attempt_started", "Started execution for TASK-0001");
+    expect(addAttemptEvent).toHaveBeenCalledWith("attempt-5", "attempt_failed", "worktree setup failed");
+    expect(finalizeAttempt).toHaveBeenCalledWith(
+      "attempt-5",
+      "failed",
+      expect.objectContaining({ summary: "worktree setup failed", errorMessage: "worktree setup failed" }),
+    );
+    expect(updateJobStatus).toHaveBeenLastCalledWith(
+      "job-1",
+      "failed",
+      expect.objectContaining({ errorMessage: "worktree setup failed" }),
+    );
+    expect(releaseLeasesForAttempt).toHaveBeenCalledWith("attempt-5", "completed");
     expect(updateWorkerStatus).toHaveBeenLastCalledWith("worker-1", "idle", null);
   });
 });

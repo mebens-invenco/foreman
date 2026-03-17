@@ -21,6 +21,7 @@ export interface ReviewService {
     body?: string;
   }): Promise<{ url: string; number: number }>;
   replyToReviewSummary(prUrl: string, reviewId: string, body: string): Promise<void>;
+  replyToThreadComment(prUrl: string, threadId: string, body: string): Promise<void>;
   replyToPrComment(prUrl: string, commentId: string, body: string): Promise<void>;
   resolveThreads(prUrl: string, threadIds: string[]): Promise<void>;
 }

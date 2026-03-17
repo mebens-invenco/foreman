@@ -95,6 +95,10 @@ class FakeReviewService implements ReviewService {
     throw new Error("not used");
   }
 
+  async replyToThreadComment(_prUrl: string, _threadId: string, _body: string): Promise<void> {
+    throw new Error("not used");
+  }
+
   async resolveThreads(_prUrl: string, _threadIds: string[]): Promise<void> {
     throw new Error("not used");
   }
@@ -174,6 +178,291 @@ describe("runScoutSelection", () => {
       expect(result.jobs[0]?.action).toBe("review");
       expect(result.jobs[0]?.task.id).toBe("TASK-0002");
       expect(result.jobs[1]?.action).toBe("execution");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("blocks dependent chains until upstream tasks are in review with an open pull request or merged", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 4;
+
+    const tasks = [
+      task({
+        id: "ENG-4746",
+        title: "Root task",
+        state: "ready",
+        providerState: "ready",
+        priority: "normal",
+        updatedAt: "2026-03-14T10:00:00Z",
+      }),
+      task({
+        id: "ENG-4747",
+        title: "Depends on 4746",
+        state: "ready",
+        providerState: "ready",
+        priority: "normal",
+        updatedAt: "2026-03-14T10:01:00Z",
+        dependencies: { taskIds: ["ENG-4746"], baseTaskId: null, branchNames: [] },
+      }),
+      task({
+        id: "ENG-4748",
+        title: "Depends on 4747",
+        state: "ready",
+        providerState: "ready",
+        priority: "normal",
+        updatedAt: "2026-03-14T10:02:00Z",
+        dependencies: { taskIds: ["ENG-4747"], baseTaskId: null, branchNames: [] },
+      }),
+      task({
+        id: "ENG-4749",
+        title: "Depends on 4748",
+        state: "ready",
+        providerState: "ready",
+        priority: "normal",
+        updatedAt: "2026-03-14T10:03:00Z",
+        dependencies: { taskIds: ["ENG-4748"], baseTaskId: null, branchNames: [] },
+      }),
+      task({
+        id: "ENG-4750",
+        title: "Depends on 4749",
+        state: "ready",
+        providerState: "ready",
+        priority: "normal",
+        updatedAt: "2026-03-14T10:04:00Z",
+        dependencies: { taskIds: ["ENG-4749"], baseTaskId: null, branchNames: [] },
+      }),
+    ];
+
+    const taskSystem = new FakeTaskSystem(tasks);
+    const reviewService = new FakeReviewService({});
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.task.id).toBe("ENG-4746");
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(taskSystem.comments.get("ENG-4747") ?? []).toHaveLength(0);
+      expect(taskSystem.comments.get("ENG-4748") ?? []).toHaveLength(0);
+      expect(taskSystem.comments.get("ENG-4749") ?? []).toHaveLength(0);
+      expect(taskSystem.comments.get("ENG-4750") ?? []).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("blocks dependent execution when the upstream pull request head branch is missing on origin", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    vi.spyOn(worktrees, "branchExistsOnOrigin").mockResolvedValue(false);
+
+    const dependencyTask = task({
+      id: "ENG-4680",
+      title: "Dependency in review",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:00:00Z",
+      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/10" } satisfies TaskArtifact],
+    });
+    const dependentTask = task({
+      id: "ENG-4681",
+      title: "Dependent task",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      dependencies: { taskIds: ["ENG-4680"], baseTaskId: null, branchNames: [] },
+    });
+
+    const taskSystem = new FakeTaskSystem([dependencyTask, dependentTask]);
+    const reviewService = new FakeReviewService({
+      [dependencyTask.id]: {
+        provider: "github",
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/10",
+        pullRequestNumber: 10,
+        state: "open",
+        isDraft: false,
+        headSha: "abc",
+        headBranch: "eng-4680",
+        baseBranch: "main",
+        headIntroducedAt: "2026-03-14T10:00:00Z",
+        mergeState: "clean",
+        actionableReviewSummaries: [],
+        actionableConversationComments: [],
+        unresolvedThreads: [],
+        failingChecks: [],
+        pendingChecks: [],
+      },
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.comments.get("ENG-4681") ?? []).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("requires non-base dependencies to be merged before scheduling multi-dependency execution", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    vi.spyOn(worktrees, "branchExistsOnOrigin").mockResolvedValue(true);
+
+    const baseTask = task({
+      id: "ENG-4700",
+      title: "Base dependency",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:00:00Z",
+      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/20" } satisfies TaskArtifact],
+    });
+    const nonBaseTask = task({
+      id: "ENG-4701",
+      title: "Non-base dependency",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:01:00Z",
+      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/21" } satisfies TaskArtifact],
+    });
+    const dependentTask = task({
+      id: "ENG-4702",
+      title: "Multi-dependency task",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      dependencies: { taskIds: ["ENG-4700", "ENG-4701"], baseTaskId: "ENG-4700", branchNames: [] },
+    });
+
+    const taskSystem = new FakeTaskSystem([baseTask, nonBaseTask, dependentTask]);
+    const reviewService = new FakeReviewService({
+      [baseTask.id]: {
+        provider: "github",
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/20",
+        pullRequestNumber: 20,
+        state: "open",
+        isDraft: false,
+        headSha: "abc",
+        headBranch: "eng-4700",
+        baseBranch: "main",
+        headIntroducedAt: "2026-03-14T10:00:00Z",
+        mergeState: "clean",
+        actionableReviewSummaries: [],
+        actionableConversationComments: [],
+        unresolvedThreads: [],
+        failingChecks: [],
+        pendingChecks: [],
+      },
+      [nonBaseTask.id]: {
+        provider: "github",
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/21",
+        pullRequestNumber: 21,
+        state: "open",
+        isDraft: false,
+        headSha: "def",
+        headBranch: "eng-4701",
+        baseBranch: "main",
+        headIntroducedAt: "2026-03-14T10:01:00Z",
+        mergeState: "clean",
+        actionableReviewSummaries: [],
+        actionableConversationComments: [],
+        unresolvedThreads: [],
+        failingChecks: [],
+        pendingChecks: [],
+      },
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.comments.get("ENG-4702") ?? []).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips posting a blocker comment when it matches the latest existing comment", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const blockerBody = `${config.workspace.agentPrefix}Execution blocked because Agent Repo metadata is missing.`;
+
+    const blockedTask = task({
+      id: "TASK-0003",
+      title: "Missing repo metadata",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T10:00:00Z",
+      repo: null,
+    });
+
+    const taskSystem = new FakeTaskSystem([blockedTask]);
+    taskSystem.comments.set(blockedTask.id, [
+      {
+        id: `${blockedTask.id}-1`,
+        taskId: blockedTask.id,
+        body: blockerBody,
+        authorName: "agent",
+        authorKind: "agent",
+        createdAt: "2026-03-14T10:05:00Z",
+        updatedAt: null,
+      },
+    ]);
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.comments.get(blockedTask.id) ?? []).toHaveLength(1);
+      expect(taskSystem.comments.get(blockedTask.id)?.[0]?.body).toBe(blockerBody);
     } finally {
       db.close();
     }
