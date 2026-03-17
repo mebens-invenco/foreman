@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import type { LoggerService } from "../logger.js";
-import { renderPlanPrompt } from "../prompts.js";
+import { renderPlanPrompt } from "./render-plan-prompt.js";
 import type { ForemanRepos } from "../repos/index.js";
 import { atomicWriteFile } from "../lib/fs.js";
 import { discoverGitRepos } from "../workspace/git-repo-discovery.js";
