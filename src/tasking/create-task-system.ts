@@ -14,5 +14,9 @@ export const createTaskSystem = (input: {
     return new FileTaskSystem(input.config, input.paths);
   }
 
-  return new LinearTaskSystem(input.config, input.env, input.logger?.child({ component: "taskSystem.linear" }));
+  if (input.config.taskSystem.type === "linear") {
+    return new LinearTaskSystem(input.config, input.env, input.logger?.child({ component: "taskSystem.linear" }));
+  }
+
+  throw new Error(`Unsupported task system type: ${String((input.config.taskSystem as { type?: unknown }).type)}`);
 };
