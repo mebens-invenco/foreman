@@ -1,6 +1,7 @@
-import { promises as fs } from "node:fs";
+import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 
+import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 
 import type { RepoRef, TaskState } from "./domain/index.js";
@@ -82,6 +83,8 @@ const attemptStatuses = ["running", "completed", "failed", "blocked", "canceled"
 
 export const createHttpServer = (deps: HttpServerDeps) => {
   const server = Fastify({ logger: false });
+  const uiRoot = path.join(deps.paths.projectRoot, "dist", "ui");
+  const hasUiBuild = existsSync(uiRoot);
 
   server.setErrorHandler((error, _request, reply) => {
     const body = errorShape(error);
@@ -126,17 +129,22 @@ export const createHttpServer = (deps: HttpServerDeps) => {
         return task.id.toLowerCase().includes(search) || task.title.toLowerCase().includes(search);
       })
       .slice(0, limit ?? 100)
-      .map((task) => ({
-        id: task.id,
-        provider: task.provider,
-        title: task.title,
-        state: task.state,
-        providerState: task.providerState,
-        priority: task.priority,
-        repo: task.repo,
-        updatedAt: task.updatedAt,
-        url: task.url,
-      }));
+      .map((task) => {
+        const pullRequestUrl = task.artifacts.find((artifact) => artifact.type === "pull_request")?.url ?? null;
+
+        return {
+          id: task.id,
+          provider: task.provider,
+          title: task.title,
+          state: task.state,
+          providerState: task.providerState,
+          priority: task.priority,
+          repo: task.repo,
+          updatedAt: task.updatedAt,
+          url: task.url,
+          reviewUrl: pullRequestUrl ?? task.url,
+        };
+      });
     return { tasks };
   });
 
@@ -185,8 +193,8 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   });
 
   server.get("/api/attempts", async (request) => {
-    const query = request.query as { status?: string; jobId?: string; limit?: string };
-    const filters: { status?: "running" | "completed" | "failed" | "blocked" | "canceled" | "timed_out"; jobId?: string; limit?: number } = {};
+    const query = request.query as { status?: string; jobId?: string; limit?: string; offset?: string };
+    const filters: { status?: "running" | "completed" | "failed" | "blocked" | "canceled" | "timed_out"; jobId?: string; limit?: number; offset?: number } = {};
     const status = parseEnumQuery("status", query.status, attemptStatuses);
     if (status !== undefined) {
       filters.status = status;
@@ -197,6 +205,10 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const limit = parsePositiveIntegerQuery("limit", query.limit);
     if (limit !== undefined) {
       filters.limit = limit;
+    }
+    const offset = parseNonNegativeIntegerQuery("offset", query.offset);
+    if (offset !== undefined) {
+      filters.offset = offset;
     }
     return {
       attempts: deps.repos.attempts.listAttempts(filters),
@@ -256,13 +268,54 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   });
 
   server.get("/api/workers", async () => ({
-    workers: deps.repos.workers.listWorkers().map((worker) => ({
-      id: worker.id,
-      slot: worker.slot,
-      status: worker.status,
-      currentAttemptId: worker.currentAttemptId,
-      lastHeartbeatAt: worker.lastHeartbeatAt,
-    })),
+    workers: deps.repos.workers.listWorkers().map((worker) => {
+      const currentAttempt = worker.currentAttemptId
+        ? (() => {
+            try {
+              return deps.repos.attempts.getAttempt(worker.currentAttemptId);
+            } catch {
+              return null;
+            }
+          })()
+        : null;
+
+      const currentJob = currentAttempt
+        ? (() => {
+            try {
+              return deps.repos.jobs.getJob(currentAttempt.jobId);
+            } catch {
+              return null;
+            }
+          })()
+        : null;
+
+      return {
+        id: worker.id,
+        slot: worker.slot,
+        status: worker.status,
+        currentAttemptId: worker.currentAttemptId,
+        lastHeartbeatAt: worker.lastHeartbeatAt,
+        currentAttempt:
+          currentAttempt === null
+            ? null
+            : {
+                id: currentAttempt.id,
+                jobId: currentAttempt.jobId,
+                status: currentAttempt.status,
+                startedAt: currentAttempt.startedAt,
+              },
+        currentJob:
+          currentJob === null
+            ? null
+            : {
+                id: currentJob.id,
+                taskId: currentJob.taskId,
+                action: currentJob.action,
+                repoKey: currentJob.repoKey,
+                status: currentJob.status,
+              },
+      };
+    }),
   }));
 
   server.get("/api/workers/:workerId/logs/stream", async (request, reply) => {
@@ -313,7 +366,28 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     });
   });
 
-  server.get("/api/history", async () => ({ history: deps.repos.history.listHistory() }));
+  server.get("/api/history", async (request) => {
+    const query = request.query as { stage?: string; repo?: string; search?: string; limit?: string; offset?: string };
+    const filters: { stage?: string; repo?: string; search?: string; limit?: number; offset?: number } = {};
+    if (query.stage) {
+      filters.stage = query.stage;
+    }
+    if (query.repo) {
+      filters.repo = query.repo;
+    }
+    if (query.search) {
+      filters.search = query.search;
+    }
+    const limit = parsePositiveIntegerQuery("limit", query.limit);
+    if (limit !== undefined) {
+      filters.limit = limit;
+    }
+    const offset = parseNonNegativeIntegerQuery("offset", query.offset);
+    if (offset !== undefined) {
+      filters.offset = offset;
+    }
+    return { history: deps.repos.history.listHistory(filters) };
+  });
   server.get("/api/learnings", async (request) => {
     const query = request.query as { search?: string; repo?: string; limit?: string; offset?: string };
     const filters: { search?: string; repo?: string; limit?: number; offset?: number } = {};
@@ -356,6 +430,19 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     deps.scheduler.triggerManualScout();
     return { scout: { status: "scheduled", trigger: "manual" } };
   });
+
+  if (hasUiBuild) {
+    void server.register(fastifyStatic, { root: uiRoot, prefix: "/" });
+
+    server.setNotFoundHandler((request, reply) => {
+      const acceptsHtml = request.headers.accept?.includes("text/html") ?? false;
+      if (request.method === "GET" && !request.url.startsWith("/api/") && acceptsHtml) {
+        return fs.readFile(path.join(uiRoot, "index.html"), "utf8").then((html) => reply.type("text/html").send(html));
+      }
+
+      void reply.status(404).send({ error: { code: "not_found", message: `Route not found: ${request.method} ${request.url}` } });
+    });
+  }
 
   return server;
 };

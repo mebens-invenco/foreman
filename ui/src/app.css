@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  --background: 220 15% 7%;
+  --foreground: 36 24% 93%;
+  --card: 220 12% 9%;
+  --card-foreground: 36 24% 93%;
+  --muted: 220 10% 14%;
+  --muted-foreground: 30 10% 68%;
+  --border: 220 8% 20%;
+  --input: 220 10% 16%;
+  --primary: 28 93% 54%;
+  --primary-foreground: 24 18% 8%;
+  --accent: 220 10% 12%;
+  --accent-foreground: 36 24% 93%;
+  --success: 135 52% 46%;
+  --warning: 36 100% 55%;
+  --destructive: 0 72% 56%;
+  --info: 205 88% 61%;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    @apply bg-background text-foreground;
+  }
+
+  body {
+    @apply m-0 min-h-screen bg-background font-sans text-sm text-foreground antialiased;
+  }
+
+  body,
+  button,
+  input,
+  select,
+  textarea {
+    border-radius: 0;
+  }
+
+  a {
+    @apply text-inherit no-underline;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  ::selection {
+    @apply bg-primary text-primary-foreground;
+  }
+}
+
+@layer components {
+  .panel-surface {
+    @apply border border-border bg-card text-card-foreground shadow-panel;
+  }
+
+  .focus-ring {
+    @apply outline-none focus-visible:ring-1 focus-visible:ring-primary focus-visible:ring-offset-0;
+  }
+}

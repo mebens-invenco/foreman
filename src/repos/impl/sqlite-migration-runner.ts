@@ -13,6 +13,40 @@ import type { SqliteDatabase } from "./sqlite-database.js";
 export class SqliteMigrationRunner implements MigrationRunner {
   constructor(private readonly sqlite: SqliteDatabase) {}
 
+  private rowMatches(
+    existing: Record<string, unknown> | undefined,
+    incoming: Record<string, unknown>,
+    columns: readonly string[],
+  ): boolean {
+    if (!existing) {
+      return false;
+    }
+
+    return columns.every((column) => existing[column] === incoming[column]);
+  }
+
+  private skipOrThrowLegacyConflict(
+    entity: string,
+    identifier: string,
+    existing: Record<string, unknown> | undefined,
+    incoming: Record<string, unknown>,
+    columns: readonly string[],
+  ): boolean {
+    if (!existing) {
+      return false;
+    }
+
+    if (this.rowMatches(existing, incoming, columns)) {
+      return true;
+    }
+
+    throw new ForemanError(
+      "legacy_import_conflict",
+      `Legacy import conflict for ${entity} ${identifier}: existing row differs from legacy data`,
+      409,
+    );
+  }
+
   async runMigrations(projectRoot: string): Promise<void> {
     this.sqlite.exec(
       "CREATE TABLE IF NOT EXISTS schema_migration (version TEXT PRIMARY KEY, checksum TEXT NOT NULL, applied_at TEXT NOT NULL)",
@@ -56,21 +90,7 @@ export class SqliteMigrationRunner implements MigrationRunner {
     }
   }
 
-  private assertLegacyImportDestinationEmpty(): void {
-    const tables = ["learning", "history_step", "history_step_repo"];
-    for (const table of tables) {
-      const row = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as Record<string, unknown>;
-      if (Number(row.count ?? 0) > 0) {
-        throw new ForemanError(
-          "legacy_import_destination_not_empty",
-          `Destination table ${table} must be empty before import`,
-        );
-      }
-    }
-  }
-
   importLegacyDatabase(legacyDbPath: string): void {
-    this.assertLegacyImportDestinationEmpty();
     const legacy = new Database(legacyDbPath, { readonly: true });
     try {
       const learnings = legacy
@@ -86,17 +106,38 @@ export class SqliteMigrationRunner implements MigrationRunner {
         .all() as Array<Record<string, unknown>>;
 
       this.sqlite.transaction(() => {
+        const selectLearning = this.sqlite.prepare(
+          "SELECT id, title, repo, tags, confidence, content, applied_count, read_count, created_at, updated_at FROM learning WHERE id = ?",
+        );
         const insertLearning = this.sqlite.prepare(
           "INSERT INTO learning(id, title, repo, tags, confidence, content, applied_count, read_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         );
+        const selectHistory = this.sqlite.prepare(
+          "SELECT step_id, created_at, stage, issue, summary FROM history_step WHERE step_id = ?",
+        );
         const insertHistory = this.sqlite.prepare(
           "INSERT INTO history_step(step_id, created_at, stage, issue, summary) VALUES (?, ?, ?, ?, ?)",
+        );
+        const selectHistoryRepo = this.sqlite.prepare(
+          "SELECT step_id, position, path, before_sha, after_sha FROM history_step_repo WHERE step_id = ? AND position = ?",
         );
         const insertHistoryRepo = this.sqlite.prepare(
           "INSERT INTO history_step_repo(step_id, position, path, before_sha, after_sha) VALUES (?, ?, ?, ?, ?)",
         );
 
         for (const row of learnings) {
+          if (
+            this.skipOrThrowLegacyConflict(
+              "learning",
+              String(row.id),
+              selectLearning.get(row.id) as Record<string, unknown> | undefined,
+              row,
+              ["id", "title", "repo", "tags", "confidence", "content", "applied_count", "read_count", "created_at", "updated_at"],
+            )
+          ) {
+            continue;
+          }
+
           insertLearning.run(
             row.id,
             row.title,
@@ -112,10 +153,39 @@ export class SqliteMigrationRunner implements MigrationRunner {
         }
 
         for (const row of historySteps) {
+          if (
+            this.skipOrThrowLegacyConflict(
+              "history step",
+              String(row.step_id),
+              selectHistory.get(row.step_id) as Record<string, unknown> | undefined,
+              row,
+              ["step_id", "created_at", "stage", "issue", "summary"],
+            )
+          ) {
+            continue;
+          }
+
           insertHistory.run(row.step_id, row.created_at, row.stage, row.issue, row.summary);
         }
 
         for (const row of historyRepos) {
+          const historyStep = selectHistory.get(row.step_id) as Record<string, unknown> | undefined;
+          if (!historyStep) {
+            continue;
+          }
+
+          if (
+            this.skipOrThrowLegacyConflict(
+              "history repo",
+              `${String(row.step_id)}:${String(row.position)}`,
+              selectHistoryRepo.get(row.step_id, row.position) as Record<string, unknown> | undefined,
+              row,
+              ["step_id", "position", "path", "before_sha", "after_sha"],
+            )
+          ) {
+            continue;
+          }
+
           insertHistoryRepo.run(row.step_id, row.position, row.path, row.before_sha, row.after_sha);
         }
       })();

@@ -23,5 +23,5 @@ export interface HistoryRepo {
     summary: string;
     repos?: Array<{ path: string; beforeSha: string; afterSha: string }>;
   }): string;
-  listHistory(limit?: number): HistoryRecord[];
+  listHistory(filters?: { stage?: string; repo?: string; search?: string; limit?: number; offset?: number }): HistoryRecord[];
 }

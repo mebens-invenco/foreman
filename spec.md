@@ -1346,9 +1346,11 @@ The target workspace must already have been initialized with `foreman init` so t
 
 Import preconditions:
 
-- destination `learning`, `history_step`, and `history_step_repo` tables must be empty
-- if any of those destination tables already contain rows, import must fail instead of merging or overwriting
-- import is not treated as idempotent in v1
+- destination `learning`, `history_step`, and `history_step_repo` tables may already contain rows
+- rows with primary keys not present in the destination are inserted normally
+- rows whose primary key already exists are skipped only when the destination row matches the legacy row exactly
+- rows whose primary key already exists but whose payload differs must fail the import instead of merging or overwriting
+- `history_step_repo` rows whose parent `history_step` does not exist in either the destination or imported legacy data are skipped
 - if import fails partway through, the operation must roll back the transaction and leave the destination unchanged
 
 ## HTTP API
