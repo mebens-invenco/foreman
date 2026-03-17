@@ -6,10 +6,10 @@ import { loadWorkspaceConfig } from "./config.js";
 import { createAgentRunner } from "./execution/index.js";
 import { createHttpServer } from "./http.js";
 import { LoggerService } from "./logger.js";
+import { SchedulerService } from "./orchestration/index.js";
 import { createRepos } from "./repos/index.js";
 import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
 import { createReviewService, resolveGitHubAuthEnv } from "./review/index.js";
-import { SchedulerService } from "./scheduler.js";
 import { createTaskSystem } from "./tasking/index.js";
 import { importLegacyMemory, initializeWorkspace, renderWorkspacePlan } from "./workspace.js";
 import { discoverGitRepos } from "./workspace/git-repo-discovery.js";
@@ -72,11 +72,11 @@ program
     const scheduler = new SchedulerService({
       config,
       paths,
-      repos,
+      foremanRepos: repos,
       taskSystem,
       reviewService: createReviewService({ env: resolvedEnv, logger }),
       runner: createAgentRunner({ config }),
-      repoRefs,
+      repos: repoRefs,
       env: resolvedEnv,
       logger: logger.child({ component: "scheduler" }),
     });
