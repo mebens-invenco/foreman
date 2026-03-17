@@ -1,13 +1,13 @@
-import type { WorkspaceConfig } from "./config.js";
-import type { ActionType, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskComment } from "./domain/index.js";
-import { priorityToRank } from "./domain/index.js";
-import { ForemanError } from "./lib/errors.js";
-import { stableStringify } from "./lib/json.js";
-import type { LoggerService } from "./logger.js";
-import type { ForemanRepos, ScoutRunTrigger } from "./repos/index.js";
-import type { ReviewService } from "./review/index.js";
-import type { TaskSystem } from "./tasking/index.js";
-import { branchExistsOnOrigin, isAncestorOnOrigin, resolveTaskBranchName } from "./worktrees.js";
+import type { WorkspaceConfig } from "../config.js";
+import type { ActionType, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskComment } from "../domain/index.js";
+import { priorityToRank } from "../domain/index.js";
+import { ForemanError } from "../lib/errors.js";
+import { stableStringify } from "../lib/json.js";
+import type { LoggerService } from "../logger.js";
+import type { ForemanRepos, ScoutRunTrigger } from "../repos/index.js";
+import type { ReviewService } from "../review/index.js";
+import type { TaskSystem } from "../tasking/index.js";
+import { branchExistsOnOrigin, isAncestorOnOrigin, resolveTaskBranchName } from "../worktrees.js";
 
 type Selection = {
   task: Task;

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskArtifact, TaskComment } from "../src/domain/index.js";
-import { runScoutSelection } from "../src/scout.js";
+import { runScoutSelection } from "../src/orchestration/index.js";
 import type { ReviewService } from "../src/review/index.js";
 import type { TaskSystem } from "../src/tasking/index.js";
 import { createDefaultWorkspaceConfig } from "../src/config.js";
