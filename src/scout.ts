@@ -264,6 +264,10 @@ export const runScoutSelection = async (input: {
   });
 
   const canSchedule = (task: Task, action: ActionType): boolean => {
+    if (jobs.some((job) => job.task.id === task.id)) {
+      return false;
+    }
+
     const dedupeKey = `${task.id}:${action}`;
     if (jobs.some((job) => `${job.task.id}:${job.action}` === dedupeKey)) {
       return false;
@@ -298,7 +302,9 @@ export const runScoutSelection = async (input: {
   for (let index = 0; index < availableCapacity; index += 1) {
     let chosen: Selection | null = null;
 
-    for (const task of activeCandidates.filter((candidate) => candidate.state === "in_review")) {
+    for (const task of activeCandidates.filter(
+      (candidate) => candidate.state === "in_review" || candidate.state === "in_progress",
+    )) {
       if (!canSchedule(task, "review")) {
         continue;
       }

@@ -779,6 +779,15 @@ export class SchedulerService extends EventEmitter {
       logger.info("transitioned task to in_review using existing pull request artifact", { pullRequestUrl });
     }
 
+    if (input.job.action === "execution" && workerResult.outcome === "no_action_needed") {
+      const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(input.task, input.repo);
+      if (resolvedPullRequest?.state === "open") {
+        pullRequestUrl = resolvedPullRequest.pullRequestUrl;
+        await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
+        logger.info("transitioned task to in_review after execution no-op on open pull request", { pullRequestUrl });
+      }
+    }
+
     for (const mutation of workerResult.reviewMutations) {
       if (mutation.type === "create_pull_request" || mutation.type === "reopen_pull_request") {
         continue;
