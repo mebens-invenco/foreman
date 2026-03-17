@@ -3,15 +3,16 @@
 import { Command, InvalidArgumentError } from "commander";
 
 import { loadWorkspaceConfig } from "./config.js";
-import { applyMigrations, ForemanDb, openDatabase } from "./db.js";
 import { createHttpServer } from "./http.js";
 import { LoggerService } from "./logger.js";
+import { createRepos } from "./repos/index.js";
+import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
 import { GitHubReviewService, resolveGitHubAuthEnv } from "./review.js";
-import { discoverRepos } from "./repos.js";
 import { OpenCodeRunner } from "./runner.js";
 import { SchedulerService } from "./scheduler.js";
 import { createTaskSystem } from "./task-system.js";
 import { importLegacyMemory, initializeWorkspace, renderWorkspacePlan } from "./workspace.js";
+import { discoverGitRepos } from "./workspace/git-repo-discovery.js";
 import type { LoggerLevelName } from "./logger.js";
 
 const program = new Command();
@@ -54,9 +55,9 @@ program
     });
     logger.info("starting foreman service", { host: config.http.host, port: config.http.port });
     const resolvedEnv = await resolveGitHubAuthEnv(env, logger.child({ component: "review.github.auth" }));
-    const db = new ForemanDb(await openDatabase(paths.dbPath));
-    await applyMigrations(db.sqlite, paths.projectRoot);
-    const repos = await discoverRepos(config, paths);
+    const foremanRepos = createRepos(await openSqliteDatabase(paths.dbPath));
+    await foremanRepos.migrationRunner.runMigrations(paths.projectRoot);
+    const repos = await discoverGitRepos(config, paths);
     logger.info("discovered repositories for service startup", { repoCount: repos.length });
     const taskSystem = createTaskSystem({
       config,
@@ -66,12 +67,12 @@ program
     });
     await taskSystem.validateStartup?.();
     logger.info("validated task system startup");
-    await renderWorkspacePlan(workspace, db, logger);
+    await renderWorkspacePlan(workspace, foremanRepos, logger);
 
     const scheduler = new SchedulerService({
       config,
       paths,
-      db,
+      foremanRepos,
       taskSystem,
       reviewService: new GitHubReviewService(resolvedEnv, logger.child({ component: "review.github" })),
       runner: new OpenCodeRunner(config.runner.model, config.runner.variant),
@@ -80,7 +81,7 @@ program
       logger: logger.child({ component: "scheduler" }),
     });
 
-    const server = createHttpServer({ config, paths, repos, db, taskSystem, scheduler });
+    const server = createHttpServer({ config, paths, repos, foremanRepos, taskSystem, scheduler });
     await server.listen({ host: config.http.host, port: config.http.port });
     logger.info("http server listening", { host: config.http.host, port: config.http.port });
     await scheduler.start();
@@ -98,7 +99,7 @@ program
         logger.info("shutting down foreman service");
         await scheduler.stop();
         await server.close();
-        db.close();
+        foremanRepos.close();
         logger.info("foreman service stopped");
         await logger.flush();
         process.exit(0);
@@ -124,14 +125,14 @@ plan
       minLevel: options.logLevel,
     });
     logger.info("rendering plan prompt from cli command");
-    const db = new ForemanDb(await openDatabase(paths.dbPath));
+    const foremanRepos = createRepos(await openSqliteDatabase(paths.dbPath));
     try {
-      await applyMigrations(db.sqlite, paths.projectRoot);
-      const result = await renderWorkspacePlan(workspace, db, logger);
+      await foremanRepos.migrationRunner.runMigrations(paths.projectRoot);
+      const result = await renderWorkspacePlan(workspace, foremanRepos, logger);
       logger.info("rendered plan prompt from cli command", { planPath: result.paths.planPath, contextPath: result.contextPath });
       process.stdout.write(`Rendered plan prompt to ${result.paths.planPath}\n`);
     } finally {
-      db.close();
+      foremanRepos.close();
       await logger.flush();
     }
   });

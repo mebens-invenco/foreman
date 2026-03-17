@@ -25,11 +25,11 @@ describe("legacy import", () => {
     const db = await createMigratedDb(dbPath, projectRoot);
 
     try {
-      db.importLegacyDatabase(legacyDbPath);
+      db.migrationRunner.importLegacyDatabase(legacyDbPath);
 
-      expect(db.listLearnings({ limit: 10 })).toHaveLength(1);
-      expect(db.listHistory(10)).toHaveLength(1);
-      expect(db.listLearnings({ search: "fixtures", limit: 10 })[0]?.title).toBe("Prefer repo fixtures");
+      expect(db.learnings.listLearnings({ limit: 10 })).toHaveLength(1);
+      expect(db.history.listHistory(10)).toHaveLength(1);
+      expect(db.learnings.listLearnings({ search: "fixtures", limit: 10 })[0]?.title).toBe("Prefer repo fixtures");
     } finally {
       db.close();
     }

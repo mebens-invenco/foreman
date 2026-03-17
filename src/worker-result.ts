@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { WorkerResult } from "./domain.js";
+import type { WorkerResult } from "./domain/index.js";
 
 const taskMutationSchema = z.object({ type: z.literal("add_comment"), body: z.string().min(1) });
 

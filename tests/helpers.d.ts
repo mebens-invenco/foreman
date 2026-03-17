@@ -1,8 +1,11 @@
 import { type WorkspacePaths } from "../src/config.js";
-import { ForemanDb } from "../src/db.js";
+import { ForemanRepos } from "../src/repos/index.js";
+import { SqliteForemanDatabase } from "../src/repos/impl/sqlite-database.js";
 export declare const createTempDir: (prefix: string) => Promise<string>;
 export declare const createWorkspacePaths: (projectRoot: string, workspaceRoot: string) => WorkspacePaths;
-export declare const createMigratedDb: (dbPath: string, projectRoot: string) => Promise<ForemanDb>;
+export declare const createMigratedDb: (dbPath: string, projectRoot: string) => Promise<ForemanRepos & {
+    database: SqliteForemanDatabase;
+}>;
 export declare const createLegacyMemoryDb: (dbPath: string) => void;
 export declare const createTestConfig: () => {
     version: 1;

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskArtifact, TaskComment } from "../src/domain.js";
+import type { ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskArtifact, TaskComment } from "../src/domain/index.js";
 import { runScoutSelection } from "../src/scout.js";
 import type { ReviewService } from "../src/review.js";
 import type { TaskSystem } from "../src/task-system.js";
@@ -182,7 +182,7 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        db,
+        foremanRepos: db,
         taskSystem,
         reviewService,
         repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
@@ -254,7 +254,7 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        db,
+        foremanRepos: db,
         taskSystem,
         reviewService,
         repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
@@ -311,7 +311,7 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        db,
+        foremanRepos: db,
         taskSystem,
         reviewService,
         repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
@@ -386,7 +386,7 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        db,
+        foremanRepos: db,
         taskSystem,
         reviewService,
         repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
@@ -457,7 +457,7 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        db,
+        foremanRepos: db,
         taskSystem,
         reviewService,
         repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
@@ -523,7 +523,7 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        db,
+        foremanRepos: db,
         taskSystem,
         reviewService,
         repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
@@ -618,7 +618,7 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        db,
+        foremanRepos: db,
         taskSystem,
         reviewService,
         repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
@@ -665,7 +665,7 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        db,
+        foremanRepos: db,
         taskSystem,
         reviewService: new FakeReviewService({}),
         repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
@@ -733,7 +733,7 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        db,
+        foremanRepos: db,
         taskSystem,
         reviewService,
         repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }],

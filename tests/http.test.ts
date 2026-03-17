@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../src/config.js";
 import { createHttpServer } from "../src/http.js";
-import type { Task } from "../src/domain.js";
+import type { Task } from "../src/domain/index.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths } from "./helpers.js";
 
 const cleanupDirs: string[] = [];
@@ -46,7 +46,7 @@ describe("HTTP query validation", () => {
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths,
       repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
-      db,
+      foremanRepos: db,
       taskSystem: {
         listCandidates: vi.fn(async () => [sampleTask]),
         getTask: vi.fn(async () => sampleTask),

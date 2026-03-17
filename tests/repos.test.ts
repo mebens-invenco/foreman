@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../src/config.js";
-import { discoverRepos } from "../src/repos.js";
+import { discoverGitRepos } from "../src/workspace/git-repo-discovery.js";
 import { createTempDir, createWorkspacePaths } from "./helpers.js";
 
 const execFileAsync = promisify(execFile);
@@ -43,7 +43,7 @@ const addLinkedWorktree = async (repoPath: string, worktreePath: string): Promis
   await execFileAsync("git", ["worktree", "add", "--detach", worktreePath, "HEAD"], { cwd: repoPath });
 };
 
-describe("discoverRepos", () => {
+describe("discoverGitRepos", () => {
   test("skips repos matching repos.ignore patterns", async () => {
     const workspaceRoot = await createTempDir("foreman-repos-test-");
     cleanupDirs.push(workspaceRoot);
@@ -57,7 +57,7 @@ describe("discoverRepos", () => {
     config.repos.roots = ["repos"];
     config.repos.ignore = ["**/ignored-repo"];
 
-    const repos = await discoverRepos(config, createWorkspacePaths("/project", workspaceRoot));
+    const repos = await discoverGitRepos(config, createWorkspacePaths("/project", workspaceRoot));
     expect(repos.map((repo) => repo.key)).toEqual(["kept-repo"]);
   });
 
@@ -76,7 +76,7 @@ describe("discoverRepos", () => {
     const config = createDefaultWorkspaceConfig("foo", "file");
     config.repos.roots = ["repos"];
 
-    const repos = await discoverRepos(config, createWorkspacePaths("/project", workspaceRoot));
+    const repos = await discoverGitRepos(config, createWorkspacePaths("/project", workspaceRoot));
     expect(repos.map((repo) => repo.key)).toEqual(["source-repo"]);
   });
 
@@ -93,7 +93,7 @@ describe("discoverRepos", () => {
     const config = createDefaultWorkspaceConfig("foo", "file");
     config.repos.roots = ["linked-root"];
 
-    const repos = await discoverRepos(config, createWorkspacePaths("/project", workspaceRoot));
+    const repos = await discoverGitRepos(config, createWorkspacePaths("/project", workspaceRoot));
     expect(repos).toEqual([]);
   });
 
@@ -110,7 +110,7 @@ describe("discoverRepos", () => {
     const config = createDefaultWorkspaceConfig("foo", "file");
     config.repos.roots = ["repos"];
 
-    const repos = await discoverRepos(config, createWorkspacePaths("/project", workspaceRoot));
+    const repos = await discoverGitRepos(config, createWorkspacePaths("/project", workspaceRoot));
     expect(repos.map((repo) => repo.key)).toEqual(["gitfile-repo"]);
   });
 });

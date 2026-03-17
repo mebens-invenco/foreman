@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 
-import type { AgentRunRequest, AgentRunResult } from "./domain.js";
+import type { AgentRunRequest, AgentRunResult } from "./domain/index.js";
 import { isoNow } from "./lib/time.js";
 
 const forceKillAfterMs = 1_000;

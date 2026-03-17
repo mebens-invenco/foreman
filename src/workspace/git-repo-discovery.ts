@@ -1,10 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { ForemanError } from "./lib/errors.js";
-import { exec } from "./lib/process.js";
-import type { RepoRef } from "./domain.js";
-import type { WorkspaceConfig, WorkspacePaths } from "./config.js";
+import type { WorkspaceConfig, WorkspacePaths } from "../config.js";
+import type { RepoRef } from "../domain/index.js";
+import { ForemanError } from "../lib/errors.js";
+import { exec } from "../lib/process.js";
 
 const isGitRepo = async (repoPath: string): Promise<boolean> => {
   try {
@@ -60,7 +60,7 @@ const resolveDefaultBranch = async (repoPath: string): Promise<string> => {
   return branches.includes("main") ? "main" : branches.includes("master") ? "master" : branches[0] ?? "main";
 };
 
-export const discoverRepos = async (config: WorkspaceConfig, paths: WorkspacePaths): Promise<RepoRef[]> => {
+export const discoverGitRepos = async (config: WorkspaceConfig, paths: WorkspacePaths): Promise<RepoRef[]> => {
   const resolved = new Map<string, RepoRef>();
   const isIgnoredRepoPath = (candidatePath: string): boolean => {
     const relativePath = path.relative(paths.workspaceRoot, candidatePath) || ".";

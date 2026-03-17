@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { priorityToRank } from "../src/db.js";
+import { priorityToRank } from "../src/domain/index.js";
 import { addSeconds } from "../src/lib/time.js";
 import { createMigratedDb, createTempDir } from "./helpers.js";
 
@@ -15,18 +15,18 @@ afterEach(async () => {
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
-describe("ForemanDb leases", () => {
+describe("persistence repos", () => {
   test("creates attempt-owned leases that heartbeat and release by attempt", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
 
     try {
-      db.ensureWorkerSlots(1);
-      const worker = db.listWorkers()[0];
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0];
       expect(worker).toBeDefined();
 
-      const job = db.createJob({
+      const job = db.jobs.createJob({
         taskId: "TASK-0001",
         taskProvider: "file",
         action: "execution",
@@ -37,7 +37,7 @@ describe("ForemanDb leases", () => {
         selectionReason: "test",
       });
 
-      const attempt = db.createAttemptWithLeases({
+      const attempt = db.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId: worker!.id,
         runnerModel: "openai/gpt-5.4",
@@ -51,7 +51,7 @@ describe("ForemanDb leases", () => {
 
       expect(attempt).not.toBeNull();
 
-      const createdLeases = db.sqlite
+      const createdLeases = db.database.sqlite
         .prepare(
           "SELECT execution_attempt_id, released_at FROM lease WHERE worker_id = ? ORDER BY resource_key ASC",
         )
@@ -60,21 +60,21 @@ describe("ForemanDb leases", () => {
       expect(createdLeases.every((lease) => lease.execution_attempt_id === attempt!.id)).toBe(true);
 
       const nextExpiry = addSeconds(new Date(), 240);
-      db.heartbeatWorker(worker!.id, attempt!.id, nextExpiry);
+      db.workers.heartbeatWorker(worker!.id, attempt!.id, nextExpiry);
 
-      const heartbeatedLeases = db.sqlite
+      const heartbeatedLeases = db.database.sqlite
         .prepare("SELECT expires_at FROM lease WHERE execution_attempt_id = ? AND released_at IS NULL")
         .all(attempt!.id) as Array<{ expires_at: string }>;
       expect(heartbeatedLeases).toHaveLength(2);
       expect(heartbeatedLeases.every((lease) => lease.expires_at === nextExpiry)).toBe(true);
 
-      db.releaseLeasesForAttempt(attempt!.id, "completed");
+      db.leases.releaseLeasesForAttempt(attempt!.id, "completed");
 
-      const releasedLeases = db.sqlite
+      const releasedLeases = db.database.sqlite
         .prepare("SELECT release_reason FROM lease WHERE execution_attempt_id = ?")
         .all(attempt!.id) as Array<{ release_reason: string | null }>;
       expect(releasedLeases.every((lease) => lease.release_reason === "completed")).toBe(true);
-      expect(db.hasActiveTaskLease("TASK-0001")).toBe(false);
+      expect(db.leases.hasActiveTaskLease("TASK-0001")).toBe(false);
     } finally {
       db.close();
     }
@@ -86,11 +86,11 @@ describe("ForemanDb leases", () => {
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
 
     try {
-      db.ensureWorkerSlots(1);
-      const worker = db.listWorkers()[0];
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0];
       expect(worker).toBeDefined();
 
-      const job = db.createJob({
+      const job = db.jobs.createJob({
         taskId: "TASK-0002",
         taskProvider: "file",
         action: "execution",
@@ -100,7 +100,7 @@ describe("ForemanDb leases", () => {
         dedupeKey: "TASK-0002:execution",
         selectionReason: "test",
       });
-      const attempt = db.createAttemptWithLeases({
+      const attempt = db.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId: worker!.id,
         runnerModel: "openai/gpt-5.4",
@@ -110,19 +110,21 @@ describe("ForemanDb leases", () => {
       });
 
       expect(attempt).not.toBeNull();
-      db.updateWorkerStatus(worker!.id, "running", attempt!.id);
-      db.updateJobStatus(job.id, "running", { startedAt: attempt!.startedAt });
-      db.releaseLeasesForAttempt(attempt!.id, "expired");
+      db.workers.updateWorkerStatus(worker!.id, "running", attempt!.id);
+      db.jobs.updateJobStatus(job.id, "running", { startedAt: attempt!.startedAt });
+      db.leases.releaseLeasesForAttempt(attempt!.id, "expired");
 
-      const recovered = db.recoverOrphanedRunningAttempts("Recovered abandoned attempt on scheduler startup after prior shutdown");
+      const recovered = db.attempts.recoverOrphanedRunningAttempts(
+        "Recovered abandoned attempt on scheduler startup after prior shutdown",
+      );
       expect(recovered).toEqual([{ attemptId: attempt!.id, jobId: job.id, workerId: worker!.id }]);
 
-      expect(db.getAttempt(attempt!.id).status).toBe("canceled");
-      expect(db.getJob(job.id).status).toBe("canceled");
-      expect(db.listWorkers()[0]?.status).toBe("idle");
-      expect(db.listWorkers()[0]?.currentAttemptId).toBeNull();
+      expect(db.attempts.getAttempt(attempt!.id).status).toBe("canceled");
+      expect(db.jobs.getJob(job.id).status).toBe("canceled");
+      expect(db.workers.listWorkers()[0]?.status).toBe("idle");
+      expect(db.workers.listWorkers()[0]?.currentAttemptId).toBeNull();
 
-      const events = db.listAttemptEvents(attempt!.id);
+      const events = db.attempts.listAttemptEvents(attempt!.id);
       expect(events.some((event) => event.eventType === "attempt_recovered")).toBe(true);
     } finally {
       db.close();
@@ -135,11 +137,11 @@ describe("ForemanDb leases", () => {
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
 
     try {
-      db.ensureWorkerSlots(1);
-      const worker = db.listWorkers()[0];
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0];
       expect(worker).toBeDefined();
 
-      const job = db.createJob({
+      const job = db.jobs.createJob({
         taskId: "TASK-0003",
         taskProvider: "file",
         action: "execution",
@@ -150,16 +152,16 @@ describe("ForemanDb leases", () => {
         selectionReason: "test",
       });
 
-      expect(db.claimQueuedJobForWorker(job.id, worker!.id)).toBe(true);
-      expect(db.claimQueuedJobForWorker(job.id, worker!.id)).toBe(false);
+      expect(db.jobs.claimQueuedJobForWorker(job.id, worker!.id)).toBe(true);
+      expect(db.jobs.claimQueuedJobForWorker(job.id, worker!.id)).toBe(false);
 
-      expect(db.getJob(job.id).status).toBe("leased");
-      expect(db.listWorkers()[0]?.status).toBe("leased");
+      expect(db.jobs.getJob(job.id).status).toBe("leased");
+      expect(db.workers.listWorkers()[0]?.status).toBe("leased");
 
-      db.returnLeasedJobToQueue(job.id);
+      db.jobs.returnLeasedJobToQueue(job.id);
 
-      expect(db.getJob(job.id).status).toBe("queued");
-      expect(db.getJob(job.id).leasedAt).toBeNull();
+      expect(db.jobs.getJob(job.id).status).toBe("queued");
+      expect(db.jobs.getJob(job.id).leasedAt).toBeNull();
     } finally {
       db.close();
     }
@@ -173,11 +175,11 @@ describe("ForemanDb leases", () => {
     try {
       const taskId = "TASK-0004";
       const prUrl = "https://github.com/acme/repo/pull/123";
-      db.ensureWorkerSlots(1);
-      const worker = db.listWorkers()[0];
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0];
       expect(worker).toBeDefined();
 
-      const job = db.createJob({
+      const job = db.jobs.createJob({
         taskId,
         taskProvider: "file",
         action: "review",
@@ -188,7 +190,7 @@ describe("ForemanDb leases", () => {
         selectionReason: "test",
       });
 
-      const attemptOne = db.createAttemptWithLeases({
+      const attemptOne = db.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId: worker!.id,
         runnerModel: "openai/gpt-5.4",
@@ -196,7 +198,7 @@ describe("ForemanDb leases", () => {
         expiresAt: addSeconds(new Date(), 120),
         leases: [],
       });
-      const attemptTwo = db.createAttemptWithLeases({
+      const attemptTwo = db.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId: worker!.id,
         runnerModel: "openai/gpt-5.4",
@@ -208,7 +210,7 @@ describe("ForemanDb leases", () => {
       expect(attemptOne).not.toBeNull();
       expect(attemptTwo).not.toBeNull();
 
-      db.upsertReviewCheckpoint({
+      db.reviewCheckpoints.upsertReviewCheckpoint({
         taskId,
         prUrl,
         sourceAttemptId: attemptOne!.id,
@@ -231,13 +233,13 @@ describe("ForemanDb leases", () => {
         },
       });
 
-      const firstCheckpoint = db.getReviewCheckpoint(taskId, prUrl) as Record<string, unknown>;
+      const firstCheckpoint = db.reviewCheckpoints.getReviewCheckpoint(taskId, prUrl);
       expect(firstCheckpoint).not.toBeNull();
-      expect(firstCheckpoint.id).toBeDefined();
-      expect(firstCheckpoint.head_sha).toBe("sha-1");
-      expect(firstCheckpoint.source_attempt_id).toBe(attemptOne!.id);
+      expect(firstCheckpoint?.id).toBeDefined();
+      expect(firstCheckpoint?.headSha).toBe("sha-1");
+      expect(firstCheckpoint?.sourceAttemptId).toBe(attemptOne!.id);
 
-      db.upsertReviewCheckpoint({
+      db.reviewCheckpoints.upsertReviewCheckpoint({
         taskId,
         prUrl,
         sourceAttemptId: attemptTwo!.id,
@@ -260,15 +262,15 @@ describe("ForemanDb leases", () => {
         },
       });
 
-      const secondCheckpoint = db.getReviewCheckpoint(taskId, prUrl) as Record<string, unknown>;
-      expect(secondCheckpoint.id).toBe(firstCheckpoint.id);
-      expect(secondCheckpoint.head_sha).toBe("sha-2");
-      expect(secondCheckpoint.merge_state).toBe("dirty");
-      expect(secondCheckpoint.latest_review_summary_id).toBeNull();
-      expect(secondCheckpoint.latest_conversation_comment_id).toBeNull();
-      expect(secondCheckpoint.source_attempt_id).toBe(attemptTwo!.id);
+      const secondCheckpoint = db.reviewCheckpoints.getReviewCheckpoint(taskId, prUrl);
+      expect(secondCheckpoint?.id).toBe(firstCheckpoint?.id);
+      expect(secondCheckpoint?.headSha).toBe("sha-2");
+      expect(secondCheckpoint?.mergeState).toBe("dirty");
+      expect(secondCheckpoint?.latestReviewSummaryId).toBeNull();
+      expect(secondCheckpoint?.latestConversationCommentId).toBeNull();
+      expect(secondCheckpoint?.sourceAttemptId).toBe(attemptTwo!.id);
 
-      const rowCount = db.sqlite
+      const rowCount = db.database.sqlite
         .prepare("SELECT COUNT(*) AS count FROM review_checkpoint WHERE task_id = ? AND pr_url = ?")
         .get(taskId, prUrl) as { count: number };
       expect(rowCount.count).toBe(1);

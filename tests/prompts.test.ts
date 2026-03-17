@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../src/config.js";
 import { renderPlanPrompt, renderWorkerPrompt } from "../src/prompts.js";
-import type { Task } from "../src/domain.js";
+import type { Task } from "../src/domain/index.js";
 import { createTempDir, createWorkspacePaths } from "./helpers.js";
 
 const cleanupDirs: string[] = [];

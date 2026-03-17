@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { ActionType, RepoRef, Task } from "./domain.js";
+import type { ActionType, RepoRef, Task } from "./domain/index.js";
 import type { WorkspacePaths } from "./config.js";
 import { ForemanError } from "./lib/errors.js";
 import { ensureDir, pathExists } from "./lib/fs.js";
