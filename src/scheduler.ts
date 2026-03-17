@@ -688,7 +688,7 @@ export class SchedulerService extends EventEmitter {
     workerResult: WorkerResult;
   }): Promise<string | null> {
     const { workerResult } = input;
-    let pullRequestUrl = input.task.artifacts.find((artifact) => artifact.type === "pull_request")?.url ?? null;
+    let pullRequestUrl = await this.resolveCurrentPullRequestUrl(input.task, input.repo);
     const logger = this.logger.child({
       component: "scheduler.applyWorkerResult",
       attemptId: input.attempt.id,
@@ -884,6 +884,11 @@ export class SchedulerService extends EventEmitter {
     this.scheduleScout("task_mutation");
     logger.info("scheduled follow-up scout after task mutations", { pullRequestUrl });
     return pullRequestUrl;
+  }
+
+  private async resolveCurrentPullRequestUrl(task: Task, repo: RepoRef): Promise<string | null> {
+    const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(task, repo);
+    return resolvedPullRequest?.pullRequestUrl ?? null;
   }
 
   private async gitHead(cwd: string): Promise<string> {
