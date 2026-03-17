@@ -11,10 +11,18 @@ export const createTaskSystem = (input: {
   logger?: LoggerService;
 }): TaskSystem => {
   if (input.config.taskSystem.type === "file") {
+    if (!input.config.taskSystem.file) {
+      throw new Error("File task system config is required when type=file");
+    }
+
     return new FileTaskSystem(input.config, input.paths);
   }
 
   if (input.config.taskSystem.type === "linear") {
+    if (!input.config.taskSystem.linear) {
+      throw new Error("Linear task system config is required when type=linear");
+    }
+
     return new LinearTaskSystem(input.config, input.env, input.logger?.child({ component: "taskSystem.linear" }));
   }
 
