@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { OpenCodeRunner } from "../src/runner.js";
+import { OpenCodeRunner } from "../src/execution/index.js";
 import { createTempDir } from "./helpers.js";
 
 const cleanupDirs: string[] = [];

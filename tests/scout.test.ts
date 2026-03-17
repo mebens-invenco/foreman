@@ -6,8 +6,8 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { ConversationComment, ReviewContext, Task, TaskArtifact, TaskComment } from "../src/domain.js";
 import { runScoutSelection } from "../src/scout.js";
-import type { ReviewService } from "../src/review.js";
-import type { TaskSystem } from "../src/task-system.js";
+import type { ReviewService } from "../src/review/index.js";
+import type { TaskSystem } from "../src/tasking/index.js";
 import { createDefaultWorkspaceConfig } from "../src/config.js";
 import * as worktrees from "../src/worktrees.js";
 import { createMigratedDb, createTempDir } from "./helpers.js";

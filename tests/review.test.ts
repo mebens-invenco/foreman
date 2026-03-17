@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { Task } from "../src/domain.js";
-import { GitHubReviewService } from "../src/review.js";
+import { GitHubReviewService } from "../src/review/index.js";
 
 const fakeLogger = {
   child() {
