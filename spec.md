@@ -450,19 +450,23 @@ Rules:
 
 1. no task dependencies -> use the repo default branch
 2. exactly one task dependency:
-   - if the dependency is terminal, use the repo default branch
-   - otherwise resolve the dependency branch in this order:
-     1. latest open linked PR head branch for that dependency task
-     2. dependency task `branchName`
-     3. lowercase dependency task id
+   - the dependency is satisfied only when that dependency task is either:
+     1. in review with an open linked PR, or
+     2. merged
+   - if the dependency has an open linked PR, use that PR head branch
+   - if the dependency is merged, use that PR base branch
+   - the resolved branch must exist on origin
+   - otherwise the dependency is unsatisfied
 3. more than one task dependency:
    - require valid `Base from task`
-   - all non-base task dependencies must be terminal
-   - if the selected base task is terminal, use the repo default branch
-   - otherwise resolve the selected base branch in this order:
-     1. latest open linked PR head branch for the base task
-     2. base task `branchName`
-     3. lowercase base task id
+   - all non-base task dependencies must be merged
+   - the selected base task is satisfied only when it is either:
+     1. in review with an open linked PR, or
+     2. merged
+   - if the selected base task has an open linked PR, use that PR head branch
+   - if the selected base task is merged, use that PR base branch
+   - the resolved branch must exist on origin
+   - otherwise the dependency set is unsatisfied
 
 Branch dependency rules:
 
@@ -471,6 +475,7 @@ Branch dependency rules:
 - if a required dependency branch does not exist on origin, the dependency is unsatisfied
 
 If required metadata is missing or invalid for a task that would otherwise be selected, Foreman must add a task comment describing the blocker and not schedule that action.
+This includes task dependencies that are not yet review-ready or whose required remote branch does not exist on origin.
 
 ## File Task System
 
@@ -1048,8 +1053,8 @@ Consolidation swaps labels:
 
 ### System-Owned State Transitions
 
-- `execution` start -> `in_progress`
-- `retry` start -> `in_progress`
+- `execution` start -> `in_progress` after task worktree preparation succeeds
+- `retry` start -> `in_progress` after task worktree preparation succeeds
 - PR created/reopened -> `in_review`
 - `review` remains `in_review`
 - `consolidation` changes labels only

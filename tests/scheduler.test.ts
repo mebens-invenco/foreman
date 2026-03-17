@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import { createDefaultWorkspaceConfig } from "../src/config.js";
 import type { ReviewContext, Task, WorkerResult } from "../src/domain.js";
 import { SchedulerService } from "../src/scheduler.js";
+import * as worktrees from "../src/worktrees.js";
 
 const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   id: "TASK-0001",
@@ -496,6 +497,88 @@ describe("SchedulerService applyWorkerResult", () => {
 
     expect(returnLeasedJobToQueue).toHaveBeenCalledWith("job-1");
     expect(releaseLeaseByResource).not.toHaveBeenCalled();
+    expect(updateWorkerStatus).toHaveBeenLastCalledWith("worker-1", "idle", null);
+  });
+
+  test("does not transition a task to in_progress when worktree preparation fails", async () => {
+    vi.spyOn(worktrees, "ensureTaskWorktree").mockRejectedValue(new Error("worktree setup failed"));
+
+    const transition = vi.fn(async () => undefined);
+    const finalizeAttempt = vi.fn();
+    const updateJobStatus = vi.fn();
+    const releaseLeasesForAttempt = vi.fn();
+    const addAttemptEvent = vi.fn();
+    const updateWorkerStatus = vi.fn();
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      db: {
+        ensureWorkerSlots: vi.fn(),
+        createAttemptWithLeases: vi.fn(() => ({
+          id: "attempt-5",
+          attemptNumber: 1,
+          startedAt: "2026-03-16T00:00:00Z",
+        })),
+        updateWorkerStatus,
+        updateJobStatus,
+        addAttemptEvent,
+        finalizeAttempt,
+        releaseLeasesForAttempt,
+      } as any,
+      taskSystem: {
+        getTask: vi.fn(async () => sampleTask({ state: "ready", providerState: "ready" })),
+        transition,
+      } as any,
+      reviewService: {} as any,
+      runner: {} as any,
+      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    await (scheduler as any).runJob(
+      {
+        id: "worker-1",
+        slot: 1,
+        status: "leased",
+        currentAttemptId: null,
+        lastHeartbeatAt: "2026-03-16T00:00:00Z",
+      },
+      {
+        id: "job-1",
+        taskId: "TASK-0001",
+        action: "execution",
+        repoKey: "repo-a",
+        baseBranch: "main",
+      },
+    );
+
+    expect(transition).not.toHaveBeenCalled();
+    expect(addAttemptEvent).toHaveBeenCalledWith("attempt-5", "attempt_started", "Started execution for TASK-0001");
+    expect(addAttemptEvent).toHaveBeenCalledWith("attempt-5", "attempt_failed", "worktree setup failed");
+    expect(finalizeAttempt).toHaveBeenCalledWith(
+      "attempt-5",
+      "failed",
+      expect.objectContaining({ summary: "worktree setup failed", errorMessage: "worktree setup failed" }),
+    );
+    expect(updateJobStatus).toHaveBeenLastCalledWith(
+      "job-1",
+      "failed",
+      expect.objectContaining({ errorMessage: "worktree setup failed" }),
+    );
+    expect(releaseLeasesForAttempt).toHaveBeenCalledWith("attempt-5", "completed");
     expect(updateWorkerStatus).toHaveBeenLastCalledWith("worker-1", "idle", null);
   });
 });

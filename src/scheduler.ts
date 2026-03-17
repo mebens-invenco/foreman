@@ -479,11 +479,6 @@ export class SchedulerService extends EventEmitter {
       }, this.deps.config.scheduler.workerHeartbeatSeconds * 1000);
 
       try {
-        if (job.action === "execution" || job.action === "retry") {
-          await this.deps.taskSystem.transition({ taskId: task.id, toState: "in_progress" });
-          attemptLogger.info("transitioned task to in_progress");
-        }
-
         worktreePath =
           job.action === "consolidation"
             ? path.join(this.deps.paths.worktreesDir, repo.key, task.id)
@@ -498,6 +493,11 @@ export class SchedulerService extends EventEmitter {
           worktreePath,
           mode: job.action === "consolidation" ? "consolidation" : "task_worktree",
         });
+
+        if (job.action === "execution" || job.action === "retry") {
+          await this.deps.taskSystem.transition({ taskId: task.id, toState: "in_progress" });
+          attemptLogger.info("transitioned task to in_progress");
+        }
 
         if (await pathExists(worktreePath)) {
           beforeSha = await this.gitHead(worktreePath).catch(() => null);
