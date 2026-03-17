@@ -2,17 +2,7 @@ import { z } from "zod";
 
 import type { WorkerResult } from "./domain.js";
 
-const taskArtifactSchema = z.object({
-  type: z.enum(["pull_request", "commit", "doc", "link", "other"]),
-  url: z.string().url(),
-  title: z.string().optional(),
-  externalId: z.string().optional(),
-});
-
-const taskMutationSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("add_comment"), body: z.string().min(1) }),
-  z.object({ type: z.literal("upsert_artifact"), artifact: taskArtifactSchema }),
-]);
+const taskMutationSchema = z.object({ type: z.literal("add_comment"), body: z.string().min(1) });
 
 const reviewMutationSchema = z.discriminatedUnion("type", [
   z.object({

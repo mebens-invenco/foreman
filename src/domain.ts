@@ -21,7 +21,7 @@ export type AttemptStatus =
   | "timed_out";
 
 export type TaskArtifact = {
-  type: "pull_request" | "commit" | "doc" | "link" | "other";
+  type: "pull_request";
   url: string;
   title?: string;
   externalId?: string;
@@ -124,9 +124,7 @@ export type AgentRunResult = {
   stderrBytes: number;
 };
 
-export type TaskMutation =
-  | { type: "add_comment"; body: string }
-  | { type: "upsert_artifact"; artifact: TaskArtifact };
+export type TaskMutation = { type: "add_comment"; body: string };
 
 export type ReviewMutation =
   | {

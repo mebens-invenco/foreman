@@ -502,12 +502,18 @@ const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task
     repo: metadata.repo,
     branchName,
     dependencies: metadata.dependencies,
-    artifacts: node.attachments.nodes.map((attachment) => ({
-      type: attachment.url.includes("/pull/") ? "pull_request" : "link",
-      url: attachment.url,
-      ...(attachment.title ? { title: attachment.title } : {}),
-      externalId: attachment.id,
-    })),
+    artifacts: node.attachments.nodes.flatMap((attachment) =>
+      isGithubPullRequestArtifact({ type: "pull_request", url: attachment.url })
+        ? [
+            {
+              type: "pull_request" as const,
+              url: attachment.url,
+              ...(attachment.title ? { title: attachment.title } : {}),
+              externalId: attachment.id,
+            },
+          ]
+        : [],
+    ),
     updatedAt: node.updatedAt,
     url: node.url,
   };
@@ -876,58 +882,10 @@ export class LinearTaskSystem implements TaskSystem {
   }
 
   async addArtifact(input: { taskId: string; artifact: TaskArtifact }): Promise<void> {
-    if (isGithubPullRequestArtifact(input.artifact)) {
-      this.logger.info("skipping Linear attachment for GitHub pull request artifact", {
-        taskId: input.taskId,
-        artifactType: input.artifact.type,
-        artifactUrl: input.artifact.url,
-      });
-      return;
-    }
-
-    const task = await this.getTask(input.taskId);
-    const existingArtifact = task.artifacts.find(
-      (artifact) => artifact.type === input.artifact.type && artifact.url === input.artifact.url,
-    );
-
-    if (existingArtifact?.externalId) {
-      this.logger.info("updating Linear attachment title", {
-        taskId: input.taskId,
-        providerId: task.providerId,
-        artifactType: input.artifact.type,
-        attachmentId: existingArtifact.externalId,
-      });
-      await this.client.request(
-        `mutation ForemanAttachmentUpdate($id: String!, $title: String) {
-          attachmentUpdate(id: $id, input: { title: $title }) { success }
-        }`,
-        { id: existingArtifact.externalId, title: input.artifact.title ?? existingArtifact.title ?? null },
-      );
-      this.logger.info("updated Linear attachment title", {
-        taskId: input.taskId,
-        providerId: task.providerId,
-        artifactType: input.artifact.type,
-        attachmentId: existingArtifact.externalId,
-      });
-      return;
-    }
-
-    this.logger.info("creating Linear attachment", {
+    this.logger.info("skipping Linear attachment mutation for pull request artifact", {
       taskId: input.taskId,
-      providerId: task.providerId,
       artifactType: input.artifact.type,
       artifactUrl: input.artifact.url,
-    });
-    await this.client.request(
-      `mutation ForemanAttachmentCreate($issueId: String!, $url: String!, $title: String) {
-        attachmentCreate(input: { issueId: $issueId, url: $url, title: $title }) { success }
-      }`,
-      { issueId: task.providerId, url: input.artifact.url, title: input.artifact.title ?? null },
-    );
-    this.logger.info("created Linear attachment", {
-      taskId: input.taskId,
-      providerId: task.providerId,
-      artifactType: input.artifact.type,
     });
   }
 

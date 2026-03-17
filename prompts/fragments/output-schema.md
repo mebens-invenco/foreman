@@ -30,7 +30,6 @@ The JSON must match this shape:
 Allowed task mutation types:
 
 - `add_comment`
-- `upsert_artifact`
 
 Allowed review mutation types:
 

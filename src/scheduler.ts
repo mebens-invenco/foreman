@@ -823,10 +823,6 @@ export class SchedulerService extends EventEmitter {
         await this.deps.taskSystem.addComment({ taskId: input.task.id, body: mutation.body });
         logger.info("added task comment from worker mutation");
       }
-      if (mutation.type === "upsert_artifact") {
-        await this.deps.taskSystem.addArtifact({ taskId: input.task.id, artifact: mutation.artifact });
-        logger.info("upserted task artifact from worker mutation", { artifactType: mutation.artifact.type, artifactUrl: mutation.artifact.url });
-      }
     }
 
     if (input.job.action === "consolidation" && workerResult.outcome === "completed") {

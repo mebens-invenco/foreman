@@ -347,7 +347,7 @@ type Task = {
 }
 
 type TaskArtifact = {
-  type: "pull_request" | "commit" | "doc" | "link" | "other"
+  type: "pull_request"
   url: string
   title?: string
   externalId?: string
@@ -799,18 +799,7 @@ type Signal =
 ```ts
 type TaskMutation =
   | { type: "add_comment"; body: string }
-  | {
-      type: "upsert_artifact"
-      artifact: {
-        type: "pull_request" | "commit" | "doc" | "link" | "other"
-        url: string
-        title?: string
-        externalId?: string
-      }
-    }
 ```
-
-Task artifact upsert identity is `(type, url)` within a task. If an existing artifact has the same `type` and `url`, adapter code must update its optional metadata (`title`, `externalId`) rather than appending a duplicate.
 
 ### Review Mutations
 

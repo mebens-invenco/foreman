@@ -78,6 +78,7 @@ describe("prompt rendering", () => {
     expect(result).toContain("Follow repo instructions carefully.");
     expect(result).toContain("## Required Output");
     expect(result).toContain("If execution completes with code changes, return a PR review mutation");
+    expect(result).not.toContain("upsert_artifact");
     expect(result).not.toContain("{{fragment:");
     expect(result).not.toContain("{{context:");
   });
