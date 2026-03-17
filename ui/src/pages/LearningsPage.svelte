@@ -66,6 +66,8 @@
             <th class="px-3 py-2">Title</th>
             <th class="px-3 py-2">Repo</th>
             <th class="px-3 py-2">Confidence</th>
+            <th class="px-3 py-2">Read</th>
+            <th class="px-3 py-2">Applied</th>
             <th class="px-3 py-2">Updated</th>
           </tr>
         </thead>
@@ -75,6 +77,8 @@
               <td class="px-3 py-3 text-sm text-foreground">{learning.title}</td>
               <td class="px-3 py-3 text-sm text-muted-foreground">{learning.repo}</td>
               <td class="px-3 py-3"><StatusPill value={learning.confidence} /></td>
+              <td class="px-3 py-3 font-mono text-xs text-muted-foreground">{learning.readCount}</td>
+              <td class="px-3 py-3 font-mono text-xs text-muted-foreground">{learning.appliedCount}</td>
               <td class="px-3 py-3"><Timestamp value={learning.updatedAt} /></td>
             </tr>
           {/each}

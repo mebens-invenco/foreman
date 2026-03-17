@@ -19,6 +19,18 @@ export const formatTimestamp = (value: string | null | undefined): string => {
   return dateTimeFormatter.format(date);
 };
 
+const formatRelativeSeconds = (totalSeconds: number): string => {
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+
+  if (totalSeconds < 3600) {
+    return `${Math.floor(totalSeconds / 60)}m`;
+  }
+
+  return `${Math.floor(totalSeconds / 3600)}h`;
+};
+
 export const formatDuration = (startedAt: string | null | undefined, finishedAt: string | null | undefined): string => {
   if (!startedAt) {
     return "-";
@@ -31,9 +43,7 @@ export const formatDuration = (startedAt: string | null | undefined, finishedAt:
   }
 
   const totalSeconds = Math.max(0, Math.round((end - start) / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+  return formatRelativeSeconds(totalSeconds);
 };
 
 export const formatHeartbeat = (value: string | null | undefined): string => {
@@ -43,12 +53,7 @@ export const formatHeartbeat = (value: string | null | undefined): string => {
 
   const timestamp = new Date(value).getTime();
   const secondsAgo = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
-  if (secondsAgo < 60) {
-    return `${secondsAgo}s ago`;
-  }
-
-  const minutes = Math.floor(secondsAgo / 60);
-  return `${minutes}m ago`;
+  return `${formatRelativeSeconds(secondsAgo)} ago`;
 };
 
 export const truncate = (value: string, length = 120): string => {
