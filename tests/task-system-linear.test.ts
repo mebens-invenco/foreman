@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../src/config.js";
-import { LinearTaskSystem, parseLinearMetadata } from "../src/task-system.js";
+import { LinearTaskSystem, parseLinearMetadata } from "../src/tasking/index.js";
 
 const originalFetch = global.fetch;
 const fakeLogger = {

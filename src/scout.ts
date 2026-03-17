@@ -4,8 +4,8 @@ import { priorityToRank, type ForemanDb, type ScoutRunTrigger } from "./db.js";
 import { ForemanError } from "./lib/errors.js";
 import { stableStringify } from "./lib/json.js";
 import type { LoggerService } from "./logger.js";
-import type { ReviewService } from "./review.js";
-import type { TaskSystem } from "./task-system.js";
+import type { ReviewService } from "./review/index.js";
+import type { TaskSystem } from "./tasking/index.js";
 import { branchExistsOnOrigin, isAncestorOnOrigin, resolveTaskBranchName } from "./worktrees.js";
 
 type Selection = {

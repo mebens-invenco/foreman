@@ -1,7 +1,8 @@
-import { exec } from "./lib/process.js";
-import { ForemanError } from "./lib/errors.js";
-import type { CheckState, ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, ReviewThread, ReviewSummary, Task } from "./domain.js";
-import { LoggerService } from "./logger.js";
+import { ForemanError } from "../../lib/errors.js";
+import { exec } from "../../lib/process.js";
+import { LoggerService } from "../../logger.js";
+import type { CheckState, ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, ReviewThread, ReviewSummary, Task } from "../../domain.js";
+import type { ReviewService } from "../review-service.js";
 
 type RepoDescriptor = { owner: string; repo: string };
 
@@ -119,33 +120,6 @@ const mergeCheckStates = (input: {
     pendingChecks: checks.filter((check) => check.state === "pending"),
   };
 };
-
-export interface ReviewService {
-  resolvePullRequest(task: Task, repo?: RepoRef): Promise<ResolvedPullRequest | null>;
-  getContext(task: Task, agentPrefix: string, repo?: RepoRef): Promise<ReviewContext | null>;
-  findLatestOpenPullRequestBranch(task: Task, repo?: RepoRef): Promise<string | null>;
-  listConversationComments(prUrl: string): Promise<ConversationComment[]>;
-  createPullRequest(input: {
-    cwd: string;
-    title: string;
-    body: string;
-    draft: boolean;
-    baseBranch: string;
-    headBranch: string;
-  }): Promise<{ url: string; number: number }>;
-  reopenPullRequest(input: {
-    cwd: string;
-    pullRequestUrl?: string;
-    pullRequestNumber?: number;
-    draft: boolean;
-    title?: string;
-    body?: string;
-  }): Promise<{ url: string; number: number }>;
-  replyToReviewSummary(prUrl: string, reviewId: string, body: string): Promise<void>;
-  replyToThreadComment(prUrl: string, threadId: string, body: string): Promise<void>;
-  replyToPrComment(prUrl: string, commentId: string, body: string): Promise<void>;
-  resolveThreads(prUrl: string, threadIds: string[]): Promise<void>;
-}
 
 export class GitHubReviewService implements ReviewService {
   private readonly token: string;
@@ -886,27 +860,3 @@ export class GitHubReviewService implements ReviewService {
     this.logger.info("resolved GitHub review threads", { owner, repo, pullRequestNumber: number, threadCount: threadIds.length });
   }
 }
-
-export const resolveGitHubAuthEnv = async (env: Record<string, string>, logger?: LoggerService): Promise<Record<string, string>> => {
-  const authLogger = (logger ?? LoggerService.create({ context: { component: "review.github.auth" }, colorMode: "never" })).child({
-    component: "review.github.auth",
-  });
-  if (env.GH_TOKEN) {
-    authLogger.debug("using GitHub token from environment");
-    return env;
-  }
-
-  if (env.GH_CONFIG_DIR) {
-    authLogger.debug("attempting to resolve GitHub token via gh auth token", { hasGhConfigDir: true });
-    const token = (await exec("gh", ["auth", "token"], { env })).stdout.trim();
-    if (token) {
-      authLogger.info("resolved GitHub token via gh auth token");
-      return { ...env, GH_TOKEN: token };
-    }
-
-    authLogger.warn("gh auth token did not return a GitHub token");
-  }
-
-  authLogger.warn("GitHub token was not resolved from the environment or gh auth token");
-  return env;
-};

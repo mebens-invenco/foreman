@@ -8,7 +8,7 @@ import type { ForemanDb } from "./db.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
 import type { RepoRef, TaskState } from "./domain.js";
 import type { SchedulerService } from "./scheduler.js";
-import type { TaskSystem } from "./task-system.js";
+import type { TaskSystem } from "./tasking/index.js";
 
 type HttpServerDeps = {
   config: WorkspaceConfig;

@@ -5,17 +5,16 @@ import path from "node:path";
 import type { WorkspaceConfig, WorkspacePaths } from "./config.js";
 import { deriveAttemptStatus, type AttemptRecord, type ForemanDb, type JobRecord, type WorkerRecord } from "./db.js";
 import type { ActionType, RepoRef, ReviewContext, Task, TaskComment, WorkerResult } from "./domain.js";
+import type { AgentRunner, CapturedAgentRunResult } from "./execution/index.js";
+import { parseWorkerResult, validateWorkerResult } from "./execution/index.js";
 import { ForemanError } from "./lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "./lib/fs.js";
 import type { LoggerService } from "./logger.js";
 import { isoNow, addMilliseconds, addSeconds } from "./lib/time.js";
 import { renderWorkerPrompt } from "./prompts.js";
-import type { ReviewService } from "./review.js";
-import type { CapturedAgentRunResult, OpenCodeRunner } from "./runner.js";
-import { parseWorkerResult } from "./runner.js";
+import type { ReviewService } from "./review/index.js";
 import { assertTaskActionableRepo, leaseResourceKeysForAction, runScoutSelection } from "./scout.js";
-import type { TaskSystem } from "./task-system.js";
-import { validateWorkerResult } from "./worker-result.js";
+import type { TaskSystem } from "./tasking/index.js";
 import { ensureTaskWorktree, removeCleanWorktree } from "./worktrees.js";
 
 export type SchedulerStatus = "running" | "paused" | "stopped";
@@ -27,7 +26,7 @@ type SchedulerDeps = {
   db: ForemanDb;
   taskSystem: TaskSystem;
   reviewService: ReviewService;
-  runner: OpenCodeRunner;
+  runner: AgentRunner;
   repos: RepoRef[];
   env: Record<string, string>;
   logger: LoggerService;
@@ -555,7 +554,7 @@ export class SchedulerService extends EventEmitter {
           onStderrLine: (line: string) => {
             attemptLogger.runnerLine(line);
           },
-        } as Parameters<OpenCodeRunner["invoke"]>[0]) as CapturedAgentRunResult;
+        });
         attemptLogger.info("runner invocation completed", {
           exitCode: runResult.exitCode,
           signal: runResult.signal,
