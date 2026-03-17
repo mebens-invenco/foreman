@@ -3,12 +3,12 @@ import path from "node:path";
 
 import { deriveAttemptStatus, type RepoRef, type Task, type WorkerResult } from "../domain/index.js";
 import type { AgentRunner } from "../execution/index.js";
+import { renderWorkerPrompt } from "../execution/render-worker-prompt.js";
 import { parseWorkerResult, validateWorkerResult } from "../execution/index.js";
 import { ForemanError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
-import { renderWorkerPrompt } from "../prompts.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
