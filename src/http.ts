@@ -3,12 +3,13 @@ import path from "node:path";
 
 import Fastify from "fastify";
 
-import type { WorkspaceConfig, WorkspacePaths } from "./config.js";
 import type { RepoRef, TaskState } from "./domain/index.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
 import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
 import type { TaskSystem } from "./tasking/index.js";
+import type { WorkspaceConfig } from "./workspace/config.js";
+import type { WorkspacePaths } from "./workspace/workspace-paths.js";
 
 type HttpServerDeps = {
   config: WorkspaceConfig;

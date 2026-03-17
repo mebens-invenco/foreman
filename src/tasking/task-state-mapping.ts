@@ -1,6 +1,6 @@
-import type { WorkspaceConfig } from "../config.js";
 import type { TaskState } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
+import type { WorkspaceConfig } from "../workspace/config.js";
 
 const normalizedStateMap = (config: WorkspaceConfig): Record<string, TaskState> => {
   if (config.taskSystem.type === "linear") {

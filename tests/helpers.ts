@@ -4,7 +4,8 @@ import { promises as fs } from "node:fs";
 
 import Database from "better-sqlite3";
 
-import { createDefaultWorkspaceConfig, type WorkspacePaths } from "../src/config.js";
+import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
+import type { WorkspacePaths } from "../src/workspace/workspace-paths.js";
 import { createRepos, type ForemanRepos } from "../src/repos/index.js";
 import { openSqliteDatabase, type SqliteForemanDatabase } from "../src/repos/impl/sqlite-database.js";
 

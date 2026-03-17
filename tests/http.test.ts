@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { createDefaultWorkspaceConfig } from "../src/config.js";
+import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
 import { createHttpServer } from "../src/http.js";
 import type { Task } from "../src/domain/index.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths } from "./helpers.js";

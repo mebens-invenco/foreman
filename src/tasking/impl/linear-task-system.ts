@@ -1,7 +1,7 @@
-import type { WorkspaceConfig } from "../../config.js";
 import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain/index.js";
 import { ForemanError } from "../../lib/errors.js";
 import { LoggerService } from "../../logger.js";
+import type { WorkspaceConfig } from "../../workspace/config.js";
 import type { TaskSystem } from "../task-system.js";
 import { getProviderStateForNormalized, normalizeTaskState } from "../task-state-mapping.js";
 

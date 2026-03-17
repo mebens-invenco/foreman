@@ -1,11 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { ActionType, RepoRef, Task } from "./domain/index.js";
-import type { WorkspacePaths } from "./config.js";
-import { ForemanError } from "./lib/errors.js";
-import { ensureDir, pathExists } from "./lib/fs.js";
-import { exec } from "./lib/process.js";
+import type { ActionType, RepoRef, Task } from "../domain/index.js";
+import { ForemanError } from "../lib/errors.js";
+import { ensureDir, pathExists } from "../lib/fs.js";
+import { exec } from "../lib/process.js";
+import type { WorkspacePaths } from "./workspace-paths.js";
 
 export const resolveTaskBranchName = (task: Task): string => task.branchName ?? task.id.toLowerCase();
 
@@ -37,11 +37,9 @@ export const ensureTaskWorktree = async (input: {
   }).catch(() => undefined);
 
   if (!(await pathExists(targetPath))) {
-    await exec(
-      "git",
-      ["worktree", "add", "-B", taskBranch, targetPath, `origin/${input.baseBranch}`],
-      { cwd: input.repo.rootPath },
-    );
+    await exec("git", ["worktree", "add", "-B", taskBranch, targetPath, `origin/${input.baseBranch}`], {
+      cwd: input.repo.rootPath,
+    });
     return targetPath;
   }
 

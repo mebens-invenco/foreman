@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { createDefaultWorkspaceConfig, parseWorkspaceConfig, stringifyWorkspaceConfig } from "../src/config.js";
+import { createDefaultWorkspaceConfig, parseWorkspaceConfig, stringifyWorkspaceConfig } from "../src/workspace/config.js";
 
 describe("workspace config", () => {
   test("round-trips default file task config", () => {

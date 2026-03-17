@@ -1,15 +1,7 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-
-import dotenv from "dotenv";
 import YAML from "yaml";
 import { z } from "zod";
 
-import { ForemanError } from "./lib/errors.js";
-import { walkParentsForFile, pathExists } from "./lib/fs.js";
-
-const schedulerSchema = z.object({
+export const schedulerSchema = z.object({
   workerConcurrency: z.number().int().positive().default(4),
   scoutPollIntervalSeconds: z.number().int().positive().default(60),
   scoutRerunDebounceMs: z.number().int().nonnegative().default(1000),
@@ -20,7 +12,7 @@ const schedulerSchema = z.object({
   shutdownGracePeriodSeconds: z.number().int().positive().default(10),
 });
 
-const linearSchema = z.object({
+export const linearSchema = z.object({
   team: z.string().min(1),
   assignee: z.string().min(1).default("me"),
   includeLabels: z.array(z.string().min(1)).default(["Agent"]),
@@ -34,7 +26,7 @@ const linearSchema = z.object({
   }),
 });
 
-const fileTaskSchema = z.object({
+export const fileTaskSchema = z.object({
   tasksDir: z.string().min(1).default("tasks"),
   idPrefix: z.string().min(1).default("TASK"),
   states: z.object({
@@ -46,18 +38,18 @@ const fileTaskSchema = z.object({
   }),
 });
 
-const reviewSystemSchema = z.object({
+export const reviewSystemSchema = z.object({
   type: z.literal("github").default("github"),
 });
 
-const runnerSchema = z.object({
+export const runnerSchema = z.object({
   type: z.literal("opencode").default("opencode"),
   model: z.string().min(1).default("openai/gpt-5.4"),
   variant: z.string().min(1).default("high"),
   timeoutMs: z.number().int().positive().default(3_600_000),
 });
 
-const workspaceConfigSchema = z
+export const workspaceConfigSchema = z
   .object({
     version: z.literal(1).default(1),
     workspace: z.object({
@@ -102,52 +94,6 @@ const workspaceConfigSchema = z
   });
 
 export type WorkspaceConfig = z.infer<typeof workspaceConfigSchema>;
-
-export type WorkspacePaths = {
-  projectRoot: string;
-  workspaceRoot: string;
-  configPath: string;
-  envPath: string;
-  dbPath: string;
-  logsDir: string;
-  attemptsLogDir: string;
-  artifactsDir: string;
-  worktreesDir: string;
-  tasksDir: string;
-  planPath: string;
-};
-
-const FOREMAN_CONFIG_FILE = "foreman.workspace.yml";
-
-export const findProjectRoot = async (): Promise<string> => {
-  const currentDir = path.dirname(fileURLToPath(import.meta.url));
-  const packagePath = await walkParentsForFile(currentDir, "package.json");
-
-  if (!packagePath) {
-    throw new ForemanError("project_root_not_found", "Could not locate Foreman project root", 500);
-  }
-
-  return path.dirname(packagePath);
-};
-
-export const resolveWorkspacePaths = async (workspaceName: string): Promise<WorkspacePaths> => {
-  const projectRoot = await findProjectRoot();
-  const workspaceRoot = path.join(projectRoot, "workspaces", workspaceName);
-
-  return {
-    projectRoot,
-    workspaceRoot,
-    configPath: path.join(workspaceRoot, FOREMAN_CONFIG_FILE),
-    envPath: path.join(workspaceRoot, ".env"),
-    dbPath: path.join(workspaceRoot, "foreman.db"),
-    logsDir: path.join(workspaceRoot, "logs"),
-    attemptsLogDir: path.join(workspaceRoot, "logs", "attempts"),
-    artifactsDir: path.join(workspaceRoot, "artifacts"),
-    worktreesDir: path.join(workspaceRoot, "worktrees"),
-    tasksDir: path.join(workspaceRoot, "tasks"),
-    planPath: path.join(workspaceRoot, "plan.md"),
-  };
-};
 
 export const createDefaultWorkspaceConfig = (
   workspaceName: string,
@@ -226,21 +172,3 @@ export const parseWorkspaceConfig = (raw: string): WorkspaceConfig => {
 };
 
 export const stringifyWorkspaceConfig = (config: WorkspaceConfig): string => YAML.stringify(config);
-
-export const loadWorkspaceConfig = async (workspaceName: string): Promise<{ paths: WorkspacePaths; config: WorkspaceConfig; env: Record<string, string> }> => {
-  const paths = await resolveWorkspacePaths(workspaceName);
-
-  if (!(await pathExists(paths.configPath))) {
-    throw new ForemanError("workspace_not_initialized", `Workspace ${workspaceName} is missing ${FOREMAN_CONFIG_FILE}`, 404);
-  }
-
-  const [configRaw, envRaw] = await Promise.all([
-    fs.readFile(paths.configPath, "utf8"),
-    pathExists(paths.envPath).then((exists) => (exists ? fs.readFile(paths.envPath, "utf8") : "")),
-  ]);
-
-  const config = parseWorkspaceConfig(configRaw);
-  const env = dotenv.parse(envRaw);
-
-  return { paths, config, env };
-};

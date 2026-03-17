@@ -1,4 +1,4 @@
-import { type WorkspacePaths } from "../src/config.js";
+import { type WorkspacePaths } from "../src/workspace/workspace-paths.js";
 import { ForemanRepos } from "../src/repos/index.js";
 import { SqliteForemanDatabase } from "../src/repos/impl/sqlite-database.js";
 export declare const createTempDir: (prefix: string) => Promise<string>;

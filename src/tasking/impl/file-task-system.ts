@@ -5,12 +5,13 @@ import fg from "fast-glob";
 import matter from "gray-matter";
 import YAML from "yaml";
 
-import type { WorkspaceConfig, WorkspacePaths } from "../../config.js";
 import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain/index.js";
 import { ForemanError } from "../../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists } from "../../lib/fs.js";
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
+import type { WorkspaceConfig } from "../../workspace/config.js";
+import type { WorkspacePaths } from "../../workspace/workspace-paths.js";
 import type { TaskSystem } from "../task-system.js";
 import { getProviderStateForNormalized, normalizeTaskState } from "../task-state-mapping.js";
 

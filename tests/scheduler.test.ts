@@ -1,9 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { createDefaultWorkspaceConfig } from "../src/config.js";
+import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
 import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../src/domain/index.js";
 import { SchedulerService } from "../src/orchestration/index.js";
-import * as worktrees from "../src/worktrees.js";
+import * as worktrees from "../src/workspace/git-worktrees.js";
 
 const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   id: "TASK-0001",

@@ -1,10 +1,10 @@
-import type { WorkspaceConfig } from "../config.js";
 import type { RepoRef, Task, WorkerResult } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
+import type { WorkspaceConfig } from "../workspace/config.js";
 
 const consolidationLabels = (config: WorkspaceConfig): { remove: string[]; add: string[] } => {
   if (config.taskSystem.type === "linear") {

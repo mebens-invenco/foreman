@@ -1,5 +1,6 @@
-import type { WorkspaceConfig, WorkspacePaths } from "../config.js";
 import { LoggerService } from "../logger.js";
+import type { WorkspaceConfig } from "../workspace/config.js";
+import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import type { TaskSystem } from "./task-system.js";
 import { FileTaskSystem } from "./impl/file-task-system.js";
 import { LinearTaskSystem } from "./impl/linear-task-system.js";
