@@ -1,7 +1,6 @@
 import { isoNow } from "../../lib/time.js";
 import { newId } from "../../lib/ids.js";
-import type { LeaseRepo } from "../lease-repo.js";
-import type { LeaseResourceType } from "../records.js";
+import type { LeaseRepo, LeaseResourceType } from "../lease-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 export class SqliteLeaseRepo implements LeaseRepo {

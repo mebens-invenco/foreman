@@ -1,7 +1,6 @@
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
-import type { HistoryRepo } from "../history-repo.js";
-import type { HistoryRecord } from "../records.js";
+import type { HistoryRecord, HistoryRepo } from "../history-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 export class SqliteHistoryRepo implements HistoryRepo {

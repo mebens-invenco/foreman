@@ -55,10 +55,10 @@ program
     });
     logger.info("starting foreman service", { host: config.http.host, port: config.http.port });
     const resolvedEnv = await resolveGitHubAuthEnv(env, logger.child({ component: "review.github.auth" }));
-    const foremanRepos = createRepos(await openSqliteDatabase(paths.dbPath));
-    await foremanRepos.migrationRunner.runMigrations(paths.projectRoot);
-    const repos = await discoverGitRepos(config, paths);
-    logger.info("discovered repositories for service startup", { repoCount: repos.length });
+    const repos = createRepos(await openSqliteDatabase(paths.dbPath));
+    await repos.migrationRunner.runMigrations(paths.projectRoot);
+    const repoRefs = await discoverGitRepos(config, paths);
+    logger.info("discovered repositories for service startup", { repoCount: repoRefs.length });
     const taskSystem = createTaskSystem({
       config,
       paths,
@@ -67,21 +67,21 @@ program
     });
     await taskSystem.validateStartup?.();
     logger.info("validated task system startup");
-    await renderWorkspacePlan(workspace, foremanRepos, logger);
+    await renderWorkspacePlan(workspace, repos, logger);
 
     const scheduler = new SchedulerService({
       config,
       paths,
-      foremanRepos,
+      repos,
       taskSystem,
       reviewService: createReviewService({ env: resolvedEnv, logger }),
       runner: createAgentRunner({ config }),
-      repos,
+      repoRefs,
       env: resolvedEnv,
       logger: logger.child({ component: "scheduler" }),
     });
 
-    const server = createHttpServer({ config, paths, repos, foremanRepos, taskSystem, scheduler });
+    const server = createHttpServer({ config, paths, repoRefs, repos, taskSystem, scheduler });
     await server.listen({ host: config.http.host, port: config.http.port });
     logger.info("http server listening", { host: config.http.host, port: config.http.port });
     await scheduler.start();
@@ -99,7 +99,7 @@ program
         logger.info("shutting down foreman service");
         await scheduler.stop();
         await server.close();
-        foremanRepos.close();
+        repos.close();
         logger.info("foreman service stopped");
         await logger.flush();
         process.exit(0);
@@ -125,14 +125,14 @@ plan
       minLevel: options.logLevel,
     });
     logger.info("rendering plan prompt from cli command");
-    const foremanRepos = createRepos(await openSqliteDatabase(paths.dbPath));
+    const repos = createRepos(await openSqliteDatabase(paths.dbPath));
     try {
-      await foremanRepos.migrationRunner.runMigrations(paths.projectRoot);
-      const result = await renderWorkspacePlan(workspace, foremanRepos, logger);
+      await repos.migrationRunner.runMigrations(paths.projectRoot);
+      const result = await renderWorkspacePlan(workspace, repos, logger);
       logger.info("rendered plan prompt from cli command", { planPath: result.paths.planPath, contextPath: result.contextPath });
       process.stdout.write(`Rendered plan prompt to ${result.paths.planPath}\n`);
     } finally {
-      foremanRepos.close();
+      repos.close();
       await logger.flush();
     }
   });

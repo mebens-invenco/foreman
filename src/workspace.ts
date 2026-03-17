@@ -51,7 +51,7 @@ export const initializeWorkspace = async (workspaceName: string, taskSystemType:
 
 export const renderWorkspacePlan = async (
   workspaceName: string,
-  foremanRepos?: ForemanRepos,
+  repos?: ForemanRepos,
   logger?: LoggerService,
 ): Promise<{ config: WorkspaceConfig; paths: WorkspacePaths; markdown: string; contextPath: string }> => {
   const { config, paths } = await loadWorkspaceConfig(workspaceName);
@@ -70,10 +70,10 @@ export const renderWorkspacePlan = async (
   await atomicWriteFile(absoluteJsonPath, `${JSON.stringify(context, null, 2)}\n`);
   workspaceLogger?.info("wrote workspace plan context", { contextPath: absoluteJsonPath });
 
-  if (foremanRepos) {
+  if (repos) {
     const planStat = await fs.stat(paths.planPath);
     const planContextStat = await fs.stat(absoluteJsonPath);
-    foremanRepos.artifacts.createArtifact({
+    repos.artifacts.createArtifact({
       ownerType: "workspace",
       ownerId: config.workspace.name,
       artifactType: "plan_prompt",
@@ -81,7 +81,7 @@ export const renderWorkspacePlan = async (
       mediaType: "text/markdown",
       sizeBytes: planStat.size,
     });
-    foremanRepos.artifacts.createArtifact({
+    repos.artifacts.createArtifact({
       ownerType: "workspace",
       ownerId: config.workspace.name,
       artifactType: "plan_context",

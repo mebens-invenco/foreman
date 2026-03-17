@@ -182,10 +182,10 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        foremanRepos: db,
+        repos: db,
         taskSystem,
         reviewService,
-        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
         triggerType: "manual",
       });
 
@@ -254,10 +254,10 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        foremanRepos: db,
+        repos: db,
         taskSystem,
         reviewService,
-        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
         triggerType: "manual",
       });
 
@@ -311,10 +311,10 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        foremanRepos: db,
+        repos: db,
         taskSystem,
         reviewService,
-        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
         triggerType: "manual",
       });
 
@@ -386,10 +386,10 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        foremanRepos: db,
+        repos: db,
         taskSystem,
         reviewService,
-        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
         triggerType: "manual",
       });
 
@@ -457,10 +457,10 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        foremanRepos: db,
+        repos: db,
         taskSystem,
         reviewService,
-        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
         triggerType: "manual",
       });
 
@@ -523,10 +523,10 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        foremanRepos: db,
+        repos: db,
         taskSystem,
         reviewService,
-        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
         triggerType: "manual",
       });
 
@@ -618,10 +618,10 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        foremanRepos: db,
+        repos: db,
         taskSystem,
         reviewService,
-        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
         triggerType: "manual",
       });
 
@@ -665,10 +665,10 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        foremanRepos: db,
+        repos: db,
         taskSystem,
         reviewService: new FakeReviewService({}),
-        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
         triggerType: "manual",
       });
 
@@ -733,10 +733,10 @@ describe("runScoutSelection", () => {
     try {
       const result = await runScoutSelection({
         config,
-        foremanRepos: db,
+        repos: db,
         taskSystem,
         reviewService,
-        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }],
+        repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }],
         triggerType: "manual",
       });
 

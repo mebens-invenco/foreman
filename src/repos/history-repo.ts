@@ -1,4 +1,18 @@
-import type { HistoryRecord } from "./records.js";
+export type HistoryRepoRecord = {
+  path: string;
+  beforeSha: string;
+  afterSha: string;
+  position: number;
+};
+
+export type HistoryRecord = {
+  stepId: string;
+  createdAt: string;
+  stage: string;
+  issue: string;
+  summary: string;
+  repos: HistoryRepoRecord[];
+};
 
 export interface HistoryRepo {
   addHistoryStep(input: {

@@ -231,32 +231,32 @@ export const resolveBaseBranch = async (input: {
 
 export const runScoutSelection = async (input: {
   config: WorkspaceConfig;
-  foremanRepos: ForemanRepos;
+  repos: ForemanRepos;
   taskSystem: TaskSystem;
   reviewService: ReviewService;
-  repos: RepoRef[];
+  repoRefs: RepoRef[];
   triggerType: ScoutRunTrigger;
   logger?: LoggerService;
 }): Promise<{ scoutRunId: string; jobs: Selection[] }> => {
   const logger = input.logger?.child({ component: "scout.selection", trigger: input.triggerType });
   const allTasks = await input.taskSystem.listCandidates();
-  const reposByKey = new Map(input.repos.map((repo) => [repo.key, repo]));
+  const reposByKey = new Map(input.repoRefs.map((repo) => [repo.key, repo]));
   const activeCandidates = allTasks.filter(
     (task) =>
       task.state === "ready" ||
       task.state === "in_review" ||
-      (task.state === "in_progress" && !input.foremanRepos.leases.hasActiveTaskLease(task.id)),
+      (task.state === "in_progress" && !input.repos.leases.hasActiveTaskLease(task.id)),
   );
   const terminalCandidates = allTasks.filter(isTerminal);
 
-  const scoutRunId = input.foremanRepos.scoutRuns.createScoutRun({
+  const scoutRunId = input.repos.scoutRuns.createScoutRun({
     triggerType: input.triggerType,
     candidateCount: allTasks.length,
     activeCount: activeCandidates.length,
     terminalCount: terminalCandidates.length,
   });
 
-  const availableCapacity = Math.max(0, input.config.scheduler.workerConcurrency - input.foremanRepos.jobs.activeJobCount());
+  const availableCapacity = Math.max(0, input.config.scheduler.workerConcurrency - input.repos.jobs.activeJobCount());
   const jobs: Selection[] = [];
   const blockedReasons = new Set<string>();
   logger?.info("loaded scout candidates", {
@@ -276,7 +276,7 @@ export const runScoutSelection = async (input: {
     if (jobs.some((job) => `${job.task.id}:${job.action}` === dedupeKey)) {
       return false;
     }
-    return !input.foremanRepos.jobs.hasActiveDedupeKey(dedupeKey);
+    return !input.repos.jobs.hasActiveDedupeKey(dedupeKey);
   };
 
   const recordBlocker = async (taskId: string, body: string, options?: { postComment?: boolean }): Promise<void> => {
@@ -324,7 +324,7 @@ export const runScoutSelection = async (input: {
         continue;
       }
 
-      const checkpoint = input.foremanRepos.reviewCheckpoints.getReviewCheckpoint(task.id, context.pullRequestUrl);
+      const checkpoint = input.repos.reviewCheckpoints.getReviewCheckpoint(task.id, context.pullRequestUrl);
       const checkpointMatches = checkpoint
         ? checkpoint.headSha === context.headSha &&
           checkpoint.latestReviewSummaryId === (context.actionableReviewSummaries.at(-1)?.id ?? null) &&
@@ -334,7 +334,7 @@ export const runScoutSelection = async (input: {
         : false;
 
       if (checkpoint && !checkpointMatches) {
-        input.foremanRepos.reviewCheckpoints.deleteReviewCheckpoint(task.id, context.pullRequestUrl);
+        input.repos.reviewCheckpoints.deleteReviewCheckpoint(task.id, context.pullRequestUrl);
       }
 
       if (checkpointMatches) {
@@ -382,7 +382,7 @@ export const runScoutSelection = async (input: {
           continue;
         }
 
-        const base = await resolveBaseBranch({ task, repo, repos: input.repos, taskSystem: input.taskSystem, reviewService: input.reviewService });
+        const base = await resolveBaseBranch({ task, repo, repos: input.repoRefs, taskSystem: input.taskSystem, reviewService: input.reviewService });
         if (base.blockers.length > 0) {
           for (const blocker of base.blockers) {
             await recordBlocker(task.id, blocker);
@@ -424,7 +424,7 @@ export const runScoutSelection = async (input: {
           continue;
         }
 
-        const base = await resolveBaseBranch({ task, repo, repos: input.repos, taskSystem: input.taskSystem, reviewService: input.reviewService });
+        const base = await resolveBaseBranch({ task, repo, repos: input.repoRefs, taskSystem: input.taskSystem, reviewService: input.reviewService });
         if (base.blockers.length > 0) {
           for (const blocker of base.blockers) {
             await recordBlocker(task.id, blocker, { postComment: false });
