@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { createDefaultWorkspaceConfig } from "../src/config.js";
+import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
 import { createTaskSystem } from "../src/tasking/index.js";
 
 describe("createTaskSystem", () => {

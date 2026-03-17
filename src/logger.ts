@@ -1,9 +1,9 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { WorkspacePaths } from "./config.js";
 import { ensureDir } from "./lib/fs.js";
 import { isoNow } from "./lib/time.js";
+import type { WorkspacePaths } from "./workspace/workspace-paths.js";
 
 type LogLevel = "DEBUG" | "INFO" | "WARN" | "ERROR";
 export type LoggerLevelName = "debug" | "info" | "warn" | "error";

@@ -2,17 +2,18 @@
 
 import { Command, InvalidArgumentError } from "commander";
 
-import { loadWorkspaceConfig } from "./config.js";
+import { importLegacyMemory } from "./importing/import-legacy-memory.js";
 import { createAgentRunner } from "./execution/index.js";
 import { createHttpServer } from "./http.js";
 import { LoggerService } from "./logger.js";
 import { SchedulerService } from "./orchestration/index.js";
+import { renderWorkspacePlan } from "./planning/render-workspace-plan.js";
 import { createRepos } from "./repos/index.js";
 import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
 import { createReviewService, resolveGitHubAuthEnv } from "./review/index.js";
 import { createTaskSystem } from "./tasking/index.js";
-import { importLegacyMemory, initializeWorkspace, renderWorkspacePlan } from "./workspace.js";
 import { discoverGitRepos } from "./workspace/git-repo-discovery.js";
+import { initializeWorkspace, loadWorkspace } from "./workspace/index.js";
 import type { LoggerLevelName } from "./logger.js";
 
 const program = new Command();
@@ -47,7 +48,7 @@ program
   .argument("<workspace>")
   .option("-l, --log-level <level>", "Minimum log level", parseLogLevel, "info")
   .action(async (workspace: string, options: { logLevel: LoggerLevelName }) => {
-    const { config, paths, env } = await loadWorkspaceConfig(workspace);
+    const { config, paths, env } = await loadWorkspace(workspace);
     const logger = LoggerService.create({
       paths,
       context: { workspace: config.workspace.name, component: "cli.serve" },
@@ -118,7 +119,7 @@ plan
   .argument("<workspace>")
   .option("-l, --log-level <level>", "Minimum log level", parseLogLevel, "info")
   .action(async (workspace: string, options: { logLevel: LoggerLevelName }) => {
-    const { paths } = await loadWorkspaceConfig(workspace);
+    const { paths } = await loadWorkspace(workspace);
     const logger = LoggerService.create({
       paths,
       context: { workspace, component: "cli.plan" },
@@ -140,7 +141,7 @@ plan
 const scheduler = program.command("scheduler");
 for (const action of ["start", "pause", "stop"] as const) {
   scheduler.command(action).argument("<workspace>").action(async (workspace: string) => {
-    const { config } = await loadWorkspaceConfig(workspace);
+    const { config } = await loadWorkspace(workspace);
     const response = await fetch(`http://${config.http.host}:${config.http.port}/api/scheduler/${action}`, {
       method: "POST",
       headers: { "content-type": "application/json" },

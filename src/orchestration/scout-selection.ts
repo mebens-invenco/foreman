@@ -1,4 +1,3 @@
-import type { WorkspaceConfig } from "../config.js";
 import type { ActionType, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskComment } from "../domain/index.js";
 import { priorityToRank } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
@@ -7,7 +6,8 @@ import type { LoggerService } from "../logger.js";
 import type { ForemanRepos, ScoutRunTrigger } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
-import { branchExistsOnOrigin, isAncestorOnOrigin, resolveTaskBranchName } from "../worktrees.js";
+import type { WorkspaceConfig } from "../workspace/config.js";
+import { branchExistsOnOrigin, isAncestorOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
 
 type Selection = {
   task: Task;
@@ -315,7 +315,7 @@ export const runScoutSelection = async (input: {
 
       const repo = task.repo ? reposByKey.get(task.repo) : null;
       if (!repo) {
-          await recordBlocker(task.id, "Review blocked because the task repo is missing or invalid.");
+        await recordBlocker(task.id, "Review blocked because the task repo is missing or invalid.");
         continue;
       }
 
@@ -324,7 +324,7 @@ export const runScoutSelection = async (input: {
         continue;
       }
 
-       const checkpoint = input.foremanRepos.reviewCheckpoints.getReviewCheckpoint(task.id, context.pullRequestUrl);
+      const checkpoint = input.foremanRepos.reviewCheckpoints.getReviewCheckpoint(task.id, context.pullRequestUrl);
       const checkpointMatches = checkpoint
         ? checkpoint.headSha === context.headSha &&
           checkpoint.latestReviewSummaryId === (context.actionableReviewSummaries.at(-1)?.id ?? null) &&
@@ -334,7 +334,7 @@ export const runScoutSelection = async (input: {
         : false;
 
       if (checkpoint && !checkpointMatches) {
-         input.foremanRepos.reviewCheckpoints.deleteReviewCheckpoint(task.id, context.pullRequestUrl);
+        input.foremanRepos.reviewCheckpoints.deleteReviewCheckpoint(task.id, context.pullRequestUrl);
       }
 
       if (checkpointMatches) {

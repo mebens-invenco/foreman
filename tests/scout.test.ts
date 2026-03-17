@@ -8,8 +8,8 @@ import type { ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, 
 import { runScoutSelection } from "../src/orchestration/index.js";
 import type { ReviewService } from "../src/review/index.js";
 import type { TaskSystem } from "../src/tasking/index.js";
-import { createDefaultWorkspaceConfig } from "../src/config.js";
-import * as worktrees from "../src/worktrees.js";
+import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
+import * as worktrees from "../src/workspace/git-worktrees.js";
 import { createMigratedDb, createTempDir } from "./helpers.js";
 
 const cleanupDirs: string[] = [];

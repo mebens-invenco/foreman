@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { WorkspaceConfig, WorkspacePaths } from "../config.js";
+import type { WorkspaceConfig } from "./config.js";
+import type { WorkspacePaths } from "./workspace-paths.js";
 import type { RepoRef } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 import { exec } from "../lib/process.js";

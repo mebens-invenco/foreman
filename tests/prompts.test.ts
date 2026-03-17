@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { createDefaultWorkspaceConfig } from "../src/config.js";
+import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
 import { renderPlanPrompt, renderWorkerPrompt } from "../src/prompts.js";
 import type { Task } from "../src/domain/index.js";
 import { createTempDir, createWorkspacePaths } from "./helpers.js";

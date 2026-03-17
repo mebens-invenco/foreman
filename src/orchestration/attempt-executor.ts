@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { WorkspaceConfig, WorkspacePaths } from "../config.js";
 import { deriveAttemptStatus, type RepoRef, type Task, type WorkerResult } from "../domain/index.js";
 import type { AgentRunner } from "../execution/index.js";
 import { parseWorkerResult, validateWorkerResult } from "../execution/index.js";
@@ -13,7 +12,9 @@ import { renderWorkerPrompt } from "../prompts.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
-import { ensureTaskWorktree, removeCleanWorktree } from "../worktrees.js";
+import type { WorkspaceConfig } from "../workspace/config.js";
+import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
+import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { assertTaskActionableRepo, leaseResourceKeysForAction } from "./scout-selection.js";
 
 type AttemptExecutorDeps = {

@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { createDefaultWorkspaceConfig } from "../src/config.js";
+import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
 import { discoverGitRepos } from "../src/workspace/git-repo-discovery.js";
 import { createTempDir, createWorkspacePaths } from "./helpers.js";
 

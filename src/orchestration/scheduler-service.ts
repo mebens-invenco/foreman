@@ -1,6 +1,5 @@
 import { EventEmitter } from "node:events";
 
-import type { WorkspaceConfig, WorkspacePaths } from "../config.js";
 import type { ActionType, RepoRef, Task, WorkerResult } from "../domain/index.js";
 import type { AgentRunner } from "../execution/index.js";
 import { addSeconds, isoNow } from "../lib/time.js";
@@ -8,6 +7,8 @@ import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
+import type { WorkspaceConfig } from "../workspace/config.js";
+import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { AttemptExecutor } from "./attempt-executor.js";
 import { runScoutSelection } from "./scout-selection.js";
 import { WorkerResultApplier } from "./worker-result-applier.js";

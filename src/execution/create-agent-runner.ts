@@ -1,4 +1,4 @@
-import type { WorkspaceConfig } from "../config.js";
+import type { WorkspaceConfig } from "../workspace/config.js";
 import type { AgentRunner } from "./agent-runner.js";
 import { OpenCodeRunner } from "./impl/opencode-runner.js";
 
