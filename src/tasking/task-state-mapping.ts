@@ -1,5 +1,5 @@
 import type { WorkspaceConfig } from "../config.js";
-import type { TaskState } from "../domain.js";
+import type { TaskState } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 
 const normalizedStateMap = (config: WorkspaceConfig): Record<string, TaskState> => {

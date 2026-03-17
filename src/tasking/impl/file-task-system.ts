@@ -6,7 +6,7 @@ import matter from "gray-matter";
 import YAML from "yaml";
 
 import type { WorkspaceConfig, WorkspacePaths } from "../../config.js";
-import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain.js";
+import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain/index.js";
 import { ForemanError } from "../../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists } from "../../lib/fs.js";
 import { newId } from "../../lib/ids.js";

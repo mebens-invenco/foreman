@@ -1,4 +1,4 @@
-import type { AgentRunRequest, AgentRunResult } from "../domain.js";
+import type { AgentRunRequest, AgentRunResult } from "../domain/index.js";
 
 export type AgentRunLineCallbacks = {
   onStdoutLine?: (line: string) => void;

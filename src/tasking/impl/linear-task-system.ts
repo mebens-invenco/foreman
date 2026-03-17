@@ -1,5 +1,5 @@
 import type { WorkspaceConfig } from "../../config.js";
-import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain.js";
+import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain/index.js";
 import { ForemanError } from "../../lib/errors.js";
 import { LoggerService } from "../../logger.js";
 import type { TaskSystem } from "../task-system.js";

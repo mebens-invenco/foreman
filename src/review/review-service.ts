@@ -1,4 +1,4 @@
-import type { ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, Task } from "../domain.js";
+import type { ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, Task } from "../domain/index.js";
 
 export interface ReviewService {
   resolvePullRequest(task: Task, repo?: RepoRef): Promise<ResolvedPullRequest | null>;

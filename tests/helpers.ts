@@ -5,7 +5,8 @@ import { promises as fs } from "node:fs";
 import Database from "better-sqlite3";
 
 import { createDefaultWorkspaceConfig, type WorkspacePaths } from "../src/config.js";
-import { applyMigrations, ForemanDb, openDatabase } from "../src/db.js";
+import { createRepos, type ForemanRepos } from "../src/repos/index.js";
+import { openSqliteDatabase, type SqliteForemanDatabase } from "../src/repos/impl/sqlite-database.js";
 
 export const createTempDir = async (prefix: string): Promise<string> => fs.mkdtemp(path.join(os.tmpdir(), prefix));
 
@@ -23,10 +24,13 @@ export const createWorkspacePaths = (projectRoot: string, workspaceRoot: string)
   planPath: path.join(workspaceRoot, "plan.md"),
 });
 
-export const createMigratedDb = async (dbPath: string, projectRoot: string): Promise<ForemanDb> => {
-  const db = new ForemanDb(await openDatabase(dbPath));
-  await applyMigrations(db.sqlite, projectRoot);
-  return db;
+export const createMigratedDb = async (
+  dbPath: string,
+  projectRoot: string,
+): Promise<ForemanRepos & { database: SqliteForemanDatabase }> => {
+  const repos = createRepos(await openSqliteDatabase(dbPath));
+  await repos.migrationRunner.runMigrations(projectRoot);
+  return repos as ForemanRepos & { database: SqliteForemanDatabase };
 };
 
 export const createLegacyMemoryDb = (dbPath: string): void => {

@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../src/config.js";
-import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../src/domain.js";
+import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../src/domain/index.js";
 import { SchedulerService } from "../src/scheduler.js";
 import * as worktrees from "../src/worktrees.js";
 
@@ -83,6 +83,79 @@ const fakeLogger = {
   flush: async () => undefined,
 };
 
+const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
+  database: { close: vi.fn() },
+  migrationRunner: { runMigrations: vi.fn(), importLegacyDatabase: vi.fn() },
+  jobs: {
+    activeJobCount: vi.fn(() => 0),
+    hasActiveDedupeKey: vi.fn(() => false),
+    createJob: vi.fn(),
+    listQueue: vi.fn(() => []),
+    listJobsByStatus: vi.fn(() => []),
+    getJob: vi.fn(),
+    updateJobStatus: vi.fn(),
+    returnLeasedJobToQueue: vi.fn(),
+    claimQueuedJobForWorker: vi.fn(() => true),
+    ...((overrides.jobs as object | undefined) ?? {}),
+  },
+  attempts: {
+    createAttempt: vi.fn(),
+    createAttemptWithLeases: vi.fn(),
+    finalizeAttempt: vi.fn(),
+    listAttempts: vi.fn(() => []),
+    getAttempt: vi.fn(),
+    latestAttemptForJob: vi.fn(() => null),
+    addAttemptEvent: vi.fn(),
+    listAttemptEvents: vi.fn(() => []),
+    recoverOrphanedRunningAttempts: vi.fn(() => []),
+    ...((overrides.attempts as object | undefined) ?? {}),
+  },
+  workers: {
+    ensureWorkerSlots: vi.fn(),
+    listWorkers: vi.fn(() => []),
+    updateWorkerStatus: vi.fn(),
+    heartbeatWorker: vi.fn(),
+    ...((overrides.workers as object | undefined) ?? {}),
+  },
+  leases: {
+    acquireLease: vi.fn(() => true),
+    releaseLeasesForAttempt: vi.fn(),
+    releaseLeaseByResource: vi.fn(),
+    hasActiveTaskLease: vi.fn(() => false),
+    reapExpiredLeases: vi.fn(() => 0),
+    ...((overrides.leases as object | undefined) ?? {}),
+  },
+  scoutRuns: {
+    createScoutRun: vi.fn(),
+    completeScoutRun: vi.fn(),
+    listScoutRuns: vi.fn(() => []),
+    ...((overrides.scoutRuns as object | undefined) ?? {}),
+  },
+  artifacts: {
+    createArtifact: vi.fn(),
+    listArtifacts: vi.fn(() => []),
+    ...((overrides.artifacts as object | undefined) ?? {}),
+  },
+  reviewCheckpoints: {
+    getReviewCheckpoint: vi.fn(() => null),
+    upsertReviewCheckpoint: vi.fn(),
+    deleteReviewCheckpoint: vi.fn(),
+    ...((overrides.reviewCheckpoints as object | undefined) ?? {}),
+  },
+  learnings: {
+    addLearning: vi.fn(),
+    updateLearning: vi.fn(),
+    listLearnings: vi.fn(() => []),
+    ...((overrides.learnings as object | undefined) ?? {}),
+  },
+  history: {
+    addHistoryStep: vi.fn(),
+    listHistory: vi.fn(() => []),
+    ...((overrides.history as object | undefined) ?? {}),
+  },
+  close: vi.fn(),
+});
+
 describe("SchedulerService applyWorkerResult", () => {
   test("swaps consolidation labels on completed consolidation jobs", async () => {
     const updateLabels = vi.fn(async () => undefined);
@@ -101,13 +174,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      db: {
-        ensureWorkerSlots: vi.fn(),
-        addLearning: vi.fn(),
-        updateLearning: vi.fn(),
-        addAttemptEvent: vi.fn(),
-        upsertReviewCheckpoint: vi.fn(),
-      } as any,
+      repos: createMockRepos(),
       taskSystem: {
         addComment: vi.fn(async () => undefined),
         addArtifact: vi.fn(async () => undefined),
@@ -119,7 +186,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
       runner: {} as any,
-      repos: [],
+      repoRefs: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -159,15 +226,14 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      db: {
-        ensureWorkerSlots: vi.fn(),
-        addLearning: vi.fn(),
-        updateLearning: vi.fn(),
-        addAttemptEvent,
-        upsertReviewCheckpoint: vi.fn(() => {
-          throw new Error("checkpoint write failed");
-        }),
-      } as any,
+      repos: createMockRepos({
+        attempts: { addAttemptEvent },
+        reviewCheckpoints: {
+          upsertReviewCheckpoint: vi.fn(() => {
+            throw new Error("checkpoint write failed");
+          }),
+        },
+      }),
       taskSystem: {
         addComment: vi.fn(async () => undefined),
         addArtifact: vi.fn(async () => undefined),
@@ -179,7 +245,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
       runner: {} as any,
-      repos: [],
+      repoRefs: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -223,13 +289,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      db: {
-        ensureWorkerSlots: vi.fn(),
-        addLearning: vi.fn(),
-        updateLearning: vi.fn(),
-        addAttemptEvent: vi.fn(),
-        upsertReviewCheckpoint: vi.fn(),
-      } as any,
+      repos: createMockRepos(),
       taskSystem: {
         addComment: vi.fn(async () => undefined),
         addArtifact: vi.fn(async () => undefined),
@@ -241,7 +301,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
       runner: {} as any,
-      repos: [],
+      repoRefs: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -282,13 +342,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      db: {
-        ensureWorkerSlots: vi.fn(),
-        addLearning: vi.fn(),
-        updateLearning: vi.fn(),
-        addAttemptEvent: vi.fn(),
-        upsertReviewCheckpoint: vi.fn(),
-      } as any,
+      repos: createMockRepos(),
       taskSystem: {
         addComment: vi.fn(async () => undefined),
         addArtifact: vi.fn(async () => undefined),
@@ -300,7 +354,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolvePullRequest,
       } as any,
       runner: {} as any,
-      repos: [],
+      repoRefs: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -350,13 +404,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      db: {
-        ensureWorkerSlots: vi.fn(),
-        addLearning: vi.fn(),
-        updateLearning: vi.fn(),
-        addAttemptEvent: vi.fn(),
-        upsertReviewCheckpoint: vi.fn(),
-      } as any,
+      repos: createMockRepos(),
       taskSystem: {
         addComment: vi.fn(async () => undefined),
         addArtifact: vi.fn(async () => undefined),
@@ -371,7 +419,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolveThreads,
       } as any,
       runner: {} as any,
-      repos: [],
+      repoRefs: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -422,13 +470,7 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      db: {
-        ensureWorkerSlots: vi.fn(),
-        addLearning: vi.fn(),
-        updateLearning: vi.fn(),
-        addAttemptEvent: vi.fn(),
-        upsertReviewCheckpoint: vi.fn(),
-      } as any,
+      repos: createMockRepos(),
       taskSystem: {
         addComment: vi.fn(async () => undefined),
         addArtifact: vi.fn(async () => undefined),
@@ -441,7 +483,7 @@ describe("SchedulerService applyWorkerResult", () => {
         resolveThreads,
       } as any,
       runner: {} as any,
-      repos: [],
+      repoRefs: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -490,23 +532,24 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      db: {
-        ensureWorkerSlots: vi.fn(),
-        listWorkers: vi.fn(() => [
-          {
-            id: "worker-1",
-            slot: 1,
-            status: "running",
-            currentAttemptId: "attempt-4",
-            lastHeartbeatAt: "2026-03-16T00:00:00Z",
-          },
-        ]),
-        updateWorkerStatus,
-      } as any,
+      repos: createMockRepos({
+        workers: {
+          listWorkers: vi.fn(() => [
+            {
+              id: "worker-1",
+              slot: 1,
+              status: "running",
+              currentAttemptId: "attempt-4",
+              lastHeartbeatAt: "2026-03-16T00:00:00Z",
+            },
+          ]),
+          updateWorkerStatus,
+        },
+      }),
       taskSystem: {} as any,
       reviewService: {} as any,
       runner: {} as any,
-      repos: [],
+      repoRefs: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -547,31 +590,34 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      db: {
-        ensureWorkerSlots: vi.fn(),
-        listWorkers: vi.fn(() => [
-          {
-            id: "worker-1",
-            slot: 1,
-            status: "idle",
-            currentAttemptId: null,
-            lastHeartbeatAt: "2026-03-16T00:00:00Z",
-          },
-        ]),
-        listJobsByStatus: vi.fn(() => [
-          {
-            id: "job-1",
-            taskId: "TASK-0001",
-            action: "execution",
-            repoKey: "repo-a",
-          },
-        ]),
-        claimQueuedJobForWorker,
-      } as any,
+      repos: createMockRepos({
+        workers: {
+          listWorkers: vi.fn(() => [
+            {
+              id: "worker-1",
+              slot: 1,
+              status: "idle",
+              currentAttemptId: null,
+              lastHeartbeatAt: "2026-03-16T00:00:00Z",
+            },
+          ]),
+        },
+        jobs: {
+          listJobsByStatus: vi.fn(() => [
+            {
+              id: "job-1",
+              taskId: "TASK-0001",
+              action: "execution",
+              repoKey: "repo-a",
+            },
+          ]),
+          claimQueuedJobForWorker,
+        },
+      }),
       taskSystem: {} as any,
       reviewService: {} as any,
       runner: {} as any,
-      repos: [],
+      repoRefs: [],
       env: {},
       logger: fakeLogger as any,
     });
@@ -613,22 +659,20 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      db: {
-        ensureWorkerSlots: vi.fn(),
-        createAttemptWithLeases: vi.fn(() => null),
-        updateWorkerStatus,
-        updateJobStatus: vi.fn(),
-        addAttemptEvent: vi.fn(),
-        releaseLeasesForAttempt: vi.fn(),
-        returnLeasedJobToQueue,
-        releaseLeaseByResource,
-      } as any,
+      repos: createMockRepos({
+        attempts: {
+          createAttemptWithLeases: vi.fn(() => null),
+        },
+        workers: { updateWorkerStatus },
+        jobs: { updateJobStatus: vi.fn(), returnLeasedJobToQueue },
+        leases: { releaseLeasesForAttempt: vi.fn(), releaseLeaseByResource },
+      }),
       taskSystem: {
         getTask: vi.fn(async () => sampleTask({ state: "in_progress", providerState: "in_progress" })),
       } as any,
       reviewService: {} as any,
       runner: {} as any,
-      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
       env: {},
       logger: fakeLogger as any,
     });
@@ -679,26 +723,27 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      db: {
-        ensureWorkerSlots: vi.fn(),
-        createAttemptWithLeases: vi.fn(() => ({
-          id: "attempt-5",
-          attemptNumber: 1,
-          startedAt: "2026-03-16T00:00:00Z",
-        })),
-        updateWorkerStatus,
-        updateJobStatus,
-        addAttemptEvent,
-        finalizeAttempt,
-        releaseLeasesForAttempt,
-      } as any,
+      repos: createMockRepos({
+        attempts: {
+          createAttemptWithLeases: vi.fn(() => ({
+            id: "attempt-5",
+            attemptNumber: 1,
+            startedAt: "2026-03-16T00:00:00Z",
+          })),
+          addAttemptEvent,
+          finalizeAttempt,
+        },
+        workers: { updateWorkerStatus },
+        jobs: { updateJobStatus },
+        leases: { releaseLeasesForAttempt },
+      }),
       taskSystem: {
         getTask: vi.fn(async () => sampleTask({ state: "ready", providerState: "ready" })),
         transition,
       } as any,
       reviewService: {} as any,
       runner: {} as any,
-      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
       env: {},
       logger: fakeLogger as any,
     });

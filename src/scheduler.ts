@@ -3,8 +3,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import type { WorkspaceConfig, WorkspacePaths } from "./config.js";
-import { deriveAttemptStatus, type AttemptRecord, type ForemanDb, type JobRecord, type WorkerRecord } from "./db.js";
-import type { ActionType, RepoRef, ReviewContext, Task, TaskComment, WorkerResult } from "./domain.js";
+import { deriveAttemptStatus, type ActionType, type RepoRef, type ReviewContext, type Task, type TaskComment, type WorkerResult } from "./domain/index.js";
 import type { AgentRunner, CapturedAgentRunResult } from "./execution/index.js";
 import { parseWorkerResult, validateWorkerResult } from "./execution/index.js";
 import { ForemanError } from "./lib/errors.js";
@@ -12,6 +11,7 @@ import { atomicWriteFile, ensureDir, pathExists, sha256File } from "./lib/fs.js"
 import type { LoggerService } from "./logger.js";
 import { isoNow, addMilliseconds, addSeconds } from "./lib/time.js";
 import { renderWorkerPrompt } from "./prompts.js";
+import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "./repos/index.js";
 import type { ReviewService } from "./review/index.js";
 import { assertTaskActionableRepo, leaseResourceKeysForAction, runScoutSelection } from "./scout.js";
 import type { TaskSystem } from "./tasking/index.js";
@@ -23,11 +23,11 @@ type ScoutTrigger = "startup" | "poll" | "worker_finished" | "task_mutation" | "
 type SchedulerDeps = {
   config: WorkspaceConfig;
   paths: WorkspacePaths;
-  db: ForemanDb;
+  repos: ForemanRepos;
   taskSystem: TaskSystem;
   reviewService: ReviewService;
   runner: AgentRunner;
-  repos: RepoRef[];
+  repoRefs: RepoRef[];
   env: Record<string, string>;
   logger: LoggerService;
 };
@@ -66,7 +66,7 @@ export class SchedulerService extends EventEmitter {
   constructor(private readonly deps: SchedulerDeps) {
     super();
     this.logger = deps.logger.child({ component: "scheduler" });
-    this.deps.db.ensureWorkerSlots(deps.config.scheduler.workerConcurrency);
+    this.deps.repos.workers.ensureWorkerSlots(deps.config.scheduler.workerConcurrency);
     this.logger.info("ensured worker slots", { workerConcurrency: deps.config.scheduler.workerConcurrency });
   }
 
@@ -85,7 +85,7 @@ export class SchedulerService extends EventEmitter {
       await this.stopPromise;
     }
 
-    const recovered = this.deps.db.recoverOrphanedRunningAttempts(
+    const recovered = this.deps.repos.attempts.recoverOrphanedRunningAttempts(
       "Recovered abandoned attempt on scheduler startup after prior shutdown",
     );
     if (recovered.length > 0) {
@@ -130,11 +130,11 @@ export class SchedulerService extends EventEmitter {
     this.clearTimers();
     this.pendingScoutTrigger = null;
 
-    for (const worker of this.deps.db.listWorkers()) {
-      if (this.workerAbortControllers.has(worker.id)) {
-        this.deps.db.updateWorkerStatus(worker.id, "stopping", worker.currentAttemptId);
+      for (const worker of this.deps.repos.workers.listWorkers()) {
+        if (this.workerAbortControllers.has(worker.id)) {
+          this.deps.repos.workers.updateWorkerStatus(worker.id, "stopping", worker.currentAttemptId);
+        }
       }
-    }
 
     for (const controller of this.workerAbortControllers.values()) {
       controller.abort();
@@ -201,7 +201,7 @@ export class SchedulerService extends EventEmitter {
     }, this.deps.config.scheduler.schedulerLoopIntervalMs);
 
     this.reapTimer = setInterval(() => {
-      const changes = this.deps.db.reapExpiredLeases(isoNow());
+      const changes = this.deps.repos.leases.reapExpiredLeases(isoNow());
       if (changes > 0) {
         this.logger.warn("reaped expired leases", { changes });
         this.scheduleScout("lease_change");
@@ -271,16 +271,16 @@ export class SchedulerService extends EventEmitter {
     try {
       const selection = await runScoutSelection({
         config: this.deps.config,
-        db: this.deps.db,
+        repos: this.deps.repos,
         taskSystem: this.deps.taskSystem,
         reviewService: this.deps.reviewService,
-        repos: this.deps.repos,
+        repoRefs: this.deps.repoRefs,
         triggerType: trigger,
         logger: this.logger.child({ component: "scout", trigger }),
       });
 
       if (this.status !== "running" && trigger !== "manual") {
-        this.deps.db.completeScoutRun({
+        this.deps.repos.scoutRuns.completeScoutRun({
           id: selection.scoutRunId,
           summary: { enqueued: 0, skippedBecauseStopped: true },
         });
@@ -297,7 +297,7 @@ export class SchedulerService extends EventEmitter {
       let firstReason = "";
 
       for (const selected of selection.jobs) {
-        const job = this.deps.db.createJob({
+          const job = this.deps.repos.jobs.createJob({
           taskId: selected.task.id,
           taskProvider: selected.task.provider,
           action: selected.action,
@@ -327,7 +327,7 @@ export class SchedulerService extends EventEmitter {
         });
       }
 
-      this.deps.db.completeScoutRun({
+      this.deps.repos.scoutRuns.completeScoutRun({
         id: selection.scoutRunId,
         selectedJobId: firstJobId,
         selectedAction: firstAction,
@@ -350,10 +350,10 @@ export class SchedulerService extends EventEmitter {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error("scout run failed", { trigger, error: message });
-      const scoutRuns = this.deps.db.listScoutRuns(1);
+        const scoutRuns = this.deps.repos.scoutRuns.listScoutRuns(1);
       const latestId = String(scoutRuns[0]?.id ?? "");
       if (latestId) {
-        this.deps.db.completeScoutRun({
+          this.deps.repos.scoutRuns.completeScoutRun({
           id: latestId,
           status: "failed",
           errorMessage: message,
@@ -380,8 +380,8 @@ export class SchedulerService extends EventEmitter {
       return;
     }
 
-    const queuedJobs = this.deps.db.listJobsByStatus(["queued"]);
-    const idleWorkers = this.deps.db
+    const queuedJobs = this.deps.repos.jobs.listJobsByStatus(["queued"]);
+    const idleWorkers = this.deps.repos.workers
       .listWorkers()
       .filter((worker) => worker.status === "idle" && !this.activeWorkerRuns.has(worker.id));
     if (queuedJobs.length > 0 || idleWorkers.length > 0) {
@@ -398,7 +398,7 @@ export class SchedulerService extends EventEmitter {
         break;
       }
 
-      const claimed = this.deps.db.claimQueuedJobForWorker(job.id, worker.id);
+      const claimed = this.deps.repos.jobs.claimQueuedJobForWorker(job.id, worker.id);
       if (!claimed) {
         this.logger.debug("skipped dispatch because worker or job was already claimed", {
           workerId: worker.id,
@@ -443,12 +443,12 @@ export class SchedulerService extends EventEmitter {
 
     try {
       task = await this.deps.taskSystem.getTask(job.taskId);
-      repo = assertTaskActionableRepo(task, this.deps.repos);
+      repo = assertTaskActionableRepo(task, this.deps.repoRefs);
       jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
       jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
 
-      attempt = this.deps.db.createAttemptWithLeases({
+        attempt = this.deps.repos.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId,
         runnerModel: this.deps.config.runner.model,
@@ -457,7 +457,7 @@ export class SchedulerService extends EventEmitter {
         leases: leaseResourceKeysForAction(task, job.action),
       });
       if (!attempt) {
-        this.deps.db.returnLeasedJobToQueue(job.id);
+          this.deps.repos.jobs.returnLeasedJobToQueue(job.id);
         jobLogger.warn("returned leased job to queue because required execution leases could not be acquired");
         return;
       }
@@ -465,17 +465,21 @@ export class SchedulerService extends EventEmitter {
       const attemptLogger = jobLogger.child({ attemptId: attempt.id });
       attemptLogger.info("created execution attempt", { attemptNumber: attempt.attemptNumber, leaseExpiresAt });
 
-      this.deps.db.updateWorkerStatus(workerId, "running", attempt.id);
-      this.deps.db.updateJobStatus(job.id, "running", { startedAt: attempt.startedAt });
-      this.deps.db.addAttemptEvent(attempt.id, "attempt_started", `Started ${job.action} for ${task.id}`);
+        this.deps.repos.workers.updateWorkerStatus(workerId, "running", attempt.id);
+        this.deps.repos.jobs.updateJobStatus(job.id, "running", { startedAt: attempt.startedAt });
+        this.deps.repos.attempts.addAttemptEvent(attempt.id, "attempt_started", `Started ${job.action} for ${task.id}`);
       attemptLogger.info("worker leased and job marked running");
       this.emit("worker_updated", { workerId, status: "running", attemptId: attempt.id });
       this.emit("attempt_changed", { attemptId: attempt.id, status: "running" });
 
-      const heartbeat = setInterval(() => {
-        this.deps.db.heartbeatWorker(workerId, attempt?.id ?? null, addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds));
-        attemptLogger.debug("sent worker heartbeat");
-      }, this.deps.config.scheduler.workerHeartbeatSeconds * 1000);
+        const heartbeat = setInterval(() => {
+          this.deps.repos.workers.heartbeatWorker(
+            workerId,
+            attempt?.id ?? null,
+            addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds),
+          );
+          attemptLogger.debug("sent worker heartbeat");
+        }, this.deps.config.scheduler.workerHeartbeatSeconds * 1000);
 
       try {
         worktreePath =
@@ -530,7 +534,7 @@ export class SchedulerService extends EventEmitter {
         const promptAbsolutePath = path.join(this.deps.paths.workspaceRoot, promptRelativePath);
         await atomicWriteFile(promptAbsolutePath, prompt);
         const promptStat = await fs.stat(promptAbsolutePath);
-        this.deps.db.createArtifact({
+        this.deps.repos.artifacts.createArtifact({
           ownerType: "execution_attempt",
           ownerId: attempt.id,
           artifactType: "rendered_prompt",
@@ -567,7 +571,7 @@ export class SchedulerService extends EventEmitter {
         await ensureDir(path.dirname(logAbsolutePath));
         await attemptLogger.flush();
         const logStat = await fs.stat(logAbsolutePath);
-        this.deps.db.createArtifact({
+        this.deps.repos.artifacts.createArtifact({
           ownerType: "execution_attempt",
           ownerId: attempt.id,
           artifactType: "log",
@@ -590,7 +594,7 @@ export class SchedulerService extends EventEmitter {
         const resultAbsolutePath = path.join(this.deps.paths.workspaceRoot, resultRelativePath);
         await atomicWriteFile(resultAbsolutePath, `${JSON.stringify(workerResult, null, 2)}\n`);
         const resultStat = await fs.stat(resultAbsolutePath);
-        this.deps.db.createArtifact({
+        this.deps.repos.artifacts.createArtifact({
           ownerType: "execution_attempt",
           ownerId: attempt.id,
           artifactType: "parsed_result",
@@ -599,7 +603,9 @@ export class SchedulerService extends EventEmitter {
           sizeBytes: resultStat.size,
           sha256: await sha256File(resultAbsolutePath),
         });
-        this.deps.db.addAttemptEvent(attempt.id, "worker_result_parsed", workerResult.summary, { outcome: workerResult.outcome });
+        this.deps.repos.attempts.addAttemptEvent(attempt.id, "worker_result_parsed", workerResult.summary, {
+          outcome: workerResult.outcome,
+        });
         attemptLogger.info("wrote parsed worker result artifact", { resultPath: resultAbsolutePath, sizeBytes: resultStat.size });
 
         currentPrUrl = await this.applyWorkerResult({
@@ -615,18 +621,18 @@ export class SchedulerService extends EventEmitter {
         const attemptStatus = deriveAttemptStatus(workerResult);
         const jobStatus = attemptStatus === "timed_out" ? "failed" : attemptStatus;
         const afterSha = await this.gitHead(worktreePath).catch(() => null);
-        this.deps.db.finalizeAttempt(attempt.id, attemptStatus, {
+        this.deps.repos.attempts.finalizeAttempt(attempt.id, attemptStatus, {
           finishedAt: runResult.finishedAt,
           exitCode: runResult.exitCode,
           signal: runResult.signal,
           summary: workerResult.summary,
           errorMessage: workerResult.outcome === "failed" ? workerResult.summary : null,
         });
-        this.deps.db.updateJobStatus(job.id, jobStatus, {
+        this.deps.repos.jobs.updateJobStatus(job.id, jobStatus, {
           finishedAt: runResult.finishedAt,
           errorMessage: workerResult.outcome === "failed" ? workerResult.summary : null,
         });
-        const historyInput: Parameters<ForemanDb["addHistoryStep"]>[0] = {
+        const historyInput: Parameters<ForemanRepos["history"]["addHistoryStep"]>[0] = {
           createdAt: runResult.finishedAt,
           stage: job.action,
           issue: task.id.toLowerCase(),
@@ -635,7 +641,7 @@ export class SchedulerService extends EventEmitter {
         if (beforeSha && afterSha) {
           historyInput.repos = [{ path: repo.rootPath, beforeSha, afterSha }];
         }
-        this.deps.db.addHistoryStep(historyInput);
+        this.deps.repos.history.addHistoryStep(historyInput);
         attemptLogger.info("finalized attempt and job", { attemptStatus, jobStatus, afterSha: afterSha ?? "unknown" });
 
         if (job.action === "consolidation" && workerResult.outcome === "completed" && worktreePath !== repo.rootPath) {
@@ -650,28 +656,28 @@ export class SchedulerService extends EventEmitter {
       if (attempt) {
         const attemptLogger = jobLogger.child({ attemptId: attempt.id });
         attemptLogger.error("attempt failed", { error: message, aborted: controller.signal.aborted });
-        this.deps.db.addAttemptEvent(attempt.id, "attempt_failed", message);
-        this.deps.db.finalizeAttempt(attempt.id, controller.signal.aborted ? "canceled" : "failed", {
+          this.deps.repos.attempts.addAttemptEvent(attempt.id, "attempt_failed", message);
+          this.deps.repos.attempts.finalizeAttempt(attempt.id, controller.signal.aborted ? "canceled" : "failed", {
           finishedAt: isoNow(),
           summary: message,
           errorMessage: message,
         });
         this.emit("attempt_changed", { attemptId: attempt.id, status: controller.signal.aborted ? "canceled" : "failed" });
       }
-      this.deps.db.updateJobStatus(job.id, controller.signal.aborted ? "canceled" : "failed", {
+      this.deps.repos.jobs.updateJobStatus(job.id, controller.signal.aborted ? "canceled" : "failed", {
         finishedAt: isoNow(),
         errorMessage: message,
       });
       jobLogger.error("job failed", { error: message, aborted: controller.signal.aborted });
     } finally {
       if (attempt) {
-        this.deps.db.releaseLeasesForAttempt(attempt.id, controller.signal.aborted ? "stopped" : "completed");
+          this.deps.repos.leases.releaseLeasesForAttempt(attempt.id, controller.signal.aborted ? "stopped" : "completed");
         jobLogger.child({ attemptId: attempt.id }).info("released attempt leases", {
           releaseReason: controller.signal.aborted ? "stopped" : "completed",
         });
       }
 
-      this.deps.db.updateWorkerStatus(workerId, "idle", null);
+      this.deps.repos.workers.updateWorkerStatus(workerId, "idle", null);
       this.emit("worker_updated", { workerId, status: "idle" });
       this.workerAbortControllers.delete(workerId);
       jobLogger.info("worker returned to idle");
@@ -845,11 +851,11 @@ export class SchedulerService extends EventEmitter {
 
     for (const mutation of workerResult.learningMutations) {
       if (mutation.type === "add") {
-        this.deps.db.addLearning(mutation);
+          this.deps.repos.learnings.addLearning(mutation);
         logger.info("added learning mutation", { learningTitle: mutation.title, repo: mutation.repo });
       }
       if (mutation.type === "update") {
-        this.deps.db.updateLearning(mutation);
+          this.deps.repos.learnings.updateLearning(mutation);
         logger.info("updated learning mutation", { learningId: mutation.id });
       }
     }
@@ -863,7 +869,7 @@ export class SchedulerService extends EventEmitter {
       const reviewContext = await this.deps.reviewService.getContext(input.task, this.deps.config.workspace.agentPrefix, input.repo);
       if (reviewContext) {
         try {
-          this.deps.db.upsertReviewCheckpoint({
+            this.deps.repos.reviewCheckpoints.upsertReviewCheckpoint({
             taskId: input.task.id,
             prUrl: pullRequestUrl,
             reviewContext,
@@ -871,10 +877,10 @@ export class SchedulerService extends EventEmitter {
           });
           logger.info("saved review checkpoint", { pullRequestUrl });
         } catch (error) {
-          this.deps.db.addAttemptEvent(
-            input.attempt.id,
-            "review_checkpoint_warning",
-            error instanceof Error ? error.message : String(error),
+            this.deps.repos.attempts.addAttemptEvent(
+              input.attempt.id,
+              "review_checkpoint_warning",
+              error instanceof Error ? error.message : String(error),
           );
           logger.warn("failed to save review checkpoint", { error: error instanceof Error ? error.message : String(error) });
         }

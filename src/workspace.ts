@@ -6,9 +6,10 @@ import { createDefaultWorkspaceConfig, loadWorkspaceConfig, resolveWorkspacePath
 import { ForemanError } from "./lib/errors.js";
 import { atomicWriteFile, ensureDir, isDirectoryEmpty, pathExists } from "./lib/fs.js";
 import type { LoggerService } from "./logger.js";
-import { applyMigrations, ForemanDb, openDatabase } from "./db.js";
 import { renderPlanPrompt } from "./prompts.js";
-import { discoverRepos } from "./repos.js";
+import { createRepos, type ForemanRepos } from "./repos/index.js";
+import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
+import { discoverGitRepos } from "./workspace/git-repo-discovery.js";
 
 export const initializeWorkspace = async (workspaceName: string, taskSystemType: "linear" | "file"): Promise<WorkspacePaths> => {
   const paths = await resolveWorkspacePaths(workspaceName);
@@ -38,11 +39,11 @@ export const initializeWorkspace = async (workspaceName: string, taskSystemType:
   ].filter(Boolean);
   await atomicWriteFile(paths.envPath, `${envLines.join("\n")}\n`);
 
-  const db = new ForemanDb(await openDatabase(paths.dbPath));
+  const repos = createRepos(await openSqliteDatabase(paths.dbPath));
   try {
-    await applyMigrations(db.sqlite, paths.projectRoot);
+    await repos.migrationRunner.runMigrations(paths.projectRoot);
   } finally {
-    db.close();
+    repos.close();
   }
 
   return paths;
@@ -50,15 +51,15 @@ export const initializeWorkspace = async (workspaceName: string, taskSystemType:
 
 export const renderWorkspacePlan = async (
   workspaceName: string,
-  db?: ForemanDb,
+  repos?: ForemanRepos,
   logger?: LoggerService,
 ): Promise<{ config: WorkspaceConfig; paths: WorkspacePaths; markdown: string; contextPath: string }> => {
   const { config, paths } = await loadWorkspaceConfig(workspaceName);
   const workspaceLogger = logger?.child({ component: "workspace.plan", workspace: config.workspace.name });
   workspaceLogger?.info("rendering workspace plan");
-  const repos = await discoverRepos(config, paths);
-  workspaceLogger?.info("discovered repositories for workspace plan", { repoCount: repos.length });
-  const { markdown, context } = await renderPlanPrompt(config, paths, repos);
+  const discoveredRepos = await discoverGitRepos(config, paths);
+  workspaceLogger?.info("discovered repositories for workspace plan", { repoCount: discoveredRepos.length });
+  const { markdown, context } = await renderPlanPrompt(config, paths, discoveredRepos);
 
   await atomicWriteFile(paths.planPath, markdown);
   workspaceLogger?.info("wrote workspace plan prompt", { planPath: paths.planPath });
@@ -69,10 +70,10 @@ export const renderWorkspacePlan = async (
   await atomicWriteFile(absoluteJsonPath, `${JSON.stringify(context, null, 2)}\n`);
   workspaceLogger?.info("wrote workspace plan context", { contextPath: absoluteJsonPath });
 
-  if (db) {
+  if (repos) {
     const planStat = await fs.stat(paths.planPath);
     const planContextStat = await fs.stat(absoluteJsonPath);
-    db.createArtifact({
+    repos.artifacts.createArtifact({
       ownerType: "workspace",
       ownerId: config.workspace.name,
       artifactType: "plan_prompt",
@@ -80,7 +81,7 @@ export const renderWorkspacePlan = async (
       mediaType: "text/markdown",
       sizeBytes: planStat.size,
     });
-    db.createArtifact({
+    repos.artifacts.createArtifact({
       ownerType: "workspace",
       ownerId: config.workspace.name,
       artifactType: "plan_context",
@@ -96,10 +97,10 @@ export const renderWorkspacePlan = async (
 
 export const importLegacyMemory = async (workspaceName: string, legacyDbPath: string): Promise<void> => {
   const { paths } = await loadWorkspaceConfig(workspaceName);
-  const db = new ForemanDb(await openDatabase(paths.dbPath));
+  const repos = createRepos(await openSqliteDatabase(paths.dbPath));
   try {
-    db.importLegacyDatabase(legacyDbPath);
+    repos.migrationRunner.importLegacyDatabase(legacyDbPath);
   } finally {
-    db.close();
+    repos.close();
   }
 };

@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import type { WorkspaceConfig, WorkspacePaths } from "./config.js";
-import type { RepoRef, ReviewContext, Task } from "./domain.js";
+import type { RepoRef, ReviewContext, Task } from "./domain/index.js";
 
 type PromptTemplateName = "plan" | "execution" | "review" | "retry" | "consolidation";
 type WorkerPromptTemplateName = Exclude<PromptTemplateName, "plan">;

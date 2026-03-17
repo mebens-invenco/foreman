@@ -1,7 +1,7 @@
 import { ForemanError } from "../../lib/errors.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
-import type { CheckState, ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, ReviewThread, ReviewSummary, Task } from "../../domain.js";
+import type { CheckState, ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, ReviewThread, ReviewSummary, Task } from "../../domain/index.js";
 import type { ReviewService } from "../review-service.js";
 
 type RepoDescriptor = { owner: string; repo: string };

@@ -1,9 +1,10 @@
 import type { WorkspaceConfig } from "./config.js";
-import type { ActionType, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskComment } from "./domain.js";
-import { priorityToRank, type ForemanDb, type ScoutRunTrigger } from "./db.js";
+import type { ActionType, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskComment } from "./domain/index.js";
+import { priorityToRank } from "./domain/index.js";
 import { ForemanError } from "./lib/errors.js";
 import { stableStringify } from "./lib/json.js";
 import type { LoggerService } from "./logger.js";
+import type { ForemanRepos, ScoutRunTrigger } from "./repos/index.js";
 import type { ReviewService } from "./review/index.js";
 import type { TaskSystem } from "./tasking/index.js";
 import { branchExistsOnOrigin, isAncestorOnOrigin, resolveTaskBranchName } from "./worktrees.js";
@@ -230,29 +231,32 @@ export const resolveBaseBranch = async (input: {
 
 export const runScoutSelection = async (input: {
   config: WorkspaceConfig;
-  db: ForemanDb;
+  repos: ForemanRepos;
   taskSystem: TaskSystem;
   reviewService: ReviewService;
-  repos: RepoRef[];
+  repoRefs: RepoRef[];
   triggerType: ScoutRunTrigger;
   logger?: LoggerService;
 }): Promise<{ scoutRunId: string; jobs: Selection[] }> => {
   const logger = input.logger?.child({ component: "scout.selection", trigger: input.triggerType });
   const allTasks = await input.taskSystem.listCandidates();
-  const reposByKey = new Map(input.repos.map((repo) => [repo.key, repo]));
+  const reposByKey = new Map(input.repoRefs.map((repo) => [repo.key, repo]));
   const activeCandidates = allTasks.filter(
-    (task) => task.state === "ready" || task.state === "in_review" || (task.state === "in_progress" && !input.db.hasActiveTaskLease(task.id)),
+    (task) =>
+      task.state === "ready" ||
+      task.state === "in_review" ||
+      (task.state === "in_progress" && !input.repos.leases.hasActiveTaskLease(task.id)),
   );
   const terminalCandidates = allTasks.filter(isTerminal);
 
-  const scoutRunId = input.db.createScoutRun({
+  const scoutRunId = input.repos.scoutRuns.createScoutRun({
     triggerType: input.triggerType,
     candidateCount: allTasks.length,
     activeCount: activeCandidates.length,
     terminalCount: terminalCandidates.length,
   });
 
-  const availableCapacity = Math.max(0, input.config.scheduler.workerConcurrency - input.db.activeJobCount());
+  const availableCapacity = Math.max(0, input.config.scheduler.workerConcurrency - input.repos.jobs.activeJobCount());
   const jobs: Selection[] = [];
   const blockedReasons = new Set<string>();
   logger?.info("loaded scout candidates", {
@@ -272,7 +276,7 @@ export const runScoutSelection = async (input: {
     if (jobs.some((job) => `${job.task.id}:${job.action}` === dedupeKey)) {
       return false;
     }
-    return !input.db.hasActiveDedupeKey(dedupeKey);
+    return !input.repos.jobs.hasActiveDedupeKey(dedupeKey);
   };
 
   const recordBlocker = async (taskId: string, body: string, options?: { postComment?: boolean }): Promise<void> => {
@@ -320,17 +324,17 @@ export const runScoutSelection = async (input: {
         continue;
       }
 
-      const checkpoint = input.db.getReviewCheckpoint(task.id, context.pullRequestUrl);
+      const checkpoint = input.repos.reviewCheckpoints.getReviewCheckpoint(task.id, context.pullRequestUrl);
       const checkpointMatches = checkpoint
-        ? checkpoint.head_sha === context.headSha &&
-          checkpoint.latest_review_summary_id === (context.actionableReviewSummaries.at(-1)?.id ?? null) &&
-          checkpoint.latest_conversation_comment_id === (context.actionableConversationComments.at(-1)?.id ?? null) &&
-          checkpoint.checks_fingerprint === stableStringify({ failing: context.failingChecks, pending: context.pendingChecks }) &&
-          checkpoint.merge_state === context.mergeState
+        ? checkpoint.headSha === context.headSha &&
+          checkpoint.latestReviewSummaryId === (context.actionableReviewSummaries.at(-1)?.id ?? null) &&
+          checkpoint.latestConversationCommentId === (context.actionableConversationComments.at(-1)?.id ?? null) &&
+          checkpoint.checksFingerprint === stableStringify({ failing: context.failingChecks, pending: context.pendingChecks }) &&
+          checkpoint.mergeState === context.mergeState
         : false;
 
       if (checkpoint && !checkpointMatches) {
-        input.db.deleteReviewCheckpoint(task.id, context.pullRequestUrl);
+        input.repos.reviewCheckpoints.deleteReviewCheckpoint(task.id, context.pullRequestUrl);
       }
 
       if (checkpointMatches) {
@@ -378,7 +382,7 @@ export const runScoutSelection = async (input: {
           continue;
         }
 
-        const base = await resolveBaseBranch({ task, repo, repos: input.repos, taskSystem: input.taskSystem, reviewService: input.reviewService });
+        const base = await resolveBaseBranch({ task, repo, repos: input.repoRefs, taskSystem: input.taskSystem, reviewService: input.reviewService });
         if (base.blockers.length > 0) {
           for (const blocker of base.blockers) {
             await recordBlocker(task.id, blocker);
@@ -420,7 +424,7 @@ export const runScoutSelection = async (input: {
           continue;
         }
 
-        const base = await resolveBaseBranch({ task, repo, repos: input.repos, taskSystem: input.taskSystem, reviewService: input.reviewService });
+        const base = await resolveBaseBranch({ task, repo, repos: input.repoRefs, taskSystem: input.taskSystem, reviewService: input.reviewService });
         if (base.blockers.length > 0) {
           for (const blocker of base.blockers) {
             await recordBlocker(task.id, blocker, { postComment: false });

@@ -1,4 +1,4 @@
-import type { Task, TaskArtifact, TaskComment, TaskProvider, TaskState } from "../domain.js";
+import type { Task, TaskArtifact, TaskComment, TaskProvider, TaskState } from "../domain/index.js";
 
 export interface TaskSystem {
   getProvider(): TaskProvider;
