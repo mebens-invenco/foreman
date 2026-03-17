@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { RepoRef, Task } from "../src/domain/index.js";
 import * as processLib from "../src/lib/process.js";
-import { GitHubReviewService } from "../src/review.js";
+import { GitHubReviewService } from "../src/review/index.js";
 
 const fakeLogger = {
   child() {

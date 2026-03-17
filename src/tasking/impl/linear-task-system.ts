@@ -1,113 +1,28 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
+import type { WorkspaceConfig } from "../../config.js";
+import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain/index.js";
+import { ForemanError } from "../../lib/errors.js";
+import { LoggerService } from "../../logger.js";
+import type { TaskSystem } from "../task-system.js";
+import { getProviderStateForNormalized, normalizeTaskState } from "../task-state-mapping.js";
 
-import fg from "fast-glob";
-import matter from "gray-matter";
-import YAML from "yaml";
-
-import type { WorkspaceConfig, WorkspacePaths } from "./config.js";
-import type { Task, TaskArtifact, TaskComment, TaskProvider, TaskState } from "./domain/index.js";
-import { ForemanError } from "./lib/errors.js";
-import { atomicWriteFile, ensureDir, pathExists } from "./lib/fs.js";
-import { newId } from "./lib/ids.js";
-import { LoggerService } from "./logger.js";
-import { isoNow } from "./lib/time.js";
-
-export interface TaskSystem {
-  getProvider(): TaskProvider;
-  listCandidates(): Promise<Task[]>;
-  getTask(taskId: string): Promise<Task>;
-  listComments(taskId: string): Promise<TaskComment[]>;
-  addComment(input: { taskId: string; body: string }): Promise<void>;
-  transition(input: { taskId: string; toState: TaskState }): Promise<void>;
-  addArtifact(input: { taskId: string; artifact: TaskArtifact }): Promise<void>;
-  updateLabels(input: { taskId: string; add: string[]; remove: string[] }): Promise<void>;
-  validateStartup?(): Promise<void>;
-}
-
-const normalizedStateMap = (config: WorkspaceConfig): Record<string, TaskState> => {
-  if (config.taskSystem.type === "linear") {
-    const states = config.taskSystem.linear!.states;
-    return Object.fromEntries([
-      ...states.ready.map((value) => [value, "ready"]),
-      ...states.inProgress.map((value) => [value, "in_progress"]),
-      ...states.inReview.map((value) => [value, "in_review"]),
-      ...states.done.map((value) => [value, "done"]),
-      ...states.canceled.map((value) => [value, "canceled"]),
-    ]);
-  }
-
-  const states = config.taskSystem.file!.states;
-  return Object.fromEntries([
-    ...states.ready.map((value) => [value, "ready"]),
-    ...states.inProgress.map((value) => [value, "in_progress"]),
-    ...states.inReview.map((value) => [value, "in_review"]),
-    ...states.done.map((value) => [value, "done"]),
-    ...states.canceled.map((value) => [value, "canceled"]),
-  ]);
+type LinearIssueNode = {
+  id: string;
+  identifier: string;
+  title: string;
+  description: string | null;
+  state: { id: string; name: string };
+  priorityLabel: string | null;
+  labels: { nodes: Array<{ id: string; name: string }> };
+  assignee: { name: string } | null;
+  branchName: string | null;
+  updatedAt: string;
+  url: string | null;
+  attachments: { nodes: Array<{ id: string; title: string | null; url: string }> };
 };
 
-export const normalizeTaskState = (config: WorkspaceConfig, providerState: string): TaskState => {
-  const mapped = normalizedStateMap(config)[providerState];
-  if (!mapped) {
-    throw new ForemanError("unknown_provider_state", `Unmapped provider state: ${providerState}`);
-  }
-  return mapped;
-};
-
-export const getProviderStateForNormalized = (config: WorkspaceConfig, state: TaskState): string => {
-  const stateConfig = config.taskSystem.type === "linear" ? config.taskSystem.linear!.states : config.taskSystem.file!.states;
-  switch (state) {
-    case "ready":
-      return stateConfig.ready[0]!;
-    case "in_progress":
-      return stateConfig.inProgress[0]!;
-    case "in_review":
-      return stateConfig.inReview[0]!;
-    case "done":
-      return stateConfig.done[0]!;
-    case "canceled":
-      return stateConfig.canceled[0]!;
-  }
-};
-
-const normalizePriority = (value: unknown): Task["priority"] => {
-  const normalized = String(value ?? "none").toLowerCase();
-  switch (normalized) {
-    case "urgent":
-    case "high":
-    case "normal":
-    case "low":
-    case "none":
-      return normalized;
-    default:
-      return "none";
-  }
-};
-
-const isGithubPullRequestArtifact = (artifact: Pick<TaskArtifact, "type" | "url">): boolean => {
-  if (artifact.type !== "pull_request") {
-    return false;
-  }
-
-  try {
-    const parsed = new URL(artifact.url);
-    return (parsed.hostname === "github.com" || parsed.hostname.endsWith(".github.com")) && /\/pull\/\d+$/.test(parsed.pathname);
-  } catch {
-    return false;
-  }
-};
-
-const normalizeAuthorKind = (value: unknown): TaskComment["authorKind"] => {
-  const normalized = String(value ?? "unknown").toLowerCase();
-  switch (normalized) {
-    case "agent":
-    case "human":
-    case "system":
-      return normalized;
-    default:
-      return "unknown";
-  }
+type LinearViewer = {
+  id: string;
+  name: string;
 };
 
 const parseCsv = (value: string): string[] =>
@@ -118,10 +33,11 @@ const parseCsv = (value: string): string[] =>
 
 export const parseLinearMetadata = (description: string): Pick<Task, "repo" | "branchName" | "dependencies"> => {
   const match = description.match(/(^|\n)Agent:\s*\n((?:\s{2,}.+\n?)*)/i);
-  const lines = match?.[2]
-    ?.split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean) ?? [];
+  const lines =
+    match?.[2]
+      ?.split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean) ?? [];
 
   const values = new Map<string, string>();
   for (const line of lines) {
@@ -147,252 +63,6 @@ export const parseLinearMetadata = (description: string): Pick<Task, "repo" | "b
   };
 };
 
-type FileTaskFrontmatter = {
-  id: string;
-  title: string;
-  state: string;
-  priority: string;
-  labels?: string[];
-  repo?: string | null;
-  branchName?: string | null;
-  dependsOnTasks?: string[];
-  baseFromTask?: string | null;
-  dependsOnBranches?: string[];
-  artifacts?: TaskArtifact[];
-  assignee?: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-const fileFrontmatterOrder: Array<keyof FileTaskFrontmatter> = [
-  "id",
-  "title",
-  "state",
-  "priority",
-  "labels",
-  "repo",
-  "branchName",
-  "dependsOnTasks",
-  "baseFromTask",
-  "dependsOnBranches",
-  "artifacts",
-  "assignee",
-  "createdAt",
-  "updatedAt",
-];
-
-const stringifyFileTask = (frontmatter: FileTaskFrontmatter, body: string): string => {
-  const ordered = Object.fromEntries(fileFrontmatterOrder.map((key) => [key, frontmatter[key]]));
-  const yaml = YAML.stringify(ordered).trimEnd();
-  return `---\n${yaml}\n---\n\n${body.trim()}\n`;
-};
-
-const parseFileTaskDocument = (config: WorkspaceConfig, filePath: string, contents: string): Task => {
-  const parsed = matter(contents);
-  const data = parsed.data as FileTaskFrontmatter;
-  const stem = path.basename(filePath, ".md");
-  if (data.id !== stem) {
-    throw new ForemanError("invalid_file_task", `Task id ${data.id} does not match filename ${stem}`);
-  }
-
-  return {
-    id: data.id,
-    provider: "file",
-    providerId: data.id,
-    title: data.title,
-    description: parsed.content.trim(),
-    state: normalizeTaskState(config, data.state),
-    providerState: data.state,
-    priority: normalizePriority(data.priority),
-    labels: data.labels ?? [],
-    assignee: data.assignee ?? null,
-    repo: data.repo ?? null,
-    branchName: data.branchName ?? data.id.toLowerCase(),
-    dependencies: {
-      taskIds: data.dependsOnTasks ?? [],
-      baseTaskId: data.baseFromTask ?? null,
-      branchNames: data.dependsOnBranches ?? [],
-    },
-    artifacts: data.artifacts ?? [],
-    updatedAt: data.updatedAt,
-    url: null,
-  };
-};
-
-const toFileFrontmatter = (task: Task, createdAt: string): FileTaskFrontmatter => ({
-  id: task.id,
-  title: task.title,
-  state: task.providerState,
-  priority: task.priority,
-  labels: task.labels,
-  repo: task.repo,
-  branchName: task.branchName ?? task.id.toLowerCase(),
-  dependsOnTasks: task.dependencies.taskIds,
-  baseFromTask: task.dependencies.baseTaskId,
-  dependsOnBranches: task.dependencies.branchNames,
-  artifacts: task.artifacts,
-  assignee: task.assignee,
-  createdAt,
-  updatedAt: task.updatedAt,
-});
-
-const fileCommentsPath = (taskPath: string): string => taskPath.replace(/\.md$/, ".comments.ndjson");
-
-export class FileTaskSystem implements TaskSystem {
-  constructor(
-    private readonly config: WorkspaceConfig,
-    private readonly paths: WorkspacePaths,
-  ) {}
-
-  getProvider(): "file" {
-    return "file";
-  }
-
-  private get taskDir(): string {
-    return path.join(this.paths.workspaceRoot, this.config.taskSystem.file!.tasksDir);
-  }
-
-  private async listTaskFiles(): Promise<string[]> {
-    await ensureDir(this.taskDir);
-    return fg("*.md", { cwd: this.taskDir, absolute: true, onlyFiles: true }).then((entries) => entries.sort());
-  }
-
-  private async loadTaskDocument(taskId: string): Promise<{ task: Task; frontmatter: FileTaskFrontmatter; path: string }> {
-    const taskPath = path.join(this.taskDir, `${taskId}.md`);
-    if (!(await pathExists(taskPath))) {
-      throw new ForemanError("task_not_found", `Task not found: ${taskId}`, 404);
-    }
-
-    const contents = await fs.readFile(taskPath, "utf8");
-    const parsed = matter(contents);
-    return {
-      task: parseFileTaskDocument(this.config, taskPath, contents),
-      frontmatter: parsed.data as FileTaskFrontmatter,
-      path: taskPath,
-    };
-  }
-
-  async listCandidates(): Promise<Task[]> {
-    const files = await this.listTaskFiles();
-    return Promise.all(files.map(async (filePath) => parseFileTaskDocument(this.config, filePath, await fs.readFile(filePath, "utf8"))));
-  }
-
-  async getTask(taskId: string): Promise<Task> {
-    return (await this.loadTaskDocument(taskId)).task;
-  }
-
-  async listComments(taskId: string): Promise<TaskComment[]> {
-    const taskPath = path.join(this.taskDir, `${taskId}.md`);
-    const commentsPath = fileCommentsPath(taskPath);
-    if (!(await pathExists(commentsPath))) {
-      return [];
-    }
-    const raw = await fs.readFile(commentsPath, "utf8");
-    return raw
-      .split(/\r?\n/)
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => JSON.parse(line) as TaskComment)
-      .map((comment) => ({ ...comment, authorKind: normalizeAuthorKind(comment.authorKind) }));
-  }
-
-  async addComment(input: { taskId: string; body: string }): Promise<void> {
-    const taskPath = path.join(this.taskDir, `${input.taskId}.md`);
-    if (!(await pathExists(taskPath))) {
-      throw new ForemanError("task_not_found", `Task not found: ${input.taskId}`, 404);
-    }
-
-    const comment: TaskComment = {
-      id: newId(),
-      taskId: input.taskId,
-      body: input.body,
-      authorName: "agent",
-      authorKind: "agent",
-      createdAt: isoNow(),
-      updatedAt: null,
-    };
-
-    await fs.appendFile(fileCommentsPath(taskPath), `${JSON.stringify(comment)}\n`, "utf8");
-  }
-
-  async transition(input: { taskId: string; toState: TaskState }): Promise<void> {
-    const { task, frontmatter: existingFrontmatter, path: taskPath } = await this.loadTaskDocument(input.taskId);
-    const updatedFrontmatter = {
-      ...toFileFrontmatter(task, existingFrontmatter.createdAt),
-      state: getProviderStateForNormalized(this.config, input.toState),
-      updatedAt: isoNow(),
-    };
-    await atomicWriteFile(taskPath, stringifyFileTask(updatedFrontmatter, task.description));
-  }
-
-  async addArtifact(input: { taskId: string; artifact: TaskArtifact }): Promise<void> {
-    const { task, frontmatter, path: taskPath } = await this.loadTaskDocument(input.taskId);
-    const existingIndex = task.artifacts.findIndex(
-      (artifact) => artifact.type === input.artifact.type && artifact.url === input.artifact.url,
-    );
-
-    if (existingIndex >= 0) {
-      task.artifacts[existingIndex] = { ...task.artifacts[existingIndex], ...input.artifact };
-    } else {
-      task.artifacts.push(input.artifact);
-    }
-
-    await atomicWriteFile(
-      taskPath,
-      stringifyFileTask(
-        {
-          ...toFileFrontmatter(task, frontmatter.createdAt),
-          artifacts: task.artifacts,
-          updatedAt: isoNow(),
-        },
-        task.description,
-      ),
-    );
-  }
-
-  async updateLabels(input: { taskId: string; add: string[]; remove: string[] }): Promise<void> {
-    const { task, frontmatter, path: taskPath } = await this.loadTaskDocument(input.taskId);
-    const labels = new Set(task.labels);
-    for (const label of input.remove) {
-      labels.delete(label);
-    }
-    for (const label of input.add) {
-      labels.add(label);
-    }
-    await atomicWriteFile(
-      taskPath,
-      stringifyFileTask(
-        {
-          ...toFileFrontmatter(task, frontmatter.createdAt),
-          labels: [...labels].sort(),
-          updatedAt: isoNow(),
-        },
-        task.description,
-      ),
-    );
-  }
-}
-
-type LinearIssueNode = {
-  id: string;
-  identifier: string;
-  title: string;
-  description: string | null;
-  state: { id: string; name: string };
-  priorityLabel: string | null;
-  labels: { nodes: Array<{ id: string; name: string }> };
-  assignee: { name: string } | null;
-  branchName: string | null;
-  updatedAt: string;
-  url: string | null;
-  attachments: { nodes: Array<{ id: string; title: string | null; url: string }> };
-};
-
-type LinearViewer = {
-  id: string;
-  name: string;
-};
-
 const parseLinearIssueIdentifier = (taskId: string): { teamKey: string; number: number } | null => {
   const match = taskId.match(/^([A-Za-z0-9]+)-(\d+)$/);
   if (!match) {
@@ -405,7 +75,7 @@ const parseLinearIssueIdentifier = (taskId: string): { teamKey: string; number: 
   };
 };
 
-class LinearClient {
+export class LinearClient {
   constructor(
     private readonly apiKey: string,
     private readonly logger: LoggerService,
@@ -482,6 +152,19 @@ const linearPriorityToNormalized = (label: string | null): Task["priority"] => {
       return "normal";
     default:
       return "none";
+  }
+};
+
+const isGithubPullRequestArtifact = (artifact: Pick<TaskArtifact, "type" | "url">): boolean => {
+  if (artifact.type !== "pull_request") {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(artifact.url);
+    return (parsed.hostname === "github.com" || parsed.hostname.endsWith(".github.com")) && /\/pull\/\d+$/.test(parsed.pathname);
+  } catch {
+    return false;
   }
 };
 
@@ -925,16 +608,3 @@ export class LinearTaskSystem implements TaskSystem {
     });
   }
 }
-
-export const createTaskSystem = (input: {
-  config: WorkspaceConfig;
-  paths: WorkspacePaths;
-  env: Record<string, string>;
-  logger?: LoggerService;
-}): TaskSystem => {
-  if (input.config.taskSystem.type === "file") {
-    return new FileTaskSystem(input.config, input.paths);
-  }
-
-  return new LinearTaskSystem(input.config, input.env, input.logger?.child({ component: "taskSystem.linear" }));
-};

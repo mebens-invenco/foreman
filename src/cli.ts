@@ -3,14 +3,14 @@
 import { Command, InvalidArgumentError } from "commander";
 
 import { loadWorkspaceConfig } from "./config.js";
+import { createAgentRunner } from "./execution/index.js";
 import { createHttpServer } from "./http.js";
 import { LoggerService } from "./logger.js";
 import { createRepos } from "./repos/index.js";
 import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
-import { GitHubReviewService, resolveGitHubAuthEnv } from "./review.js";
-import { OpenCodeRunner } from "./runner.js";
+import { createReviewService, resolveGitHubAuthEnv } from "./review/index.js";
 import { SchedulerService } from "./scheduler.js";
-import { createTaskSystem } from "./task-system.js";
+import { createTaskSystem } from "./tasking/index.js";
 import { importLegacyMemory, initializeWorkspace, renderWorkspacePlan } from "./workspace.js";
 import { discoverGitRepos } from "./workspace/git-repo-discovery.js";
 import type { LoggerLevelName } from "./logger.js";
@@ -74,8 +74,8 @@ program
       paths,
       foremanRepos,
       taskSystem,
-      reviewService: new GitHubReviewService(resolvedEnv, logger.child({ component: "review.github" })),
-      runner: new OpenCodeRunner(config.runner.model, config.runner.variant),
+      reviewService: createReviewService({ env: resolvedEnv, logger }),
+      runner: createAgentRunner({ config }),
       repos,
       env: resolvedEnv,
       logger: logger.child({ component: "scheduler" }),

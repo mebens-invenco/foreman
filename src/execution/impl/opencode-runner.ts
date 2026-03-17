@@ -1,23 +1,9 @@
 import { spawn } from "node:child_process";
 
-import type { AgentRunRequest, AgentRunResult } from "./domain/index.js";
-import { isoNow } from "./lib/time.js";
+import { isoNow } from "../../lib/time.js";
+import type { AgentRunner, AgentRunnerInvokeRequest, CapturedAgentRunResult } from "../agent-runner.js";
 
 const forceKillAfterMs = 1_000;
-
-type AgentRunLineCallbacks = {
-  onStdoutLine?: (line: string) => void;
-  onStderrLine?: (line: string) => void;
-};
-
-export interface AgentRunner {
-  invoke(request: AgentRunRequest): Promise<AgentRunResult>;
-}
-
-export type CapturedAgentRunResult = AgentRunResult & {
-  stdout: string;
-  stderr: string;
-};
 
 export class OpenCodeRunner implements AgentRunner {
   constructor(
@@ -25,16 +11,10 @@ export class OpenCodeRunner implements AgentRunner {
     private readonly variant: string,
   ) {}
 
-  async invoke(request: AgentRunRequest & { abortSignal?: AbortSignal } & AgentRunLineCallbacks): Promise<CapturedAgentRunResult> {
+  async invoke(request: AgentRunnerInvokeRequest): Promise<CapturedAgentRunResult> {
     const startedAt = isoNow();
     const command = process.env.FOREMAN_OPENCODE_BIN ?? "opencode";
-    const args = [
-      "run",
-      "--model",
-      this.model,
-      "--variant",
-      this.variant,
-    ];
+    const args = ["run", "--model", this.model, "--variant", this.variant];
 
     const child = spawn(command, args, {
       cwd: request.cwd,
@@ -136,21 +116,3 @@ export class OpenCodeRunner implements AgentRunner {
     };
   }
 }
-
-export const parseWorkerResult = (stdout: string): unknown => {
-  const trimmed = stdout.trim();
-  if (!trimmed) {
-    throw new Error("Worker output was empty");
-  }
-
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    const match = trimmed.match(/<agent-result>\s*([\s\S]*?)\s*<\/agent-result>/);
-    if (!match?.[1]) {
-      throw new Error("Worker output did not contain a valid <agent-result> block");
-    }
-
-    return JSON.parse(match[1]);
-  }
-};
