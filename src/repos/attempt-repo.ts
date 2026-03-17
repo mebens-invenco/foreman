@@ -58,7 +58,7 @@ export interface AttemptRepo {
       errorMessage?: string | null;
     },
   ): void;
-  listAttempts(filters?: { status?: AttemptStatus; jobId?: string; limit?: number }): AttemptRecord[];
+  listAttempts(filters?: { status?: AttemptStatus; jobId?: string; limit?: number; offset?: number }): AttemptRecord[];
   getAttempt(attemptId: string): AttemptRecord;
   latestAttemptForJob(jobId: string): AttemptRecord | null;
   addAttemptEvent(attemptId: string, eventType: string, message: string, payload?: Record<string, unknown>): void;

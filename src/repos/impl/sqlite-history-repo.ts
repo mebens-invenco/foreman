@@ -33,7 +33,30 @@ export class SqliteHistoryRepo implements HistoryRepo {
     return stepId;
   }
 
-  listHistory(limit = 50): HistoryRecord[] {
+  listHistory(filters: { stage?: string; repo?: string; search?: string; limit?: number; offset?: number } = {}): HistoryRecord[] {
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (filters.stage) {
+      clauses.push("h.stage = ?");
+      params.push(filters.stage);
+    }
+
+    if (filters.repo) {
+      clauses.push("EXISTS (SELECT 1 FROM history_step_repo filter_repo WHERE filter_repo.step_id = h.step_id AND filter_repo.path LIKE ?)");
+      params.push(`%${filters.repo}%`);
+    }
+
+    if (filters.search) {
+      clauses.push("(LOWER(h.issue) LIKE ? OR LOWER(h.summary) LIKE ?)");
+      const searchValue = `%${filters.search.toLowerCase()}%`;
+      params.push(searchValue, searchValue);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const limit = filters.limit ?? 50;
+    const offset = filters.offset ?? 0;
+
     return this.sqlite
       .prepare(
         `SELECT h.step_id, h.created_at, h.stage, h.issue, h.summary,
@@ -41,12 +64,13 @@ export class SqliteHistoryRepo implements HistoryRepo {
                   CASE WHEN r.step_id IS NULL THEN NULL ELSE json_object('path', r.path, 'beforeSha', r.before_sha, 'afterSha', r.after_sha, 'position', r.position) END
                 ), '[]') AS repos_json
            FROM history_step h
-      LEFT JOIN history_step_repo r ON r.step_id = h.step_id
-       GROUP BY h.step_id
-       ORDER BY h.created_at DESC
-       LIMIT ?`,
+       LEFT JOIN history_step_repo r ON r.step_id = h.step_id
+           ${where}
+        GROUP BY h.step_id
+        ORDER BY h.created_at DESC
+        LIMIT ? OFFSET ?`,
       )
-      .all(limit)
+      .all(...params, limit, offset)
       .map((row: unknown) => {
         const mapped = row as SqliteRow;
         return {

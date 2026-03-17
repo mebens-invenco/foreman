@@ -166,7 +166,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
       );
   }
 
-  listAttempts(filters: { status?: AttemptStatus; jobId?: string; limit?: number } = {}): AttemptRecord[] {
+  listAttempts(filters: { status?: AttemptStatus; jobId?: string; limit?: number; offset?: number } = {}): AttemptRecord[] {
     const conditions: string[] = [];
     const params: unknown[] = [];
 
@@ -182,14 +182,15 @@ export class SqliteAttemptRepo implements AttemptRepo {
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
     const limit = filters.limit ?? 100;
+    const offset = filters.offset ?? 0;
 
     return this.sqlite
       .prepare(
         `SELECT id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, status, started_at,
-                finished_at, exit_code, signal, summary, error_message
-           FROM execution_attempt ${where} ORDER BY started_at DESC LIMIT ?`,
+                 finished_at, exit_code, signal, summary, error_message
+           FROM execution_attempt ${where} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
       )
-      .all(...params, limit)
+      .all(...params, limit, offset)
       .map((row: unknown) => mapAttempt(row as SqliteRow));
   }
 
