@@ -48,6 +48,22 @@ const sampleRepo: RepoRef = {
   defaultBranch: "master",
 };
 
+const pullRequestSummaryResponse = jsonResponse({
+  data: {
+    repository: {
+      pullRequest: {
+        url: "https://github.com/acme/repo/pull/946",
+        number: 946,
+        state: "OPEN",
+        isDraft: false,
+        merged: false,
+        headRefName: "eng-4737",
+        baseRefName: "master",
+      },
+    },
+  },
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -126,6 +142,7 @@ describe("GitHubReviewService.getContext", () => {
   test("includes status contexts in failing and pending checks", async () => {
     global.fetch = vi
       .fn()
+      .mockResolvedValueOnce(pullRequestSummaryResponse)
       .mockResolvedValueOnce(
         jsonResponse({
           data: {
@@ -190,13 +207,14 @@ describe("GitHubReviewService.getContext", () => {
       { name: "unit tests", state: "failure" },
     ]);
     expect(context?.pendingChecks).toEqual([{ name: "task-list-completed", state: "pending" }]);
-    expect(global.fetch).toHaveBeenCalledTimes(5);
-    expect(vi.mocked(global.fetch).mock.calls[4]?.[0]).toBe("https://api.github.com/repos/acme/repo/commits/abc123/status");
+    expect(global.fetch).toHaveBeenCalledTimes(6);
+    expect(vi.mocked(global.fetch).mock.calls[5]?.[0]).toBe("https://api.github.com/repos/acme/repo/commits/abc123/status");
   });
 
   test("maps dirty or conflicting pull requests to conflicting review state", async () => {
     global.fetch = vi
       .fn()
+      .mockResolvedValueOnce(pullRequestSummaryResponse)
       .mockResolvedValueOnce(
         jsonResponse({
           data: {
@@ -259,6 +277,7 @@ describe("GitHubReviewService.getContext", () => {
 
     global.fetch = vi
       .fn()
+      .mockResolvedValueOnce(pullRequestSummaryResponse)
       .mockResolvedValueOnce(
         jsonResponse({
           data: {
@@ -453,9 +472,9 @@ describe("GitHubReviewService.getContext", () => {
         ],
       },
     ]);
-    expect(global.fetch).toHaveBeenCalledTimes(8);
-    expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=1");
-    expect(vi.mocked(global.fetch).mock.calls[2]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=2");
+    expect(global.fetch).toHaveBeenCalledTimes(9);
+    expect(vi.mocked(global.fetch).mock.calls[2]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=1");
+    expect(vi.mocked(global.fetch).mock.calls[3]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=2");
   });
 });
 

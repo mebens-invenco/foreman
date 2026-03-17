@@ -567,9 +567,8 @@ export class GitHubReviewService implements ReviewService {
   }
 
   async getContext(task: Task, agentPrefix: string, repo?: RepoRef): Promise<ReviewContext | null> {
-    const prUrl = this.pullRequestArtifact(task);
-    const resolvedPullRequest = prUrl ? null : await this.resolvePullRequest(task, repo);
-    const effectivePrUrl = prUrl ?? resolvedPullRequest?.pullRequestUrl ?? null;
+    const resolvedPullRequest = await this.resolvePullRequest(task, repo);
+    const effectivePrUrl = resolvedPullRequest?.pullRequestUrl ?? null;
     if (!effectivePrUrl) {
       this.logger.debug("skipping GitHub review context lookup because task has no resolvable pull request", { taskId: task.id });
       return null;

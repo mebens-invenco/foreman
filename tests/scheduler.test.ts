@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../src/config.js";
-import type { ReviewContext, Task, WorkerResult } from "../src/domain.js";
+import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../src/domain.js";
 import { SchedulerService } from "../src/scheduler.js";
 import * as worktrees from "../src/worktrees.js";
 
@@ -56,6 +56,20 @@ const reviewContext: ReviewContext = {
   pendingChecks: [],
 };
 
+const resolvedPullRequest: ResolvedPullRequest = {
+  pullRequestUrl: reviewContext.pullRequestUrl,
+  pullRequestNumber: reviewContext.pullRequestNumber,
+  state: reviewContext.state,
+  isDraft: reviewContext.isDraft,
+  headBranch: reviewContext.headBranch,
+  baseBranch: reviewContext.baseBranch,
+};
+
+const resolvePullRequestFromTask = async (task: Task): Promise<ResolvedPullRequest | null> => {
+  const artifactUrl = task.artifacts.find((artifact) => artifact.type === "pull_request")?.url;
+  return artifactUrl ? { ...resolvedPullRequest, pullRequestUrl: artifactUrl } : null;
+};
+
 const fakeLogger = {
   child() {
     return this;
@@ -102,6 +116,7 @@ describe("SchedulerService applyWorkerResult", () => {
       } as any,
       reviewService: {
         getContext: vi.fn(async () => reviewContext),
+        resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
       runner: {} as any,
       repos: [],
@@ -161,6 +176,7 @@ describe("SchedulerService applyWorkerResult", () => {
       } as any,
       reviewService: {
         getContext: vi.fn(async () => reviewContext),
+        resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
       runner: {} as any,
       repos: [],
@@ -222,6 +238,7 @@ describe("SchedulerService applyWorkerResult", () => {
       } as any,
       reviewService: {
         getContext: vi.fn(async () => reviewContext),
+        resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
       runner: {} as any,
       repos: [],
@@ -249,14 +266,7 @@ describe("SchedulerService applyWorkerResult", () => {
 
   test("returns execution no-op tasks to in_review when an open pull request already exists", async () => {
     const transition = vi.fn(async () => undefined);
-    const resolvePullRequest = vi.fn(async () => ({
-      pullRequestUrl: reviewContext.pullRequestUrl,
-      pullRequestNumber: reviewContext.pullRequestNumber,
-      state: "open" as const,
-      isDraft: false,
-      headBranch: reviewContext.headBranch,
-      baseBranch: reviewContext.baseBranch,
-    }));
+    const resolvePullRequest = vi.fn(async () => ({ ...resolvedPullRequest, state: "open" as const }));
     const scheduler = new SchedulerService({
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
@@ -324,6 +334,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const replyToThreadComment = vi.fn(async () => undefined);
     const replyToPrComment = vi.fn(async () => undefined);
     const resolveThreads = vi.fn(async () => undefined);
+    const resolvePullRequest = vi.fn(resolvePullRequestFromTask);
     const scheduler = new SchedulerService({
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
@@ -353,6 +364,7 @@ describe("SchedulerService applyWorkerResult", () => {
         updateLabels: vi.fn(async () => undefined),
       } as any,
       reviewService: {
+        resolvePullRequest,
         replyToReviewSummary,
         replyToThreadComment,
         replyToPrComment,
@@ -387,6 +399,77 @@ describe("SchedulerService applyWorkerResult", () => {
     expect(replyToReviewSummary).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "review-1", "[agent] Looks good now");
     expect(replyToThreadComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "thread-1", "[agent] Addressed in latest head");
     expect(replyToPrComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "comment-1", "[agent] Please take another look");
+    expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
+    expect(resolvePullRequest).toHaveBeenCalled();
+  });
+
+  test("uses centralized PR resolution for review mutations when the task has no PR artifact", async () => {
+    const replyToThreadComment = vi.fn(async () => undefined);
+    const resolveThreads = vi.fn(async () => undefined);
+    const resolvePullRequest = vi.fn(async () => resolvedPullRequest);
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      db: {
+        ensureWorkerSlots: vi.fn(),
+        addLearning: vi.fn(),
+        updateLearning: vi.fn(),
+        addAttemptEvent: vi.fn(),
+        upsertReviewCheckpoint: vi.fn(),
+      } as any,
+      taskSystem: {
+        addComment: vi.fn(async () => undefined),
+        addArtifact: vi.fn(async () => undefined),
+        transition: vi.fn(async () => undefined),
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        resolvePullRequest,
+        replyToThreadComment,
+        resolveThreads,
+      } as any,
+      runner: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-3c" },
+        job: { action: "review" },
+        task: sampleTask({ artifacts: [] }),
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        workerResult: baseWorkerResult({
+          reviewMutations: [
+            { type: "reply_to_thread_comment", threadId: "thread-1", body: "Addressed in latest head" },
+            { type: "resolve_threads", threadIds: ["thread-1"] },
+          ],
+        }),
+      }),
+    ).resolves.toBe(reviewContext.pullRequestUrl);
+
+    expect(resolvePullRequest).toHaveBeenCalledWith(sampleTask({ artifacts: [] }), {
+      key: "repo-a",
+      rootPath: "/repos/repo-a",
+      defaultBranch: "main",
+    });
+    expect(replyToThreadComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "thread-1", "[agent] Addressed in latest head");
     expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
   });
 
