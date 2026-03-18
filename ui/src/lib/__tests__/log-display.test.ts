@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { appendLogChunk, appendSyntheticLogLine, createLogBuffer, getDisplayLines, parseAnsiLine } from "../ui/src/lib/log-display.ts";
+import { appendLogChunk, appendSyntheticLogLine, createLogBuffer, getDisplayLines, parseAnsiLine } from "../log-display";
 
 const lineText = (index: number, lines: ReturnType<typeof getDisplayLines>): string =>
   lines[index]?.segments.map((segment) => segment.text).join("") ?? "";
