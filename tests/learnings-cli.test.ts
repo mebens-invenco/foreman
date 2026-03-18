@@ -56,6 +56,16 @@ const createCliWorkspace = async (): Promise<{ workspaceName: string; workspaceR
   return { workspaceName, workspaceRoot };
 };
 
+const getLearningReadCount = async (workspaceRoot: string, id: string): Promise<number> => {
+  const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), projectRoot);
+  try {
+    const row = db.database.sqlite.prepare("SELECT read_count FROM learning WHERE id = ?").get(id) as { read_count: number } | undefined;
+    return Number(row?.read_count ?? 0);
+  } finally {
+    db.close();
+  }
+};
+
 const runCli = async (args: string[]): Promise<unknown> => {
   const { stdout } = await execFileAsync("node", ["--import", "tsx", "src/cli.ts", ...args], { cwd: projectRoot });
   return JSON.parse(stdout);
@@ -63,7 +73,7 @@ const runCli = async (args: string[]): Promise<unknown> => {
 
 describe("learnings cli", () => {
   test("search returns ranked JSON results from the workspace database", async () => {
-    const { workspaceName } = await createCliWorkspace();
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
 
     const output = (await runCli([
       "learnings",
@@ -91,10 +101,12 @@ describe("learnings cli", () => {
     expect(output.learnings.every((learning) => Number.isFinite(learning.score))).toBe(true);
     expect(output.learnings[0]!.score).toBeLessThanOrEqual(output.learnings[1]!.score);
     expect(output.learnings.every((learning) => !("content" in learning))).toBe(true);
+    expect(await getLearningReadCount(workspaceRoot, "learn-a")).toBe(1);
+    expect(await getLearningReadCount(workspaceRoot, "learn-b")).toBe(1);
   });
 
   test("get returns requested learning details as JSON", async () => {
-    const { workspaceName } = await createCliWorkspace();
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
 
     const output = (await runCli([
       "learnings",
@@ -116,6 +128,8 @@ describe("learnings cli", () => {
     expect(output.learnings.map((learning) => learning.id)).toEqual(["learn-b", "learn-a"]);
     expect(output.learnings[0]?.content).toBe("planning prompt learnings cli");
     expect(output.missingIds).toEqual(["missing"]);
+    expect(await getLearningReadCount(workspaceRoot, "learn-a")).toBe(1);
+    expect(await getLearningReadCount(workspaceRoot, "learn-b")).toBe(1);
   });
 
   test("package.json exposes the built CLI through yarn foreman", async () => {

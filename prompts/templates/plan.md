@@ -12,7 +12,14 @@ Do not start implementation work. Do not reprioritize outside the supplied works
 
 {{context:repos}}
 
-{{context:learnings}}
+## Learnings CLI
+
+- Search the workspace learnings database on demand before decomposition or ticket authoring; do not assume learnings are embedded in this prompt.
+- Use `foreman learnings search {{workspace:name}} --repo shared --repo <repo-key> --query "<topic>" [--query "<topic>" ...]` to shortlist relevant learnings.
+- If `foreman` is not on your PATH, use `yarn foreman learnings search {{workspace:name}} ...` after a local build so the bundled CLI still works.
+- Use `foreman learnings get {{workspace:name}} --id <learning-id> [--id <learning-id> ...]` to inspect shortlisted learnings before finalizing tasks.
+- When a task clearly belongs to a repo, search both `shared` and that repo's scope. If no strong relevant learnings are found, say so explicitly in the task's `Relevant Learnings` section.
+- Generated tasks should cite only relevant learning IDs and titles, not the full learning bodies.
 
 {{fragment:task-system-planning}}
 

@@ -22,6 +22,10 @@ export type LearningSearchRecord = {
   score: number;
 };
 
+export type LearningReadOptions = {
+  incrementReadCount?: boolean;
+};
+
 export interface LearningRepo {
   addLearning(input: {
     id?: string;
@@ -40,7 +44,10 @@ export interface LearningRepo {
     tags?: string[];
     markApplied?: boolean;
   }): void;
-  searchLearnings(filters?: { queries?: string[]; repos?: string[]; limit?: number; offset?: number }): LearningSearchRecord[];
-  getLearningsById(ids: string[]): LearningRecord[];
+  searchLearnings(
+    filters?: { queries?: string[]; repos?: string[]; limit?: number; offset?: number },
+    options?: LearningReadOptions,
+  ): LearningSearchRecord[];
+  getLearningsByIds(ids: string[], options?: LearningReadOptions): LearningRecord[];
   listLearnings(filters?: { search?: string; repo?: string; limit?: number; offset?: number }): LearningRecord[];
 }

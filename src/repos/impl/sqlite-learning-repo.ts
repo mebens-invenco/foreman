@@ -1,7 +1,7 @@
 import { ForemanError } from "../../lib/errors.js";
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
-import type { LearningRecord, LearningRepo, LearningSearchRecord } from "../learning-repo.js";
+import type { LearningReadOptions, LearningRecord, LearningRepo, LearningSearchRecord } from "../learning-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 const LEARNING_COLUMNS = "id, title, repo, tags, confidence, content, applied_count, read_count, created_at, updated_at";
@@ -41,6 +41,17 @@ const normalizeFilterValues = (values: readonly string[] | undefined): string[] 
 
 export class SqliteLearningRepo implements LearningRepo {
   constructor(private readonly sqlite: SqliteDatabase) {}
+
+  private incrementReadCount(ids: readonly string[]): void {
+    const normalizedIds = normalizeFilterValues(ids);
+    if (normalizedIds.length === 0) {
+      return;
+    }
+
+    this.sqlite
+      .prepare(`UPDATE learning SET read_count = read_count + 1 WHERE id IN (${normalizedIds.map(() => "?").join(", ")})`)
+      .run(...normalizedIds);
+  }
 
   addLearning(input: {
     id?: string;
@@ -94,7 +105,10 @@ export class SqliteLearningRepo implements LearningRepo {
       );
   }
 
-  searchLearnings(filters: { queries?: string[]; repos?: string[]; limit?: number; offset?: number } = {}): LearningSearchRecord[] {
+  searchLearnings(
+    filters: { queries?: string[]; repos?: string[]; limit?: number; offset?: number } = {},
+    options: LearningReadOptions = {},
+  ): LearningSearchRecord[] {
     const queries = normalizeFilterValues(filters.queries);
     const repos = normalizeFilterValues(filters.repos);
     const limit = filters.limit ?? 20;
@@ -102,7 +116,7 @@ export class SqliteLearningRepo implements LearningRepo {
 
     if (queries.length === 0) {
       const repoWhere = repos.length > 0 ? `WHERE repo IN (${repos.map(() => "?").join(", ")})` : "";
-      return this.sqlite
+      const learnings = this.sqlite
         .prepare(
           `SELECT id, title, repo, tags, confidence, created_at, updated_at, 0.0 AS score
              FROM learning ${repoWhere}
@@ -111,6 +125,12 @@ export class SqliteLearningRepo implements LearningRepo {
         )
         .all(...repos, limit, offset)
         .map(mapLearningSearchRecord);
+
+      if (options.incrementReadCount) {
+        this.incrementReadCount(learnings.map((learning) => learning.id));
+      }
+
+      return learnings;
     }
 
     const matchedScores = new Map<number, number>();
@@ -142,7 +162,7 @@ export class SqliteLearningRepo implements LearningRepo {
       )
       .all(...rowIds, ...repos) as SqliteRow[];
 
-    return rows
+    const learnings = rows
       .map((row) => ({
         ...mapLearningSearchRecord({
           ...row,
@@ -161,9 +181,15 @@ export class SqliteLearningRepo implements LearningRepo {
         return left.id.localeCompare(right.id);
       })
       .slice(offset, offset + limit);
+
+    if (options.incrementReadCount) {
+      this.incrementReadCount(learnings.map((learning) => learning.id));
+    }
+
+    return learnings;
   }
 
-  getLearningsById(ids: string[]): LearningRecord[] {
+  getLearningsByIds(ids: string[], options: LearningReadOptions = {}): LearningRecord[] {
     const normalizedIds = normalizeFilterValues(ids);
     if (normalizedIds.length === 0) {
       return [];
@@ -175,10 +201,16 @@ export class SqliteLearningRepo implements LearningRepo {
       .map(mapLearningRecord);
     const rowsById = new Map(rows.map((row) => [row.id, row]));
 
-    return normalizedIds.flatMap((id) => {
+    const learnings = normalizedIds.flatMap((id) => {
       const learning = rowsById.get(id);
       return learning ? [learning] : [];
     });
+
+    if (options.incrementReadCount) {
+      this.incrementReadCount(learnings.map((learning) => learning.id));
+    }
+
+    return learnings;
   }
 
   listLearnings(filters: { search?: string; repo?: string; limit?: number; offset?: number } = {}): LearningRecord[] {
@@ -189,7 +221,7 @@ export class SqliteLearningRepo implements LearningRepo {
         ...(filters.limit !== undefined ? { limit: filters.limit } : {}),
         ...(filters.offset !== undefined ? { offset: filters.offset } : {}),
       });
-      return this.getLearningsById(matches.map((match) => match.id));
+      return this.getLearningsByIds(matches.map((match) => match.id));
     }
 
     const clauses: string[] = [];

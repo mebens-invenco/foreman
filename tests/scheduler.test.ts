@@ -146,7 +146,7 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     addLearning: vi.fn(),
     updateLearning: vi.fn(),
     searchLearnings: vi.fn(() => []),
-    getLearningsById: vi.fn(() => []),
+    getLearningsByIds: vi.fn(() => []),
     listLearnings: vi.fn(() => []),
     ...((overrides.learnings as object | undefined) ?? {}),
   },

@@ -56,6 +56,7 @@ describe("prompt rendering", () => {
     expect(result.markdown).toContain("No strong relevant learnings found in shared/<repo> scope.");
     expect(result.markdown).not.toContain("{{fragment:");
     expect(result.markdown).not.toContain("{{context:");
+    expect(result.markdown).not.toContain("{{workspace:");
   });
 
   test("renders the linear planning fragment with relevant learnings requirements", async () => {

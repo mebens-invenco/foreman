@@ -350,11 +350,56 @@ describe("persistence repos", () => {
         tags: ["planning"],
       });
 
-      const learnings = db.learnings.getLearningsById(["learn-b", "missing", "learn-a"]);
+      const learnings = db.learnings.getLearningsByIds(["learn-b", "missing", "learn-a"]);
 
       expect(learnings.map((learning) => learning.id)).toEqual(["learn-b", "learn-a"]);
       expect(learnings[0]?.content).toBe("Second content");
       expect(learnings[1]?.content).toBe("First content");
+      const readCounts = db.database.sqlite
+        .prepare("SELECT id, read_count FROM learning WHERE id IN (?, ?) ORDER BY id ASC")
+        .all("learn-a", "learn-b") as Array<{ id: string; read_count: number }>;
+      expect(readCounts).toEqual([
+        { id: "learn-a", read_count: 0 },
+        { id: "learn-b", read_count: 0 },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("increments read counts only when explicitly requested", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.learnings.addLearning({
+        id: "learn-a",
+        title: "First learning",
+        repo: "foreman",
+        confidence: "emerging",
+        content: "planning prompt cli",
+        tags: [],
+      });
+      db.learnings.addLearning({
+        id: "learn-b",
+        title: "Second learning",
+        repo: "shared",
+        confidence: "proven",
+        content: "planning prompt cli",
+        tags: ["planning"],
+      });
+
+      db.learnings.searchLearnings({ queries: ["planning prompt"], repos: ["shared", "foreman"] }, { incrementReadCount: true });
+      db.learnings.getLearningsByIds(["learn-b", "learn-a"], { incrementReadCount: true });
+
+      const readCounts = db.database.sqlite
+        .prepare("SELECT id, read_count FROM learning WHERE id IN (?, ?) ORDER BY id ASC")
+        .all("learn-a", "learn-b") as Array<{ id: string; read_count: number }>;
+      expect(readCounts).toEqual([
+        { id: "learn-a", read_count: 2 },
+        { id: "learn-b", read_count: 2 },
+      ]);
     } finally {
       db.close();
     }

@@ -182,11 +182,14 @@ learnings
         workspace,
         repos: options.repo,
         queries: options.query,
-        learnings: repos.learnings.searchLearnings({
-          queries: options.query,
-          ...(options.repo.length > 0 ? { repos: options.repo } : {}),
-          limit: options.limit,
-        }),
+        learnings: repos.learnings.searchLearnings(
+          {
+            queries: options.query,
+            ...(options.repo.length > 0 ? { repos: options.repo } : {}),
+            limit: options.limit,
+          },
+          { incrementReadCount: true },
+        ),
       });
     });
   });
@@ -197,7 +200,7 @@ learnings
   .requiredOption("--id <id>", "Learning id to fetch", collectRepeatedValues, [])
   .action(async (workspace: string, options: { id: string[] }) => {
     await withWorkspaceRepos(workspace, async (repos) => {
-      const learnings = repos.learnings.getLearningsById(options.id);
+      const learnings = repos.learnings.getLearningsByIds(options.id, { incrementReadCount: true });
       const foundIds = new Set(learnings.map((learning) => learning.id));
       writeJson({
         workspace,
