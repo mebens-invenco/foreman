@@ -7,6 +7,7 @@ export type ReviewCheckpointRecord = {
   headSha: string;
   latestReviewSummaryId: string | null;
   latestConversationCommentId: string | null;
+  reviewThreadsFingerprint: string;
   checksFingerprint: string;
   mergeState: ReviewContext["mergeState"];
   recordedAt: string;

@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskArtifact, TaskComment } from "../../domain/index.js";
+import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewContext, type Task, type TaskArtifact, type TaskComment } from "../../domain/index.js";
 import { runScoutSelection } from "../index.js";
 import type { ReviewService } from "../../review/index.js";
 import { FileTaskSystem } from "../../tasking/index.js";
@@ -380,6 +380,130 @@ describe("runScoutSelection", () => {
       expect(result.jobs).toHaveLength(1);
       expect(result.jobs[0]?.action).toBe("review");
       expect(result.jobs[0]?.task.id).toBe("TASK-0003");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reselects review work when unresolved review thread activity changes after a checkpoint", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0004",
+      title: "Threaded review task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/4" } satisfies TaskArtifact],
+    });
+
+    const priorContext: ReviewContext = {
+      provider: "github",
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/4",
+      pullRequestNumber: 4,
+      state: "open",
+      isDraft: false,
+      headSha: "ghi",
+      headBranch: "task-0004",
+      baseBranch: "main",
+      headIntroducedAt: "2026-03-14T12:00:00Z",
+      mergeState: "clean",
+      reviewSummaries: [],
+      conversationComments: [],
+      reviewThreads: [
+        {
+          id: "thread-1",
+          path: "src/example.ts",
+          line: 20,
+          isResolved: false,
+          comments: [
+            {
+              id: "thread-comment-1",
+              body: "Please revisit this",
+              authorName: "reviewer",
+              authoredByAgent: false,
+              createdAt: "2026-03-14T12:01:00Z",
+            },
+          ],
+        },
+      ],
+      failingChecks: [],
+      pendingChecks: [],
+    };
+    const currentContext: ReviewContext = {
+      ...priorContext,
+      reviewThreads: [
+        {
+          ...priorContext.reviewThreads[0]!,
+          comments: [
+            ...priorContext.reviewThreads[0]!.comments,
+            {
+              id: "thread-comment-2",
+              body: "One more thought",
+              authorName: "reviewer",
+              authoredByAgent: false,
+              createdAt: "2026-03-14T12:02:00Z",
+            },
+          ],
+        },
+      ],
+    };
+
+    const taskSystem = new FakeTaskSystem([reviewTask]);
+    const reviewService = new FakeReviewService({
+      [reviewTask.id]: currentContext,
+    });
+
+    db.workers.ensureWorkerSlots(1);
+    const worker = db.workers.listWorkers()[0];
+    expect(worker).toBeDefined();
+
+    const reviewJob = db.jobs.createJob({
+      taskId: reviewTask.id,
+      taskProvider: reviewTask.provider,
+      action: "review",
+      priorityRank: priorityToRank(reviewTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${reviewTask.id}:review`,
+      selectionReason: "test",
+    });
+    db.jobs.updateJobStatus(reviewJob.id, "completed", { finishedAt: "2026-03-14T12:04:00Z" });
+    const attempt = db.attempts.createAttemptWithLeases({
+      jobId: reviewJob.id,
+      workerId: worker!.id,
+      runnerModel: "openai/gpt-5.4",
+      runnerVariant: "high",
+      expiresAt: "2026-03-14T12:05:00Z",
+      leases: [],
+    });
+
+    expect(attempt).not.toBeNull();
+    db.reviewCheckpoints.upsertReviewCheckpoint({
+      taskId: reviewTask.id,
+      prUrl: priorContext.pullRequestUrl,
+      reviewContext: priorContext,
+      sourceAttemptId: attempt!.id,
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("review");
+      expect(result.jobs[0]?.task.id).toBe("TASK-0004");
+      expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTask.id, priorContext.pullRequestUrl)).toBeNull();
     } finally {
       db.close();
     }

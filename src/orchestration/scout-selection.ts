@@ -1,5 +1,6 @@
 import type { ActionType, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskComment } from "../domain/index.js";
 import {
+  actionableReviewThreadFingerprint,
   actionableConversationComments,
   actionableReviewSummaries,
   actionableReviewThreads,
@@ -336,6 +337,7 @@ export const runScoutSelection = async (input: {
         ? checkpoint.headSha === context.headSha &&
           checkpoint.latestReviewSummaryId === latestActionableReviewSummaryId(context) &&
           checkpoint.latestConversationCommentId === latestActionableConversationCommentId(context) &&
+          checkpoint.reviewThreadsFingerprint === actionableReviewThreadFingerprint(context) &&
           checkpoint.checksFingerprint === stableStringify({ failing: context.failingChecks, pending: context.pendingChecks }) &&
           checkpoint.mergeState === context.mergeState
         : false;

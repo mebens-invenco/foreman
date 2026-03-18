@@ -1,3 +1,5 @@
+import { stableStringify } from "../lib/json.js";
+
 export type ReviewProvider = "github";
 
 export type ReviewSummary = {
@@ -83,3 +85,10 @@ export const latestActionableReviewSummaryId = (context: ReviewContext): string 
 
 export const latestActionableConversationCommentId = (context: ReviewContext): string | null =>
   actionableConversationComments(context).at(-1)?.id ?? null;
+
+export const actionableReviewThreadFingerprint = (context: ReviewContext): string =>
+  stableStringify(
+    actionableReviewThreads(context)
+      .map((thread) => ({ id: thread.id, latestCommentId: thread.comments.at(-1)?.id ?? null }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+  );

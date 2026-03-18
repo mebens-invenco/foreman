@@ -1,7 +1,12 @@
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import { newId } from "../../lib/ids.js";
-import { latestActionableConversationCommentId, latestActionableReviewSummaryId, type ReviewContext } from "../../domain/index.js";
+import {
+  actionableReviewThreadFingerprint,
+  latestActionableConversationCommentId,
+  latestActionableReviewSummaryId,
+  type ReviewContext,
+} from "../../domain/index.js";
 import type { ReviewCheckpointRecord, ReviewCheckpointRepo } from "../review-checkpoint-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
@@ -12,6 +17,7 @@ const mapReviewCheckpoint = (row: SqliteRow): ReviewCheckpointRecord => ({
   headSha: String(row.head_sha),
   latestReviewSummaryId: (row.latest_review_summary_id as string | null) ?? null,
   latestConversationCommentId: (row.latest_conversation_comment_id as string | null) ?? null,
+  reviewThreadsFingerprint: String(row.review_threads_fingerprint),
   checksFingerprint: String(row.checks_fingerprint),
   mergeState: row.merge_state as ReviewContext["mergeState"],
   recordedAt: String(row.recorded_at),
@@ -24,7 +30,7 @@ export class SqliteReviewCheckpointRepo implements ReviewCheckpointRepo {
   getReviewCheckpoint(taskId: string, prUrl: string): ReviewCheckpointRecord | null {
     const row = this.sqlite
       .prepare(
-        "SELECT id, task_id, pr_url, head_sha, latest_review_summary_id, latest_conversation_comment_id, checks_fingerprint, merge_state, recorded_at, source_attempt_id FROM review_checkpoint WHERE task_id = ? AND pr_url = ?",
+        "SELECT id, task_id, pr_url, head_sha, latest_review_summary_id, latest_conversation_comment_id, review_threads_fingerprint, checks_fingerprint, merge_state, recorded_at, source_attempt_id FROM review_checkpoint WHERE task_id = ? AND pr_url = ?",
       )
       .get(taskId, prUrl) as SqliteRow | undefined;
     return row ? mapReviewCheckpoint(row) : null;
@@ -42,16 +48,18 @@ export class SqliteReviewCheckpointRepo implements ReviewCheckpointRepo {
     });
     const latestReviewSummaryId = latestActionableReviewSummaryId(input.reviewContext);
     const latestConversationCommentId = latestActionableConversationCommentId(input.reviewContext);
+    const reviewThreadsFingerprint = actionableReviewThreadFingerprint(input.reviewContext);
     this.sqlite
       .prepare(
         `INSERT INTO review_checkpoint(
           id, task_id, pr_url, head_sha, latest_review_summary_id, latest_conversation_comment_id,
-          checks_fingerprint, merge_state, recorded_at, source_attempt_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          review_threads_fingerprint, checks_fingerprint, merge_state, recorded_at, source_attempt_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(task_id, pr_url) DO UPDATE SET
           head_sha = excluded.head_sha,
           latest_review_summary_id = excluded.latest_review_summary_id,
           latest_conversation_comment_id = excluded.latest_conversation_comment_id,
+          review_threads_fingerprint = excluded.review_threads_fingerprint,
           checks_fingerprint = excluded.checks_fingerprint,
           merge_state = excluded.merge_state,
           recorded_at = excluded.recorded_at,
@@ -64,6 +72,7 @@ export class SqliteReviewCheckpointRepo implements ReviewCheckpointRepo {
         input.reviewContext.headSha,
         latestReviewSummaryId,
         latestConversationCommentId,
+        reviewThreadsFingerprint,
         checksFingerprint,
         input.reviewContext.mergeState,
         isoNow(),

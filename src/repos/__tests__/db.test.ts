@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { priorityToRank } from "../../domain/index.js";
+import { actionableReviewThreadFingerprint, priorityToRank } from "../../domain/index.js";
 import { addSeconds } from "../../lib/time.js";
 import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
 
@@ -226,7 +226,23 @@ describe("persistence repos", () => {
           mergeState: "clean",
           reviewSummaries: [{ id: "review-1", body: "Needs work", authorName: "reviewer", authoredByAgent: false, createdAt: "2026-03-16T00:00:00Z", commitId: "sha-1", isCurrentHead: true }],
           conversationComments: [{ id: "comment-1", body: "Please fix", authorName: "reviewer", authoredByAgent: false, createdAt: "2026-03-16T00:00:01Z", isAfterCurrentHead: true }],
-          reviewThreads: [],
+          reviewThreads: [
+            {
+              id: "thread-1",
+              path: "src/example.ts",
+              line: 12,
+              isResolved: false,
+              comments: [
+                {
+                  id: "thread-comment-1",
+                  body: "Please revisit this",
+                  authorName: "reviewer",
+                  authoredByAgent: false,
+                  createdAt: "2026-03-16T00:00:02Z",
+                },
+              ],
+            },
+          ],
           failingChecks: [{ name: "test", state: "failure" }],
           pendingChecks: [{ name: "lint", state: "pending" }],
         },
@@ -236,6 +252,41 @@ describe("persistence repos", () => {
       expect(firstCheckpoint).not.toBeNull();
       expect(firstCheckpoint?.id).toBeDefined();
       expect(firstCheckpoint?.headSha).toBe("sha-1");
+      expect(firstCheckpoint?.reviewThreadsFingerprint).toBe(
+        actionableReviewThreadFingerprint({
+          provider: "github",
+          pullRequestUrl: prUrl,
+          pullRequestNumber: 123,
+          state: "open",
+          isDraft: false,
+          headSha: "sha-1",
+          headBranch: "feature/task-0004",
+          baseBranch: "main",
+          headIntroducedAt: "2026-03-16T00:00:00Z",
+          mergeState: "clean",
+          reviewSummaries: [{ id: "review-1", body: "Needs work", authorName: "reviewer", authoredByAgent: false, createdAt: "2026-03-16T00:00:00Z", commitId: "sha-1", isCurrentHead: true }],
+          conversationComments: [{ id: "comment-1", body: "Please fix", authorName: "reviewer", authoredByAgent: false, createdAt: "2026-03-16T00:00:01Z", isAfterCurrentHead: true }],
+          reviewThreads: [
+            {
+              id: "thread-1",
+              path: "src/example.ts",
+              line: 12,
+              isResolved: false,
+              comments: [
+                {
+                  id: "thread-comment-1",
+                  body: "Please revisit this",
+                  authorName: "reviewer",
+                  authoredByAgent: false,
+                  createdAt: "2026-03-16T00:00:02Z",
+                },
+              ],
+            },
+          ],
+          failingChecks: [{ name: "test", state: "failure" }],
+          pendingChecks: [{ name: "lint", state: "pending" }],
+        }),
+      );
       expect(firstCheckpoint?.sourceAttemptId).toBe(attemptOne!.id);
 
       db.reviewCheckpoints.upsertReviewCheckpoint({
@@ -267,6 +318,7 @@ describe("persistence repos", () => {
       expect(secondCheckpoint?.mergeState).toBe("dirty");
       expect(secondCheckpoint?.latestReviewSummaryId).toBeNull();
       expect(secondCheckpoint?.latestConversationCommentId).toBeNull();
+      expect(secondCheckpoint?.reviewThreadsFingerprint).toBe("[]");
       expect(secondCheckpoint?.sourceAttemptId).toBe(attemptTwo!.id);
 
       const rowCount = db.database.sqlite
