@@ -1,7 +1,7 @@
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import { newId } from "../../lib/ids.js";
-import type { ReviewContext } from "../../domain/index.js";
+import { latestActionableConversationCommentId, latestActionableReviewSummaryId, type ReviewContext } from "../../domain/index.js";
 import type { ReviewCheckpointRecord, ReviewCheckpointRepo } from "../review-checkpoint-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
@@ -40,8 +40,8 @@ export class SqliteReviewCheckpointRepo implements ReviewCheckpointRepo {
       failing: input.reviewContext.failingChecks,
       pending: input.reviewContext.pendingChecks,
     });
-    const latestReviewSummaryId = input.reviewContext.actionableReviewSummaries.at(-1)?.id ?? null;
-    const latestConversationCommentId = input.reviewContext.actionableConversationComments.at(-1)?.id ?? null;
+    const latestReviewSummaryId = latestActionableReviewSummaryId(input.reviewContext);
+    const latestConversationCommentId = latestActionableConversationCommentId(input.reviewContext);
     this.sqlite
       .prepare(
         `INSERT INTO review_checkpoint(

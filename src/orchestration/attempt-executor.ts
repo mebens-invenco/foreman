@@ -137,7 +137,7 @@ export class AttemptExecutor {
 
         const comments = await this.deps.taskSystem.listComments(task.id);
         const reviewContext =
-          job.action === "review" || job.action === "retry"
+          job.action === "review" || job.action === "retry" || job.action === "consolidation"
             ? (await this.deps.reviewService.getContext(task, this.deps.config.workspace.agentPrefix, repo)) ?? undefined
             : undefined;
         const prompt = await renderWorkerPrompt({

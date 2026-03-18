@@ -1,10 +1,9 @@
-import type { ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, Task } from "../domain/index.js";
+import type { RepoRef, ResolvedPullRequest, ReviewContext, Task } from "../domain/index.js";
 
 export interface ReviewService {
   resolvePullRequest(task: Task, repo?: RepoRef): Promise<ResolvedPullRequest | null>;
   getContext(task: Task, agentPrefix: string, repo?: RepoRef): Promise<ReviewContext | null>;
   findLatestOpenPullRequestBranch(task: Task, repo?: RepoRef): Promise<string | null>;
-  listConversationComments(prUrl: string): Promise<ConversationComment[]>;
   createPullRequest(input: {
     cwd: string;
     title: string;

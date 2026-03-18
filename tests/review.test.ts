@@ -64,6 +64,19 @@ const pullRequestSummaryResponse = jsonResponse({
   },
 });
 
+const emptyReviewSummariesResponse = jsonResponse({
+  data: {
+    repository: {
+      pullRequest: {
+        reviews: {
+          nodes: [],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    },
+  },
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -108,6 +121,7 @@ describe("GitHubReviewService.getContext", () => {
           },
         }),
       )
+      .mockResolvedValueOnce(emptyReviewSummariesResponse)
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(
         jsonResponse({
@@ -133,7 +147,7 @@ describe("GitHubReviewService.getContext", () => {
     expect(context?.pullRequestUrl).toBe("https://github.com/acme/repo/pull/946");
     expect(context?.headBranch).toBe("eng-4737");
     expect(processLib.exec).toHaveBeenCalledWith("git", ["config", "--get", "remote.origin.url"], { cwd: "/repos/repo-a" });
-    expect(global.fetch).toHaveBeenCalledTimes(6);
+    expect(global.fetch).toHaveBeenCalledTimes(7);
     expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe(
       "https://api.github.com/repos/acme/repo/pulls?state=all&head=acme%3Aeng-4737&per_page=20",
     );
@@ -165,6 +179,7 @@ describe("GitHubReviewService.getContext", () => {
           },
         }),
       )
+      .mockResolvedValueOnce(emptyReviewSummariesResponse)
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(
         jsonResponse({
@@ -207,8 +222,8 @@ describe("GitHubReviewService.getContext", () => {
       { name: "unit tests", state: "failure" },
     ]);
     expect(context?.pendingChecks).toEqual([{ name: "task-list-completed", state: "pending" }]);
-    expect(global.fetch).toHaveBeenCalledTimes(6);
-    expect(vi.mocked(global.fetch).mock.calls[5]?.[0]).toBe("https://api.github.com/repos/acme/repo/commits/abc123/status");
+    expect(global.fetch).toHaveBeenCalledTimes(7);
+    expect(vi.mocked(global.fetch).mock.calls[6]?.[0]).toBe("https://api.github.com/repos/acme/repo/commits/abc123/status");
   });
 
   test("maps dirty or conflicting pull requests to conflicting review state", async () => {
@@ -237,6 +252,7 @@ describe("GitHubReviewService.getContext", () => {
           },
         }),
       )
+      .mockResolvedValueOnce(emptyReviewSummariesResponse)
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(
         jsonResponse({
@@ -262,7 +278,7 @@ describe("GitHubReviewService.getContext", () => {
     expect(context?.mergeState).toBe("conflicting");
   });
 
-  test("enriches actionable comments and unresolved threads across pages", async () => {
+  test("enriches full review history across pages and preserves relevance flags", async () => {
     const pageOneComments = Array.from({ length: 100 }, (_, index) => {
       const hour = 3 + Math.floor(index / 60);
       const minute = index % 60;
@@ -294,7 +310,42 @@ describe("GitHubReviewService.getContext", () => {
                 mergeStateStatus: "CLEAN",
                 mergeable: "MERGEABLE",
                 commits: { nodes: [{ commit: { committedDate: "2026-03-16T03:00:00Z" } }] },
-                reviews: { nodes: [] },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviews: {
+                  nodes: [
+                    {
+                      id: "review-1",
+                      body: "Older review summary",
+                      submittedAt: "2026-03-16T02:55:00Z",
+                      author: { login: "reviewer-old" },
+                      commit: { oid: "old-head" },
+                    },
+                    {
+                      id: "review-2",
+                      body: "Current-head summary",
+                      submittedAt: "2026-03-16T03:30:00Z",
+                      author: { login: "reviewer-current" },
+                      commit: { oid: "abc123" },
+                    },
+                    {
+                      id: "review-3",
+                      body: "[agent] Addressed in latest head",
+                      submittedAt: "2026-03-16T03:35:00Z",
+                      author: { login: "foreman-bot" },
+                      commit: { oid: "abc123" },
+                    },
+                  ],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
               },
             },
           },
@@ -400,10 +451,18 @@ describe("GitHubReviewService.getContext", () => {
                     {
                       id: "thread-3",
                       isResolved: true,
-                      path: "src/ignored.ts",
+                      path: "src/three.ts",
                       line: 30,
                       comments: {
-                        nodes: [],
+                        nodes: [
+                          {
+                            id: "thread-comment-4",
+                            body: "[agent] Already handled",
+                            createdAt: "2026-03-16T04:20:00Z",
+                            url: "https://github.com/acme/repo/pull/946#discussion_r4",
+                            author: { login: "foreman-bot" },
+                          },
+                        ],
                         pageInfo: { hasNextPage: false, endCursor: null },
                       },
                     },
@@ -422,18 +481,58 @@ describe("GitHubReviewService.getContext", () => {
     const context = await service.getContext(sampleTask(), "[agent]");
 
     expect(context).not.toBeNull();
-    expect(context?.actionableConversationComments).toHaveLength(101);
-    expect(context?.actionableConversationComments[0]).toMatchObject({
+    expect(context?.reviewSummaries).toEqual([
+      {
+        id: "review-1",
+        body: "Older review summary",
+        authorName: "reviewer-old",
+        authoredByAgent: false,
+        createdAt: "2026-03-16T02:55:00Z",
+        commitId: "old-head",
+        isCurrentHead: false,
+      },
+      {
+        id: "review-2",
+        body: "Current-head summary",
+        authorName: "reviewer-current",
+        authoredByAgent: false,
+        createdAt: "2026-03-16T03:30:00Z",
+        commitId: "abc123",
+        isCurrentHead: true,
+      },
+      {
+        id: "review-3",
+        body: "[agent] Addressed in latest head",
+        authorName: "foreman-bot",
+        authoredByAgent: true,
+        createdAt: "2026-03-16T03:35:00Z",
+        commitId: "abc123",
+        isCurrentHead: true,
+      },
+    ]);
+    expect(context?.conversationComments).toHaveLength(102);
+    expect(context?.conversationComments[0]).toMatchObject({
       id: "1",
       body: "Comment 1",
+      authoredByAgent: false,
+      isAfterCurrentHead: true,
       url: "https://github.com/acme/repo/pull/946#issuecomment-1",
     });
-    expect(context?.actionableConversationComments[context.actionableConversationComments.length - 1]).toMatchObject({
+    expect(context?.conversationComments[100]).toMatchObject({
+      id: "101",
+      body: "[agent] noise",
+      authoredByAgent: true,
+      isAfterCurrentHead: true,
+      url: "https://github.com/acme/repo/pull/946#issuecomment-101",
+    });
+    expect(context?.conversationComments[context.conversationComments.length - 1]).toMatchObject({
       id: "102",
       body: "Latest actionable comment",
+      authoredByAgent: false,
+      isAfterCurrentHead: true,
       url: "https://github.com/acme/repo/pull/946#issuecomment-102",
     });
-    expect(context?.unresolvedThreads).toEqual([
+    expect(context?.reviewThreads).toEqual([
       {
         id: "thread-1",
         path: "src/one.ts",
@@ -444,6 +543,7 @@ describe("GitHubReviewService.getContext", () => {
             id: "thread-comment-1",
             body: "Please adjust this",
             authorName: "reviewer-a",
+            authoredByAgent: false,
             createdAt: "2026-03-16T04:00:00Z",
             url: "https://github.com/acme/repo/pull/946#discussion_r1",
           },
@@ -451,6 +551,7 @@ describe("GitHubReviewService.getContext", () => {
             id: "thread-comment-2",
             body: "Follow-up detail",
             authorName: "reviewer-b",
+            authoredByAgent: false,
             createdAt: "2026-03-16T04:05:00Z",
             url: "https://github.com/acme/repo/pull/946#discussion_r2",
           },
@@ -466,15 +567,32 @@ describe("GitHubReviewService.getContext", () => {
             id: "thread-comment-3",
             body: "Second thread",
             authorName: "reviewer-c",
+            authoredByAgent: false,
             createdAt: "2026-03-16T04:10:00Z",
             url: "https://github.com/acme/repo/pull/946#discussion_r3",
           },
         ],
       },
+      {
+        id: "thread-3",
+        path: "src/three.ts",
+        line: 30,
+        isResolved: true,
+        comments: [
+          {
+            id: "thread-comment-4",
+            body: "[agent] Already handled",
+            authorName: "foreman-bot",
+            authoredByAgent: true,
+            createdAt: "2026-03-16T04:20:00Z",
+            url: "https://github.com/acme/repo/pull/946#discussion_r4",
+          },
+        ],
+      },
     ]);
-    expect(global.fetch).toHaveBeenCalledTimes(9);
-    expect(vi.mocked(global.fetch).mock.calls[2]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=1");
-    expect(vi.mocked(global.fetch).mock.calls[3]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=2");
+    expect(global.fetch).toHaveBeenCalledTimes(10);
+    expect(vi.mocked(global.fetch).mock.calls[3]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=1");
+    expect(vi.mocked(global.fetch).mock.calls[4]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=2");
   });
 });
 

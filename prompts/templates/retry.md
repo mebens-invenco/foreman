@@ -32,6 +32,7 @@ Reattempt the task cleanly from fresh branch state while reusing only the prior 
 
 - Treat previous patch content as discarded.
 - Use only the provided task context, task comments, PR body, review context, and check context to guide the reimplementation.
+- Read `Actionable Now` first, then use the remaining review history to preserve valid prior decisions.
 - Do not assume prior code changes are still present or should be preserved.
 - Reset the task branch to a fresh state from the resolved base branch before reimplementing.
 - You may reuse prior review intent only; you may not reuse prior implementation patches or file content.

@@ -1,5 +1,12 @@
 import type { ActionType, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskComment } from "../domain/index.js";
-import { priorityToRank } from "../domain/index.js";
+import {
+  actionableConversationComments,
+  actionableReviewSummaries,
+  actionableReviewThreads,
+  latestActionableConversationCommentId,
+  latestActionableReviewSummaryId,
+  priorityToRank,
+} from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 import { stableStringify } from "../lib/json.js";
 import type { LoggerService } from "../logger.js";
@@ -20,13 +27,13 @@ type Selection = {
 };
 
 const reviewPriorityReason = (context: ReviewContext): string | null => {
-  if (context.unresolvedThreads.length > 0) {
+  if (actionableReviewThreads(context).length > 0) {
     return "unresolved review threads";
   }
-  if (context.actionableReviewSummaries.length > 0) {
+  if (actionableReviewSummaries(context).length > 0) {
     return "actionable review summary on current head";
   }
-  if (context.actionableConversationComments.length > 0) {
+  if (actionableConversationComments(context).length > 0) {
     return "actionable pull request comment after current head";
   }
   if (context.failingChecks.length > 0) {
@@ -327,8 +334,8 @@ export const runScoutSelection = async (input: {
       const checkpoint = input.foremanRepos.reviewCheckpoints.getReviewCheckpoint(task.id, context.pullRequestUrl);
       const checkpointMatches = checkpoint
         ? checkpoint.headSha === context.headSha &&
-          checkpoint.latestReviewSummaryId === (context.actionableReviewSummaries.at(-1)?.id ?? null) &&
-          checkpoint.latestConversationCommentId === (context.actionableConversationComments.at(-1)?.id ?? null) &&
+          checkpoint.latestReviewSummaryId === latestActionableReviewSummaryId(context) &&
+          checkpoint.latestConversationCommentId === latestActionableConversationCommentId(context) &&
           checkpoint.checksFingerprint === stableStringify({ failing: context.failingChecks, pending: context.pendingChecks }) &&
           checkpoint.mergeState === context.mergeState
         : false;
@@ -376,8 +383,15 @@ export const runScoutSelection = async (input: {
         }
 
         const taskComments = await input.taskSystem.listComments(task.id);
-        const prComments = await input.reviewService.listConversationComments(reviewContext.pullRequestUrl);
-        const combinedComments = [...taskComments, ...prComments.map((comment) => ({ ...comment, taskId: task.id, authorKind: "human" as const, updatedAt: null }))];
+        const combinedComments = [
+          ...taskComments,
+          ...reviewContext.conversationComments.map((comment) => ({
+            ...comment,
+            taskId: task.id,
+            authorKind: comment.authoredByAgent ? ("agent" as const) : ("human" as const),
+            updatedAt: null,
+          })),
+        ];
         if (hasStopIntent(combinedComments, input.config.workspace.agentPrefix)) {
           continue;
         }
