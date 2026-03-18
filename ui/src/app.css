@@ -39,6 +39,24 @@
   --warning: 36 100% 55%;
   --destructive: 0 72% 56%;
   --info: 205 88% 61%;
+  --ansi-default-foreground: hsl(var(--card-foreground));
+  --ansi-default-background: hsl(var(--card));
+  --ansi-black: hsl(220 14% 18%);
+  --ansi-red: hsl(1 75% 63%);
+  --ansi-green: hsl(134 45% 52%);
+  --ansi-yellow: hsl(39 91% 63%);
+  --ansi-blue: hsl(210 88% 68%);
+  --ansi-magenta: hsl(295 57% 67%);
+  --ansi-cyan: hsl(186 60% 58%);
+  --ansi-white: hsl(35 18% 81%);
+  --ansi-bright-black: hsl(220 10% 46%);
+  --ansi-bright-red: hsl(2 95% 71%);
+  --ansi-bright-green: hsl(136 62% 62%);
+  --ansi-bright-yellow: hsl(43 100% 72%);
+  --ansi-bright-blue: hsl(213 100% 77%);
+  --ansi-bright-magenta: hsl(296 73% 76%);
+  --ansi-bright-cyan: hsl(184 85% 70%);
+  --ansi-bright-white: hsl(30 24% 94%);
 }
 
 @layer base {
