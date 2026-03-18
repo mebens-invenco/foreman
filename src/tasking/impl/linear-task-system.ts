@@ -1,5 +1,5 @@
 import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain/index.js";
-import { ForemanError } from "../../lib/errors.js";
+import { ForemanError, isForemanError } from "../../lib/errors.js";
 import { LoggerService } from "../../logger.js";
 import type { WorkspaceConfig } from "../../workspace/config.js";
 import type { TaskSystem } from "../task-system.js";
@@ -201,6 +201,9 @@ const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task
     url: node.url,
   };
 };
+
+const isUnknownProviderStateError = (error: unknown): error is ForemanError =>
+  isForemanError(error) && error.code === "unknown_provider_state";
 
 export class LinearTaskSystem implements TaskSystem {
   private readonly client: LinearClient;
@@ -427,8 +430,30 @@ export class LinearTaskSystem implements TaskSystem {
       },
     );
 
-    this.logger.debug("listed Linear candidate issues", { count: data.issues.nodes.length });
-    return data.issues.nodes.map((node) => linearIssueToTask(this.config, node));
+    const tasks = data.issues.nodes.flatMap((node) => {
+      try {
+        return [linearIssueToTask(this.config, node)];
+      } catch (error) {
+        if (!isUnknownProviderStateError(error)) {
+          throw error;
+        }
+
+        this.logger.info("skipping Linear candidate with unmapped provider state", {
+          provider: "linear",
+          taskId: node.identifier,
+          providerId: node.id,
+          providerState: node.state.name,
+        });
+        return [];
+      }
+    });
+
+    this.logger.debug("listed Linear candidate issues", {
+      count: data.issues.nodes.length,
+      acceptedCount: tasks.length,
+      skippedCount: data.issues.nodes.length - tasks.length,
+    });
+    return tasks;
   }
 
   async getTask(taskId: string): Promise<Task> {

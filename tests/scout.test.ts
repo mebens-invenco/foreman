@@ -7,10 +7,11 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import type { RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskArtifact, TaskComment } from "../src/domain/index.js";
 import { runScoutSelection } from "../src/orchestration/index.js";
 import type { ReviewService } from "../src/review/index.js";
+import { FileTaskSystem } from "../src/tasking/index.js";
 import type { TaskSystem } from "../src/tasking/index.js";
 import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
 import * as worktrees from "../src/workspace/git-worktrees.js";
-import { createMigratedDb, createTempDir } from "./helpers.js";
+import { createMigratedDb, createTempDir, createWorkspacePaths } from "./helpers.js";
 
 const cleanupDirs: string[] = [];
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -129,6 +130,28 @@ const task = (input: Partial<Task> & Pick<Task, "id" | "title" | "state" | "prov
   ...input,
 });
 
+const writeFileTask = async (workspaceRoot: string, input: { id: string; title: string; state: string; repo?: string }): Promise<void> => {
+  await fs.mkdir(path.join(workspaceRoot, "tasks"), { recursive: true });
+  await fs.writeFile(
+    path.join(workspaceRoot, "tasks", `${input.id}.md`),
+    `---
+id: ${input.id}
+title: ${input.title}
+state: ${input.state}
+priority: normal
+labels:
+  - Agent
+repo: ${input.repo ?? "repo-a"}
+createdAt: 2026-03-14T12:00:00Z
+updatedAt: 2026-03-14T12:00:00Z
+---
+
+Task body
+`,
+    "utf8",
+  );
+};
+
 describe("runScoutSelection", () => {
   test("prioritizes review before execution", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
@@ -189,6 +212,45 @@ describe("runScoutSelection", () => {
       expect(result.jobs[0]?.action).toBe("review");
       expect(result.jobs[0]?.task.id).toBe("TASK-0002");
       expect(result.jobs[1]?.action).toBe("execution");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("continues scout selection when one file candidate has an unmapped provider state", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    await writeFileTask(tempDir, {
+      id: "TASK-0001",
+      title: "Valid task",
+      state: "ready",
+    });
+    await writeFileTask(tempDir, {
+      id: "TASK-0002",
+      title: "Skipped task",
+      state: "blocked",
+    });
+
+    const taskSystem = new FileTaskSystem(config, createWorkspacePaths(projectRoot, tempDir));
+    const reviewService = new FakeReviewService({});
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.task.id).toBe("TASK-0001");
     } finally {
       db.close();
     }

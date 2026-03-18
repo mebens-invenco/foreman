@@ -17,7 +17,7 @@ export const createTaskSystem = (input: {
         throw new Error("File task system config is required when type=file");
       }
 
-      return new FileTaskSystem(input.config, input.paths);
+      return new FileTaskSystem(input.config, input.paths, input.logger?.child({ component: "taskSystem.file" }));
     }
 
     case "linear": {
