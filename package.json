@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "yarn build && yarn start",
     "ui:dev": "vite",
+    "foreman": "node dist/cli.js",
     "start": "node dist/cli.js",
     "build": "yarn build:server && yarn build:ui",
     "build:server": "tsc -p tsconfig.json",

@@ -278,4 +278,130 @@ describe("persistence repos", () => {
       db.close();
     }
   });
+
+  test("searches learnings across multiple queries and repo scopes with deterministic ordering", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.learnings.addLearning({
+        id: "learn-b",
+        title: "Planning prompt CLI notes",
+        repo: "shared",
+        confidence: "established",
+        content: "planning prompt learnings cli",
+        tags: ["planning"],
+      });
+      db.learnings.addLearning({
+        id: "learn-a",
+        title: "Planning prompt CLI notes",
+        repo: "foreman",
+        confidence: "established",
+        content: "planning prompt learnings cli",
+        tags: ["planning"],
+      });
+      db.learnings.addLearning({
+        id: "learn-c",
+        title: "Planning prompt CLI notes",
+        repo: "other-repo",
+        confidence: "established",
+        content: "planning prompt learnings cli",
+        tags: ["planning"],
+      });
+
+      db.database.sqlite
+        .prepare("UPDATE learning SET updated_at = ? WHERE id IN (?, ?, ?)")
+        .run("2026-03-16T00:00:00Z", "learn-a", "learn-b", "learn-c");
+
+      const learnings = db.learnings.searchLearnings({
+        queries: ["planning prompt", "learnings cli"],
+        repos: ["shared", "foreman"],
+        limit: 10,
+      });
+
+      expect(learnings.map((learning) => learning.id)).toEqual(["learn-a", "learn-b"]);
+      expect(learnings.every((learning) => Number.isFinite(learning.score))).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("retrieves learnings by id in requested order", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.learnings.addLearning({
+        id: "learn-a",
+        title: "First learning",
+        repo: "foreman",
+        confidence: "emerging",
+        content: "First content",
+        tags: [],
+      });
+      db.learnings.addLearning({
+        id: "learn-b",
+        title: "Second learning",
+        repo: "shared",
+        confidence: "proven",
+        content: "Second content",
+        tags: ["planning"],
+      });
+
+      const learnings = db.learnings.getLearningsByIds(["learn-b", "missing", "learn-a"]);
+
+      expect(learnings.map((learning) => learning.id)).toEqual(["learn-b", "learn-a"]);
+      expect(learnings[0]?.content).toBe("Second content");
+      expect(learnings[1]?.content).toBe("First content");
+      const readCounts = db.database.sqlite
+        .prepare("SELECT id, read_count FROM learning WHERE id IN (?, ?) ORDER BY id ASC")
+        .all("learn-a", "learn-b") as Array<{ id: string; read_count: number }>;
+      expect(readCounts).toEqual([
+        { id: "learn-a", read_count: 0 },
+        { id: "learn-b", read_count: 0 },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("increments read counts only when explicitly requested", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.learnings.addLearning({
+        id: "learn-a",
+        title: "First learning",
+        repo: "foreman",
+        confidence: "emerging",
+        content: "planning prompt cli",
+        tags: [],
+      });
+      db.learnings.addLearning({
+        id: "learn-b",
+        title: "Second learning",
+        repo: "shared",
+        confidence: "proven",
+        content: "planning prompt cli",
+        tags: ["planning"],
+      });
+
+      db.learnings.searchLearnings({ queries: ["planning prompt"], repos: ["shared", "foreman"] }, { incrementReadCount: true });
+      db.learnings.getLearningsByIds(["learn-b", "learn-a"], { incrementReadCount: true });
+
+      const readCounts = db.database.sqlite
+        .prepare("SELECT id, read_count FROM learning WHERE id IN (?, ?) ORDER BY id ASC")
+        .all("learn-a", "learn-b") as Array<{ id: string; read_count: number }>;
+      expect(readCounts).toEqual([
+        { id: "learn-a", read_count: 2 },
+        { id: "learn-b", read_count: 2 },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
 });

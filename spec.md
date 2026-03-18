@@ -98,10 +98,16 @@ Workers are logical in-process worker slots. Each worker may spawn a child proce
 - `foreman init <workspace> --task-system <linear|file>`
 - `foreman serve <workspace>`
 - `foreman plan prompt <workspace>`
+- `foreman learnings search <workspace> --repo <scope>... --query <query>...`
+- `foreman learnings get <workspace> --id <learning-id>...`
 - `foreman scheduler start <workspace>`
 - `foreman scheduler pause <workspace>`
 - `foreman scheduler stop <workspace>`
 - `foreman db import-legacy <workspace> <legacy-memory.db>`
+
+Built CLI fallback script:
+
+- `yarn foreman ...` runs `node dist/cli.js` after a local build, so the CLI remains available without a global install
 
 ### Command Behavior
 
@@ -144,6 +150,20 @@ After successful initialization, Foreman should print next steps:
 - renders the planning prompt for the workspace
 - overwrites workspace `plan.md`
 - writes the planning context JSON artifact
+
+`foreman learnings search <workspace> --repo <scope>... --query <query>...`:
+
+- reads directly from `workspaces/<workspace>/foreman.db`
+- does not require `foreman serve` to be running
+- supports repeated `--query` values as OR search terms
+- supports repeated `--repo` values as OR repo-scope filters
+- returns ranked JSON results suitable for agent consumption
+
+`foreman learnings get <workspace> --id <learning-id>...`:
+
+- reads directly from `workspaces/<workspace>/foreman.db`
+- does not require `foreman serve` to be running
+- returns JSON details for the requested learning ids
 
 `foreman scheduler start|pause|stop <workspace>`:
 
@@ -735,6 +755,15 @@ On every `foreman serve`, Foreman must:
 - render a current workspace-specific planning prompt
 - overwrite `<workspace>/plan.md`
 - write a planning context JSON artifact
+
+Planning prompt learnings workflow:
+
+- keep `plan.md` lightweight; do not embed the full learnings database into the prompt or context artifact
+- instruct the planner to call `foreman learnings search` before decomposition or ticket authoring
+- instruct the planner to follow search with `foreman learnings get` for shortlisted learning ids
+- tell the planner to search both `shared` and the target repo scope when a task clearly belongs to one repo
+- require generated executable tasks to include a compact `Relevant Learnings` section that cites learning ids and titles only
+- require an explicit `Relevant Learnings` note when no strong learning applies
 
 ### Worker Prompt Context
 

@@ -113,8 +113,27 @@ describe("prompt rendering", () => {
     expect(result.markdown).toContain("## File Task Planning Rules");
     expect(result.markdown).toContain("## Workspace Context");
     expect(result.markdown).toContain("## Discovered Repositories");
+    expect(result.markdown).toContain("## Learnings CLI");
+    expect(result.markdown).toContain("foreman learnings search foo --repo shared --repo <repo-key>");
+    expect(result.markdown).toContain("yarn foreman learnings search foo");
+    expect(result.markdown).toContain("## Relevant Learnings");
+    expect(result.markdown).toContain("No strong relevant learnings found in shared/<repo> scope.");
     expect(result.markdown).not.toContain("{{fragment:");
     expect(result.markdown).not.toContain("{{context:");
+    expect(result.markdown).not.toContain("{{workspace:");
+  });
+
+  test("renders the linear planning fragment with relevant learnings requirements", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-plan-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+
+    const result = await renderPlanPrompt(config, paths, [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }]);
+
+    expect(result.markdown).toContain("## Linear Planning Rules");
+    expect(result.markdown).toContain("## Relevant Learnings");
+    expect(result.markdown).toContain("- <learning-id>: <learning title>");
   });
 
   test("renders worker prompts with generated fragments and runtime context", async () => {

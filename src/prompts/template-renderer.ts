@@ -17,6 +17,7 @@ const TEMPLATE_PATHS: Record<PromptTemplateName, string> = {
 const FRAGMENTS_DIR = path.join("prompts", "fragments");
 const fragmentTokenPattern = /\{\{fragment:([a-zA-Z0-9_-]+)\}\}/g;
 const contextTokenPattern = /\{\{context:([a-zA-Z0-9_-]+)\}\}/g;
+const propertyTokenPattern = /\{\{([a-zA-Z0-9_-]+):([a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)*)\}\}/g;
 
 export const markdownSection = (title: string, body: string): string => `## ${title}\n\n${body}`;
 
@@ -24,6 +25,18 @@ export const jsonSection = (title: string, value: unknown): string =>
   markdownSection(title, ["```json", JSON.stringify(value, null, 2), "```"].join("\n"));
 
 export const textSection = (title: string, body: string): string => markdownSection(title, body.trim() || "(none)");
+
+const resolveTemplateProperty = (source: unknown, rawPath: string): string => {
+  const resolved = rawPath
+    .split(":")
+    .reduce<unknown>((current, segment) => (current && typeof current === "object" ? (current as Record<string, unknown>)[segment] : undefined), source);
+
+  if (resolved === undefined || resolved === null) {
+    return "";
+  }
+
+  return typeof resolved === "string" ? resolved : JSON.stringify(resolved);
+};
 
 const loadPromptAssets = async (
   paths: WorkspacePaths,
@@ -50,6 +63,7 @@ const renderTemplate = (input: {
   fragments: Record<string, string>;
   context: Record<string, string>;
   fragmentAliases?: Record<string, string>;
+  properties?: Record<string, unknown>;
 }): string => {
   const renderFragments = (value: string): string =>
     value.replace(fragmentTokenPattern, (_match, rawName) => {
@@ -60,7 +74,10 @@ const renderTemplate = (input: {
 
   const withFragments = renderFragments(input.template);
   const withContext = withFragments.replace(contextTokenPattern, (_match, rawName) => input.context[rawName] ?? "");
-  return `${withContext.trim()}\n`;
+  const withProperties = withContext.replace(propertyTokenPattern, (_match, rawScope, rawPath) =>
+    resolveTemplateProperty(input.properties?.[rawScope], rawPath),
+  );
+  return `${withProperties.trim()}\n`;
 };
 
 export const renderPromptTemplate = async (input: {
@@ -68,6 +85,7 @@ export const renderPromptTemplate = async (input: {
   template: PromptTemplateName;
   context: Record<string, string>;
   fragmentAliases?: Record<string, string>;
+  properties?: Record<string, unknown>;
 }): Promise<string> => {
   const assets = await loadPromptAssets(input.paths, input.template);
 
@@ -76,5 +94,6 @@ export const renderPromptTemplate = async (input: {
     fragments: assets.fragments,
     context: input.context,
     ...(input.fragmentAliases ? { fragmentAliases: input.fragmentAliases } : {}),
+    ...(input.properties ? { properties: input.properties } : {}),
   });
 };

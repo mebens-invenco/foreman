@@ -19,6 +19,32 @@ import type { LoggerLevelName } from "./logger.js";
 const program = new Command();
 const logLevels = ["debug", "info", "warn", "error"] as const satisfies readonly LoggerLevelName[];
 
+const collectRepeatedValues = (value: string, previous: string[] = []): string[] => [...previous, value];
+
+const parsePositiveInteger = (value: string): number => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 1) {
+    throw new InvalidArgumentError("Value must be a positive integer.");
+  }
+
+  return parsed;
+};
+
+const writeJson = (value: unknown): void => {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+};
+
+const withWorkspaceRepos = async <T>(workspace: string, handler: (repos: ReturnType<typeof createRepos>) => Promise<T>): Promise<T> => {
+  const { paths } = await loadWorkspace(workspace);
+  const repos = createRepos(await openSqliteDatabase(paths.dbPath));
+  try {
+    await repos.migrationRunner.runMigrations(paths.projectRoot);
+    return await handler(repos);
+  } finally {
+    repos.close();
+  }
+};
+
 const parseLogLevel = (value: string): LoggerLevelName => {
   const normalized = value.toLowerCase();
   if (!logLevels.includes(normalized as LoggerLevelName)) {
@@ -136,6 +162,53 @@ plan
       repos.close();
       await logger.flush();
     }
+  });
+
+const learnings = program.command("learnings").description("Query workspace learnings from the workspace SQLite database");
+
+learnings
+  .command("search")
+  .argument("<workspace>")
+  .option("--repo <repo>", "Repo scope to include", collectRepeatedValues, [])
+  .option("--query <query>", "Search query", collectRepeatedValues, [])
+  .option("--limit <count>", "Maximum results to return", parsePositiveInteger, 20)
+  .action(async (workspace: string, options: { repo: string[]; query: string[]; limit: number }) => {
+    if (options.query.length === 0) {
+      throw new InvalidArgumentError("At least one --query is required.");
+    }
+
+    await withWorkspaceRepos(workspace, async (repos) => {
+      writeJson({
+        workspace,
+        repos: options.repo,
+        queries: options.query,
+        learnings: repos.learnings.searchLearnings(
+          {
+            queries: options.query,
+            ...(options.repo.length > 0 ? { repos: options.repo } : {}),
+            limit: options.limit,
+          },
+          { incrementReadCount: true },
+        ),
+      });
+    });
+  });
+
+learnings
+  .command("get")
+  .argument("<workspace>")
+  .requiredOption("--id <id>", "Learning id to fetch", collectRepeatedValues, [])
+  .action(async (workspace: string, options: { id: string[] }) => {
+    await withWorkspaceRepos(workspace, async (repos) => {
+      const learnings = repos.learnings.getLearningsByIds(options.id, { incrementReadCount: true });
+      const foundIds = new Set(learnings.map((learning) => learning.id));
+      writeJson({
+        workspace,
+        ids: options.id,
+        learnings,
+        missingIds: options.id.filter((id) => !foundIds.has(id)),
+      });
+    });
   });
 
 const scheduler = program.command("scheduler");

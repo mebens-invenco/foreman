@@ -27,6 +27,9 @@ export const renderPlanPrompt = async (
       fragmentAliases: {
         "task-system-planning": taskSystemPlanningFragmentName(config),
       },
+      properties: {
+        workspace: config.workspace,
+      },
       context: {
         workspace: jsonSection("Workspace Context", planningContext.workspaceConfig),
         repos: jsonSection("Discovered Repositories", planningContext.repos),
