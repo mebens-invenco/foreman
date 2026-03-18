@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
 
+  import { appendLogChunk, appendSyntheticLogLine, createLogBuffer, getDisplayLines, type LogBuffer, type RenderedLogLine } from "../log-display";
   import { connectLogStream } from "../log-stream";
   import ErrorState from "./ErrorState.svelte";
   import LoadingState from "./LoadingState.svelte";
@@ -11,15 +12,41 @@
   export let emptyMessage = "No logs yet.";
   export let includeAttemptChanges = false;
 
-  let lines: string[] = [];
+  let buffer: LogBuffer = createLogBuffer();
+  let lines: RenderedLogLine[] = [];
   let error: string | null = null;
   let loading = false;
   let activeKey = "";
   let disconnect: () => void = () => {};
   let streamKey = "";
 
-  const appendLine = (line: string): void => {
-    lines = [...lines, line].slice(-500);
+  const syncLines = (): void => {
+    lines = getDisplayLines(buffer);
+  };
+
+  const resetBuffer = (): void => {
+    buffer = createLogBuffer();
+    syncLines();
+  };
+
+  const appendChunk = (chunk: string): void => {
+    buffer = appendLogChunk(buffer, chunk);
+    syncLines();
+  };
+
+  const appendAttemptChange = (attemptId: string | null): void => {
+    buffer = appendSyntheticLogLine(buffer, attemptId ? `[worker switched to ${attemptId}]` : `[worker is idle]`);
+    syncLines();
+  };
+
+  const withStreamOffset = (url: string, offset: number): string => {
+    if (offset <= 0) {
+      return url;
+    }
+
+    const nextUrl = new URL(url, window.location.origin);
+    nextUrl.searchParams.set("offset", String(offset));
+    return `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`;
   };
 
   const loadLogs = async (): Promise<void> => {
@@ -30,7 +57,7 @@
 
     activeKey = nextKey;
     disconnect();
-    lines = [];
+    resetBuffer();
     error = null;
 
     if (!streamUrl && !initialUrl) {
@@ -39,13 +66,15 @@
     }
 
     loading = true;
+    let initialOffset = 0;
 
     if (initialUrl) {
       try {
         const response = await fetch(initialUrl);
         if (response.ok) {
           const text = await response.text();
-          lines = text ? text.split(/\r?\n/).filter(Boolean).slice(-500) : [];
+          initialOffset = text.length;
+          appendChunk(text);
         }
       } catch {
         // ignore initial load failures and let the stream retry path carry the UI
@@ -54,11 +83,9 @@
 
     if (streamUrl) {
       disconnect = connectLogStream({
-        streamUrl,
-        onLine: appendLine,
-        onAttemptChanged: includeAttemptChanges
-          ? (attemptId) => appendLine(attemptId ? `[worker switched to ${attemptId}]` : `[worker is idle]`)
-          : undefined,
+        streamUrl: withStreamOffset(streamUrl, initialOffset),
+        onChunk: appendChunk,
+        onAttemptChanged: includeAttemptChanges ? appendAttemptChange : undefined,
         onError: () => {
           error = "Live log stream disconnected.";
         },

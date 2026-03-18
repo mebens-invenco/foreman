@@ -1,6 +1,6 @@
 export type LogStreamOptions = {
   streamUrl: string;
-  onLine: (line: string) => void;
+  onChunk: (chunk: string) => void;
   onAttemptChanged?: (attemptId: string | null) => void;
   onError?: () => void;
 };
@@ -10,7 +10,7 @@ export const connectLogStream = (options: LogStreamOptions): (() => void) => {
 
   source.addEventListener("log", (event) => {
     if (event instanceof MessageEvent) {
-      options.onLine(event.data);
+      options.onChunk(event.data);
     }
   });
 

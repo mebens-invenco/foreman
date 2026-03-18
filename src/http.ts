@@ -237,6 +237,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
 
   server.get("/api/attempts/:attemptId/logs/stream", async (request, reply) => {
     const params = request.params as { attemptId: string };
+    const query = request.query as { offset?: string };
     const logPath = attemptLogPath(deps.paths, params.attemptId);
     reply.raw.writeHead(200, {
       "content-type": "text/event-stream",
@@ -244,16 +245,14 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       connection: "keep-alive",
     });
 
-    let offset = 0;
+    let offset = parseNonNegativeIntegerQuery("offset", query.offset) ?? 0;
     const interval = setInterval(async () => {
       try {
         const contents = await fs.readFile(logPath, "utf8");
         const nextChunk = contents.slice(offset);
         if (nextChunk) {
           offset = contents.length;
-          for (const line of nextChunk.split(/\r?\n/).filter(Boolean)) {
-            writeSseEvent(reply, "log", line);
-          }
+          writeSseEvent(reply, "log", nextChunk);
         } else {
           writeSseEvent(reply, "ping", "{}");
         }
@@ -320,6 +319,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
 
   server.get("/api/workers/:workerId/logs/stream", async (request, reply) => {
     const params = request.params as { workerId: string };
+    const query = request.query as { offset?: string };
     reply.raw.writeHead(200, {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",
@@ -327,7 +327,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     });
 
     let activeAttemptId: string | null = null;
-    let offset = 0;
+    let offset = parseNonNegativeIntegerQuery("offset", query.offset) ?? 0;
 
     const interval = setInterval(async () => {
       const worker = deps.repos.workers.listWorkers().find((item) => item.id === params.workerId);
@@ -352,9 +352,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
         const nextChunk = contents.slice(offset);
         if (nextChunk) {
           offset = contents.length;
-          for (const line of nextChunk.split(/\r?\n/).filter(Boolean)) {
-            writeSseEvent(reply, "log", line);
-          }
+          writeSseEvent(reply, "log", nextChunk);
         }
       } catch {
         writeSseEvent(reply, "ping", "{}");
