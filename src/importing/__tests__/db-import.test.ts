@@ -1,12 +1,11 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { createLegacyMemoryDb, createMigratedDb, createTempDir } from "./helpers.js";
+import { createLegacyMemoryDb, createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
 
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = testProjectRoot;
 
 const cleanupDirs: string[] = [];
 
@@ -28,7 +27,7 @@ describe("legacy import", () => {
       db.migrationRunner.importLegacyDatabase(legacyDbPath);
 
       expect(db.learnings.listLearnings({ limit: 10 })).toHaveLength(1);
-      expect(db.history.listHistory(10)).toHaveLength(1);
+      expect(db.history.listHistory({ limit: 10 })).toHaveLength(1);
       expect(db.learnings.listLearnings({ search: "fixtures", limit: 10 })[0]?.title).toBe("Prefer repo fixtures");
     } finally {
       db.close();

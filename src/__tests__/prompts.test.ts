@@ -1,17 +1,16 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
-import type { ReviewContext, Task } from "../src/domain/index.js";
-import { renderWorkerPrompt } from "../src/execution/render-worker-prompt.js";
-import { renderPlanPrompt } from "../src/planning/render-plan-prompt.js";
-import { createTempDir, createWorkspacePaths } from "./helpers.js";
+import { createDefaultWorkspaceConfig } from "../workspace/config.js";
+import type { ReviewContext, Task } from "../domain/index.js";
+import { renderWorkerPrompt } from "../execution/render-worker-prompt.js";
+import { renderPlanPrompt } from "../planning/render-plan-prompt.js";
+import { createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
 
 const cleanupDirs: string[] = [];
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = testProjectRoot;
 
 afterEach(async () => {
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));

@@ -6,10 +6,11 @@ import matter from "gray-matter";
 import YAML from "yaml";
 
 import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain/index.js";
-import { ForemanError } from "../../lib/errors.js";
+import { ForemanError, isForemanError } from "../../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists } from "../../lib/fs.js";
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
+import { LoggerService } from "../../logger.js";
 import type { WorkspaceConfig } from "../../workspace/config.js";
 import type { WorkspacePaths } from "../../workspace/workspace-paths.js";
 import type { TaskSystem } from "../task-system.js";
@@ -132,11 +133,21 @@ const toFileFrontmatter = (task: Task, createdAt: string): FileTaskFrontmatter =
 
 const fileCommentsPath = (taskPath: string): string => taskPath.replace(/\.md$/, ".comments.ndjson");
 
+const isUnknownProviderStateError = (error: unknown): error is ForemanError =>
+  isForemanError(error) && error.code === "unknown_provider_state";
+
 export class FileTaskSystem implements TaskSystem {
+  private readonly logger: LoggerService;
+
   constructor(
     private readonly config: WorkspaceConfig,
     private readonly paths: WorkspacePaths,
-  ) {}
+    logger?: LoggerService,
+  ) {
+    this.logger = (logger ?? LoggerService.create({ context: { component: "taskSystem.file" }, colorMode: "never" })).child({
+      component: "taskSystem.file",
+    });
+  }
 
   getProvider(): "file" {
     return "file";
@@ -168,7 +179,31 @@ export class FileTaskSystem implements TaskSystem {
 
   async listCandidates(): Promise<Task[]> {
     const files = await this.listTaskFiles();
-    return Promise.all(files.map(async (filePath) => parseFileTaskDocument(this.config, filePath, await fs.readFile(filePath, "utf8"))));
+    const tasks = await Promise.all(
+      files.map(async (filePath) => {
+        const contents = await fs.readFile(filePath, "utf8");
+        const parsed = matter(contents);
+        const frontmatter = parsed.data as Partial<FileTaskFrontmatter>;
+
+        try {
+          return parseFileTaskDocument(this.config, filePath, contents);
+        } catch (error) {
+          if (!isUnknownProviderStateError(error)) {
+            throw error;
+          }
+
+          this.logger.info("skipping file candidate with unmapped provider state", {
+            provider: "file",
+            taskId: typeof frontmatter.id === "string" ? frontmatter.id : null,
+            filePath,
+            providerState: typeof frontmatter.state === "string" ? frontmatter.state : null,
+          });
+          return null;
+        }
+      }),
+    );
+
+    return tasks.flatMap((task) => (task ? [task] : []));
   }
 
   async getTask(taskId: string): Promise<Task> {

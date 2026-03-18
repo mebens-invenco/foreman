@@ -3,8 +3,8 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { OpenCodeRunner } from "../src/execution/index.js";
-import { createTempDir } from "./helpers.js";
+import { OpenCodeRunner } from "../index.js";
+import { createTempDir } from "../../test-support/helpers.js";
 
 const cleanupDirs: string[] = [];
 const originalOpencodeBin = process.env.FOREMAN_OPENCODE_BIN;

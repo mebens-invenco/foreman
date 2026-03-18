@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
-import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
-import { createTaskSystem } from "../src/tasking/index.js";
+import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
+import { createTaskSystem } from "../index.js";
 
 describe("createTaskSystem", () => {
   const paths = {
