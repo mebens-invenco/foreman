@@ -1,19 +1,18 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskArtifact, TaskComment } from "../src/domain/index.js";
-import { runScoutSelection } from "../src/orchestration/index.js";
-import type { ReviewService } from "../src/review/index.js";
-import type { TaskSystem } from "../src/tasking/index.js";
-import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
-import * as worktrees from "../src/workspace/git-worktrees.js";
-import { createMigratedDb, createTempDir } from "./helpers.js";
+import type { RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskArtifact, TaskComment } from "../../domain/index.js";
+import { runScoutSelection } from "../index.js";
+import type { ReviewService } from "../../review/index.js";
+import type { TaskSystem } from "../../tasking/index.js";
+import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
+import * as worktrees from "../../workspace/git-worktrees.js";
+import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
 
 const cleanupDirs: string[] = [];
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = testProjectRoot;
 
 afterEach(async () => {
   vi.restoreAllMocks();

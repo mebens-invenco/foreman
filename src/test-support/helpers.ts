@@ -1,13 +1,16 @@
 import os from "node:os";
 import path from "node:path";
 import { promises as fs } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import Database from "better-sqlite3";
 
-import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
-import type { WorkspacePaths } from "../src/workspace/workspace-paths.js";
-import { createRepos, type ForemanRepos } from "../src/repos/index.js";
-import { openSqliteDatabase, type SqliteForemanDatabase } from "../src/repos/impl/sqlite-database.js";
+import { createRepos, type ForemanRepos } from "../repos/index.js";
+import { openSqliteDatabase, type SqliteForemanDatabase } from "../repos/impl/sqlite-database.js";
+import { createDefaultWorkspaceConfig } from "../workspace/config.js";
+import type { WorkspacePaths } from "../workspace/workspace-paths.js";
+
+export const testProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 export const createTempDir = async (prefix: string): Promise<string> => fs.mkdtemp(path.join(os.tmpdir(), prefix));
 
