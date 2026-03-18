@@ -116,6 +116,77 @@ describe("LinearTaskSystem.listCandidates", () => {
       assigneeName: "Jane Doe",
     });
   });
+
+  test("skips unmapped provider states and logs the skipped issue", async () => {
+    const logger = {
+      child() {
+        return this;
+      },
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      line: vi.fn(),
+      runnerLine: vi.fn(),
+      flush: async () => undefined,
+    };
+
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string };
+
+      if (body.query.includes("query ForemanViewer")) {
+        return new Response(JSON.stringify({ data: { viewer: { id: "user-123", name: "Test User" } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (body.query.includes("query ForemanIssueCandidates")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              issues: {
+                nodes: [
+                  linearIssue([], "Test User").issues.nodes[0],
+                  {
+                    id: "issue-2",
+                    identifier: "ENG-124",
+                    title: "Skipped task",
+                    description: "Agent:\n  Repo: repo-a\n",
+                    branchName: "eng-124",
+                    updatedAt: "2026-03-14T12:01:00Z",
+                    url: "https://linear.app/acme/issue/ENG-124/task",
+                    priorityLabel: "normal",
+                    state: { id: "state-2", name: "Blocked" },
+                    assignee: { name: "Test User" },
+                    labels: { nodes: [{ id: "label-1", name: "Agent" }] },
+                    attachments: { nodes: [] },
+                  },
+                ],
+              },
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, logger as any);
+    const tasks = await taskSystem.listCandidates();
+
+    expect(tasks.map((task) => task.id)).toEqual(["ENG-123"]);
+    expect(logger.info).toHaveBeenCalledWith("skipping Linear candidate with unmapped provider state", {
+      provider: "linear",
+      taskId: "ENG-124",
+      providerId: "issue-2",
+      providerState: "Blocked",
+    });
+  });
 });
 
 describe("parseLinearMetadata", () => {
