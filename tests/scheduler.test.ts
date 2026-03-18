@@ -49,9 +49,9 @@ const reviewContext: ReviewContext = {
   baseBranch: "main",
   headIntroducedAt: "2026-03-14T12:00:00Z",
   mergeState: "clean",
-  actionableReviewSummaries: [],
-  actionableConversationComments: [],
-  unresolvedThreads: [],
+  reviewSummaries: [],
+  conversationComments: [],
+  reviewThreads: [],
   failingChecks: [],
   pendingChecks: [],
 };

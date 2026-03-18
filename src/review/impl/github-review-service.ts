@@ -1,7 +1,7 @@
 import { ForemanError } from "../../lib/errors.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
-import type { CheckState, ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, ReviewThread, ReviewSummary, Task } from "../../domain/index.js";
+import type { CheckState, ConversationComment, RepoRef, ResolvedPullRequest, ReviewComment, ReviewContext, ReviewThread, ReviewSummary, Task } from "../../domain/index.js";
 import type { ReviewService } from "../review-service.js";
 
 type RepoDescriptor = { owner: string; repo: string };
@@ -41,6 +41,14 @@ type GitHubGraphqlComment = {
   createdAt: string;
   url: string;
   author: GitHubAuthor;
+};
+
+type GitHubPullRequestReviewNode = {
+  id: string;
+  body: string;
+  submittedAt: string;
+  author: GitHubAuthor;
+  commit: { oid: string } | null;
 };
 
 type GitHubRestIssueComment = {
@@ -231,29 +239,121 @@ export class GitHubReviewService implements ReviewService {
     createdAt: string;
     url?: string;
     author: GitHubAuthor;
-  }): ConversationComment {
+    authoredByAgent: boolean;
+  }): ReviewComment {
     return {
       id: input.id,
       body: input.body,
       authorName: input.author?.login ?? null,
+      authoredByAgent: input.authoredByAgent,
       createdAt: input.createdAt,
       ...(input.url ? { url: input.url } : {}),
     };
   }
 
-  private async listConversationCommentsByIssue(owner: string, repo: string, number: number): Promise<ConversationComment[]> {
+  private isAuthoredByAgent(body: string, agentPrefix: string): boolean {
+    return body.startsWith(agentPrefix);
+  }
+
+  private async listPullRequestReviewSummaries(input: {
+    owner: string;
+    repo: string;
+    number: number;
+    headSha: string;
+    agentPrefix: string;
+  }): Promise<ReviewSummary[]> {
+    const reviews: ReviewSummary[] = [];
+    let cursor: string | null = null;
+
+    while (true) {
+      const data: {
+        repository: {
+          pullRequest: {
+            reviews: {
+              nodes: GitHubPullRequestReviewNode[];
+              pageInfo: PageInfo;
+            };
+          } | null;
+        } | null;
+      } = await this.graphql(
+        `query ForemanPullRequestReviews($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $number) {
+              reviews(first: 100, after: $cursor) {
+                nodes {
+                  id
+                  body
+                  submittedAt
+                  author { login }
+                  commit { oid }
+                }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+            }
+          }
+        }`,
+        { owner: input.owner, repo: input.repo, number: input.number, cursor },
+      );
+
+      const reviewConnection = data.repository?.pullRequest?.reviews ?? null;
+      if (!reviewConnection) {
+        break;
+      }
+
+      reviews.push(
+        ...reviewConnection.nodes
+          .filter((review) => Boolean(review.body?.trim()))
+          .map((review) => ({
+            id: review.id,
+            body: review.body,
+            authorName: review.author?.login ?? null,
+            authoredByAgent: this.isAuthoredByAgent(review.body, input.agentPrefix),
+            createdAt: review.submittedAt,
+            commitId: review.commit?.oid ?? "",
+            isCurrentHead: review.commit?.oid === input.headSha,
+          })),
+      );
+
+      if (!reviewConnection.pageInfo.hasNextPage) {
+        break;
+      }
+
+      cursor = reviewConnection.pageInfo.endCursor;
+    }
+
+    reviews.sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
+    return reviews;
+  }
+
+  private async listConversationCommentsByIssue(input: {
+    owner: string;
+    repo: string;
+    number: number;
+    headIntroducedAt: string;
+    agentPrefix: string;
+  }): Promise<ConversationComment[]> {
     const comments: ConversationComment[] = [];
+    const headIntroducedAtMs = new Date(input.headIntroducedAt).getTime();
 
     for (let page = 1; ; page += 1) {
-      const response = await this.rest<GitHubRestIssueComment[]>(`/repos/${owner}/${repo}/issues/${number}/comments?per_page=100&page=${page}`);
+      const response = await this.rest<GitHubRestIssueComment[]>(
+        `/repos/${input.owner}/${input.repo}/issues/${input.number}/comments?per_page=100&page=${page}`,
+      );
       comments.push(
-        ...response.map((comment) => ({
-          id: String(comment.id),
-          body: comment.body,
-          authorName: comment.user?.login ?? null,
-          createdAt: comment.created_at,
-          ...(comment.html_url ? { url: comment.html_url } : {}),
-        })),
+        ...response
+          .filter((comment) => Boolean(comment.body?.trim()))
+          .map((comment) => ({
+            id: String(comment.id),
+            body: comment.body,
+            authorName: comment.user?.login ?? null,
+            authoredByAgent: this.isAuthoredByAgent(comment.body, input.agentPrefix),
+            createdAt: comment.created_at,
+            isAfterCurrentHead: new Date(comment.created_at).getTime() >= headIntroducedAtMs,
+            ...(comment.html_url ? { url: comment.html_url } : {}),
+          })),
       );
 
       if (response.length < 100) {
@@ -265,8 +365,15 @@ export class GitHubReviewService implements ReviewService {
     return comments;
   }
 
-  private async listReviewThreadComments(threadId: string, initialComments: GitHubGraphqlComment[], initialPageInfo: PageInfo): Promise<ConversationComment[]> {
-    const comments = initialComments.map((comment) => this.mapConversationComment(comment));
+  private async listReviewThreadComments(
+    threadId: string,
+    initialComments: GitHubGraphqlComment[],
+    initialPageInfo: PageInfo,
+    agentPrefix: string,
+  ): Promise<ReviewComment[]> {
+    const comments = initialComments
+      .filter((comment) => Boolean(comment.body?.trim()))
+      .map((comment) => this.mapConversationComment({ ...comment, authoredByAgent: this.isAuthoredByAgent(comment.body, agentPrefix) }));
     let cursor = initialPageInfo.hasNextPage ? initialPageInfo.endCursor : null;
 
     while (cursor) {
@@ -305,14 +412,18 @@ export class GitHubReviewService implements ReviewService {
         break;
       }
 
-      comments.push(...thread.comments.nodes.map((comment) => this.mapConversationComment(comment)));
+      comments.push(
+        ...thread.comments.nodes
+          .filter((comment) => Boolean(comment.body?.trim()))
+          .map((comment) => this.mapConversationComment({ ...comment, authoredByAgent: this.isAuthoredByAgent(comment.body, agentPrefix) })),
+      );
       cursor = thread.comments.pageInfo.hasNextPage ? thread.comments.pageInfo.endCursor : null;
     }
 
     return comments;
   }
 
-  private async listUnresolvedReviewThreads(owner: string, repo: string, number: number): Promise<ReviewThread[]> {
+  private async listReviewThreads(owner: string, repo: string, number: number, agentPrefix: string): Promise<ReviewThread[]> {
     const threads: ReviewThread[] = [];
     let cursor: string | null = null;
 
@@ -368,7 +479,8 @@ export class GitHubReviewService implements ReviewService {
       }
 
       for (const thread of reviewThreadConnection.nodes) {
-        if (thread.isResolved) {
+        const comments = await this.listReviewThreadComments(thread.id, thread.comments.nodes, thread.comments.pageInfo, agentPrefix);
+        if (comments.length === 0) {
           continue;
         }
 
@@ -377,7 +489,7 @@ export class GitHubReviewService implements ReviewService {
           path: thread.path,
           line: thread.line,
           isResolved: thread.isResolved,
-          comments: await this.listReviewThreadComments(thread.id, thread.comments.nodes, thread.comments.pageInfo),
+          comments,
         });
       }
 
@@ -564,7 +676,6 @@ export class GitHubReviewService implements ReviewService {
             mergeStateStatus: string;
             mergeable: GitHubPullRequestMergeable;
             commits: { nodes: Array<{ commit: { committedDate: string } }> };
-            reviews: { nodes: Array<{ id: string; body: string; submittedAt: string; author: { login: string | null } | null; commit: { oid: string } | null }> };
           } | null;
         } | null;
       }>(
@@ -582,9 +693,6 @@ export class GitHubReviewService implements ReviewService {
             mergeStateStatus
             mergeable
             commits(last: 1) { nodes { commit { committedDate } } }
-            reviews(last: 100) {
-              nodes { id body submittedAt author { login } commit { oid } }
-            }
           }
         }
       }`,
@@ -598,27 +706,21 @@ export class GitHubReviewService implements ReviewService {
     }
 
     const headIntroducedAt = pullRequest.commits.nodes.at(-1)?.commit.committedDate ?? new Date().toISOString();
-    const actionableReviewSummaries: ReviewSummary[] = pullRequest.reviews.nodes
-      .filter((review) => Boolean(review.body?.trim()))
-      .filter((review) => !review.body.startsWith(agentPrefix))
-      .filter((review) => review.commit?.oid === pullRequest.headRefOid)
-      .map((review) => ({
-        id: review.id,
-        body: review.body,
-        authorName: review.author?.login ?? null,
-        createdAt: review.submittedAt,
-        commitId: review.commit?.oid ?? "",
-      }));
-
-    const conversationComments = await this.listConversationCommentsByIssue(owner, repoName, number);
-
-    const actionableConversationComments: ConversationComment[] = conversationComments
-      .filter((comment) => Boolean(comment.body?.trim()))
-      .filter((comment) => !comment.body.startsWith(agentPrefix))
-      .filter((comment) => new Date(comment.createdAt).getTime() >= new Date(headIntroducedAt).getTime())
-      .map((comment) => ({ ...comment }));
-
-    const unresolvedThreads = await this.listUnresolvedReviewThreads(owner, repoName, number);
+    const reviewSummaries = await this.listPullRequestReviewSummaries({
+      owner,
+      repo: repoName,
+      number,
+      headSha: pullRequest.headRefOid,
+      agentPrefix,
+    });
+    const conversationComments = await this.listConversationCommentsByIssue({
+      owner,
+      repo: repoName,
+      number,
+      headIntroducedAt,
+      agentPrefix,
+    });
+    const reviewThreads = await this.listReviewThreads(owner, repoName, number, agentPrefix);
 
     const checks = await this.rest<{ check_runs: Array<{ name: string; status: string; conclusion: string | null }> }>(
       `/repos/${owner}/${repoName}/commits/${pullRequest.headRefOid}/check-runs`,
@@ -635,9 +737,9 @@ export class GitHubReviewService implements ReviewService {
       repo: repoName,
       pullRequestNumber: pullRequest.number,
       state: pullRequest.merged ? "merged" : pullRequest.state === "OPEN" ? "open" : "closed",
-      reviewSummaryCount: actionableReviewSummaries.length,
-      conversationCommentCount: actionableConversationComments.length,
-      unresolvedThreadCount: unresolvedThreads.length,
+      reviewSummaryCount: reviewSummaries.length,
+      conversationCommentCount: conversationComments.length,
+      reviewThreadCount: reviewThreads.length,
       failingCheckCount: failingChecks.length,
       pendingCheckCount: pendingChecks.length,
     });
@@ -653,9 +755,9 @@ export class GitHubReviewService implements ReviewService {
       baseBranch: pullRequest.baseRefName,
       headIntroducedAt,
       mergeState: this.mapMergeState(pullRequest.mergeStateStatus, pullRequest.mergeable),
-      actionableReviewSummaries,
-      actionableConversationComments,
-      unresolvedThreads,
+      reviewSummaries,
+      conversationComments,
+      reviewThreads,
       failingChecks,
       pendingChecks,
     };
@@ -684,15 +786,6 @@ export class GitHubReviewService implements ReviewService {
     const branch = pullRequest?.state === "open" ? pullRequest.headBranch : null;
     this.logger.debug("resolved latest open pull request branch", { taskId: task.id, branch: branch ?? null });
     return branch;
-  }
-
-  async listConversationComments(prUrl: string): Promise<ConversationComment[]> {
-    const { owner, repo, number } = parseGitHubUrl(prUrl);
-    this.logger.debug("listing GitHub pull request conversation comments", { owner, repo, pullRequestNumber: number });
-    const mapped = await this.listConversationCommentsByIssue(owner, repo, number);
-
-    this.logger.debug("listed GitHub pull request conversation comments", { owner, repo, pullRequestNumber: number, count: mapped.length });
-    return mapped;
   }
 
   private async repoDescriptorFromCwd(cwd: string): Promise<RepoDescriptor> {

@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { ConversationComment, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskArtifact, TaskComment } from "../src/domain/index.js";
+import type { RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskArtifact, TaskComment } from "../src/domain/index.js";
 import { runScoutSelection } from "../src/orchestration/index.js";
 import type { ReviewService } from "../src/review/index.js";
 import type { TaskSystem } from "../src/tasking/index.js";
@@ -90,10 +90,6 @@ class FakeReviewService implements ReviewService {
     return this.contexts[task.id]?.state === "open" ? this.contexts[task.id]?.headBranch ?? null : null;
   }
 
-  async listConversationComments(_prUrl: string): Promise<ConversationComment[]> {
-    return [];
-  }
-
   async createPullRequest(_input: { cwd: string; title: string; body: string; draft: boolean; baseBranch: string; headBranch: string }): Promise<{ url: string; number: number }> {
     throw new Error("not used");
   }
@@ -171,9 +167,9 @@ describe("runScoutSelection", () => {
         baseBranch: "main",
         headIntroducedAt: "2026-03-14T12:00:00Z",
         mergeState: "clean",
-        actionableReviewSummaries: [{ id: "rev-1", body: "Please fix", authorName: "reviewer", createdAt: "2026-03-14T12:01:00Z", commitId: "abc" }],
-        actionableConversationComments: [],
-        unresolvedThreads: [],
+        reviewSummaries: [{ id: "rev-1", body: "Please fix", authorName: "reviewer", authoredByAgent: false, createdAt: "2026-03-14T12:01:00Z", commitId: "abc", isCurrentHead: true }],
+        conversationComments: [],
+        reviewThreads: [],
         failingChecks: [],
         pendingChecks: [],
       },
@@ -235,17 +231,19 @@ describe("runScoutSelection", () => {
         baseBranch: "main",
         headIntroducedAt: "2026-03-14T12:00:00Z",
         mergeState: "clean",
-        actionableReviewSummaries: [],
-        actionableConversationComments: [
+        reviewSummaries: [],
+        conversationComments: [
           {
             id: "comment-1",
             body: "Please remove this extra step.",
             authorName: "reviewer",
+            authoredByAgent: false,
             createdAt: "2026-03-14T12:05:00Z",
+            isAfterCurrentHead: true,
             url: "https://github.com/acme/repo-a/pull/2#issuecomment-1",
           },
         ],
-        unresolvedThreads: [],
+        reviewThreads: [],
         failingChecks: [],
         pendingChecks: [],
       },
@@ -300,9 +298,9 @@ describe("runScoutSelection", () => {
         baseBranch: "main",
         headIntroducedAt: "2026-03-14T12:00:00Z",
         mergeState: "conflicting",
-        actionableReviewSummaries: [],
-        actionableConversationComments: [],
-        unresolvedThreads: [],
+        reviewSummaries: [],
+        conversationComments: [],
+        reviewThreads: [],
         failingChecks: [],
         pendingChecks: [],
       },
@@ -446,9 +444,9 @@ describe("runScoutSelection", () => {
         baseBranch: "main",
         headIntroducedAt: "2026-03-14T10:00:00Z",
         mergeState: "clean",
-        actionableReviewSummaries: [],
-        actionableConversationComments: [],
-        unresolvedThreads: [],
+        reviewSummaries: [],
+        conversationComments: [],
+        reviewThreads: [],
         failingChecks: [],
         pendingChecks: [],
       },
@@ -512,9 +510,9 @@ describe("runScoutSelection", () => {
         baseBranch: "main",
         headIntroducedAt: "2026-03-14T10:00:00Z",
         mergeState: "clean",
-        actionableReviewSummaries: [],
-        actionableConversationComments: [],
-        unresolvedThreads: [],
+        reviewSummaries: [],
+        conversationComments: [],
+        reviewThreads: [],
         failingChecks: [],
         pendingChecks: [],
       },
@@ -590,9 +588,9 @@ describe("runScoutSelection", () => {
         baseBranch: "main",
         headIntroducedAt: "2026-03-14T10:00:00Z",
         mergeState: "clean",
-        actionableReviewSummaries: [],
-        actionableConversationComments: [],
-        unresolvedThreads: [],
+        reviewSummaries: [],
+        conversationComments: [],
+        reviewThreads: [],
         failingChecks: [],
         pendingChecks: [],
       },
@@ -607,9 +605,9 @@ describe("runScoutSelection", () => {
         baseBranch: "main",
         headIntroducedAt: "2026-03-14T10:01:00Z",
         mergeState: "clean",
-        actionableReviewSummaries: [],
-        actionableConversationComments: [],
-        unresolvedThreads: [],
+        reviewSummaries: [],
+        conversationComments: [],
+        reviewThreads: [],
         failingChecks: [],
         pendingChecks: [],
       },
@@ -722,9 +720,9 @@ describe("runScoutSelection", () => {
         baseBranch: "master",
         headIntroducedAt: "2026-03-14T10:00:00Z",
         mergeState: "clean",
-        actionableReviewSummaries: [],
-        actionableConversationComments: [],
-        unresolvedThreads: [],
+        reviewSummaries: [],
+        conversationComments: [],
+        reviewThreads: [],
         failingChecks: [],
         pendingChecks: [],
       },
