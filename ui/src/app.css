@@ -19,7 +19,6 @@
   --color-info: hsl(var(--info));
   --font-sans: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
   --font-mono: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-  --shadow-panel: 0 0 0 1px hsl(var(--border) / 1);
 }
 
 :root {
@@ -81,7 +80,7 @@
 
 @layer components {
   .panel-surface {
-    @apply border border-border bg-card text-card-foreground shadow-panel;
+    @apply border border-border bg-card text-card-foreground;
   }
 
   .focus-ring {

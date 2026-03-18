@@ -56,6 +56,20 @@ export const formatHeartbeat = (value: string | null | undefined): string => {
   return `${formatRelativeSeconds(secondsAgo)} ago`;
 };
 
+export const formatRelativeTimestamp = (value: string | null | undefined): string => {
+  if (!value) {
+    return "-";
+  }
+
+  const timestamp = new Date(value).getTime();
+  if (Number.isNaN(timestamp)) {
+    return value;
+  }
+
+  const secondsAgo = Math.max(0, Math.round((Date.now() - timestamp) / 1000));
+  return `${formatRelativeSeconds(secondsAgo)} ago`;
+};
+
 export const truncate = (value: string, length = 120): string => {
   if (value.length <= length) {
     return value;

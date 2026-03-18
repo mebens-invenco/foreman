@@ -2,7 +2,7 @@
   import { createQuery } from "@tanstack/svelte-query";
 
   import { api, type QueueJob, type ScoutRun, type TaskListItem, type Worker } from "../lib/api";
-  import { formatHeartbeat } from "../lib/format";
+  import { formatHeartbeat, formatRelativeTimestamp } from "../lib/format";
   import Card from "../lib/components/Card.svelte";
   import DataTable from "../lib/components/DataTable.svelte";
   import Drawer from "../lib/components/Drawer.svelte";
@@ -61,8 +61,7 @@
     <ErrorState message={$statusQuery.error instanceof Error ? $statusQuery.error.message : "Failed to load overview."} />
   {/if}
 
-  <section class="space-y-3">
-    <div class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Workers</div>
+  <section>
     {#if $workersQuery.isPending}
       <LoadingState label="Loading workers..." />
     {:else if workers.length === 0}
@@ -92,7 +91,7 @@
             <div class="mt-auto space-y-1 text-sm text-muted-foreground">
               <div>Heartbeat {formatHeartbeat(worker.lastHeartbeatAt)}</div>
               {#if worker.currentAttempt?.startedAt}
-                <div>Started <Timestamp value={worker.currentAttempt.startedAt} /></div>
+                <div>Started {formatRelativeTimestamp(worker.currentAttempt.startedAt)}</div>
               {/if}
             </div>
           </button>
@@ -102,50 +101,59 @@
   </section>
 
   <section class="grid gap-6 xl:grid-cols-3">
-    <Card title="Needs Review">
-      {#if reviewTasks.length === 0}
-        <EmptyState label="No tasks in review right now." />
-      {:else}
-        <div class="space-y-2">
-          {#each reviewTasks as task}
-            <div class="panel-surface p-3">
-              <div class="flex items-center justify-between gap-3">
+    <section>
+      <header class="border-b border-border pb-3">
+        <h2 class="m-0 text-xs uppercase tracking-[0.18em] text-muted-foreground">Needs Review</h2>
+      </header>
+      <div class="pt-4">
+        {#if reviewTasks.length === 0}
+          <EmptyState label="No tasks in review right now." />
+        {:else}
+          <div class="space-y-2">
+            {#each reviewTasks as task}
+              <div class="panel-surface p-3">
+                <div class="flex items-center justify-between gap-3">
+                  {#if task.reviewUrl}
+                    <a
+                      class="font-mono text-xs text-foreground underline-offset-4 hover:text-primary hover:underline"
+                      href={task.reviewUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      on:click|stopPropagation
+                    >
+                      {task.id}
+                    </a>
+                  {:else}
+                    <div class="font-mono text-xs text-foreground">{task.id}</div>
+                  {/if}
+                  <StatusPill value={task.state} />
+                </div>
                 {#if task.reviewUrl}
                   <a
-                    class="font-mono text-xs text-foreground underline-offset-4 hover:text-primary hover:underline"
+                    class="mt-2 block text-sm text-foreground underline-offset-4 hover:text-primary hover:underline"
                     href={task.reviewUrl}
                     target="_blank"
                     rel="noreferrer"
                     on:click|stopPropagation
                   >
-                    {task.id}
+                    {task.title}
                   </a>
                 {:else}
-                  <div class="font-mono text-xs text-foreground">{task.id}</div>
+                  <div class="mt-2 text-sm text-foreground">{task.title}</div>
                 {/if}
-                <StatusPill value={task.state} />
+                <div class="mt-1 text-sm text-muted-foreground">{task.repo ?? "No repo"}</div>
               </div>
-              {#if task.reviewUrl}
-                <a
-                  class="mt-2 block text-sm text-foreground underline-offset-4 hover:text-primary hover:underline"
-                  href={task.reviewUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  on:click|stopPropagation
-                >
-                  {task.title}
-                </a>
-              {:else}
-                <div class="mt-2 text-sm text-foreground">{task.title}</div>
-              {/if}
-              <div class="mt-1 text-sm text-muted-foreground">{task.repo ?? "No repo"}</div>
-            </div>
-          {/each}
-        </div>
-      {/if}
-    </Card>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </section>
 
-    <Card title="Active Queue">
+    <section>
+      <header class="border-b border-border pb-3">
+        <h2 class="m-0 text-xs uppercase tracking-[0.18em] text-muted-foreground">Active Queue</h2>
+      </header>
+      <div class="pt-4">
       {#if $queueQuery.isPending}
         <LoadingState label="Loading queue..." />
       {:else if queueJobs.length === 0}
@@ -172,9 +180,14 @@
           </tbody>
         </DataTable>
       {/if}
-    </Card>
+      </div>
+    </section>
 
-    <Card title="Recent Scout Runs">
+    <section>
+      <header class="border-b border-border pb-3">
+        <h2 class="m-0 text-xs uppercase tracking-[0.18em] text-muted-foreground">Recent Scout Runs</h2>
+      </header>
+      <div class="pt-4">
       {#if $scoutRunsQuery.isPending}
         <LoadingState label="Loading scout runs..." />
       {:else if scoutRuns.length === 0}
@@ -201,7 +214,8 @@
           </tbody>
         </DataTable>
       {/if}
-    </Card>
+      </div>
+    </section>
   </section>
 </div>
 
