@@ -12,6 +12,8 @@ Do not start implementation work. Do not reprioritize outside the supplied works
 
 {{context:repos}}
 
+{{context:learnings}}
+
 {{fragment:task-system-planning}}
 
 ## Planning Requirements
@@ -22,6 +24,7 @@ Do not start implementation work. Do not reprioritize outside the supplied works
 - Use explicit base-task relationships when multiple task dependencies exist.
 - Prefer tasks that can move directly into Foreman-ready execution without additional interpretation.
 - Keep task titles concise and action-oriented.
+- Ground decomposition in the learnings you fetched with the CLI, and call out when no strong learning applies.
 
 ## Output Expectations
 
