@@ -1,15 +1,14 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { priorityToRank } from "../src/domain/index.js";
-import { addSeconds } from "../src/lib/time.js";
-import { createMigratedDb, createTempDir } from "./helpers.js";
+import { priorityToRank } from "../../domain/index.js";
+import { addSeconds } from "../../lib/time.js";
+import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
 
 const cleanupDirs: string[] = [];
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = testProjectRoot;
 
 afterEach(async () => {
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));

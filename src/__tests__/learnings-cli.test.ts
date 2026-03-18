@@ -1,17 +1,16 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { stringifyWorkspaceConfig, createDefaultWorkspaceConfig } from "../src/workspace/config.js";
-import { createMigratedDb, createWorkspacePaths } from "./helpers.js";
+import { stringifyWorkspaceConfig, createDefaultWorkspaceConfig } from "../workspace/config.js";
+import { createMigratedDb, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
 
 const execFileAsync = promisify(execFile);
 const cleanupDirs: string[] = [];
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = testProjectRoot;
 const workspacesRoot = path.join(projectRoot, "workspaces");
 
 afterEach(async () => {

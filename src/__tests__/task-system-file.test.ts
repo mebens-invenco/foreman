@@ -4,10 +4,10 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { LoggerService } from "../src/logger.js";
-import { FileTaskSystem } from "../src/tasking/index.js";
-import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
-import { createTempDir, createWorkspacePaths } from "./helpers.js";
+import { LoggerService } from "../logger.js";
+import { FileTaskSystem } from "../tasking/index.js";
+import { createDefaultWorkspaceConfig } from "../workspace/config.js";
+import { createTempDir, createWorkspacePaths } from "../test-support/helpers.js";
 
 const cleanupDirs: string[] = [];
 

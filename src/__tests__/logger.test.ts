@@ -5,8 +5,8 @@ import path from "node:path";
 
 import { describe, expect, test } from "vitest";
 
-import type { WorkspacePaths } from "../src/workspace/workspace-paths.js";
-import { LoggerService } from "../src/logger.js";
+import type { WorkspacePaths } from "../workspace/workspace-paths.js";
+import { LoggerService } from "../logger.js";
 
 const workspacePaths = (workspaceRoot: string): WorkspacePaths => ({
   projectRoot: workspaceRoot,

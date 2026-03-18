@@ -1,16 +1,15 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
-import { fileURLToPath } from "node:url";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
-import { createHttpServer } from "../src/http.js";
-import type { Task } from "../src/domain/index.js";
-import { createMigratedDb, createTempDir, createWorkspacePaths } from "./helpers.js";
+import { createDefaultWorkspaceConfig } from "../workspace/config.js";
+import { createHttpServer } from "../http.js";
+import type { Task } from "../domain/index.js";
+import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
 
 const cleanupDirs: string[] = [];
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = testProjectRoot;
 
 afterEach(async () => {
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));

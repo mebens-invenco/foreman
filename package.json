@@ -12,9 +12,9 @@
     "foreman": "node dist/cli.js",
     "start": "node dist/cli.js",
     "build": "yarn build:server && yarn build:ui",
-    "build:server": "tsc -p tsconfig.json",
+    "build:server": "tsc -p tsconfig.build.json",
     "build:ui": "vite build",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "tsc -p tsconfig.build.json --noEmit && tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest"
   },

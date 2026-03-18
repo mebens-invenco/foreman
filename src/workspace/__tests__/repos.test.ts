@@ -5,9 +5,9 @@ import { promisify } from "node:util";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { createDefaultWorkspaceConfig } from "../src/workspace/config.js";
-import { discoverGitRepos } from "../src/workspace/git-repo-discovery.js";
-import { createTempDir, createWorkspacePaths } from "./helpers.js";
+import { createDefaultWorkspaceConfig } from "../config.js";
+import { discoverGitRepos } from "../git-repo-discovery.js";
+import { createTempDir, createWorkspacePaths } from "../../test-support/helpers.js";
 
 const execFileAsync = promisify(execFile);
 const cleanupDirs: string[] = [];
