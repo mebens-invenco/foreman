@@ -8,7 +8,7 @@
 
 {#if open}
   <button aria-label="Close drawer" class="fixed inset-0 z-40 bg-background/80 backdrop-blur-sm" on:click={onClose} type="button"></button>
-  <aside class="fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col border-l border-border bg-card text-card-foreground">
+  <aside class="fixed inset-y-0 right-0 z-50 flex w-full max-w-[84rem] flex-col border-l border-border bg-card text-card-foreground">
     <header class="flex items-center justify-between border-b border-border px-4 py-3">
       <div class="text-xs uppercase tracking-[0.18em] text-muted-foreground">{title}</div>
       <Button variant="ghost" on:click={onClose}>Close</Button>
