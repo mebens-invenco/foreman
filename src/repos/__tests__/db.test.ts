@@ -455,4 +455,119 @@ describe("persistence repos", () => {
       db.close();
     }
   });
+
+  test("mirrors single-target tasks and derives target dependencies locally", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.taskMirror.syncTasks([
+        {
+          id: "ENG-4700",
+          provider: "linear",
+          providerId: "issue-4700",
+          title: "Base task",
+          description: "Base description",
+          state: "in_review",
+          providerState: "In Review",
+          priority: "high",
+          labels: ["Agent"],
+          assignee: "Test User",
+          repo: "repo-a",
+          branchName: "eng-4700",
+          dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
+          artifacts: [],
+          updatedAt: "2026-03-18T12:00:00Z",
+          url: "https://linear.app/acme/issue/ENG-4700",
+        },
+        {
+          id: "ENG-4701",
+          provider: "linear",
+          providerId: "issue-4701",
+          title: "Dependent task",
+          description: "Dependent description",
+          state: "ready",
+          providerState: "Todo",
+          priority: "normal",
+          labels: ["Agent", "Backend"],
+          assignee: null,
+          repo: "repo-a",
+          branchName: "eng-4701",
+          dependencies: { taskIds: [], baseTaskId: "ENG-4700", branchNames: ["eng-4700"] },
+          artifacts: [],
+          updatedAt: "2026-03-18T12:05:00Z",
+          url: "https://linear.app/acme/issue/ENG-4701",
+        },
+        {
+          id: "ENG-4702",
+          provider: "linear",
+          providerId: "issue-4702",
+          title: "Repo-less task",
+          description: "No repo metadata",
+          state: "ready",
+          providerState: "Todo",
+          priority: "low",
+          labels: ["Agent"],
+          assignee: null,
+          repo: null,
+          branchName: null,
+          dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
+          artifacts: [],
+          updatedAt: "2026-03-18T12:10:00Z",
+          url: "https://linear.app/acme/issue/ENG-4702",
+        },
+      ]);
+
+      expect(db.taskMirror.getMirroredTask("ENG-4701")).toMatchObject({
+        provider: "linear",
+        providerId: "issue-4701",
+        state: "ready",
+        providerState: "Todo",
+        labels: ["Agent", "Backend"],
+      });
+      expect(db.taskMirror.listTaskTargets("ENG-4701")).toHaveLength(1);
+      expect(db.taskMirror.listTaskTargets("ENG-4701")[0]).toMatchObject({
+        taskId: "ENG-4701",
+        repoKey: "repo-a",
+        branchName: "eng-4701",
+        position: 0,
+      });
+      expect(db.taskMirror.listTaskTargets("ENG-4702")).toEqual([]);
+
+      expect(db.taskMirror.listTaskDependencies("ENG-4701")).toEqual([
+        expect.objectContaining({
+          taskId: "ENG-4701",
+          dependsOnTaskId: "ENG-4700",
+          position: 0,
+          isBaseDependency: true,
+        }),
+      ]);
+
+      const dependentTarget = db.taskMirror.listTaskTargets("ENG-4701")[0];
+      const baseTarget = db.taskMirror.listTaskTargets("ENG-4700")[0];
+      expect(db.taskMirror.listTaskTargetDependencies("ENG-4701")).toEqual([
+        expect.objectContaining({
+          taskTargetId: dependentTarget?.id,
+          dependsOnTaskTargetId: baseTarget?.id,
+          position: 0,
+          source: "derived",
+        }),
+      ]);
+
+      expect(db.taskMirror.getTask("ENG-4701")).toMatchObject({
+        id: "ENG-4701",
+        repo: "repo-a",
+        branchName: "eng-4701",
+        dependencies: {
+          taskIds: ["ENG-4700"],
+          baseTaskId: "ENG-4700",
+          branchNames: [],
+        },
+      });
+      expect(db.taskMirror.getTask("ENG-4702")).toMatchObject({ id: "ENG-4702", repo: null, branchName: null });
+    } finally {
+      db.close();
+    }
+  });
 });

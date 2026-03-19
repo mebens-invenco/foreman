@@ -90,6 +90,7 @@ program
       config,
       paths,
       env: resolvedEnv,
+      foremanRepos: repos,
       logger: logger.child({ component: "taskSystem" }),
     });
     await taskSystem.validateStartup?.();
