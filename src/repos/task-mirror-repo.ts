@@ -1,20 +1,4 @@
-import type { Task, TaskPriority, TaskProvider, TaskState } from "../domain/index.js";
-
-export type MirroredTaskRecord = {
-  id: string;
-  provider: TaskProvider;
-  providerId: string;
-  title: string;
-  description: string;
-  state: TaskState;
-  providerState: string;
-  priority: TaskPriority;
-  assignee: string | null;
-  url: string | null;
-  updatedAt: string;
-  syncedAt: string;
-  labels: string[];
-};
+import type { Task } from "../domain/index.js";
 
 export type TaskTargetRecord = {
   id: string;
@@ -43,10 +27,9 @@ export type TaskTargetDependencyRecord = {
 };
 
 export interface TaskMirrorRepo {
-  syncTasks(tasks: Task[]): void;
+  saveTasks(tasks: Task[]): void;
   getTask(taskId: string): Task | null;
   getTasks(taskIds: string[]): Task[];
-  getMirroredTask(taskId: string): MirroredTaskRecord | null;
   listTaskTargets(taskId: string): TaskTargetRecord[];
   listTaskDependencies(taskId: string): TaskDependencyRecord[];
   listTaskTargetDependencies(taskId: string): TaskTargetDependencyRecord[];

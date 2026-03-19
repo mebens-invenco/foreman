@@ -119,7 +119,9 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const query = request.query as { state?: string; search?: string; limit?: string };
     const state = parseEnumQuery("state", query.state, taskStates);
     const limit = parsePositiveIntegerQuery("limit", query.limit);
-    const tasks = (await deps.taskSystem.listCandidates())
+    const providerTasks = await deps.taskSystem.listCandidates();
+    deps.repos.taskMirror.saveTasks(providerTasks);
+    const tasks = providerTasks
       .filter((task) => (state ? task.state === state : true))
       .filter((task) => {
         if (!query.search) {
@@ -154,6 +156,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       deps.taskSystem.getTask(params.taskId),
       deps.taskSystem.listComments(params.taskId),
     ]);
+    deps.repos.taskMirror.saveTasks([task]);
     return { task, comments };
   });
 

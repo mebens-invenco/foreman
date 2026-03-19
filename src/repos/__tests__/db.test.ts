@@ -462,7 +462,7 @@ describe("persistence repos", () => {
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
 
     try {
-      db.taskMirror.syncTasks([
+      db.taskMirror.saveTasks([
         {
           id: "ENG-4700",
           provider: "linear",
@@ -519,12 +519,14 @@ describe("persistence repos", () => {
         },
       ]);
 
-      expect(db.taskMirror.getMirroredTask("ENG-4701")).toMatchObject({
+      expect(db.taskMirror.getTask("ENG-4701")).toMatchObject({
         provider: "linear",
         providerId: "issue-4701",
         state: "ready",
         providerState: "Todo",
         labels: ["Agent", "Backend"],
+        repo: "repo-a",
+        branchName: "eng-4701",
       });
       expect(db.taskMirror.listTaskTargets("ENG-4701")).toHaveLength(1);
       expect(db.taskMirror.listTaskTargets("ENG-4701")[0]).toMatchObject({

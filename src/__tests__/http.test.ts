@@ -97,4 +97,45 @@ describe("HTTP query validation", () => {
       db.close();
     }
   });
+
+  test("syncs provider tasks into the mirror on task reads", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+
+    const taskSystem = {
+      listCandidates: vi.fn(async () => [sampleTask]),
+      getTask: vi.fn(async () => sampleTask),
+      listComments: vi.fn(async () => []),
+    } as any;
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const listResponse = await server.inject({ method: "GET", url: "/api/tasks" });
+      expect(listResponse.statusCode).toBe(200);
+      expect(db.taskMirror.getTask(sampleTask.id)).toMatchObject({ id: sampleTask.id, repo: "repo-a", branchName: "task-0001" });
+
+      const detailResponse = await server.inject({ method: "GET", url: `/api/tasks/${sampleTask.id}` });
+      expect(detailResponse.statusCode).toBe(200);
+      expect(db.taskMirror.listTaskTargets(sampleTask.id)).toHaveLength(1);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
 });
