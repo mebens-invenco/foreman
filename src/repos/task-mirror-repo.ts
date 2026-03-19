@@ -28,6 +28,7 @@ export type TaskTargetDependencyRecord = {
 
 export interface TaskMirrorRepo {
   saveTasks(tasks: Task[]): void;
+  listTasks(): Task[];
   getTask(taskId: string): Task | null;
   getTasks(taskIds: string[]): Task[];
   listTaskTargets(taskId: string): TaskTargetRecord[];

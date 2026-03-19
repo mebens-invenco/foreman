@@ -46,11 +46,6 @@ describe("HTTP query validation", () => {
       paths,
       repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
       repos: db,
-      taskSystem: {
-        listCandidates: vi.fn(async () => [sampleTask]),
-        getTask: vi.fn(async () => sampleTask),
-        listComments: vi.fn(async () => []),
-      } as any,
       scheduler: {
         getStatus: () => ({ status: "running", nextScoutPollAt: null }),
         start: vi.fn(),
@@ -98,24 +93,18 @@ describe("HTTP query validation", () => {
     }
   });
 
-  test("syncs provider tasks into the mirror on task reads", async () => {
+  test("reads tasks from the mirror", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
     cleanupDirs.push(workspaceRoot);
     const paths = createWorkspacePaths(projectRoot, workspaceRoot);
     const db = await createMigratedDb(paths.dbPath, projectRoot);
-
-    const taskSystem = {
-      listCandidates: vi.fn(async () => [sampleTask]),
-      getTask: vi.fn(async () => sampleTask),
-      listComments: vi.fn(async () => []),
-    } as any;
+    db.taskMirror.saveTasks([sampleTask]);
 
     const server = createHttpServer({
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths,
       repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
       repos: db,
-      taskSystem,
       scheduler: {
         getStatus: () => ({ status: "running", nextScoutPollAt: null }),
         start: vi.fn(),
@@ -128,11 +117,19 @@ describe("HTTP query validation", () => {
     try {
       const listResponse = await server.inject({ method: "GET", url: "/api/tasks" });
       expect(listResponse.statusCode).toBe(200);
-      expect(db.taskMirror.getTask(sampleTask.id)).toMatchObject({ id: sampleTask.id, repo: "repo-a", branchName: "task-0001" });
+      expect(listResponse.json()).toEqual({
+        tasks: [
+          expect.objectContaining({
+            id: sampleTask.id,
+            repo: "repo-a",
+            reviewUrl: sampleTask.url,
+          }),
+        ],
+      });
 
       const detailResponse = await server.inject({ method: "GET", url: `/api/tasks/${sampleTask.id}` });
       expect(detailResponse.statusCode).toBe(200);
-      expect(db.taskMirror.listTaskTargets(sampleTask.id)).toHaveLength(1);
+      expect(detailResponse.json()).toEqual({ task: sampleTask, comments: [] });
     } finally {
       await server.close();
       db.close();

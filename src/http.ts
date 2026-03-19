@@ -8,7 +8,6 @@ import type { RepoRef, TaskState } from "./domain/index.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
 import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
-import type { TaskSystem } from "./tasking/index.js";
 import type { WorkspaceConfig } from "./workspace/config.js";
 import type { WorkspacePaths } from "./workspace/workspace-paths.js";
 
@@ -17,7 +16,6 @@ type HttpServerDeps = {
   paths: WorkspacePaths;
   repoRefs: RepoRef[];
   repos: ForemanRepos;
-  taskSystem: TaskSystem;
   scheduler: SchedulerService;
 };
 
@@ -119,9 +117,8 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const query = request.query as { state?: string; search?: string; limit?: string };
     const state = parseEnumQuery("state", query.state, taskStates);
     const limit = parsePositiveIntegerQuery("limit", query.limit);
-    const providerTasks = await deps.taskSystem.listCandidates();
-    deps.repos.taskMirror.saveTasks(providerTasks);
-    const tasks = providerTasks
+    const tasks = deps.repos.taskMirror
+      .listTasks()
       .filter((task) => (state ? task.state === state : true))
       .filter((task) => {
         if (!query.search) {
@@ -152,12 +149,12 @@ export const createHttpServer = (deps: HttpServerDeps) => {
 
   server.get("/api/tasks/:taskId", async (request) => {
     const params = request.params as { taskId: string };
-    const [task, comments] = await Promise.all([
-      deps.taskSystem.getTask(params.taskId),
-      deps.taskSystem.listComments(params.taskId),
-    ]);
-    deps.repos.taskMirror.saveTasks([task]);
-    return { task, comments };
+    const task = deps.repos.taskMirror.getTask(params.taskId);
+    if (!task) {
+      throw new ForemanError("task_not_found", `Task not found: ${params.taskId}`, 404);
+    }
+
+    return { task, comments: [] };
   });
 
   server.get("/api/queue", async () => ({

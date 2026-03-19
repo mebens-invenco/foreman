@@ -110,6 +110,13 @@ const mapTaskTargetDependency = (row: unknown): TaskTargetDependencyRecord => {
 export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
   constructor(private readonly sqlite: SqliteDatabase) {}
 
+  private selectAllTaskIds(): string[] {
+    return this.sqlite
+      .prepare("SELECT id FROM task ORDER BY updated_at DESC, id ASC")
+      .all()
+      .map((row) => String((row as SqliteRow).id));
+  }
+
   private selectStoredTasks(taskIds: readonly string[]): StoredTaskRecord[] {
     const normalizedIds = normalizeIds(taskIds);
     if (normalizedIds.length === 0) {
@@ -335,6 +342,10 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
 
       this.rebuildTargetDependencies();
     })();
+  }
+
+  listTasks(): Task[] {
+    return this.hydrateTasks(this.selectAllTaskIds());
   }
 
   getTask(taskId: string): Task | null {

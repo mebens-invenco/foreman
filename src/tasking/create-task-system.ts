@@ -11,15 +11,13 @@ export const createTaskSystem = (input: {
   env: Record<string, string>;
   logger?: LoggerService;
 }): TaskSystem => {
-  let taskSystem: TaskSystem;
   switch (input.config.taskSystem.type) {
     case "file": {
       if (!input.config.taskSystem.file) {
         throw new Error("File task system config is required when type=file");
       }
 
-      taskSystem = new FileTaskSystem(input.config, input.paths, input.logger?.child({ component: "taskSystem.file" }));
-      break;
+      return new FileTaskSystem(input.config, input.paths, input.logger?.child({ component: "taskSystem.file" }));
     }
 
     case "linear": {
@@ -27,13 +25,10 @@ export const createTaskSystem = (input: {
         throw new Error("Linear task system config is required when type=linear");
       }
 
-      taskSystem = new LinearTaskSystem(input.config, input.env, input.logger?.child({ component: "taskSystem.linear" }));
-      break;
+      return new LinearTaskSystem(input.config, input.env, input.logger?.child({ component: "taskSystem.linear" }));
     }
 
     default:
       throw new Error(`Unsupported task system type: ${String((input.config.taskSystem as { type?: unknown }).type)}`);
   }
-
-  return taskSystem;
 };
