@@ -11,7 +11,23 @@ import type {
 } from "../task-mirror-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
-const MIRRORED_TASK_COLUMNS = [
+type StoredTaskRecord = {
+  id: string;
+  provider: Task["provider"];
+  providerId: string;
+  title: string;
+  description: string;
+  state: Task["state"];
+  providerState: string;
+  priority: Task["priority"];
+  assignee: string | null;
+  url: string | null;
+  updatedAt: string;
+  syncedAt: string;
+  labels: string[];
+};
+
+const TASK_COLUMNS = [
   "id",
   "provider",
   "provider_id",
@@ -28,18 +44,27 @@ const MIRRORED_TASK_COLUMNS = [
 ].join(", ");
 
 const normalizeIds = (ids: readonly string[]): string[] => Array.from(new Set(ids.filter((id) => id.length > 0)));
+const normalizeTimestamp = (value: unknown, fallback: string): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  return fallback;
+};
 
-const mapMirroredTask = (row: unknown): MirroredTaskRecord => {
+const mapStoredTask = (row: unknown): StoredTaskRecord => {
   const mapped = row as SqliteRow;
   return {
     id: String(mapped.id),
-    provider: mapped.provider as MirroredTaskRecord["provider"],
+    provider: mapped.provider as StoredTaskRecord["provider"],
     providerId: String(mapped.provider_id),
     title: String(mapped.title),
     description: String(mapped.description),
-    state: mapped.state as MirroredTaskRecord["state"],
+    state: mapped.state as StoredTaskRecord["state"],
     providerState: String(mapped.provider_state),
-    priority: mapped.priority as MirroredTaskRecord["priority"],
+    priority: mapped.priority as StoredTaskRecord["priority"],
     assignee: (mapped.assignee as string | null) ?? null,
     url: (mapped.url as string | null) ?? null,
     updatedAt: String(mapped.updated_at),
@@ -98,16 +123,16 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     return fallbackTarget ? [fallbackTarget] : [];
   }
 
-  private selectMirroredTasks(taskIds: readonly string[]): MirroredTaskRecord[] {
+  private selectStoredTasks(taskIds: readonly string[]): StoredTaskRecord[] {
     const normalizedIds = normalizeIds(taskIds);
     if (normalizedIds.length === 0) {
       return [];
     }
 
     return this.sqlite
-      .prepare(`SELECT ${MIRRORED_TASK_COLUMNS} FROM task WHERE id IN (${normalizedIds.map(() => "?").join(", ")}) ORDER BY id ASC`)
+      .prepare(`SELECT ${TASK_COLUMNS} FROM task WHERE id IN (${normalizedIds.map(() => "?").join(", ")}) ORDER BY id ASC`)
       .all(...normalizedIds)
-      .map(mapMirroredTask);
+      .map(mapStoredTask);
   }
 
   private selectTargets(taskIds: readonly string[]): TaskTargetRecord[] {
@@ -145,40 +170,40 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
   }
 
   private hydrateTasks(taskIds: readonly string[]): Task[] {
-    const mirroredTasks = this.selectMirroredTasks(taskIds);
-    if (mirroredTasks.length === 0) {
+    const storedTasks = this.selectStoredTasks(taskIds);
+    if (storedTasks.length === 0) {
       return [];
     }
 
     const targetsByTaskId = new Map<string, TaskTargetRecord[]>();
-    for (const target of this.selectTargets(mirroredTasks.map((task) => task.id))) {
+    for (const target of this.selectTargets(storedTasks.map((task) => task.id))) {
       const existing = targetsByTaskId.get(target.taskId) ?? [];
       existing.push(target);
       targetsByTaskId.set(target.taskId, existing);
     }
 
     const dependenciesByTaskId = new Map<string, TaskDependencyRecord[]>();
-    for (const dependency of this.selectDependencies(mirroredTasks.map((task) => task.id))) {
+    for (const dependency of this.selectDependencies(storedTasks.map((task) => task.id))) {
       const existing = dependenciesByTaskId.get(dependency.taskId) ?? [];
       existing.push(dependency);
       dependenciesByTaskId.set(dependency.taskId, existing);
     }
 
-    return mirroredTasks.map((mirroredTask) => {
-      const targets = targetsByTaskId.get(mirroredTask.id) ?? [];
-      const dependencies = dependenciesByTaskId.get(mirroredTask.id) ?? [];
+    return storedTasks.map((storedTask) => {
+      const targets = targetsByTaskId.get(storedTask.id) ?? [];
+      const dependencies = dependenciesByTaskId.get(storedTask.id) ?? [];
       const primaryTarget = targets.length === 1 ? targets[0] : null;
       return {
-        id: mirroredTask.id,
-        provider: mirroredTask.provider,
-        providerId: mirroredTask.providerId,
-        title: mirroredTask.title,
-        description: mirroredTask.description,
-        state: mirroredTask.state,
-        providerState: mirroredTask.providerState,
-        priority: mirroredTask.priority,
-        labels: mirroredTask.labels,
-        assignee: mirroredTask.assignee,
+        id: storedTask.id,
+        provider: storedTask.provider,
+        providerId: storedTask.providerId,
+        title: storedTask.title,
+        description: storedTask.description,
+        state: storedTask.state,
+        providerState: storedTask.providerState,
+        priority: storedTask.priority,
+        labels: storedTask.labels,
+        assignee: storedTask.assignee,
         repo: primaryTarget?.repoKey ?? null,
         branchName: primaryTarget?.branchName ?? null,
         dependencies: {
@@ -187,8 +212,8 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
           branchNames: [],
         },
         artifacts: [],
-        updatedAt: mirroredTask.updatedAt,
-        url: mirroredTask.url,
+        updatedAt: storedTask.updatedAt,
+        url: storedTask.url,
       } satisfies Task;
     });
   }
@@ -225,6 +250,10 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
   }
 
   syncTasks(tasks: Task[]): void {
+    this.saveTasks(tasks);
+  }
+
+  saveTasks(tasks: Task[]): void {
     if (tasks.length === 0) {
       return;
     }
@@ -264,21 +293,26 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     );
 
     this.sqlite.transaction(() => {
+      const dependenciesByTaskId = new Map<
+        string,
+        Array<{ dependsOnTaskId: string; position: number; isBaseDependency: boolean }>
+      >();
+
       for (const task of tasks) {
         upsertTask.run(
           task.id,
           task.provider,
-          task.providerId,
-          String(task.title),
-          String(task.description),
+          task.providerId ?? task.id,
+          task.title ?? task.id,
+          task.description ?? "",
           task.state,
-          String(task.providerState),
+          task.providerState ?? task.state,
           task.priority,
           task.assignee ?? null,
           task.url ?? null,
-          String(task.updatedAt),
+          normalizeTimestamp(task.updatedAt, syncedAt),
           syncedAt,
-          stableStringify(task.labels),
+          stableStringify(task.labels ?? []),
         );
 
         deleteTargets.run(task.id);
@@ -291,11 +325,28 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
         if (task.dependencies.baseTaskId && !dependencyIds.includes(task.dependencies.baseTaskId)) {
           dependencyIds.push(task.dependencies.baseTaskId);
         }
-        for (const [position, dependencyId] of dependencyIds.entries()) {
-          if (!hasTask.get(dependencyId)) {
+        dependenciesByTaskId.set(
+          task.id,
+          dependencyIds.map((dependencyId, position) => ({
+            dependsOnTaskId: dependencyId,
+            position,
+            isBaseDependency: dependencyId === task.dependencies.baseTaskId,
+          })),
+        );
+      }
+
+      for (const [taskId, dependencies] of dependenciesByTaskId) {
+        for (const dependency of dependencies) {
+          if (!hasTask.get(dependency.dependsOnTaskId)) {
             continue;
           }
-          insertDependency.run(newId(), task.id, dependencyId, position, dependencyId === task.dependencies.baseTaskId ? 1 : 0);
+          insertDependency.run(
+            newId(),
+            taskId,
+            dependency.dependsOnTaskId,
+            dependency.position,
+            dependency.isBaseDependency ? 1 : 0,
+          );
         }
       }
 
@@ -318,7 +369,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
   }
 
   getMirroredTask(taskId: string): MirroredTaskRecord | null {
-    return this.selectMirroredTasks([taskId])[0] ?? null;
+    return this.selectStoredTasks([taskId])[0] ?? null;
   }
 
   getTaskTarget(taskId: string, repoKey: string): TaskTargetRecord | null {
@@ -344,7 +395,6 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
       .get(taskTargetId);
     return row ? mapTaskTarget(row) : null;
   }
-
   listTaskTargets(taskId: string): TaskTargetRecord[] {
     return this.selectTargets([taskId]);
   }

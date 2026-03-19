@@ -1,17 +1,14 @@
-import type { ForemanRepos } from "../repos/index.js";
 import { LoggerService } from "../logger.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import type { TaskSystem } from "./task-system.js";
 import { FileTaskSystem } from "./impl/file-task-system.js";
 import { LinearTaskSystem } from "./impl/linear-task-system.js";
-import { SyncedTaskSystem } from "./impl/synced-task-system.js";
 
 export const createTaskSystem = (input: {
   config: WorkspaceConfig;
   paths: WorkspacePaths;
   env: Record<string, string>;
-  foremanRepos?: Pick<ForemanRepos, "taskMirror">;
   logger?: LoggerService;
 }): TaskSystem => {
   let taskSystem: TaskSystem;
@@ -38,5 +35,5 @@ export const createTaskSystem = (input: {
       throw new Error(`Unsupported task system type: ${String((input.config.taskSystem as { type?: unknown }).type)}`);
   }
 
-  return input.foremanRepos ? new SyncedTaskSystem(taskSystem, input.foremanRepos.taskMirror) : taskSystem;
+  return taskSystem;
 };

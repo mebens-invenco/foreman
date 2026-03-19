@@ -101,7 +101,7 @@ describe("HTTP query validation", () => {
     }
   });
 
-  test("returns target projections for task APIs", async () => {
+  test("syncs provider tasks and returns target projections for task APIs", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
     cleanupDirs.push(workspaceRoot);
     const paths = createWorkspacePaths(projectRoot, workspaceRoot);
@@ -113,16 +113,18 @@ describe("HTTP query validation", () => {
       artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/7" }],
     };
 
+    const taskSystem = {
+      listCandidates: vi.fn(async () => [taskWithPr]),
+      getTask: vi.fn(async () => taskWithPr),
+      listComments: vi.fn(async () => []),
+    } as any;
+
     const server = createHttpServer({
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths,
       repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
       repos: db,
-      taskSystem: {
-        listCandidates: vi.fn(async () => [taskWithPr]),
-        getTask: vi.fn(async () => taskWithPr),
-        listComments: vi.fn(async () => []),
-      } as any,
+      taskSystem,
       reviewService: {
         resolvePullRequest: vi.fn(async () => ({
           pullRequestUrl: "https://github.com/acme/repo-a/pull/7",
@@ -145,6 +147,7 @@ describe("HTTP query validation", () => {
     try {
       const listResponse = await server.inject({ method: "GET", url: "/api/tasks" });
       expect(listResponse.statusCode).toBe(200);
+      expect(db.taskMirror.getTask(taskWithPr.id)).toMatchObject({ id: taskWithPr.id, repo: "repo-a", branchName: "task-0001" });
       expect(listResponse.json()).toMatchObject({
         tasks: [
           {
@@ -172,6 +175,7 @@ describe("HTTP query validation", () => {
 
       const detailResponse = await server.inject({ method: "GET", url: "/api/tasks/TASK-0001" });
       expect(detailResponse.statusCode).toBe(200);
+      expect(db.taskMirror.listTaskTargets(taskWithPr.id)).toHaveLength(1);
       expect(detailResponse.json().task.targets).toMatchObject([
         {
           repoKey: "repo-a",
