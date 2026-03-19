@@ -248,6 +248,7 @@ export const runScoutSelection = async (input: {
 }): Promise<{ scoutRunId: string; jobs: Selection[] }> => {
   const logger = input.logger?.child({ component: "scout.selection", trigger: input.triggerType });
   const allTasks = await input.taskSystem.listCandidates();
+  input.foremanRepos.taskMirror.saveTasks(allTasks);
   const reposByKey = new Map(input.repos.map((repo) => [repo.key, repo]));
   const activeCandidates = allTasks.filter(
     (task) =>

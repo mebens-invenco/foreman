@@ -8,6 +8,7 @@ import type { LeaseRepo } from "./lease-repo.js";
 import type { MigrationRunner } from "./migration-runner.js";
 import type { ReviewCheckpointRepo } from "./review-checkpoint-repo.js";
 import type { ScoutRunRepo } from "./scout-run-repo.js";
+import type { TaskMirrorRepo } from "./task-mirror-repo.js";
 import type { WorkerRepo } from "./worker-repo.js";
 
 export type ForemanRepos = {
@@ -18,6 +19,7 @@ export type ForemanRepos = {
   workers: WorkerRepo;
   leases: LeaseRepo;
   scoutRuns: ScoutRunRepo;
+  taskMirror: TaskMirrorRepo;
   artifacts: ArtifactRepo;
   reviewCheckpoints: ReviewCheckpointRepo;
   learnings: LearningRepo;

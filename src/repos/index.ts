@@ -10,4 +10,5 @@ export * from "./lease-repo.js";
 export * from "./migration-runner.js";
 export * from "./review-checkpoint-repo.js";
 export * from "./scout-run-repo.js";
+export * from "./task-mirror-repo.js";
 export * from "./worker-repo.js";

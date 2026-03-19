@@ -34,6 +34,17 @@ const sampleTask: Task = {
   url: null,
 };
 
+const secondaryTask: Task = {
+  ...sampleTask,
+  id: "TASK-0002",
+  providerId: "TASK-0002",
+  title: "Other task",
+  state: "in_review",
+  repo: null,
+  branchName: null,
+  updatedAt: "2026-03-13T12:00:00Z",
+};
+
 describe("HTTP query validation", () => {
   test("returns invalid_request for malformed query params", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
@@ -46,11 +57,6 @@ describe("HTTP query validation", () => {
       paths,
       repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
       repos: db,
-      taskSystem: {
-        listCandidates: vi.fn(async () => [sampleTask]),
-        getTask: vi.fn(async () => sampleTask),
-        listComments: vi.fn(async () => []),
-      } as any,
       scheduler: {
         getStatus: () => ({ status: "running", nextScoutPollAt: null }),
         start: vi.fn(),
@@ -92,6 +98,64 @@ describe("HTTP query validation", () => {
       expect(invalidOffset.json()).toEqual({
         error: { code: "invalid_request", message: "Query parameter offset must be a non-negative integer." },
       });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("reads tasks from the mirror", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    db.taskMirror.saveTasks([sampleTask, secondaryTask]);
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const listResponse = await server.inject({ method: "GET", url: "/api/tasks" });
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json()).toEqual({
+        tasks: [
+          expect.objectContaining({
+            id: sampleTask.id,
+            repo: "repo-a",
+            reviewUrl: sampleTask.url,
+          }),
+          expect.objectContaining({
+            id: secondaryTask.id,
+            repo: null,
+            reviewUrl: null,
+          }),
+        ],
+      });
+
+      const filteredResponse = await server.inject({ method: "GET", url: "/api/tasks?state=in_review&search=other" });
+      expect(filteredResponse.statusCode).toBe(200);
+      expect(filteredResponse.json()).toEqual({
+        tasks: [
+          expect.objectContaining({
+            id: secondaryTask.id,
+          }),
+        ],
+      });
+
+      const detailResponse = await server.inject({ method: "GET", url: `/api/tasks/${sampleTask.id}` });
+      expect(detailResponse.statusCode).toBe(200);
+      expect(detailResponse.json()).toEqual({ task: sampleTask, comments: [] });
     } finally {
       await server.close();
       db.close();

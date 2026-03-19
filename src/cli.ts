@@ -108,7 +108,7 @@ program
       logger: logger.child({ component: "scheduler" }),
     });
 
-    const server = createHttpServer({ config, paths, repoRefs, repos, taskSystem, scheduler });
+    const server = createHttpServer({ config, paths, repoRefs, repos, scheduler });
     await server.listen({ host: config.http.host, port: config.http.port });
     logger.info("http server listening", { host: config.http.host, port: config.http.port });
     await scheduler.start();

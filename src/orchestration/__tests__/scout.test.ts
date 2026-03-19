@@ -211,6 +211,7 @@ describe("runScoutSelection", () => {
       expect(result.jobs[0]?.action).toBe("review");
       expect(result.jobs[0]?.task.id).toBe("TASK-0002");
       expect(result.jobs[1]?.action).toBe("execution");
+      expect(db.taskMirror.getTask("TASK-0002")).toMatchObject({ id: "TASK-0002", repo: "repo-a", branchName: "task-0002" });
     } finally {
       db.close();
     }
