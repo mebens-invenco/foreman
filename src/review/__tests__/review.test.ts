@@ -594,6 +594,163 @@ describe("GitHubReviewService.getContext", () => {
     expect(vi.mocked(global.fetch).mock.calls[3]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=1");
     expect(vi.mocked(global.fetch).mock.calls[4]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=2");
   });
+
+  test("ignores pending review summaries and draft review comments until the review is submitted", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(pullRequestSummaryResponse)
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                url: "https://github.com/acme/repo/pull/946",
+                number: 946,
+                state: "OPEN",
+                isDraft: false,
+                merged: false,
+                headRefOid: "abc123",
+                headRefName: "eng-4737",
+                baseRefName: "master",
+                mergeStateStatus: "CLEAN",
+                mergeable: "MERGEABLE",
+                commits: { nodes: [{ commit: { committedDate: "2026-03-16T03:00:00Z" } }] },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviews: {
+                  nodes: [
+                    {
+                      id: "review-pending",
+                      body: "Draft summary",
+                      state: "PENDING",
+                      submittedAt: null,
+                      author: { login: "reviewer-draft" },
+                      commit: { oid: "abc123" },
+                    },
+                    {
+                      id: "review-submitted",
+                      body: "Submitted summary",
+                      state: "COMMENTED",
+                      submittedAt: "2026-03-16T03:30:00Z",
+                      author: { login: "reviewer-final" },
+                      commit: { oid: "abc123" },
+                    },
+                  ],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [
+                    {
+                      id: "thread-pending-only",
+                      isResolved: false,
+                      path: "src/one.ts",
+                      line: 10,
+                      comments: {
+                        nodes: [
+                          {
+                            id: "thread-comment-pending",
+                            body: "Draft inline note",
+                            createdAt: "2026-03-16T04:00:00Z",
+                            url: "https://github.com/acme/repo/pull/946#discussion_r1",
+                            author: { login: "reviewer-draft" },
+                            pullRequestReview: { state: "PENDING", submittedAt: null },
+                          },
+                        ],
+                        pageInfo: { hasNextPage: false, endCursor: null },
+                      },
+                    },
+                    {
+                      id: "thread-mixed",
+                      isResolved: false,
+                      path: "src/two.ts",
+                      line: 22,
+                      comments: {
+                        nodes: [
+                          {
+                            id: "thread-comment-pending-2",
+                            body: "Another draft inline note",
+                            createdAt: "2026-03-16T04:05:00Z",
+                            url: "https://github.com/acme/repo/pull/946#discussion_r2",
+                            author: { login: "reviewer-draft" },
+                            pullRequestReview: { state: "PENDING", submittedAt: null },
+                          },
+                          {
+                            id: "thread-comment-submitted",
+                            body: "Submitted inline note",
+                            createdAt: "2026-03-16T04:10:00Z",
+                            url: "https://github.com/acme/repo/pull/946#discussion_r3",
+                            author: { login: "reviewer-final" },
+                            pullRequestReview: { state: "COMMENTED", submittedAt: "2026-03-16T04:10:00Z" },
+                          },
+                        ],
+                        pageInfo: { hasNextPage: false, endCursor: null },
+                      },
+                    },
+                  ],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ check_runs: [] }))
+      .mockResolvedValueOnce(jsonResponse({ statuses: [] })) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const context = await service.getContext(sampleTask(), "[agent]");
+
+    expect(context).not.toBeNull();
+    expect(context?.reviewSummaries).toEqual([
+      {
+        id: "review-submitted",
+        body: "Submitted summary",
+        authorName: "reviewer-final",
+        authoredByAgent: false,
+        createdAt: "2026-03-16T03:30:00Z",
+        commitId: "abc123",
+        isCurrentHead: true,
+      },
+    ]);
+    expect(context?.reviewThreads).toEqual([
+      {
+        id: "thread-mixed",
+        path: "src/two.ts",
+        line: 22,
+        isResolved: false,
+        comments: [
+          {
+            id: "thread-comment-submitted",
+            body: "Submitted inline note",
+            authorName: "reviewer-final",
+            authoredByAgent: false,
+            createdAt: "2026-03-16T04:10:00Z",
+            url: "https://github.com/acme/repo/pull/946#discussion_r3",
+          },
+        ],
+      },
+    ]);
+    expect(global.fetch).toHaveBeenCalledTimes(7);
+  });
 });
 
 describe("GitHubReviewService reply mutations", () => {

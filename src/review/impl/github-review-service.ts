@@ -41,15 +41,22 @@ type GitHubGraphqlComment = {
   createdAt: string;
   url: string;
   author: GitHubAuthor;
+  pullRequestReview?: GitHubPullRequestReviewRef;
 };
 
 type GitHubPullRequestReviewNode = {
   id: string;
   body: string;
-  submittedAt: string;
+  state: string;
+  submittedAt: string | null;
   author: GitHubAuthor;
   commit: { oid: string } | null;
 };
+
+type GitHubPullRequestReviewRef = {
+  state: string;
+  submittedAt: string | null;
+} | null;
 
 type GitHubRestIssueComment = {
   id: number;
@@ -255,6 +262,10 @@ export class GitHubReviewService implements ReviewService {
     return body.startsWith(agentPrefix);
   }
 
+  private isSubmittedReview(review: GitHubPullRequestReviewRef): boolean {
+    return review ? review.state !== "PENDING" && Boolean(review.submittedAt) : true;
+  }
+
   private async listPullRequestReviewSummaries(input: {
     owner: string;
     repo: string;
@@ -283,6 +294,7 @@ export class GitHubReviewService implements ReviewService {
                 nodes {
                   id
                   body
+                  state
                   submittedAt
                   author { login }
                   commit { oid }
@@ -305,16 +317,21 @@ export class GitHubReviewService implements ReviewService {
 
       reviews.push(
         ...reviewConnection.nodes
-          .filter((review) => Boolean(review.body?.trim()))
-          .map((review) => ({
-            id: review.id,
-            body: review.body,
-            authorName: review.author?.login ?? null,
-            authoredByAgent: this.isAuthoredByAgent(review.body, input.agentPrefix),
-            createdAt: review.submittedAt,
-            commitId: review.commit?.oid ?? "",
-            isCurrentHead: review.commit?.oid === input.headSha,
-          })),
+          .flatMap((review) =>
+            Boolean(review.body?.trim()) && this.isSubmittedReview({ state: review.state, submittedAt: review.submittedAt }) && review.submittedAt
+              ? [
+                  {
+                    id: review.id,
+                    body: review.body,
+                    authorName: review.author?.login ?? null,
+                    authoredByAgent: this.isAuthoredByAgent(review.body, input.agentPrefix),
+                    createdAt: review.submittedAt,
+                    commitId: review.commit?.oid ?? "",
+                    isCurrentHead: review.commit?.oid === input.headSha,
+                  },
+                ]
+              : [],
+          ),
       );
 
       if (!reviewConnection.pageInfo.hasNextPage) {
@@ -372,7 +389,7 @@ export class GitHubReviewService implements ReviewService {
     agentPrefix: string,
   ): Promise<ReviewComment[]> {
     const comments = initialComments
-      .filter((comment) => Boolean(comment.body?.trim()))
+      .filter((comment) => Boolean(comment.body?.trim()) && this.isSubmittedReview(comment.pullRequestReview ?? null))
       .map((comment) => this.mapConversationComment({ ...comment, authoredByAgent: this.isAuthoredByAgent(comment.body, agentPrefix) }));
     let cursor = initialPageInfo.hasNextPage ? initialPageInfo.endCursor : null;
 
@@ -395,6 +412,10 @@ export class GitHubReviewService implements ReviewService {
                   createdAt
                   url
                   author { login }
+                  pullRequestReview {
+                    state
+                    submittedAt
+                  }
                 }
                 pageInfo {
                   hasNextPage
@@ -414,7 +435,7 @@ export class GitHubReviewService implements ReviewService {
 
       comments.push(
         ...thread.comments.nodes
-          .filter((comment) => Boolean(comment.body?.trim()))
+          .filter((comment) => Boolean(comment.body?.trim()) && this.isSubmittedReview(comment.pullRequestReview ?? null))
           .map((comment) => this.mapConversationComment({ ...comment, authoredByAgent: this.isAuthoredByAgent(comment.body, agentPrefix) })),
       );
       cursor = thread.comments.pageInfo.hasNextPage ? thread.comments.pageInfo.endCursor : null;
@@ -454,6 +475,10 @@ export class GitHubReviewService implements ReviewService {
                       createdAt
                       url
                       author { login }
+                      pullRequestReview {
+                        state
+                        submittedAt
+                      }
                     }
                     pageInfo {
                       hasNextPage
