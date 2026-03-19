@@ -567,6 +567,8 @@ describe("persistence repos", () => {
         repo: "repo-a",
         branchName: "eng-4701",
       });
+      expect(db.taskMirror.listTasks().map((task) => task.id)).toEqual(["ENG-4702", "ENG-4701", "ENG-4700"]);
+
       expect(db.taskMirror.listTaskTargets("ENG-4701")).toHaveLength(1);
       expect(db.taskMirror.listTaskTargets("ENG-4701")[0]).toMatchObject({
         taskId: "ENG-4701",

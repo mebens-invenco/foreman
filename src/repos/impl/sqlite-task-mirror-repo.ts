@@ -132,10 +132,15 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
       return [];
     }
 
-    return this.sqlite
-      .prepare(`SELECT ${TASK_COLUMNS} FROM task WHERE id IN (${normalizedIds.map(() => "?").join(", ")}) ORDER BY id ASC`)
+    const storedTasks = this.sqlite
+      .prepare(`SELECT ${TASK_COLUMNS} FROM task WHERE id IN (${normalizedIds.map(() => "?").join(", ")})`)
       .all(...normalizedIds)
       .map(mapStoredTask);
+    const tasksById = new Map(storedTasks.map((task) => [task.id, task]));
+    return normalizedIds.flatMap((taskId) => {
+      const task = tasksById.get(taskId);
+      return task ? [task] : [];
+    });
   }
 
   private selectTargets(taskIds: readonly string[]): PersistedTaskTarget[] {
@@ -357,12 +362,12 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     })();
   }
 
-  listTasks(): Task[] {
-    return this.hydrateTasks(this.selectAllTaskIds());
-  }
-
   getTask(taskId: string): Task | null {
     return this.hydrateTasks([taskId])[0] ?? null;
+  }
+
+  listTasks(): Task[] {
+    return this.hydrateTasks(this.selectAllTaskIds());
   }
 
   getTaskTarget(taskId: string, repoKey: string): PersistedTaskTarget | null {

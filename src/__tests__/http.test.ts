@@ -34,6 +34,17 @@ const sampleTask: Task = {
   url: null,
 };
 
+const secondaryTask: Task = {
+  ...sampleTask,
+  id: "TASK-0002",
+  providerId: "TASK-0002",
+  title: "Other task",
+  state: "in_review",
+  repo: null,
+  branchName: null,
+  updatedAt: "2026-03-13T12:00:00Z",
+};
+
 describe("HTTP query validation", () => {
   test("returns invalid_request for malformed query params", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
@@ -114,7 +125,7 @@ describe("HTTP query validation", () => {
     };
 
     const taskSystem = {
-      listCandidates: vi.fn(async () => [taskWithPr]),
+      listCandidates: vi.fn(async () => [taskWithPr, secondaryTask]),
       getTask: vi.fn(async () => taskWithPr),
       listComments: vi.fn(async () => []),
     } as any;
@@ -126,14 +137,18 @@ describe("HTTP query validation", () => {
       repos: db,
       taskSystem,
       reviewService: {
-        resolvePullRequest: vi.fn(async () => ({
-          pullRequestUrl: "https://github.com/acme/repo-a/pull/7",
-          pullRequestNumber: 7,
-          state: "open",
-          isDraft: true,
-          headBranch: "task-0001",
-          baseBranch: "main",
-        })),
+        resolvePullRequest: vi.fn(async (task: Task) =>
+          task.id === taskWithPr.id
+            ? {
+                pullRequestUrl: "https://github.com/acme/repo-a/pull/7",
+                pullRequestNumber: 7,
+                state: "open",
+                isDraft: true,
+                headBranch: "task-0001",
+                baseBranch: "main",
+              }
+            : null,
+        ),
       } as any,
       scheduler: {
         getStatus: () => ({ status: "running", nextScoutPollAt: null }),
@@ -170,6 +185,22 @@ describe("HTTP query validation", () => {
               },
             ],
           },
+          expect.objectContaining({
+            id: secondaryTask.id,
+            repo: null,
+            reviewUrl: null,
+            targets: [],
+          }),
+        ],
+      });
+
+      const filteredResponse = await server.inject({ method: "GET", url: "/api/tasks?state=in_review&search=other" });
+      expect(filteredResponse.statusCode).toBe(200);
+      expect(filteredResponse.json()).toEqual({
+        tasks: [
+          expect.objectContaining({
+            id: secondaryTask.id,
+          }),
         ],
       });
 
