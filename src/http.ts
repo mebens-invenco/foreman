@@ -147,8 +147,6 @@ export const createHttpServer = (deps: HttpServerDeps) => {
                 repoKey: task.repo,
                 branchName: task.branchName ?? task.id.toLowerCase(),
                 position: 0,
-                createdAt: task.updatedAt,
-                updatedAt: task.updatedAt,
               },
             ]
           : [];

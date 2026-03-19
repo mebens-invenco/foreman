@@ -143,8 +143,6 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
   taskMirror: {
     syncTasks: vi.fn(),
     getTask: vi.fn(() => null),
-    getTasks: vi.fn(() => []),
-    getMirroredTask: vi.fn(() => null),
     getTaskTarget: vi.fn(() => null),
     getTaskTargetById: vi.fn(() => sampleTarget),
     listTaskTargets: vi.fn(() => [sampleTarget]),

@@ -1,13 +1,11 @@
 import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
-import { taskTargetFromTask, type Task, type TaskTarget } from "../../domain/index.js";
+import { taskTargetFromTask, type PersistedTaskTarget, type Task, type TaskTarget } from "../../domain/index.js";
 import type {
-  MirroredTaskRecord,
   TaskDependencyRecord,
   TaskMirrorRepo,
   TaskTargetDependencyRecord,
-  TaskTargetRecord,
 } from "../task-mirror-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
@@ -73,7 +71,7 @@ const mapStoredTask = (row: unknown): StoredTaskRecord => {
   };
 };
 
-const mapTaskTarget = (row: unknown): TaskTargetRecord => {
+const mapTaskTarget = (row: unknown): PersistedTaskTarget => {
   const mapped = row as SqliteRow;
   return {
     id: String(mapped.id),
@@ -81,8 +79,6 @@ const mapTaskTarget = (row: unknown): TaskTargetRecord => {
     repoKey: String(mapped.repo_key),
     branchName: String(mapped.branch_name),
     position: Number(mapped.position),
-    createdAt: String(mapped.created_at),
-    updatedAt: String(mapped.updated_at),
   };
 };
 
@@ -123,6 +119,13 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     return fallbackTarget ? [fallbackTarget] : [];
   }
 
+  private selectAllTaskIds(): string[] {
+    return this.sqlite
+      .prepare("SELECT id FROM task ORDER BY updated_at DESC, id ASC")
+      .all()
+      .map((row) => String((row as SqliteRow).id));
+  }
+
   private selectStoredTasks(taskIds: readonly string[]): StoredTaskRecord[] {
     const normalizedIds = normalizeIds(taskIds);
     if (normalizedIds.length === 0) {
@@ -135,7 +138,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
       .map(mapStoredTask);
   }
 
-  private selectTargets(taskIds: readonly string[]): TaskTargetRecord[] {
+  private selectTargets(taskIds: readonly string[]): PersistedTaskTarget[] {
     const normalizedIds = normalizeIds(taskIds);
     if (normalizedIds.length === 0) {
       return [];
@@ -143,10 +146,10 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
 
     return this.sqlite
       .prepare(
-        `SELECT id, task_id, repo_key, branch_name, position, created_at, updated_at
+        `SELECT id, task_id, repo_key, branch_name, position
            FROM task_target
-          WHERE task_id IN (${normalizedIds.map(() => "?").join(", ")})
-          ORDER BY task_id ASC, position ASC, repo_key ASC`,
+           WHERE task_id IN (${normalizedIds.map(() => "?").join(", ")})
+           ORDER BY task_id ASC, position ASC, repo_key ASC`,
       )
       .all(...normalizedIds)
       .map(mapTaskTarget);
@@ -175,7 +178,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
       return [];
     }
 
-    const targetsByTaskId = new Map<string, TaskTargetRecord[]>();
+    const targetsByTaskId = new Map<string, PersistedTaskTarget[]>();
     for (const target of this.selectTargets(storedTasks.map((task) => task.id))) {
       const existing = targetsByTaskId.get(target.taskId) ?? [];
       existing.push(target);
@@ -354,48 +357,39 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     })();
   }
 
+  listTasks(): Task[] {
+    return this.hydrateTasks(this.selectAllTaskIds());
+  }
+
   getTask(taskId: string): Task | null {
     return this.hydrateTasks([taskId])[0] ?? null;
   }
 
-  getTasks(taskIds: string[]): Task[] {
-    const normalizedIds = normalizeIds(taskIds);
-    const tasks = this.hydrateTasks(normalizedIds);
-    const tasksById = new Map(tasks.map((task) => [task.id, task]));
-    return normalizedIds.flatMap((taskId) => {
-      const task = tasksById.get(taskId);
-      return task ? [task] : [];
-    });
-  }
-
-  getMirroredTask(taskId: string): MirroredTaskRecord | null {
-    return this.selectStoredTasks([taskId])[0] ?? null;
-  }
-
-  getTaskTarget(taskId: string, repoKey: string): TaskTargetRecord | null {
+  getTaskTarget(taskId: string, repoKey: string): PersistedTaskTarget | null {
     const row = this.sqlite
       .prepare(
-        `SELECT id, task_id, repo_key, branch_name, position, created_at, updated_at
+        `SELECT id, task_id, repo_key, branch_name, position
            FROM task_target
-          WHERE task_id = ?
-            AND repo_key = ?
-          LIMIT 1`,
+           WHERE task_id = ?
+             AND repo_key = ?
+           LIMIT 1`,
       )
       .get(taskId, repoKey);
     return row ? mapTaskTarget(row) : null;
   }
 
-  getTaskTargetById(taskTargetId: string): TaskTargetRecord | null {
+  getTaskTargetById(taskTargetId: string): PersistedTaskTarget | null {
     const row = this.sqlite
       .prepare(
-        `SELECT id, task_id, repo_key, branch_name, position, created_at, updated_at
+        `SELECT id, task_id, repo_key, branch_name, position
            FROM task_target
-          WHERE id = ?`,
+           WHERE id = ?`,
       )
       .get(taskTargetId);
     return row ? mapTaskTarget(row) : null;
   }
-  listTaskTargets(taskId: string): TaskTargetRecord[] {
+
+  listTaskTargets(taskId: string): PersistedTaskTarget[] {
     return this.selectTargets([taskId]);
   }
 

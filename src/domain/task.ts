@@ -13,6 +13,11 @@ export type TaskTarget = {
   position: number;
 };
 
+export type PersistedTaskTarget = TaskTarget & {
+  id: string;
+  taskId: string;
+};
+
 export type TaskArtifact = {
   type: "pull_request";
   url: string;

@@ -1,4 +1,14 @@
-import { taskTargetFromTask, type ActionType, type RepoRef, type ResolvedPullRequest, type ReviewContext, type Task, type TaskComment, type TaskTarget } from "../domain/index.js";
+import {
+  taskTargetFromTask,
+  type ActionType,
+  type PersistedTaskTarget,
+  type RepoRef,
+  type ResolvedPullRequest,
+  type ReviewContext,
+  type Task,
+  type TaskComment,
+  type TaskTarget,
+} from "../domain/index.js";
 import {
   actionableReviewThreadFingerprint,
   actionableConversationComments,
@@ -11,7 +21,7 @@ import {
 import { ForemanError } from "../lib/errors.js";
 import { stableStringify } from "../lib/json.js";
 import type { LoggerService } from "../logger.js";
-import type { ForemanRepos, ScoutRunTrigger, TaskTargetRecord } from "../repos/index.js";
+import type { ForemanRepos, ScoutRunTrigger } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
@@ -19,7 +29,7 @@ import { branchExistsOnOrigin, isAncestorOnOrigin, resolveTaskBranchName } from 
 
 type Selection = {
   task: Task;
-  target: TaskTargetRecord;
+  target: PersistedTaskTarget;
   action: ActionType;
   repo: RepoRef;
   baseBranch: string | null;
@@ -84,7 +94,7 @@ const compareExecutionTasks = (left: Task, right: Task): number => {
   return numericTaskId(left.id) - numericTaskId(right.id);
 };
 
-const resolvePersistedTaskTarget = (task: Task, foremanRepos: ForemanRepos): TaskTargetRecord | null => {
+const resolvePersistedTaskTarget = (task: Task, foremanRepos: ForemanRepos): PersistedTaskTarget | null => {
   const target = taskTargetFromTask(task);
   if (!target) {
     return null;
