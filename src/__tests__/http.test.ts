@@ -112,7 +112,7 @@ describe("HTTP query validation", () => {
     }
   });
 
-  test("syncs provider tasks and returns target projections for task APIs", async () => {
+  test("serves mirrored tasks and returns target projections for task APIs", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
     cleanupDirs.push(workspaceRoot);
     const paths = createWorkspacePaths(projectRoot, workspaceRoot);
@@ -129,6 +129,8 @@ describe("HTTP query validation", () => {
       getTask: vi.fn(async () => taskWithPr),
       listComments: vi.fn(async () => []),
     } as any;
+
+    db.taskMirror.saveTasks([taskWithPr, secondaryTask]);
 
     const server = createHttpServer({
       config: createDefaultWorkspaceConfig("foo", "file"),
@@ -163,6 +165,7 @@ describe("HTTP query validation", () => {
       const listResponse = await server.inject({ method: "GET", url: "/api/tasks" });
       expect(listResponse.statusCode).toBe(200);
       expect(db.taskMirror.getTask(taskWithPr.id)).toMatchObject({ id: taskWithPr.id, repo: "repo-a", branchName: "task-0001" });
+      expect(taskSystem.listCandidates).not.toHaveBeenCalled();
       expect(listResponse.json()).toMatchObject({
         tasks: [
           {
@@ -206,7 +209,8 @@ describe("HTTP query validation", () => {
 
       const detailResponse = await server.inject({ method: "GET", url: "/api/tasks/TASK-0001" });
       expect(detailResponse.statusCode).toBe(200);
-      expect(db.taskMirror.listTaskTargets(taskWithPr.id)).toHaveLength(1);
+      expect(db.taskMirror.getTargetsForTask(taskWithPr.id)).toHaveLength(1);
+      expect(taskSystem.getTask).not.toHaveBeenCalled();
       expect(detailResponse.json().task.targets).toMatchObject([
         {
           repoKey: "repo-a",

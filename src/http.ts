@@ -133,9 +133,10 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   const server = Fastify({ logger: false });
   const uiRoot = path.join(deps.paths.projectRoot, "dist", "ui");
   const hasUiBuild = existsSync(uiRoot);
+  const getAllMirroredTasks = (): Task[] => deps.repos.taskMirror.getTasks();
 
   const buildTaskTargets = async (task: Task, tasksById: ReadonlyMap<string, Task>) => {
-    const persistedTargets = deps.repos.taskMirror.listTaskTargets(task.id);
+    const persistedTargets = deps.repos.taskMirror.getTargetsForTask(task.id);
     const targets =
       persistedTargets.length > 0
         ? persistedTargets
@@ -258,14 +259,12 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const query = request.query as { state?: string; search?: string; limit?: string };
     const state = parseEnumQuery("state", query.state, taskStates);
     const limit = parsePositiveIntegerQuery("limit", query.limit);
-    const candidateTasks = await deps.taskSystem.listCandidates();
-    deps.repos.taskMirror.saveTasks(candidateTasks);
     const taskQuery = {
       ...(state ? { state } : {}),
       ...(query.search ? { search: query.search } : {}),
       limit: limit ?? 100,
     };
-    const tasksById = new Map(candidateTasks.map((task) => [task.id, task]));
+    const tasksById = new Map(getAllMirroredTasks().map((task) => [task.id, task]));
     const tasks = await Promise.all(
       deps.repos.taskMirror
         .getTasks(taskQuery)
@@ -276,14 +275,11 @@ export const createHttpServer = (deps: HttpServerDeps) => {
 
   server.get("/api/tasks/:taskId", async (request) => {
     const params = request.params as { taskId: string };
-    const [task, comments, candidateTasks] = await Promise.all([
-      deps.taskSystem.getTask(params.taskId),
-      deps.taskSystem.listComments(params.taskId),
-      deps.taskSystem.listCandidates(),
-    ]);
-    deps.repos.taskMirror.saveTasks(candidateTasks);
-    deps.repos.taskMirror.saveTasks([task]);
-    const tasksById = new Map(candidateTasks.map((candidateTask) => [candidateTask.id, candidateTask]));
+    const commentsPromise = deps.taskSystem.listComments(params.taskId);
+    const mirroredTask = deps.repos.taskMirror.getTask(params.taskId);
+    const task = mirroredTask ?? (await deps.taskSystem.getTask(params.taskId));
+    const comments = await commentsPromise;
+    const tasksById = new Map(getAllMirroredTasks().map((candidateTask) => [candidateTask.id, candidateTask]));
     tasksById.set(task.id, task);
     return { task: await serializeTask(task, tasksById), comments };
   });

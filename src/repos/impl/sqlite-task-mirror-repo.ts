@@ -421,15 +421,15 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     return row ? mapTaskTarget(row) : null;
   }
 
-  listTaskTargets(taskId: string): PersistedTaskTarget[] {
+  getTargetsForTask(taskId: string): PersistedTaskTarget[] {
     return this.selectTargets([taskId]);
   }
 
-  listTaskDependencies(taskId: string): TaskDependencyRecord[] {
+  getDependenciesForTask(taskId: string): TaskDependencyRecord[] {
     return this.selectDependencies([taskId]);
   }
 
-  listTaskTargetDependencies(taskId: string): TaskTargetDependencyRecord[] {
+  getTargetDependenciesForTask(taskId: string): TaskTargetDependencyRecord[] {
     return this.sqlite
       .prepare(
         `SELECT task_target_dependency.id,

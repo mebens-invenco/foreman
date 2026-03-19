@@ -29,7 +29,7 @@ export interface TaskMirrorRepo {
   getTask(taskId: string): Task | null;
   getTaskTarget(taskId: string, repoKey: string): PersistedTaskTarget | null;
   getTaskTargetById(taskTargetId: string): PersistedTaskTarget | null;
-  listTaskTargets(taskId: string): PersistedTaskTarget[];
-  listTaskDependencies(taskId: string): TaskDependencyRecord[];
-  listTaskTargetDependencies(taskId: string): TaskTargetDependencyRecord[];
+  getTargetsForTask(taskId: string): PersistedTaskTarget[];
+  getDependenciesForTask(taskId: string): TaskDependencyRecord[];
+  getTargetDependenciesForTask(taskId: string): TaskTargetDependencyRecord[];
 }

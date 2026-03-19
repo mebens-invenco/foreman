@@ -141,13 +141,12 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     ...((overrides.scoutRuns as object | undefined) ?? {}),
   },
   taskMirror: {
-    syncTasks: vi.fn(),
     getTask: vi.fn(() => null),
     getTaskTarget: vi.fn(() => null),
     getTaskTargetById: vi.fn(() => sampleTarget),
-    listTaskTargets: vi.fn(() => [sampleTarget]),
-    listTaskDependencies: vi.fn(() => []),
-    listTaskTargetDependencies: vi.fn(() => []),
+    getTargetsForTask: vi.fn(() => [sampleTarget]),
+    getDependenciesForTask: vi.fn(() => []),
+    getTargetDependenciesForTask: vi.fn(() => []),
     ...((overrides.taskMirror as object | undefined) ?? {}),
   },
   artifacts: {

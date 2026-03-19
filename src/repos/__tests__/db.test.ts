@@ -574,16 +574,16 @@ describe("persistence repos", () => {
         "ENG-4700",
       ]);
 
-      expect(db.taskMirror.listTaskTargets("ENG-4701")).toHaveLength(1);
-      expect(db.taskMirror.listTaskTargets("ENG-4701")[0]).toMatchObject({
+      expect(db.taskMirror.getTargetsForTask("ENG-4701")).toHaveLength(1);
+      expect(db.taskMirror.getTargetsForTask("ENG-4701")[0]).toMatchObject({
         taskId: "ENG-4701",
         repoKey: "repo-a",
         branchName: "eng-4701",
         position: 0,
       });
-      expect(db.taskMirror.listTaskTargets("ENG-4702")).toEqual([]);
+      expect(db.taskMirror.getTargetsForTask("ENG-4702")).toEqual([]);
 
-      expect(db.taskMirror.listTaskDependencies("ENG-4701")).toEqual([
+      expect(db.taskMirror.getDependenciesForTask("ENG-4701")).toEqual([
         expect.objectContaining({
           taskId: "ENG-4701",
           dependsOnTaskId: "ENG-4700",
@@ -592,9 +592,9 @@ describe("persistence repos", () => {
         }),
       ]);
 
-      const dependentTarget = db.taskMirror.listTaskTargets("ENG-4701")[0];
-      const baseTarget = db.taskMirror.listTaskTargets("ENG-4700")[0];
-      expect(db.taskMirror.listTaskTargetDependencies("ENG-4701")).toEqual([
+      const dependentTarget = db.taskMirror.getTargetsForTask("ENG-4701")[0];
+      const baseTarget = db.taskMirror.getTargetsForTask("ENG-4700")[0];
+      expect(db.taskMirror.getTargetDependenciesForTask("ENG-4701")).toEqual([
         expect.objectContaining({
           taskTargetId: dependentTarget?.id,
           dependsOnTaskTargetId: baseTarget?.id,
