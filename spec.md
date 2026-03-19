@@ -1707,13 +1707,14 @@ Semantics:
 - kills all running attempts
 - releases active leases for killed attempts
 - preserves queued jobs
+- returns `stopping` immediately while worker shutdown drains in the background
 
 Response:
 
 ```json
 {
   "scheduler": {
-    "status": "stopped"
+    "status": "stopping"
   }
 }
 ```

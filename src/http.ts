@@ -420,7 +420,9 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   });
 
   server.post("/api/scheduler/stop", async () => {
-    await deps.scheduler.stop();
+    void deps.scheduler.stop().catch((error) => {
+      server.log.error(error, "scheduler stop failed");
+    });
     return { scheduler: { status: deps.scheduler.getStatus().status } };
   });
 

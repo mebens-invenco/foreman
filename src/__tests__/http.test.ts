@@ -98,3 +98,55 @@ describe("HTTP query validation", () => {
     }
   });
 });
+
+describe("HTTP scheduler control", () => {
+  test("returns stopping immediately while scheduler shutdown continues in background", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+
+    let schedulerStatus = "running";
+    let releaseStop = () => undefined;
+    const stop = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          schedulerStatus = "stopping";
+          releaseStop = () => {
+            schedulerStatus = "stopped";
+            resolve();
+          };
+        }),
+    );
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [sampleTask]),
+        getTask: vi.fn(async () => sampleTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: schedulerStatus, nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop,
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({ method: "POST", url: "/api/scheduler/stop" });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ scheduler: { status: "stopping" } });
+      expect(stop).toHaveBeenCalledTimes(1);
+    } finally {
+      releaseStop();
+      await server.close();
+      db.close();
+    }
+  });
+});

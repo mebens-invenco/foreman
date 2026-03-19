@@ -4,6 +4,7 @@ import { isoNow } from "../../lib/time.js";
 import type { AgentRunner, AgentRunnerInvokeRequest, CapturedAgentRunResult } from "../agent-runner.js";
 
 const forceKillAfterMs = 1_000;
+const useProcessGroups = process.platform !== "win32";
 
 export class OpenCodeRunner implements AgentRunner {
   constructor(
@@ -18,6 +19,7 @@ export class OpenCodeRunner implements AgentRunner {
 
     const child = spawn(command, args, {
       cwd: request.cwd,
+      detached: useProcessGroups,
       env: { ...process.env, ...request.env },
       stdio: "pipe",
     });
@@ -30,7 +32,29 @@ export class OpenCodeRunner implements AgentRunner {
     let timeout: NodeJS.Timeout | undefined;
     let forcedKillTimeout: NodeJS.Timeout | undefined;
     let timedOut = false;
+    let closed = false;
     let terminateRequested = false;
+
+    const sendSignal = (requestedSignal: NodeJS.Signals): void => {
+      if (closed) {
+        return;
+      }
+
+      try {
+        if (useProcessGroups && child.pid) {
+          process.kill(-child.pid, requestedSignal);
+          return;
+        }
+
+        child.kill(requestedSignal);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ESRCH") {
+          return;
+        }
+
+        throw error;
+      }
+    };
 
     const terminateChild = (): void => {
       if (terminateRequested) {
@@ -38,10 +62,10 @@ export class OpenCodeRunner implements AgentRunner {
       }
 
       terminateRequested = true;
-      child.kill("SIGTERM");
+      sendSignal("SIGTERM");
       forcedKillTimeout = setTimeout(() => {
-        if (child.exitCode === null) {
-          child.kill("SIGKILL");
+        if (!closed) {
+          sendSignal("SIGKILL");
         }
       }, forceKillAfterMs);
     };
@@ -50,7 +74,11 @@ export class OpenCodeRunner implements AgentRunner {
       terminateChild();
     };
 
-    request.abortSignal?.addEventListener("abort", abortHandler, { once: true });
+    if (request.abortSignal?.aborted) {
+      terminateChild();
+    } else {
+      request.abortSignal?.addEventListener("abort", abortHandler, { once: true });
+    }
 
     child.stdin.end(request.prompt);
     const emitLines = (chunk: string, buffer: string, callback?: (line: string) => void): string => {
@@ -85,6 +113,7 @@ export class OpenCodeRunner implements AgentRunner {
     const exitCode = await new Promise<number | null>((resolve, reject) => {
       child.once("error", reject);
       child.once("close", (code, closeSignal) => {
+        closed = true;
         signal = closeSignal;
         resolve(code);
       });

@@ -568,11 +568,13 @@ describe("SchedulerService applyWorkerResult", () => {
     const stopPromise = scheduler.stop();
     await Promise.resolve();
 
+    expect(scheduler.getStatus().status).toBe("stopping");
     expect(controller.signal.aborted).toBe(true);
     expect(updateWorkerStatus).toHaveBeenCalledWith("worker-1", "stopping", "attempt-4");
 
     resolveRun();
     await stopPromise;
+    expect(scheduler.getStatus().status).toBe("stopped");
   });
 
   test("does not redispatch workers that already have an in-flight run", async () => {

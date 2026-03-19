@@ -13,7 +13,7 @@ import { AttemptExecutor } from "./attempt-executor.js";
 import { runScoutSelection } from "./scout-selection.js";
 import { WorkerResultApplier } from "./worker-result-applier.js";
 
-export type SchedulerStatus = "running" | "paused" | "stopped";
+export type SchedulerStatus = "running" | "paused" | "stopping" | "stopped";
 type ScoutTrigger = "startup" | "poll" | "worker_finished" | "task_mutation" | "lease_change" | "manual";
 
 type SchedulerDeps = {
@@ -119,6 +119,11 @@ export class SchedulerService extends EventEmitter {
       return;
     }
 
+    if (this.status !== "running") {
+      this.logger.debug("scheduler pause ignored because it is not running", { status: this.status });
+      return;
+    }
+
     this.status = "paused";
     this.emit("scheduler_status_changed", { status: this.status });
     this.logger.info("scheduler paused");
@@ -135,7 +140,7 @@ export class SchedulerService extends EventEmitter {
       return;
     }
 
-    this.status = "stopped";
+    this.status = "stopping";
     this.emit("scheduler_status_changed", { status: this.status });
     this.logger.info("scheduler stopping", { activeWorkers: this.workerAbortControllers.size });
     this.clearTimers();
@@ -181,6 +186,8 @@ export class SchedulerService extends EventEmitter {
         }
       }
 
+      this.status = "stopped";
+      this.emit("scheduler_status_changed", { status: this.status });
       this.logger.info("scheduler stopped");
     })().finally(() => {
       this.stopPromise = null;
