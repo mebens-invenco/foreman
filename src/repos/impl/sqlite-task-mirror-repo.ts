@@ -3,6 +3,7 @@ import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import { taskTargetFromTask, type PersistedTaskTarget, type Task, type TaskTarget } from "../../domain/index.js";
 import type {
+  GetTasksOptions,
   TaskDependencyRecord,
   TaskMirrorRepo,
   TaskTargetDependencyRecord,
@@ -119,10 +120,40 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     return fallbackTarget ? [fallbackTarget] : [];
   }
 
-  private selectAllTaskIds(): string[] {
+  private selectTaskIds(options: GetTasksOptions = {}): string[] {
+    const normalizedIds = normalizeIds(options.taskIds ?? []);
+    if (options.taskIds !== undefined && normalizedIds.length === 0) {
+      return [];
+    }
+
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (normalizedIds.length > 0) {
+      clauses.push(`id IN (${normalizedIds.map(() => "?").join(", ")})`);
+      params.push(...normalizedIds);
+    }
+
+    if (options.state) {
+      clauses.push("state = ?");
+      params.push(options.state);
+    }
+
+    const search = options.search?.trim().toLowerCase();
+    if (search) {
+      clauses.push("(LOWER(id) LIKE ? OR LOWER(title) LIKE ?)");
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+    const sql = `SELECT id FROM task${where} ORDER BY updated_at DESC, id ASC${typeof options.limit === "number" ? " LIMIT ?" : ""}`;
+    if (typeof options.limit === "number") {
+      params.push(options.limit);
+    }
+
     return this.sqlite
-      .prepare("SELECT id FROM task ORDER BY updated_at DESC, id ASC")
-      .all()
+      .prepare(sql)
+      .all(...params)
       .map((row) => String((row as SqliteRow).id));
   }
 
@@ -257,10 +288,6 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     }
   }
 
-  syncTasks(tasks: Task[]): void {
-    this.saveTasks(tasks);
-  }
-
   saveTasks(tasks: Task[]): void {
     if (tasks.length === 0) {
       return;
@@ -366,8 +393,8 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     return this.hydrateTasks([taskId])[0] ?? null;
   }
 
-  listTasks(): Task[] {
-    return this.hydrateTasks(this.selectAllTaskIds());
+  getTasks(options: GetTasksOptions = {}): Task[] {
+    return this.hydrateTasks(this.selectTaskIds(options));
   }
 
   getTaskTarget(taskId: string, repoKey: string): PersistedTaskTarget | null {

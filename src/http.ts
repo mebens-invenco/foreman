@@ -259,20 +259,17 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const state = parseEnumQuery("state", query.state, taskStates);
     const limit = parsePositiveIntegerQuery("limit", query.limit);
     const candidateTasks = await deps.taskSystem.listCandidates();
-    deps.repos.taskMirror.syncTasks(candidateTasks);
+    deps.repos.taskMirror.saveTasks(candidateTasks);
+    const taskQuery = {
+      ...(state ? { state } : {}),
+      ...(query.search ? { search: query.search } : {}),
+      limit: limit ?? 100,
+    };
     const tasksById = new Map(candidateTasks.map((task) => [task.id, task]));
     const tasks = await Promise.all(
-      candidateTasks
-      .filter((task) => (state ? task.state === state : true))
-      .filter((task) => {
-        if (!query.search) {
-          return true;
-        }
-        const search = query.search.toLowerCase();
-        return task.id.toLowerCase().includes(search) || task.title.toLowerCase().includes(search);
-      })
-      .slice(0, limit ?? 100)
-      .map((task) => serializeTask(task, tasksById)),
+      deps.repos.taskMirror
+        .getTasks(taskQuery)
+        .map((task) => serializeTask(task, tasksById)),
     );
     return { tasks };
   });
@@ -284,8 +281,8 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       deps.taskSystem.listComments(params.taskId),
       deps.taskSystem.listCandidates(),
     ]);
-    deps.repos.taskMirror.syncTasks(candidateTasks);
-    deps.repos.taskMirror.syncTasks([task]);
+    deps.repos.taskMirror.saveTasks(candidateTasks);
+    deps.repos.taskMirror.saveTasks([task]);
     const tasksById = new Map(candidateTasks.map((candidateTask) => [candidateTask.id, candidateTask]));
     tasksById.set(task.id, task);
     return { task: await serializeTask(task, tasksById), comments };

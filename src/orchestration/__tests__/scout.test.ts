@@ -462,7 +462,7 @@ describe("runScoutSelection", () => {
     db.workers.ensureWorkerSlots(1);
     const worker = db.workers.listWorkers()[0];
     expect(worker).toBeDefined();
-    db.taskMirror.syncTasks([reviewTask]);
+    db.taskMirror.saveTasks([reviewTask]);
     const reviewTarget = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
     expect(reviewTarget).not.toBeNull();
 

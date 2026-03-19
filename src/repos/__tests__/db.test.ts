@@ -11,7 +11,7 @@ const cleanupDirs: string[] = [];
 const projectRoot = testProjectRoot;
 
 const syncSingleTargetTask = (db: Awaited<ReturnType<typeof createMigratedDb>>, input: { taskId: string; repoKey: string; branchName?: string }) => {
-  db.taskMirror.syncTasks([
+  db.taskMirror.saveTasks([
     {
       id: input.taskId,
       provider: "file",
@@ -567,7 +567,12 @@ describe("persistence repos", () => {
         repo: "repo-a",
         branchName: "eng-4701",
       });
-      expect(db.taskMirror.listTasks().map((task) => task.id)).toEqual(["ENG-4702", "ENG-4701", "ENG-4700"]);
+      expect(db.taskMirror.getTasks({ state: "ready" }).map((task) => task.id)).toEqual(["ENG-4702", "ENG-4701"]);
+      expect(db.taskMirror.getTasks({ search: "dependent" }).map((task) => task.id)).toEqual(["ENG-4701"]);
+      expect(db.taskMirror.getTasks({ taskIds: ["ENG-4701", "ENG-4700"] }).map((task) => task.id)).toEqual([
+        "ENG-4701",
+        "ENG-4700",
+      ]);
 
       expect(db.taskMirror.listTaskTargets("ENG-4701")).toHaveLength(1);
       expect(db.taskMirror.listTaskTargets("ENG-4701")[0]).toMatchObject({
