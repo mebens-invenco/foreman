@@ -1,7 +1,7 @@
 import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
-import type { Task } from "../../domain/index.js";
+import { taskTargetFromTask, type Task, type TaskTarget } from "../../domain/index.js";
 import type {
   MirroredTaskRecord,
   TaskDependencyRecord,
@@ -85,6 +85,18 @@ const mapTaskTargetDependency = (row: unknown): TaskTargetDependencyRecord => {
 
 export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
   constructor(private readonly sqlite: SqliteDatabase) {}
+
+  private normalizeTaskTargets(task: Task): TaskTarget[] {
+    const explicitTargets = (task as Task & { targets?: TaskTarget[] }).targets;
+    if (explicitTargets && explicitTargets.length > 0) {
+      return explicitTargets
+        .map((target, position) => ({ ...target, position: target.position ?? position }))
+        .sort((left, right) => left.position - right.position || left.repoKey.localeCompare(right.repoKey));
+    }
+
+    const fallbackTarget = taskTargetFromTask(task);
+    return fallbackTarget ? [fallbackTarget] : [];
+  }
 
   private selectMirroredTasks(taskIds: readonly string[]): MirroredTaskRecord[] {
     const normalizedIds = normalizeIds(taskIds);
@@ -257,21 +269,21 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
           task.id,
           task.provider,
           task.providerId,
-          task.title,
-          task.description,
+          String(task.title),
+          String(task.description),
           task.state,
-          task.providerState,
+          String(task.providerState),
           task.priority,
-          task.assignee,
-          task.url,
-          task.updatedAt,
+          task.assignee ?? null,
+          task.url ?? null,
+          String(task.updatedAt),
           syncedAt,
           stableStringify(task.labels),
         );
 
         deleteTargets.run(task.id);
-        if (task.repo) {
-          insertTarget.run(newId(), task.id, task.repo, task.branchName ?? task.id.toLowerCase(), 0, syncedAt, syncedAt);
+        for (const target of this.normalizeTaskTargets(task)) {
+          insertTarget.run(newId(), task.id, target.repoKey, target.branchName, target.position, syncedAt, syncedAt);
         }
 
         deleteDependencies.run(task.id);
@@ -307,6 +319,30 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
 
   getMirroredTask(taskId: string): MirroredTaskRecord | null {
     return this.selectMirroredTasks([taskId])[0] ?? null;
+  }
+
+  getTaskTarget(taskId: string, repoKey: string): TaskTargetRecord | null {
+    const row = this.sqlite
+      .prepare(
+        `SELECT id, task_id, repo_key, branch_name, position, created_at, updated_at
+           FROM task_target
+          WHERE task_id = ?
+            AND repo_key = ?
+          LIMIT 1`,
+      )
+      .get(taskId, repoKey);
+    return row ? mapTaskTarget(row) : null;
+  }
+
+  getTaskTargetById(taskTargetId: string): TaskTargetRecord | null {
+    const row = this.sqlite
+      .prepare(
+        `SELECT id, task_id, repo_key, branch_name, position, created_at, updated_at
+           FROM task_target
+          WHERE id = ?`,
+      )
+      .get(taskTargetId);
+    return row ? mapTaskTarget(row) : null;
   }
 
   listTaskTargets(taskId: string): TaskTargetRecord[] {

@@ -4,10 +4,12 @@ import path from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 
-import type { RepoRef, TaskState } from "./domain/index.js";
+import type { JobRecord } from "./repos/index.js";
+import type { RepoRef, ResolvedPullRequest, Task, TaskState, TaskTargetStatus } from "./domain/index.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
 import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
+import type { ReviewService } from "./review/index.js";
 import type { TaskSystem } from "./tasking/index.js";
 import type { WorkspaceConfig } from "./workspace/config.js";
 import type { WorkspacePaths } from "./workspace/workspace-paths.js";
@@ -18,6 +20,7 @@ type HttpServerDeps = {
   repoRefs: RepoRef[];
   repos: ForemanRepos;
   taskSystem: TaskSystem;
+  reviewService: ReviewService;
   scheduler: SchedulerService;
 };
 
@@ -80,11 +83,149 @@ const parseEnumQuery = <T extends string>(name: string, value: string | undefine
 
 const taskStates = ["ready", "in_progress", "in_review", "done", "canceled"] as const satisfies readonly TaskState[];
 const attemptStatuses = ["running", "completed", "failed", "blocked", "canceled", "timed_out"] as const;
+const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
+
+const dependenciesSatisfiedForTask = (task: Task, tasksById: ReadonlyMap<string, Task>): boolean => {
+  if (task.dependencies.taskIds.length === 0) {
+    return true;
+  }
+
+  return task.dependencies.taskIds.every((dependencyTaskId) => {
+    const dependencyTask = tasksById.get(dependencyTaskId);
+    if (!dependencyTask) {
+      return false;
+    }
+
+    if (dependencyTaskId === task.dependencies.baseTaskId) {
+      return dependencyTask.state === "in_review" || dependencyTask.state === "done";
+    }
+
+    return dependencyTask.state === "done";
+  });
+};
+
+const deriveTaskTargetStatus = (input: {
+  task: Task;
+  latestJob: JobRecord | null;
+  pullRequest: ResolvedPullRequest | null;
+  dependenciesSatisfied: boolean;
+}): TaskTargetStatus => {
+  if (input.task.state === "done" || input.task.state === "canceled") {
+    return input.task.state;
+  }
+
+  if (input.latestJob && activeJobStatuses.has(input.latestJob.status)) {
+    return input.latestJob.action === "review" ? "in_review" : "in_progress";
+  }
+
+  if (input.pullRequest?.state === "open" || input.task.state === "in_review") {
+    return "in_review";
+  }
+
+  if (!input.dependenciesSatisfied) {
+    return "blocked";
+  }
+
+  return input.task.state;
+};
 
 export const createHttpServer = (deps: HttpServerDeps) => {
   const server = Fastify({ logger: false });
   const uiRoot = path.join(deps.paths.projectRoot, "dist", "ui");
   const hasUiBuild = existsSync(uiRoot);
+
+  const buildTaskTargets = async (task: Task, tasksById: ReadonlyMap<string, Task>) => {
+    const persistedTargets = deps.repos.taskMirror.listTaskTargets(task.id);
+    const targets =
+      persistedTargets.length > 0
+        ? persistedTargets
+        : task.repo
+          ? [
+              {
+                id: `unpersisted:${task.id}:${task.repo}`,
+                taskId: task.id,
+                repoKey: task.repo,
+                branchName: task.branchName ?? task.id.toLowerCase(),
+                position: 0,
+                createdAt: task.updatedAt,
+                updatedAt: task.updatedAt,
+              },
+            ]
+          : [];
+
+    return Promise.all(
+      targets.map(async (target) => {
+        const repo = deps.repoRefs.find((item) => item.key === target.repoKey);
+        const pullRequest = repo ? await deps.reviewService.resolvePullRequest(task, repo, target) : null;
+        const latestJob = deps.repos.jobs.latestJobForTaskTarget(target.id);
+        const latestAttempt = deps.repos.attempts.latestAttemptForTaskTarget(target.id);
+        const dependenciesSatisfied = dependenciesSatisfiedForTask(task, tasksById);
+
+        return {
+          id: target.id,
+          repoKey: target.repoKey,
+          branchName: target.branchName,
+          status: deriveTaskTargetStatus({ task, latestJob, pullRequest, dependenciesSatisfied }),
+          review:
+            pullRequest === null
+              ? null
+              : {
+                  pullRequestUrl: pullRequest.pullRequestUrl,
+                  pullRequestNumber: pullRequest.pullRequestNumber,
+                  state: pullRequest.state,
+                  isDraft: pullRequest.isDraft,
+                  baseBranch: pullRequest.baseBranch,
+                  headBranch: pullRequest.headBranch,
+                },
+          latestJob:
+            latestJob === null
+              ? null
+              : {
+                  id: latestJob.id,
+                  action: latestJob.action,
+                  status: latestJob.status,
+                  createdAt: latestJob.createdAt,
+                  finishedAt: latestJob.finishedAt,
+                },
+          latestAttempt:
+            latestAttempt === null
+              ? null
+              : {
+                  id: latestAttempt.id,
+                  status: latestAttempt.status,
+                  startedAt: latestAttempt.startedAt,
+                  finishedAt: latestAttempt.finishedAt,
+                },
+        };
+      }),
+    );
+  };
+
+  const serializeTask = async (task: Task, tasksById: ReadonlyMap<string, Task>) => {
+    const targets = await buildTaskTargets(task, tasksById);
+    const primaryTarget = targets[0] ?? null;
+
+    return {
+      id: task.id,
+      provider: task.provider,
+      providerId: task.providerId,
+      title: task.title,
+      description: task.description,
+      state: task.state,
+      providerState: task.providerState,
+      priority: task.priority,
+      labels: task.labels,
+      assignee: task.assignee,
+      repo: primaryTarget?.repoKey ?? task.repo,
+      branchName: primaryTarget?.branchName ?? task.branchName,
+      dependencies: task.dependencies,
+      artifacts: task.artifacts,
+      updatedAt: task.updatedAt,
+      url: task.url,
+      reviewUrl: primaryTarget?.review?.pullRequestUrl ?? null,
+      targets,
+    };
+  };
 
   server.setErrorHandler((error, _request, reply) => {
     const body = errorShape(error);
@@ -119,7 +260,11 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const query = request.query as { state?: string; search?: string; limit?: string };
     const state = parseEnumQuery("state", query.state, taskStates);
     const limit = parsePositiveIntegerQuery("limit", query.limit);
-    const tasks = (await deps.taskSystem.listCandidates())
+    const candidateTasks = await deps.taskSystem.listCandidates();
+    deps.repos.taskMirror.syncTasks(candidateTasks);
+    const tasksById = new Map(candidateTasks.map((task) => [task.id, task]));
+    const tasks = await Promise.all(
+      candidateTasks
       .filter((task) => (state ? task.state === state : true))
       .filter((task) => {
         if (!query.search) {
@@ -129,38 +274,30 @@ export const createHttpServer = (deps: HttpServerDeps) => {
         return task.id.toLowerCase().includes(search) || task.title.toLowerCase().includes(search);
       })
       .slice(0, limit ?? 100)
-      .map((task) => {
-        const pullRequestUrl = task.artifacts.find((artifact) => artifact.type === "pull_request")?.url ?? null;
-
-        return {
-          id: task.id,
-          provider: task.provider,
-          title: task.title,
-          state: task.state,
-          providerState: task.providerState,
-          priority: task.priority,
-          repo: task.repo,
-          updatedAt: task.updatedAt,
-          url: task.url,
-          reviewUrl: pullRequestUrl ?? task.url,
-        };
-      });
+      .map((task) => serializeTask(task, tasksById)),
+    );
     return { tasks };
   });
 
   server.get("/api/tasks/:taskId", async (request) => {
     const params = request.params as { taskId: string };
-    const [task, comments] = await Promise.all([
+    const [task, comments, candidateTasks] = await Promise.all([
       deps.taskSystem.getTask(params.taskId),
       deps.taskSystem.listComments(params.taskId),
+      deps.taskSystem.listCandidates(),
     ]);
-    return { task, comments };
+    deps.repos.taskMirror.syncTasks(candidateTasks);
+    deps.repos.taskMirror.syncTasks([task]);
+    const tasksById = new Map(candidateTasks.map((candidateTask) => [candidateTask.id, candidateTask]));
+    tasksById.set(task.id, task);
+    return { task: await serializeTask(task, tasksById), comments };
   });
 
   server.get("/api/queue", async () => ({
     jobs: deps.repos.jobs.listQueue().map((job) => ({
       id: job.id,
       taskId: job.taskId,
+      taskTargetId: job.taskTargetId,
       action: job.action,
       status: job.status,
       priorityRank: job.priorityRank,
@@ -178,6 +315,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       job: {
         id: job.id,
         taskId: job.taskId,
+        taskTargetId: job.taskTargetId,
         action: job.action,
         status: job.status,
         priorityRank: job.priorityRank,
@@ -309,6 +447,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
             : {
                 id: currentJob.id,
                 taskId: currentJob.taskId,
+                taskTargetId: currentJob.taskTargetId,
                 action: currentJob.action,
                 repoKey: currentJob.repoKey,
                 status: currentJob.status,

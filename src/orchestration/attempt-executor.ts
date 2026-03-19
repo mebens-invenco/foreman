@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { deriveAttemptStatus, type RepoRef, type Task, type WorkerResult } from "../domain/index.js";
+import { taskTargetFromTask, deriveAttemptStatus, type RepoRef, type Task, type TaskTarget, type WorkerResult } from "../domain/index.js";
 import type { AgentRunner } from "../execution/index.js";
 import { renderWorkerPrompt } from "../execution/render-worker-prompt.js";
 import { parseWorkerResult, validateWorkerResult } from "../execution/index.js";
@@ -15,7 +15,7 @@ import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
-import { assertTaskActionableRepo, leaseResourceKeysForAction } from "./scout-selection.js";
+import { assertTaskActionableTarget, leaseResourceKeysForAction } from "./scout-selection.js";
 
 type AttemptExecutorDeps = {
   config: WorkspaceConfig;
@@ -27,13 +27,14 @@ type AttemptExecutorDeps = {
   repos: RepoRef[];
   env: Record<string, string>;
   logger: LoggerService;
-  applyWorkerResult: (input: {
-    attempt: AttemptRecord;
-    job: JobRecord;
-    task: Task;
-    repo: RepoRef;
-    worktreePath: string;
-    workerResult: WorkerResult;
+    applyWorkerResult: (input: {
+      attempt: AttemptRecord;
+      job: JobRecord;
+      task: Task;
+      target: TaskTarget;
+      repo: RepoRef;
+      worktreePath: string;
+      workerResult: WorkerResult;
   }) => Promise<string | null>;
   onWorkerUpdated: (input: { workerId: string; status: string; attemptId?: string | null }) => void;
   onAttemptChanged: (input: { attemptId: string; status: string }) => void;
@@ -61,13 +62,20 @@ export class AttemptExecutor {
 
     let attempt: AttemptRecord | null = null;
     let task: Task | null = null;
+    let target: TaskTarget | null = null;
     let repo: RepoRef | null = null;
     let worktreePath: string | null = null;
     let beforeSha: string | null = null;
 
     try {
       task = await this.deps.taskSystem.getTask(job.taskId);
-      repo = assertTaskActionableRepo(task, this.deps.repos);
+      const actionableTarget = assertTaskActionableTarget(
+        task,
+        this.deps.repos,
+        this.deps.foremanRepos.taskMirror.getTaskTargetById(job.taskTargetId) ?? taskTargetFromTask(task),
+      );
+      target = actionableTarget.target;
+      repo = actionableTarget.repo;
       jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
       jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
@@ -76,10 +84,10 @@ export class AttemptExecutor {
         jobId: job.id,
         workerId,
         runnerModel: this.deps.config.runner.model,
-        runnerVariant: this.deps.config.runner.variant,
-        expiresAt: leaseExpiresAt,
-        leases: leaseResourceKeysForAction(task, job.action),
-      });
+          runnerVariant: this.deps.config.runner.variant,
+          expiresAt: leaseExpiresAt,
+          leases: leaseResourceKeysForAction(task, job.action, target),
+        });
       if (!attempt) {
         this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id);
         jobLogger.warn("returned leased job to queue because required execution leases could not be acquired");
@@ -113,6 +121,7 @@ export class AttemptExecutor {
                 paths: this.deps.paths,
                 repo,
                 task,
+                taskTarget: target,
                 baseBranch: job.baseBranch ?? repo.defaultBranch,
                 action: job.action,
               });
@@ -138,7 +147,7 @@ export class AttemptExecutor {
         const comments = await this.deps.taskSystem.listComments(task.id);
         const reviewContext =
           job.action === "review" || job.action === "retry" || job.action === "consolidation"
-            ? (await this.deps.reviewService.getContext(task, this.deps.config.workspace.agentPrefix, repo)) ?? undefined
+            ? (await this.deps.reviewService.getContext(task, this.deps.config.workspace.agentPrefix, repo, target)) ?? undefined
             : undefined;
         const prompt = await renderWorkerPrompt({
           action: job.action,
@@ -235,6 +244,7 @@ export class AttemptExecutor {
           attempt,
           job,
           task,
+          target,
           repo,
           worktreePath,
           workerResult,

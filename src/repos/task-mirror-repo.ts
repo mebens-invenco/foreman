@@ -47,6 +47,8 @@ export interface TaskMirrorRepo {
   getTask(taskId: string): Task | null;
   getTasks(taskIds: string[]): Task[];
   getMirroredTask(taskId: string): MirroredTaskRecord | null;
+  getTaskTarget(taskId: string, repoKey: string): TaskTargetRecord | null;
+  getTaskTargetById(taskTargetId: string): TaskTargetRecord | null;
   listTaskTargets(taskId: string): TaskTargetRecord[];
   listTaskDependencies(taskId: string): TaskDependencyRecord[];
   listTaskTargetDependencies(taskId: string): TaskTargetDependencyRecord[];

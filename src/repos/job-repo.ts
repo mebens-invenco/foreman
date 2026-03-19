@@ -3,6 +3,7 @@ import type { ActionType, JobStatus } from "../domain/index.js";
 export type JobRecord = {
   id: string;
   taskId: string;
+  taskTargetId: string;
   taskProvider: "linear" | "file";
   action: ActionType;
   status: JobStatus;
@@ -26,6 +27,7 @@ export interface JobRepo {
   hasActiveDedupeKey(dedupeKey: string): boolean;
   createJob(input: {
     taskId: string;
+    taskTargetId: string;
     taskProvider: "linear" | "file";
     action: ActionType;
     priorityRank: number;
@@ -38,6 +40,7 @@ export interface JobRepo {
   }): JobRecord;
   listQueue(limit?: number): JobRecord[];
   listJobsByStatus(statuses: JobStatus[]): JobRecord[];
+  latestJobForTaskTarget(taskTargetId: string): JobRecord | null;
   getJob(jobId: string): JobRecord;
   updateJobStatus(
     jobId: string,

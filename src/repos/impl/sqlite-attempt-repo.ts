@@ -214,10 +214,38 @@ export class SqliteAttemptRepo implements AttemptRepo {
     const row = this.sqlite
       .prepare(
         `SELECT id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, status, started_at,
-                finished_at, exit_code, signal, summary, error_message
-           FROM execution_attempt WHERE job_id = ? ORDER BY started_at DESC LIMIT 1`,
+                 finished_at, exit_code, signal, summary, error_message
+           FROM execution_attempt WHERE job_id = ? ORDER BY started_at DESC, attempt_number DESC LIMIT 1`,
       )
       .get(jobId) as SqliteRow | undefined;
+
+    return row ? mapAttempt(row) : null;
+  }
+
+  latestAttemptForTaskTarget(taskTargetId: string): AttemptRecord | null {
+    const row = this.sqlite
+      .prepare(
+        `SELECT execution_attempt.id,
+                execution_attempt.job_id,
+                execution_attempt.worker_id,
+                execution_attempt.attempt_number,
+                execution_attempt.runner_name,
+                execution_attempt.runner_model,
+                execution_attempt.runner_variant,
+                execution_attempt.status,
+                execution_attempt.started_at,
+                execution_attempt.finished_at,
+                execution_attempt.exit_code,
+                execution_attempt.signal,
+                execution_attempt.summary,
+                execution_attempt.error_message
+           FROM execution_attempt
+          JOIN job ON job.id = execution_attempt.job_id
+          WHERE job.task_target_id = ?
+          ORDER BY execution_attempt.started_at DESC, execution_attempt.attempt_number DESC
+          LIMIT 1`,
+      )
+      .get(taskTargetId) as SqliteRow | undefined;
 
     return row ? mapAttempt(row) : null;
   }

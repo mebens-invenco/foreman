@@ -1,7 +1,7 @@
 import { ForemanError } from "../../lib/errors.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
-import type { CheckState, ConversationComment, RepoRef, ResolvedPullRequest, ReviewComment, ReviewContext, ReviewThread, ReviewSummary, Task } from "../../domain/index.js";
+import { resolveTaskBranchName, type CheckState, type ConversationComment, type RepoRef, type ResolvedPullRequest, type ReviewComment, type ReviewContext, type ReviewThread, type ReviewSummary, type Task, type TaskTarget } from "../../domain/index.js";
 import type { ReviewService } from "../review-service.js";
 
 type RepoDescriptor = { owner: string; repo: string };
@@ -522,8 +522,27 @@ export class GitHubReviewService implements ReviewService {
     };
   }
 
-  private pullRequestArtifact(task: Task): string | null {
-    return task.artifacts.find((artifact) => artifact.type === "pull_request")?.url ?? null;
+  private async pullRequestArtifact(task: Task, repo?: RepoRef): Promise<string | null> {
+    const artifactUrls = task.artifacts.filter((artifact) => artifact.type === "pull_request").map((artifact) => artifact.url);
+    if (artifactUrls.length === 0) {
+      return null;
+    }
+
+    if (!repo) {
+      return artifactUrls[0] ?? null;
+    }
+
+    const descriptor = await this.repoDescriptorFromRepo(repo);
+    const matchingArtifact = artifactUrls.find((artifactUrl) => {
+      try {
+        const parsed = parseGitHubUrl(artifactUrl);
+        return parsed.owner === descriptor.owner && parsed.repo === descriptor.repo;
+      } catch {
+        return false;
+      }
+    });
+
+    return matchingArtifact ?? artifactUrls[0] ?? null;
   }
 
   private async resolvePullRequestFromArtifact(prUrl: string, taskId: string): Promise<ResolvedPullRequest | null> {
@@ -584,8 +603,9 @@ export class GitHubReviewService implements ReviewService {
     return promise;
   }
 
-  private async resolvePullRequestByBranch(task: Task, repo: RepoRef): Promise<ResolvedPullRequest | null> {
-    if (!task.branchName) {
+  private async resolvePullRequestByBranch(task: Task, repo: RepoRef, target?: TaskTarget): Promise<ResolvedPullRequest | null> {
+    const branchName = resolveTaskBranchName(task, target);
+    if (!branchName) {
       this.logger.debug("skipping branch-based GitHub pull request lookup because task branch metadata is missing", {
         taskId: task.id,
         repoKey: repo.key,
@@ -596,7 +616,7 @@ export class GitHubReviewService implements ReviewService {
     const descriptor = await this.repoDescriptorFromRepo(repo);
     const query = new URLSearchParams({
       state: "all",
-      head: `${descriptor.owner}:${task.branchName}`,
+      head: `${descriptor.owner}:${branchName}`,
       per_page: "20",
     });
     this.logger.debug("resolving GitHub pull request by task branch", {
@@ -604,11 +624,11 @@ export class GitHubReviewService implements ReviewService {
       repoKey: repo.key,
       owner: descriptor.owner,
       repo: descriptor.repo,
-      branchName: task.branchName,
+      branchName,
     });
     const pullRequests = await this.rest<GitHubRestPullRequest[]>(`/repos/${descriptor.owner}/${descriptor.repo}/pulls?${query.toString()}`);
     const bestMatch = pullRequests
-      .filter((pullRequest) => pullRequest.head.ref === task.branchName)
+      .filter((pullRequest) => pullRequest.head.ref === branchName)
       .sort((left, right) => {
         const leftRank = left.state === "open" ? 0 : left.merged_at ? 1 : 2;
         const rightRank = right.state === "open" ? 0 : right.merged_at ? 1 : 2;
@@ -622,7 +642,7 @@ export class GitHubReviewService implements ReviewService {
       this.logger.debug("no GitHub pull request matched task branch", {
         taskId: task.id,
         repoKey: repo.key,
-        branchName: task.branchName,
+        branchName,
       });
       return null;
     }
@@ -638,8 +658,8 @@ export class GitHubReviewService implements ReviewService {
     });
   }
 
-  async resolvePullRequest(task: Task, repo?: RepoRef): Promise<ResolvedPullRequest | null> {
-    const prUrl = this.pullRequestArtifact(task);
+  async resolvePullRequest(task: Task, repo?: RepoRef, target?: TaskTarget): Promise<ResolvedPullRequest | null> {
+    const prUrl = await this.pullRequestArtifact(task, repo);
     if (prUrl) {
       return this.resolvePullRequestFromArtifact(prUrl, task.id);
     }
@@ -649,11 +669,11 @@ export class GitHubReviewService implements ReviewService {
       return null;
     }
 
-    return this.resolvePullRequestByBranch(task, repo);
+    return this.resolvePullRequestByBranch(task, repo, target);
   }
 
-  async getContext(task: Task, agentPrefix: string, repo?: RepoRef): Promise<ReviewContext | null> {
-    const resolvedPullRequest = await this.resolvePullRequest(task, repo);
+  async getContext(task: Task, agentPrefix: string, repo?: RepoRef, target?: TaskTarget): Promise<ReviewContext | null> {
+    const resolvedPullRequest = await this.resolvePullRequest(task, repo, target);
     const effectivePrUrl = resolvedPullRequest?.pullRequestUrl ?? null;
     if (!effectivePrUrl) {
       this.logger.debug("skipping GitHub review context lookup because task has no resolvable pull request", { taskId: task.id });
@@ -781,8 +801,8 @@ export class GitHubReviewService implements ReviewService {
     }
   }
 
-  async findLatestOpenPullRequestBranch(task: Task, repo?: RepoRef): Promise<string | null> {
-    const pullRequest = await this.resolvePullRequest(task, repo);
+  async findLatestOpenPullRequestBranch(task: Task, repo?: RepoRef, target?: TaskTarget): Promise<string | null> {
+    const pullRequest = await this.resolvePullRequest(task, repo, target);
     const branch = pullRequest?.state === "open" ? pullRequest.headBranch : null;
     this.logger.debug("resolved latest open pull request branch", { taskId: task.id, branch: branch ?? null });
     return branch;

@@ -1,13 +1,13 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import type { ActionType, RepoRef, Task } from "../domain/index.js";
+import { resolveTaskBranchName as resolveTaskTargetBranchName, type ActionType, type RepoRef, type Task, type TaskTarget } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 import { ensureDir, pathExists } from "../lib/fs.js";
 import { exec } from "../lib/process.js";
 import type { WorkspacePaths } from "./workspace-paths.js";
 
-export const resolveTaskBranchName = (task: Task): string => task.branchName ?? task.id.toLowerCase();
+export const resolveTaskBranchName = (task: Task, target?: TaskTarget): string => resolveTaskTargetBranchName(task, target);
 
 const worktreePathForTask = (paths: WorkspacePaths, repo: RepoRef, task: Task): string =>
   path.join(paths.worktreesDir, repo.key, task.id);
@@ -25,10 +25,11 @@ export const ensureTaskWorktree = async (input: {
   paths: WorkspacePaths;
   repo: RepoRef;
   task: Task;
+  taskTarget?: TaskTarget;
   baseBranch: string;
   action: ActionType;
 }): Promise<string> => {
-  const taskBranch = resolveTaskBranchName(input.task);
+  const taskBranch = resolveTaskBranchName(input.task, input.taskTarget);
   const targetPath = worktreePathForTask(input.paths, input.repo, input.task);
   await ensureDir(path.dirname(targetPath));
 

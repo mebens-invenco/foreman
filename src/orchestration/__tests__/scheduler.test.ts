@@ -65,7 +65,14 @@ const resolvedPullRequest: ResolvedPullRequest = {
   baseBranch: reviewContext.baseBranch,
 };
 
-const resolvePullRequestFromTask = async (task: Task): Promise<ResolvedPullRequest | null> => {
+const sampleTarget = {
+  id: "target-1",
+  repoKey: "repo-a",
+  branchName: "task-0001",
+  position: 0,
+};
+
+const resolvePullRequestFromTask = async (task: Task, _repo?: unknown, _target?: unknown): Promise<ResolvedPullRequest | null> => {
   const artifactUrl = task.artifacts.find((artifact) => artifact.type === "pull_request")?.url;
   return artifactUrl ? { ...resolvedPullRequest, pullRequestUrl: artifactUrl } : null;
 };
@@ -92,6 +99,7 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     createJob: vi.fn(),
     listQueue: vi.fn(() => []),
     listJobsByStatus: vi.fn(() => []),
+    latestJobForTaskTarget: vi.fn(() => null),
     getJob: vi.fn(),
     updateJobStatus: vi.fn(),
     returnLeasedJobToQueue: vi.fn(),
@@ -105,6 +113,7 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     listAttempts: vi.fn(() => []),
     getAttempt: vi.fn(),
     latestAttemptForJob: vi.fn(() => null),
+    latestAttemptForTaskTarget: vi.fn(() => null),
     addAttemptEvent: vi.fn(),
     listAttemptEvents: vi.fn(() => []),
     recoverOrphanedRunningAttempts: vi.fn(() => []),
@@ -130,6 +139,18 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     completeScoutRun: vi.fn(),
     listScoutRuns: vi.fn(() => []),
     ...((overrides.scoutRuns as object | undefined) ?? {}),
+  },
+  taskMirror: {
+    syncTasks: vi.fn(),
+    getTask: vi.fn(() => null),
+    getTasks: vi.fn(() => []),
+    getMirroredTask: vi.fn(() => null),
+    getTaskTarget: vi.fn(() => null),
+    getTaskTargetById: vi.fn(() => sampleTarget),
+    listTaskTargets: vi.fn(() => [sampleTarget]),
+    listTaskDependencies: vi.fn(() => []),
+    listTaskTargetDependencies: vi.fn(() => []),
+    ...((overrides.taskMirror as object | undefined) ?? {}),
   },
   artifacts: {
     createArtifact: vi.fn(),
@@ -197,8 +218,9 @@ describe("SchedulerService applyWorkerResult", () => {
 
     await applyWorkerResult({
       attempt: { id: "attempt-1" },
-      job: { action: "consolidation" },
+      job: { action: "consolidation", taskTargetId: sampleTarget.id },
       task: sampleTask({ state: "done", providerState: "done" }),
+      target: sampleTarget,
       repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
       worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
       workerResult: baseWorkerResult({ action: "consolidation", outcome: "completed" }),
@@ -257,8 +279,9 @@ describe("SchedulerService applyWorkerResult", () => {
     await expect(
       applyWorkerResult({
         attempt: { id: "attempt-2" },
-        job: { action: "review" },
+        job: { action: "review", taskTargetId: sampleTarget.id },
         task: sampleTask({ artifacts: [{ type: "pull_request", url: reviewContext.pullRequestUrl }] }),
+        target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
         workerResult: baseWorkerResult({
@@ -313,8 +336,9 @@ describe("SchedulerService applyWorkerResult", () => {
     await expect(
       applyWorkerResult({
         attempt: { id: "attempt-3" },
-        job: { action: "execution" },
+        job: { action: "execution", taskTargetId: sampleTarget.id },
         task: sampleTask({ state: "in_progress", providerState: "in_progress", artifacts: [] }),
+        target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
         workerResult: baseWorkerResult({
@@ -366,12 +390,13 @@ describe("SchedulerService applyWorkerResult", () => {
     await expect(
       applyWorkerResult({
         attempt: { id: "attempt-4" },
-        job: { action: "execution" },
+        job: { action: "execution", taskTargetId: sampleTarget.id },
         task: sampleTask({
           state: "in_progress",
           providerState: "in_progress",
           artifacts: [{ type: "pull_request", url: reviewContext.pullRequestUrl }],
         }),
+        target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
         workerResult: baseWorkerResult({
@@ -431,8 +456,9 @@ describe("SchedulerService applyWorkerResult", () => {
     await expect(
       applyWorkerResult({
         attempt: { id: "attempt-3b" },
-        job: { action: "review" },
+        job: { action: "review", taskTargetId: sampleTarget.id },
         task: sampleTask({ artifacts: [{ type: "pull_request", url: reviewContext.pullRequestUrl }] }),
+        target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
         workerResult: baseWorkerResult({
@@ -495,8 +521,9 @@ describe("SchedulerService applyWorkerResult", () => {
     await expect(
       applyWorkerResult({
         attempt: { id: "attempt-3c" },
-        job: { action: "review" },
+        job: { action: "review", taskTargetId: sampleTarget.id },
         task: sampleTask({ artifacts: [] }),
+        target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
         workerResult: baseWorkerResult({
@@ -512,7 +539,7 @@ describe("SchedulerService applyWorkerResult", () => {
       key: "repo-a",
       rootPath: "/repos/repo-a",
       defaultBranch: "main",
-    });
+    }, sampleTarget);
     expect(replyToThreadComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "thread-1", "[agent] Addressed in latest head");
     expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
   });

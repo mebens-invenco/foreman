@@ -51,6 +51,9 @@ describe("HTTP query validation", () => {
         getTask: vi.fn(async () => sampleTask),
         listComments: vi.fn(async () => []),
       } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
       scheduler: {
         getStatus: () => ({ status: "running", nextScoutPollAt: null }),
         start: vi.fn(),
@@ -92,6 +95,90 @@ describe("HTTP query validation", () => {
       expect(invalidOffset.json()).toEqual({
         error: { code: "invalid_request", message: "Query parameter offset must be a non-negative integer." },
       });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("returns target projections for task APIs", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const taskWithPr: Task = {
+      ...sampleTask,
+      state: "in_review",
+      providerState: "in_review",
+      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/7" }],
+    };
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [taskWithPr]),
+        getTask: vi.fn(async () => taskWithPr),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => ({
+          pullRequestUrl: "https://github.com/acme/repo-a/pull/7",
+          pullRequestNumber: 7,
+          state: "open",
+          isDraft: true,
+          headBranch: "task-0001",
+          baseBranch: "main",
+        })),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const listResponse = await server.inject({ method: "GET", url: "/api/tasks" });
+      expect(listResponse.statusCode).toBe(200);
+      expect(listResponse.json()).toMatchObject({
+        tasks: [
+          {
+            id: "TASK-0001",
+            repo: "repo-a",
+            reviewUrl: "https://github.com/acme/repo-a/pull/7",
+            targets: [
+              {
+                repoKey: "repo-a",
+                branchName: "task-0001",
+                status: "in_review",
+                review: {
+                  pullRequestUrl: "https://github.com/acme/repo-a/pull/7",
+                  pullRequestNumber: 7,
+                  state: "open",
+                  isDraft: true,
+                  baseBranch: "main",
+                  headBranch: "task-0001",
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      const detailResponse = await server.inject({ method: "GET", url: "/api/tasks/TASK-0001" });
+      expect(detailResponse.statusCode).toBe(200);
+      expect(detailResponse.json().task.targets).toMatchObject([
+        {
+          repoKey: "repo-a",
+          branchName: "task-0001",
+          status: "in_review",
+        },
+      ]);
     } finally {
       await server.close();
       db.close();
