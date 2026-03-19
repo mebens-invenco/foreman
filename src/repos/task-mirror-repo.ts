@@ -1,5 +1,12 @@
 import type { Task } from "../domain/index.js";
 
+export type GetTasksOptions = {
+  taskIds?: string[];
+  state?: Task["state"];
+  search?: string;
+  limit?: number;
+};
+
 export type TaskTargetRecord = {
   id: string;
   taskId: string;
@@ -28,10 +35,9 @@ export type TaskTargetDependencyRecord = {
 
 export interface TaskMirrorRepo {
   saveTasks(tasks: Task[]): void;
-  listTasks(): Task[];
+  getTasks(options?: GetTasksOptions): Task[];
   getTask(taskId: string): Task | null;
-  getTasks(taskIds: string[]): Task[];
-  listTaskTargets(taskId: string): TaskTargetRecord[];
-  listTaskDependencies(taskId: string): TaskDependencyRecord[];
-  listTaskTargetDependencies(taskId: string): TaskTargetDependencyRecord[];
+  getTargetsForTask(taskId: string): TaskTargetRecord[];
+  getDependenciesForTask(taskId: string): TaskDependencyRecord[];
+  getTargetDependenciesForTask(taskId: string): TaskTargetDependencyRecord[];
 }

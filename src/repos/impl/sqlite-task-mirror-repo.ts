@@ -3,6 +3,7 @@ import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import type { Task } from "../../domain/index.js";
 import type {
+  GetTasksOptions,
   TaskDependencyRecord,
   TaskMirrorRepo,
   TaskTargetDependencyRecord,
@@ -110,10 +111,40 @@ const mapTaskTargetDependency = (row: unknown): TaskTargetDependencyRecord => {
 export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
   constructor(private readonly sqlite: SqliteDatabase) {}
 
-  private selectAllTaskIds(): string[] {
+  private selectTaskIds(options: GetTasksOptions = {}): string[] {
+    const normalizedIds = normalizeIds(options.taskIds ?? []);
+    if (options.taskIds !== undefined && normalizedIds.length === 0) {
+      return [];
+    }
+
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+
+    if (normalizedIds.length > 0) {
+      clauses.push(`id IN (${normalizedIds.map(() => "?").join(", ")})`);
+      params.push(...normalizedIds);
+    }
+
+    if (options.state) {
+      clauses.push("state = ?");
+      params.push(options.state);
+    }
+
+    const search = options.search?.trim().toLowerCase();
+    if (search) {
+      clauses.push("(LOWER(id) LIKE ? OR LOWER(title) LIKE ?)");
+      params.push(`%${search}%`, `%${search}%`);
+    }
+
+    const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+    const sql = `SELECT id FROM task${where} ORDER BY updated_at DESC, id ASC${typeof options.limit === "number" ? " LIMIT ?" : ""}`;
+    if (typeof options.limit === "number") {
+      params.push(options.limit);
+    }
+
     return this.sqlite
-      .prepare("SELECT id FROM task ORDER BY updated_at DESC, id ASC")
-      .all()
+      .prepare(sql)
+      .all(...params)
       .map((row) => String((row as SqliteRow).id));
   }
 
@@ -123,10 +154,15 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
       return [];
     }
 
-    return this.sqlite
-      .prepare(`SELECT ${TASK_COLUMNS} FROM task WHERE id IN (${normalizedIds.map(() => "?").join(", ")}) ORDER BY id ASC`)
+    const storedTasks = this.sqlite
+      .prepare(`SELECT ${TASK_COLUMNS} FROM task WHERE id IN (${normalizedIds.map(() => "?").join(", ")})`)
       .all(...normalizedIds)
       .map(mapStoredTask);
+    const tasksById = new Map(storedTasks.map((task) => [task.id, task]));
+    return normalizedIds.flatMap((taskId) => {
+      const task = tasksById.get(taskId);
+      return task ? [task] : [];
+    });
   }
 
   private selectTargets(taskIds: readonly string[]): TaskTargetRecord[] {
@@ -344,33 +380,23 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     })();
   }
 
-  listTasks(): Task[] {
-    return this.hydrateTasks(this.selectAllTaskIds());
-  }
-
   getTask(taskId: string): Task | null {
     return this.hydrateTasks([taskId])[0] ?? null;
   }
 
-  getTasks(taskIds: string[]): Task[] {
-    const normalizedIds = normalizeIds(taskIds);
-    const tasks = this.hydrateTasks(normalizedIds);
-    const tasksById = new Map(tasks.map((task) => [task.id, task]));
-    return normalizedIds.flatMap((taskId) => {
-      const task = tasksById.get(taskId);
-      return task ? [task] : [];
-    });
+  getTasks(options: GetTasksOptions = {}): Task[] {
+    return this.hydrateTasks(this.selectTaskIds(options));
   }
 
-  listTaskTargets(taskId: string): TaskTargetRecord[] {
+  getTargetsForTask(taskId: string): TaskTargetRecord[] {
     return this.selectTargets([taskId]);
   }
 
-  listTaskDependencies(taskId: string): TaskDependencyRecord[] {
+  getDependenciesForTask(taskId: string): TaskDependencyRecord[] {
     return this.selectDependencies([taskId]);
   }
 
-  listTaskTargetDependencies(taskId: string): TaskTargetDependencyRecord[] {
+  getTargetDependenciesForTask(taskId: string): TaskTargetDependencyRecord[] {
     return this.sqlite
       .prepare(
         `SELECT task_target_dependency.id,

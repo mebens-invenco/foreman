@@ -117,17 +117,13 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const query = request.query as { state?: string; search?: string; limit?: string };
     const state = parseEnumQuery("state", query.state, taskStates);
     const limit = parsePositiveIntegerQuery("limit", query.limit);
+    const taskQuery = {
+      ...(state ? { state } : {}),
+      ...(query.search ? { search: query.search } : {}),
+      limit: limit ?? 100,
+    };
     const tasks = deps.repos.taskMirror
-      .listTasks()
-      .filter((task) => (state ? task.state === state : true))
-      .filter((task) => {
-        if (!query.search) {
-          return true;
-        }
-        const search = query.search.toLowerCase();
-        return task.id.toLowerCase().includes(search) || task.title.toLowerCase().includes(search);
-      })
-      .slice(0, limit ?? 100)
+      .getTasks(taskQuery)
       .map((task) => {
         const pullRequestUrl = task.artifacts.find((artifact) => artifact.type === "pull_request")?.url ?? null;
 
