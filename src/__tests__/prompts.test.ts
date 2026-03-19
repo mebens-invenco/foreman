@@ -201,6 +201,8 @@ describe("prompt rendering", () => {
     expect(reviewPrompt).toContain("Review Summary `review-1`");
     expect(reviewPrompt).toContain("[agent] Fixed in follow-up.");
     expect(reviewPrompt).toContain("Can you simplify this flow?");
+    expect(reviewPrompt).toContain("inspect the relevant commit messages and diffs on both the task branch and the base branch");
+    expect(reviewPrompt).toContain("Reconcile both branches' intent instead of defaulting to either side.");
     expect(consolidationPrompt).toContain("### Review Summaries");
     expect(consolidationPrompt).toContain("### Review Threads");
     expect(consolidationPrompt).not.toContain("### Actionable Now");

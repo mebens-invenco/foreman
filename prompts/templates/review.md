@@ -42,7 +42,7 @@ Priority order inside this action:
 - Only address review summaries on the current PR head.
 - Only address conversation comments created after the current PR head became current.
 - Do not ignore older history when it explains prior decisions that still apply.
-- If the PR has merge conflicts, resolve them by merging the latest base branch into the task branch; do not rebase or cherry-pick.
+- If the PR has merge conflicts, resolve them by merging the latest base branch into the task branch; do not rebase or cherry-pick. Reconcile both branches' intent instead of defaulting to either side.
 - If you make code changes, run the relevant automated checks for the affected scope, then commit and push the task branch before returning `completed`.
 - If nothing needs to be changed or replied to for the current PR state, return `no_action_needed` and include `review_checkpoint_eligible`.
 - Resolve threads only when your code or reply truly addresses them.
