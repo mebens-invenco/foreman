@@ -28,8 +28,9 @@ const sampleTask: Task = {
   assignee: null,
   repo: "repo-a",
   branchName: "task-0001",
+  targets: [{ repo: "repo-a", branchName: "task-0001", position: 0 }],
   dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
-  artifacts: [],
+  artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/1", repo: "repo-a" }],
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
 };
@@ -42,6 +43,8 @@ const secondaryTask: Task = {
   state: "in_review",
   repo: null,
   branchName: null,
+  targets: [],
+  artifacts: [],
   updatedAt: "2026-03-13T12:00:00Z",
 };
 
@@ -133,12 +136,14 @@ describe("HTTP query validation", () => {
           expect.objectContaining({
             id: sampleTask.id,
             repo: "repo-a",
-            reviewUrl: sampleTask.url,
+            reviewUrl: "https://github.com/acme/repo-a/pull/1",
+            targets: [{ repoKey: "repo-a", state: "in_review", reviewUrl: "https://github.com/acme/repo-a/pull/1" }],
           }),
           expect.objectContaining({
             id: secondaryTask.id,
             repo: null,
             reviewUrl: null,
+            targets: [],
           }),
         ],
       });
@@ -200,7 +205,7 @@ describe("HTTP scheduler control", () => {
         stop,
         triggerManualScout: vi.fn(),
       } as any,
-    });
+    } as any);
 
     try {
       const response = await server.inject({ method: "POST", url: "/api/scheduler/stop" });

@@ -67,8 +67,18 @@ class FakeTaskSystem implements TaskSystem {
 class FakeReviewService implements ReviewService {
   constructor(private readonly contexts: Record<string, ReviewContext | null>) {}
 
+  private contextFor(task: Task, repo?: RepoRef): ReviewContext | null {
+    if (repo) {
+      const scoped = this.contexts[`${task.id}:${repo.key}`];
+      if (scoped !== undefined) {
+        return scoped;
+      }
+    }
+    return this.contexts[task.id] ?? null;
+  }
+
   async resolvePullRequest(task: Task, _repo?: RepoRef): Promise<ResolvedPullRequest | null> {
-    const context = this.contexts[task.id];
+    const context = this.contextFor(task, _repo);
     if (!context) {
       return null;
     }
@@ -83,11 +93,12 @@ class FakeReviewService implements ReviewService {
   }
 
   async getContext(task: Task, _agentPrefix: string, _repo?: RepoRef): Promise<ReviewContext | null> {
-    return this.contexts[task.id] ?? null;
+    return this.contextFor(task, _repo);
   }
 
   async findLatestOpenPullRequestBranch(task: Task, _repo?: RepoRef): Promise<string | null> {
-    return this.contexts[task.id]?.state === "open" ? this.contexts[task.id]?.headBranch ?? null : null;
+    const context = this.contextFor(task, _repo);
+    return context?.state === "open" ? context.headBranch ?? null : null;
   }
 
   async createPullRequest(_input: { cwd: string; title: string; body: string; draft: boolean; baseBranch: string; headBranch: string }): Promise<{ url: string; number: number }> {
@@ -931,6 +942,189 @@ describe("runScoutSelection", () => {
       expect(taskSystem.comments.get("ENG-4681") ?? []).toHaveLength(0);
       expect(worktrees.branchExistsOnOrigin).toHaveBeenCalledWith({ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }, "eng-4680");
       expect(worktrees.isAncestorOnOrigin).toHaveBeenCalledWith({ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }, "master", "master");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("fans out multi-target execution while respecting same-task repo dependencies", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 2;
+
+    const multiTargetTask = task({
+      id: "ENG-4801",
+      title: "Multi-target task",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      repo: null,
+      targets: [
+        { repo: "common", branchName: "eng-4801", position: 0 },
+        { repo: "lynk-frontend", branchName: "eng-4801", position: 1 },
+      ],
+      repoDependencies: [{ repo: "lynk-frontend", dependsOnRepo: "common", position: 0 }],
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([multiTargetTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [
+          { key: "common", rootPath: "/repos/common", defaultBranch: "main" },
+          { key: "lynk-frontend", rootPath: "/repos/lynk-frontend", defaultBranch: "main" },
+        ],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.repo.key).toBe("common");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("schedules downstream multi-target execution after the upstream target reaches review", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 2;
+
+    const multiTargetTask = task({
+      id: "ENG-4802",
+      title: "Sequenced task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      repo: null,
+      branchName: "eng-4802",
+      targets: [
+        { repo: "common", branchName: "eng-4802", position: 0 },
+        { repo: "lynk-frontend", branchName: "eng-4802", position: 1 },
+      ],
+      repoDependencies: [{ repo: "lynk-frontend", dependsOnRepo: "common", position: 0 }],
+      artifacts: [{ type: "pull_request", url: "https://github.com/acme/common/pull/11", repo: "common" }],
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([multiTargetTask]),
+        reviewService: new FakeReviewService({
+          [`${multiTargetTask.id}:common`]: {
+            provider: "github",
+            pullRequestUrl: "https://github.com/acme/common/pull/11",
+            pullRequestNumber: 11,
+            state: "open",
+            isDraft: false,
+            headSha: "abc",
+            headBranch: "eng-4802",
+            baseBranch: "main",
+            headIntroducedAt: "2026-03-14T11:00:00Z",
+            mergeState: "clean",
+            reviewSummaries: [],
+            conversationComments: [],
+            reviewThreads: [],
+            failingChecks: [],
+            pendingChecks: [],
+          },
+        }),
+        repos: [
+          { key: "common", rootPath: "/repos/common", defaultBranch: "main" },
+          { key: "lynk-frontend", rootPath: "/repos/lynk-frontend", defaultBranch: "main" },
+        ],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.repo.key).toBe("lynk-frontend");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("blocks cross-task repo targets when the dependency task does not expose a matching repo", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 2;
+
+    vi.spyOn(worktrees, "branchExistsOnOrigin").mockResolvedValue(true);
+
+    const dependencyTask = task({
+      id: "ENG-4803",
+      title: "Dependency task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:00:00Z",
+      repo: null,
+      targets: [{ repo: "common", branchName: "eng-4803", position: 0 }],
+      artifacts: [{ type: "pull_request", url: "https://github.com/acme/common/pull/12", repo: "common" }],
+    });
+    const dependentTask = task({
+      id: "ENG-4804",
+      title: "Dependent multi-target task",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      repo: null,
+      branchName: "eng-4804",
+      targets: [
+        { repo: "common", branchName: "eng-4804", position: 0 },
+        { repo: "lynk-frontend", branchName: "eng-4804", position: 1 },
+      ],
+      dependencies: { taskIds: ["ENG-4803"], baseTaskId: null, branchNames: [] },
+    });
+
+    const reviewService = new FakeReviewService({
+      [`${dependencyTask.id}:common`]: {
+        provider: "github",
+        pullRequestUrl: "https://github.com/acme/common/pull/12",
+        pullRequestNumber: 12,
+        state: "open",
+        isDraft: false,
+        headSha: "abc",
+        headBranch: "eng-4803",
+        baseBranch: "main",
+        headIntroducedAt: "2026-03-14T10:00:00Z",
+        mergeState: "clean",
+        reviewSummaries: [],
+        conversationComments: [],
+        reviewThreads: [],
+        failingChecks: [],
+        pendingChecks: [],
+      },
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([dependencyTask, dependentTask]),
+        reviewService,
+        repos: [
+          { key: "common", rootPath: "/repos/common", defaultBranch: "main" },
+          { key: "lynk-frontend", rootPath: "/repos/lynk-frontend", defaultBranch: "main" },
+        ],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.repo.key).toBe("common");
+      expect(result.jobs[0]?.baseBranch).toBe("eng-4803");
     } finally {
       db.close();
     }

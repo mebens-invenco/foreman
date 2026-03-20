@@ -67,19 +67,19 @@ export class AttemptExecutor {
 
     try {
       task = await this.deps.taskSystem.getTask(job.taskId);
-      repo = assertTaskActionableRepo(task, this.deps.repos);
+      repo = assertTaskActionableRepo(task, job.repoKey, this.deps.repos);
       jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
       jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
 
-      attempt = this.deps.foremanRepos.attempts.createAttemptWithLeases({
-        jobId: job.id,
-        workerId,
-        runnerModel: this.deps.config.runner.model,
-        runnerVariant: this.deps.config.runner.variant,
-        expiresAt: leaseExpiresAt,
-        leases: leaseResourceKeysForAction(task, job.action),
-      });
+        attempt = this.deps.foremanRepos.attempts.createAttemptWithLeases({
+          jobId: job.id,
+          workerId,
+          runnerModel: this.deps.config.runner.model,
+          runnerVariant: this.deps.config.runner.variant,
+          expiresAt: leaseExpiresAt,
+          leases: leaseResourceKeysForAction(task, job.repoKey, job.action),
+        });
       if (!attempt) {
         this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id);
         jobLogger.warn("returned leased job to queue because required execution leases could not be acquired");

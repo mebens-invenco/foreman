@@ -66,6 +66,11 @@ export type TaskListItem = {
   providerState: string;
   priority: string;
   repo: string | null;
+  targets: Array<{
+    repoKey: string;
+    state: TaskState;
+    reviewUrl: string | null;
+  }>;
   updatedAt: string;
   url: string | null;
   reviewUrl: string | null;

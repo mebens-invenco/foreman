@@ -141,7 +141,30 @@
                 {:else}
                   <div class="mt-2 text-sm text-foreground">{task.title}</div>
                 {/if}
-                <div class="mt-1 text-sm text-muted-foreground">{task.repo ?? "No repo"}</div>
+                {#if task.targets.length <= 1}
+                  <div class="mt-1 text-sm text-muted-foreground">{task.repo ?? "No repo"}</div>
+                {:else}
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    {#each task.targets as target}
+                      <div class="flex items-center gap-2 rounded-full border border-border bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground">
+                        {#if target.reviewUrl}
+                          <a
+                            class="font-mono text-[11px] text-foreground underline-offset-4 hover:text-primary hover:underline"
+                            href={target.reviewUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            on:click|stopPropagation
+                          >
+                            {target.repoKey}
+                          </a>
+                        {:else}
+                          <span class="font-mono text-[11px] text-foreground">{target.repoKey}</span>
+                        {/if}
+                        <StatusPill value={target.state} />
+                      </div>
+                    {/each}
+                  </div>
+                {/if}
               </div>
             {/each}
           </div>

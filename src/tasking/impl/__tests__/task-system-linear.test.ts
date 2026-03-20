@@ -196,6 +196,8 @@ describe("parseLinearMetadata", () => {
     ).toEqual({
       repo: "repo-a",
       branchName: "eng-124",
+      targets: [{ repo: "repo-a", branchName: "eng-124", position: 0 }],
+      repoDependencies: [],
       dependencies: {
         taskIds: ["ENG-123"],
         baseTaskId: null,
@@ -208,6 +210,33 @@ describe("parseLinearMetadata", () => {
     expect(parseLinearMetadata("Foreman:\n  Repo: repo-a\n  Depends on tasks: ENG-123\n")).toEqual({
       repo: null,
       branchName: null,
+      targets: [],
+      repoDependencies: [],
+      dependencies: {
+        taskIds: [],
+        baseTaskId: null,
+        branchNames: [],
+      },
+    });
+  });
+
+  test("parses multi-target repo metadata", () => {
+    expect(
+      parseLinearMetadata(
+        "Agent:\n  Repos: common, lynk-frontend, web-front-door\n  Repo dependencies: lynk-frontend<-common, web-front-door<-common\n  Branch: eng-4774\n",
+      ),
+    ).toEqual({
+      repo: null,
+      branchName: "eng-4774",
+      targets: [
+        { repo: "common", branchName: "eng-4774", position: 0 },
+        { repo: "lynk-frontend", branchName: "eng-4774", position: 1 },
+        { repo: "web-front-door", branchName: "eng-4774", position: 2 },
+      ],
+      repoDependencies: [
+        { repo: "lynk-frontend", dependsOnRepo: "common", position: 0 },
+        { repo: "web-front-door", dependsOnRepo: "common", position: 1 },
+      ],
       dependencies: {
         taskIds: [],
         baseTaskId: null,
@@ -277,6 +306,7 @@ describe("LinearTaskSystem.getTask", () => {
         url: "https://github.com/acme/repo-a/pull/1",
         title: "PR 1",
         externalId: "att-pr",
+        repo: "repo-a",
       },
     ]);
   });

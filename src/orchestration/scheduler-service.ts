@@ -10,7 +10,7 @@ import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { AttemptExecutor } from "./attempt-executor.js";
-import { runScoutSelection } from "./scout-selection.js";
+import { runScoutSelection, taskJobDedupeKey } from "./scout-selection.js";
 import { WorkerResultApplier } from "./worker-result-applier.js";
 
 export type SchedulerStatus = "running" | "paused" | "stopping" | "stopped";
@@ -322,7 +322,7 @@ export class SchedulerService extends EventEmitter {
           priorityRank: selected.priorityRank,
           repoKey: selected.repo.key,
           baseBranch: selected.baseBranch,
-          dedupeKey: `${selected.task.id}:${selected.action}`,
+          dedupeKey: taskJobDedupeKey(selected.task.id, selected.repo.key, selected.action),
           selectionReason: selected.selectionReason,
           selectionContext: selected.selectionContext,
           scoutRunId: selection.scoutRunId,

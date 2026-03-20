@@ -4,7 +4,7 @@ import path from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 
-import type { RepoRef, TaskState } from "./domain/index.js";
+import { resolveTaskTargets, type RepoRef, type Task, type TaskArtifact, type TaskState } from "./domain/index.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
 import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
@@ -62,6 +62,48 @@ const parseNonNegativeIntegerQuery = (name: string, value: string | undefined): 
 
   const parsed = Number.parseInt(value, 10);
   return parsed;
+};
+
+const pullRequestArtifactForRepo = (task: Task, repoKey: string): TaskArtifact | null => {
+  const pullRequests = task.artifacts.filter((artifact) => artifact.type === "pull_request");
+  const byRepo = pullRequests.find((artifact) => artifact.repo === repoKey);
+  if (byRepo) {
+    return byRepo;
+  }
+
+  const byUrl = pullRequests.find((artifact) => {
+    try {
+      const parsed = new URL(artifact.url);
+      const [, , repo] = parsed.pathname.split("/");
+      return repo === repoKey;
+    } catch {
+      return false;
+    }
+  });
+  if (byUrl) {
+    return byUrl;
+  }
+
+  return pullRequests.length === 1 ? pullRequests[0]! : null;
+};
+
+const taskTargetState = (deps: HttpServerDeps, task: Task, repoKey: string): TaskState => {
+  const activeJob = deps.repos.jobs
+    .listQueue(500)
+    .find((job) => job.taskId === task.id && job.repoKey === repoKey);
+  if (activeJob) {
+    return "in_progress";
+  }
+
+  if (pullRequestArtifactForRepo(task, repoKey)) {
+    return "in_review";
+  }
+
+  if (task.state === "done" || task.state === "canceled") {
+    return task.state;
+  }
+
+  return "ready";
 };
 
 const parseEnumQuery = <T extends string>(name: string, value: string | undefined, allowed: readonly T[]): T | undefined => {
@@ -125,7 +167,15 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const tasks = deps.repos.taskMirror
       .getTasks(taskQuery)
       .map((task) => {
-        const pullRequestUrl = task.artifacts.find((artifact) => artifact.type === "pull_request")?.url ?? null;
+        const targets = resolveTaskTargets(task).map((target) => {
+          const pullRequest = pullRequestArtifactForRepo(task, target.repo);
+          return {
+            repoKey: target.repo,
+            state: taskTargetState(deps, task, target.repo),
+            reviewUrl: pullRequest?.url ?? null,
+          };
+        });
+        const singleTarget = targets.length === 1 ? targets[0]! : null;
 
         return {
           id: task.id,
@@ -134,10 +184,11 @@ export const createHttpServer = (deps: HttpServerDeps) => {
           state: task.state,
           providerState: task.providerState,
           priority: task.priority,
-          repo: task.repo,
+          repo: singleTarget?.repoKey ?? task.repo,
+          targets,
           updatedAt: task.updatedAt,
           url: task.url,
-          reviewUrl: pullRequestUrl ?? task.url,
+          reviewUrl: singleTarget?.reviewUrl ?? task.url,
         };
       });
     return { tasks };

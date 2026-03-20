@@ -9,6 +9,19 @@ export type TaskArtifact = {
   url: string;
   title?: string;
   externalId?: string;
+  repo?: string;
+};
+
+export type TaskTarget = {
+  repo: string;
+  branchName: string;
+  position: number;
+};
+
+export type TaskRepoDependency = {
+  repo: string;
+  dependsOnRepo: string;
+  position: number;
 };
 
 export type Task = {
@@ -24,6 +37,8 @@ export type Task = {
   assignee: string | null;
   repo: string | null;
   branchName: string | null;
+  targets?: TaskTarget[];
+  repoDependencies?: TaskRepoDependency[];
   dependencies: {
     taskIds: string[];
     baseTaskId: string | null;
@@ -32,6 +47,38 @@ export type Task = {
   artifacts: TaskArtifact[];
   updatedAt: string;
   url: string | null;
+};
+
+export const resolveTaskTargets = (task: Task): TaskTarget[] => {
+  if (task.targets && task.targets.length > 0) {
+    return task.targets;
+  }
+
+  if (!task.repo) {
+    return [];
+  }
+
+  return [
+    {
+      repo: task.repo,
+      branchName: task.branchName ?? task.id.toLowerCase(),
+      position: 0,
+    },
+  ];
+};
+
+export const resolveTaskTarget = (task: Task, repoKey: string): TaskTarget | null =>
+  resolveTaskTargets(task).find((target) => target.repo === repoKey) ?? null;
+
+export const resolveTaskRepoDependencies = (task: Task): TaskRepoDependency[] => task.repoDependencies ?? [];
+
+export const resolveTaskBranchName = (task: Task, repoKey?: string): string => {
+  if (repoKey) {
+    return resolveTaskTarget(task, repoKey)?.branchName ?? task.branchName ?? task.id.toLowerCase();
+  }
+
+  const [onlyTarget] = resolveTaskTargets(task);
+  return task.branchName ?? onlyTarget?.branchName ?? task.id.toLowerCase();
 };
 
 export type TaskComment = {

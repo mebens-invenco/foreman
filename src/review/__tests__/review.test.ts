@@ -153,6 +153,42 @@ describe("GitHubReviewService.getContext", () => {
     );
   });
 
+  test("selects the pull request artifact that matches the requested repo target", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo-b.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi.fn().mockResolvedValue(
+      jsonResponse({
+        data: {
+          repository: {
+            pullRequest: {
+              url: "https://github.com/acme/repo-b/pull/12",
+              number: 12,
+              state: "OPEN",
+              isDraft: false,
+              merged: false,
+              headRefName: "eng-4737",
+              baseRefName: "master",
+            },
+          },
+        },
+      }),
+    ) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const resolved = await service.resolvePullRequest(
+      sampleTask({
+        repo: null,
+        artifacts: [
+          { type: "pull_request", url: "https://github.com/acme/repo-a/pull/11", repo: "repo-a" },
+          { type: "pull_request", url: "https://github.com/acme/repo-b/pull/12", repo: "repo-b" },
+        ],
+      }),
+      { key: "repo-b", rootPath: "/repos/repo-b", defaultBranch: "master" },
+    );
+
+    expect(resolved?.pullRequestUrl).toBe("https://github.com/acme/repo-b/pull/12");
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   test("includes status contexts in failing and pending checks", async () => {
     global.fetch = vi
       .fn()

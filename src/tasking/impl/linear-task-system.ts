@@ -1,4 +1,4 @@
-import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain/index.js";
+import type { Task, TaskArtifact, TaskComment, TaskRepoDependency, TaskState, TaskTarget } from "../../domain/index.js";
 import { ForemanError, isForemanError } from "../../lib/errors.js";
 import { LoggerService } from "../../logger.js";
 import type { WorkspaceConfig } from "../../workspace/config.js";
@@ -31,7 +31,67 @@ const parseCsv = (value: string): string[] =>
     .map((item) => item.trim())
     .filter(Boolean);
 
-export const parseLinearMetadata = (description: string): Pick<Task, "repo" | "branchName" | "dependencies"> => {
+const uniquePreservingOrder = (values: readonly string[]): string[] => {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    result.push(value);
+  }
+  return result;
+};
+
+const parseRepoDependencies = (value: string, repos: readonly string[]): TaskRepoDependency[] => {
+  const repoSet = new Set(repos);
+  const seen = new Set<string>();
+  const dependencies: TaskRepoDependency[] = [];
+
+  for (const [position, item] of parseCsv(value).entries()) {
+    const match = item.match(/^(.+?)\s*<-\s*(.+)$/);
+    if (!match) {
+      continue;
+    }
+
+    const repo = match[1]!.trim();
+    const dependsOnRepo = match[2]!.trim();
+    if (!repo || !dependsOnRepo || repo === dependsOnRepo) {
+      continue;
+    }
+    if (!repoSet.has(repo) || !repoSet.has(dependsOnRepo)) {
+      continue;
+    }
+
+    const key = `${repo}<-${dependsOnRepo}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    dependencies.push({ repo, dependsOnRepo, position });
+  }
+
+  return dependencies;
+};
+
+const githubRepoKeyFromUrl = (url: string): string | null => {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname !== "github.com" && !parsed.hostname.endsWith(".github.com")) {
+      return null;
+    }
+
+    const [, , repo] = parsed.pathname.split("/");
+    return repo ? repo.trim() : null;
+  } catch {
+    return null;
+  }
+};
+
+export const parseLinearMetadata = (
+  description: string,
+): Pick<Task, "repo" | "branchName" | "targets" | "repoDependencies" | "dependencies"> => {
   const match = description.match(/(^|\n)Agent:\s*\n((?:\s{2,}.+\n?)*)/i);
   const lines =
     match?.[2]
@@ -50,11 +110,17 @@ export const parseLinearMetadata = (description: string): Pick<Task, "repo" | "b
     values.set(key, value);
   }
 
+  const repos = uniquePreservingOrder([
+    ...parseCsv(values.get("repo") ?? ""),
+    ...parseCsv(values.get("repos") ?? ""),
+  ]);
   const taskIds = parseCsv(values.get("depends on tasks") ?? "");
   const baseTaskId = values.get("base from task") ?? null;
   return {
-    repo: values.get("repo") ?? null,
+    repo: repos.length === 1 ? repos[0]! : null,
     branchName: values.get("branch") ?? null,
+    targets: repos.map((repo, position) => ({ repo, branchName: values.get("branch") ?? "", position })),
+    repoDependencies: parseRepoDependencies(values.get("repo dependencies") ?? "", repos),
     dependencies: {
       taskIds,
       baseTaskId,
@@ -171,6 +237,7 @@ const isGithubPullRequestArtifact = (artifact: Pick<TaskArtifact, "type" | "url"
 const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task => {
   const metadata = parseLinearMetadata(node.description ?? "");
   const branchName = metadata.branchName ?? node.branchName ?? node.identifier.toLowerCase();
+  const targets: TaskTarget[] = (metadata.targets ?? []).map((target) => ({ ...target, branchName }));
   return {
     id: node.identifier,
     provider: "linear",
@@ -184,6 +251,8 @@ const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task
     assignee: node.assignee?.name ?? null,
     repo: metadata.repo,
     branchName,
+    ...(targets.length > 0 ? { targets } : {}),
+    ...(metadata.repoDependencies && metadata.repoDependencies.length > 0 ? { repoDependencies: metadata.repoDependencies } : {}),
     dependencies: metadata.dependencies,
     artifacts: node.attachments.nodes.flatMap((attachment) =>
       isGithubPullRequestArtifact({ type: "pull_request", url: attachment.url })
@@ -193,6 +262,7 @@ const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task
               url: attachment.url,
               ...(attachment.title ? { title: attachment.title } : {}),
               externalId: attachment.id,
+              ...(githubRepoKeyFromUrl(attachment.url) ? { repo: githubRepoKeyFromUrl(attachment.url)! } : {}),
             },
           ]
         : [],

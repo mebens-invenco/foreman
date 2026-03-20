@@ -30,7 +30,7 @@ export type TaskTargetDependencyRecord = {
   taskTargetId: string;
   dependsOnTaskTargetId: string;
   position: number;
-  source: "derived";
+  source: "derived" | "metadata";
 };
 
 export interface TaskMirrorRepo {

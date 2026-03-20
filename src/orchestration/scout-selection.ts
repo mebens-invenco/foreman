@@ -1,4 +1,15 @@
-import type { ActionType, RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskComment } from "../domain/index.js";
+import {
+  resolveTaskBranchName,
+  resolveTaskRepoDependencies,
+  resolveTaskTarget,
+  resolveTaskTargets,
+  type ActionType,
+  type RepoRef,
+  type ResolvedPullRequest,
+  type ReviewContext,
+  type Task,
+  type TaskComment,
+} from "../domain/index.js";
 import {
   actionableReviewThreadFingerprint,
   actionableConversationComments,
@@ -15,7 +26,7 @@ import type { ForemanRepos, ScoutRunTrigger } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
-import { branchExistsOnOrigin, isAncestorOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
+import { branchExistsOnOrigin, isAncestorOnOrigin } from "../workspace/git-worktrees.js";
 
 type Selection = {
   task: Task;
@@ -25,6 +36,22 @@ type Selection = {
   priorityRank: number;
   selectionReason: string;
   selectionContext: Record<string, unknown>;
+};
+
+const taskLeaseKey = (taskId: string, repoKey: string): string => `${taskId}:${repoKey}`;
+export const taskJobDedupeKey = (taskId: string, repoKey: string, action: ActionType): string => `${taskId}:${repoKey}:${action}`;
+
+const taskForRepo = (task: Task, repoKey: string): Task | null => {
+  const target = resolveTaskTarget(task, repoKey);
+  if (!target) {
+    return null;
+  }
+
+  return {
+    ...task,
+    repo: target.repo,
+    branchName: target.branchName,
+  };
 };
 
 const reviewPriorityReason = (context: ReviewContext): string | null => {
@@ -92,6 +119,14 @@ export const resolveBaseBranch = async (input: {
 }): Promise<{ baseBranch: string; blockers: string[] }> => {
   const blockers: string[] = [];
   const dependencies = input.task.dependencies.taskIds;
+  const selectedTarget = resolveTaskTarget(input.task, input.repo.key);
+
+  if (!selectedTarget) {
+    return {
+      baseBranch: input.repo.defaultBranch,
+      blockers: [`Task ${input.task.id} does not expose repo target ${input.repo.key}.`],
+    };
+  }
 
   const dependencyTaskCache = new Map<string, Promise<Task>>();
   const dependencyPullRequestCache = new Map<string, Promise<ResolvedPullRequest | null>>();
@@ -105,14 +140,19 @@ export const resolveBaseBranch = async (input: {
     return promise;
   };
 
-  const getDependencyReviewContext = async (taskId: string): Promise<ResolvedPullRequest | null> => {
-    let promise = dependencyPullRequestCache.get(taskId);
+  const getDependencyReviewContext = async (taskId: string, repoKey: string): Promise<ResolvedPullRequest | null> => {
+    const cacheKey = `${taskId}:${repoKey}`;
+    let promise = dependencyPullRequestCache.get(cacheKey);
     if (!promise) {
       promise = getDependencyTask(taskId).then(async (task) => {
-        const dependencyRepo = task.repo ? input.repos.find((item) => item.key === task.repo) : undefined;
-        return input.reviewService.resolvePullRequest(task, dependencyRepo);
+        const dependencyRepo = input.repos.find((item) => item.key === repoKey);
+        const scopedTask = taskForRepo(task, repoKey);
+        if (!dependencyRepo || !scopedTask) {
+          return null;
+        }
+        return input.reviewService.resolvePullRequest(scopedTask, dependencyRepo);
       });
-      dependencyPullRequestCache.set(taskId, promise);
+      dependencyPullRequestCache.set(cacheKey, promise);
     }
     return promise;
   };
@@ -127,7 +167,12 @@ export const resolveBaseBranch = async (input: {
 
   const resolveDependencyBaseBranch = async (taskId: string): Promise<{ branch: string | null; merged: boolean }> => {
     const dependencyTask = await getDependencyTask(taskId);
-    const context = await getDependencyReviewContext(taskId);
+    if (!resolveTaskTarget(dependencyTask, input.repo.key)) {
+      blockers.push(`Dependency task ${taskId} does not expose repo target ${input.repo.key}.`);
+      return { branch: null, merged: false };
+    }
+
+    const context = await getDependencyReviewContext(taskId, input.repo.key);
     if (context?.state === "open") {
       const exists = await ensureOriginBranch(
         context.headBranch,
@@ -152,7 +197,13 @@ export const resolveBaseBranch = async (input: {
   };
 
   const ensureMergedDependency = async (taskId: string): Promise<void> => {
-    const context = await getDependencyReviewContext(taskId);
+    const dependencyTask = await getDependencyTask(taskId);
+    if (!resolveTaskTarget(dependencyTask, input.repo.key)) {
+      blockers.push(`Dependency task ${taskId} does not expose repo target ${input.repo.key}.`);
+      return;
+    }
+
+    const context = await getDependencyReviewContext(taskId, input.repo.key);
     if (context?.state === "merged") {
       await ensureOriginBranch(
         context.baseBranch,
@@ -167,16 +218,40 @@ export const resolveBaseBranch = async (input: {
   const resolveMergedDependencyBaseBranch = async (branchName: string): Promise<string | null> => {
     for (const taskId of dependencies) {
       const dependencyTask = await getDependencyTask(taskId);
-      const context = await getDependencyReviewContext(taskId);
+      if (!resolveTaskTarget(dependencyTask, input.repo.key)) {
+        continue;
+      }
+      const context = await getDependencyReviewContext(taskId, input.repo.key);
       if (context?.state !== "merged") {
         continue;
       }
-      if (resolveTaskBranchName(dependencyTask) === branchName || context.headBranch === branchName) {
+      if (resolveTaskBranchName(dependencyTask, input.repo.key) === branchName || context.headBranch === branchName) {
         return context.baseBranch;
       }
     }
     return null;
   };
+
+  for (const dependency of resolveTaskRepoDependencies(input.task).filter((item) => item.repo === selectedTarget.repo)) {
+    const dependencyRepo = input.repos.find((repo) => repo.key === dependency.dependsOnRepo);
+    if (!dependencyRepo) {
+      blockers.push(`Repo dependency ${dependency.dependsOnRepo} for target ${selectedTarget.repo} was not discovered.`);
+      continue;
+    }
+
+    const scopedTask = taskForRepo(input.task, dependency.dependsOnRepo);
+    if (!scopedTask) {
+      blockers.push(`Task ${input.task.id} does not expose repo target ${dependency.dependsOnRepo}.`);
+      continue;
+    }
+
+    const context = await input.reviewService.resolvePullRequest(scopedTask, dependencyRepo);
+    if (context?.state === "open" || context?.state === "merged") {
+      continue;
+    }
+
+    blockers.push(`Target ${selectedTarget.repo} is blocked until same-task repo target ${dependency.dependsOnRepo} reaches review or merged state.`);
+  }
 
   let baseBranch = input.repo.defaultBranch;
 
@@ -254,7 +329,7 @@ export const runScoutSelection = async (input: {
     (task) =>
       task.state === "ready" ||
       task.state === "in_review" ||
-      (task.state === "in_progress" && !input.foremanRepos.leases.hasActiveTaskLease(task.id)),
+      task.state === "in_progress",
   );
   const terminalCandidates = allTasks.filter(isTerminal);
 
@@ -276,13 +351,9 @@ export const runScoutSelection = async (input: {
     availableCapacity,
   });
 
-  const canSchedule = (task: Task, action: ActionType): boolean => {
-    if (jobs.some((job) => job.task.id === task.id)) {
-      return false;
-    }
-
-    const dedupeKey = `${task.id}:${action}`;
-    if (jobs.some((job) => `${job.task.id}:${job.action}` === dedupeKey)) {
+  const canSchedule = (task: Task, action: ActionType, repoKey: string): boolean => {
+    const dedupeKey = taskJobDedupeKey(task.id, repoKey, action);
+    if (jobs.some((job) => taskJobDedupeKey(job.task.id, job.repo.key, job.action) === dedupeKey)) {
       return false;
     }
     return !input.foremanRepos.jobs.hasActiveDedupeKey(dedupeKey);
@@ -318,153 +389,208 @@ export const runScoutSelection = async (input: {
     for (const task of activeCandidates.filter(
       (candidate) => candidate.state === "in_review" || candidate.state === "in_progress",
     )) {
-      if (!canSchedule(task, "review")) {
-        continue;
-      }
-
-      const repo = task.repo ? reposByKey.get(task.repo) : null;
-      if (!repo) {
-        await recordBlocker(task.id, "Review blocked because the task repo is missing or invalid.");
-        continue;
-      }
-
-      const context = await input.reviewService.getContext(task, input.config.workspace.agentPrefix, repo);
-      if (!context || context.state !== "open") {
-        continue;
-      }
-
-      const checkpoint = input.foremanRepos.reviewCheckpoints.getReviewCheckpoint(task.id, context.pullRequestUrl);
-      const checkpointMatches = checkpoint
-        ? checkpoint.headSha === context.headSha &&
-          checkpoint.latestReviewSummaryId === latestActionableReviewSummaryId(context) &&
-          checkpoint.latestConversationCommentId === latestActionableConversationCommentId(context) &&
-          checkpoint.reviewThreadsFingerprint === actionableReviewThreadFingerprint(context) &&
-          checkpoint.checksFingerprint === stableStringify({ failing: context.failingChecks, pending: context.pendingChecks }) &&
-          checkpoint.mergeState === context.mergeState
-        : false;
-
-      if (checkpoint && !checkpointMatches) {
-        input.foremanRepos.reviewCheckpoints.deleteReviewCheckpoint(task.id, context.pullRequestUrl);
-      }
-
-      if (checkpointMatches) {
-        continue;
-      }
-
-      const reason = reviewPriorityReason(context);
-      if (!reason) {
-        continue;
-      }
-
-      chosen = {
-        task,
-        action: "review",
-        repo,
-        baseBranch: context.baseBranch,
-        priorityRank: priorityToRank(task.priority),
-        selectionReason: reason,
-        selectionContext: { reviewContext: context },
-      };
-      break;
-    }
-
-    if (!chosen) {
-      for (const task of activeCandidates.filter((candidate) => candidate.state === "in_review")) {
-        if (!canSchedule(task, "retry")) {
+      for (const target of resolveTaskTargets(task)) {
+        if (!canSchedule(task, "review", target.repo)) {
           continue;
         }
 
-        const repo = task.repo ? reposByKey.get(task.repo) : null;
+        const repo = reposByKey.get(target.repo) ?? null;
         if (!repo) {
-          await recordBlocker(task.id, "Retry blocked because the task repo is missing or invalid.");
+          await recordBlocker(task.id, `Review blocked because repo target ${target.repo} is missing or invalid.`);
           continue;
         }
 
-        const reviewContext = await input.reviewService.getContext(task, input.config.workspace.agentPrefix, repo);
-        if (!reviewContext || reviewContext.state !== "closed") {
+        const scopedTask = taskForRepo(task, target.repo);
+        if (!scopedTask) {
           continue;
         }
 
-        const taskComments = await input.taskSystem.listComments(task.id);
-        const combinedComments = [
-          ...taskComments,
-          ...reviewContext.conversationComments.map((comment) => ({
-            ...comment,
-            taskId: task.id,
-            authorKind: comment.authoredByAgent ? ("agent" as const) : ("human" as const),
-            updatedAt: null,
-          })),
-        ];
-        if (hasStopIntent(combinedComments, input.config.workspace.agentPrefix)) {
+        const context = await input.reviewService.getContext(scopedTask, input.config.workspace.agentPrefix, repo);
+        if (!context || context.state !== "open") {
           continue;
         }
 
-        const base = await resolveBaseBranch({ task, repo, repos: input.repos, taskSystem: input.taskSystem, reviewService: input.reviewService });
-        if (base.blockers.length > 0) {
-          for (const blocker of base.blockers) {
-            await recordBlocker(task.id, blocker);
-          }
+        const checkpoint = input.foremanRepos.reviewCheckpoints.getReviewCheckpoint(task.id, context.pullRequestUrl);
+        const checkpointMatches = checkpoint
+          ? checkpoint.headSha === context.headSha &&
+            checkpoint.latestReviewSummaryId === latestActionableReviewSummaryId(context) &&
+            checkpoint.latestConversationCommentId === latestActionableConversationCommentId(context) &&
+            checkpoint.reviewThreadsFingerprint === actionableReviewThreadFingerprint(context) &&
+            checkpoint.checksFingerprint === stableStringify({ failing: context.failingChecks, pending: context.pendingChecks }) &&
+            checkpoint.mergeState === context.mergeState
+          : false;
+
+        if (checkpoint && !checkpointMatches) {
+          input.foremanRepos.reviewCheckpoints.deleteReviewCheckpoint(task.id, context.pullRequestUrl);
+        }
+
+        if (checkpointMatches) {
+          continue;
+        }
+
+        const reason = reviewPriorityReason(context);
+        if (!reason) {
           continue;
         }
 
         chosen = {
           task,
-          action: "retry",
+          action: "review",
           repo,
-          baseBranch: base.baseBranch,
+          baseBranch: context.baseBranch,
           priorityRank: priorityToRank(task.priority),
-          selectionReason: "closed unmerged pull request eligible for retry",
-          selectionContext: {},
+          selectionReason: reason,
+          selectionContext: { reviewContext: context },
         };
         break;
+      }
+
+      if (chosen) {
+        break;
+      }
+    }
+
+    if (!chosen) {
+      for (const task of activeCandidates.filter((candidate) => candidate.state === "in_review")) {
+        for (const target of resolveTaskTargets(task)) {
+          if (!canSchedule(task, "retry", target.repo)) {
+            continue;
+          }
+
+          const repo = reposByKey.get(target.repo) ?? null;
+          if (!repo) {
+            await recordBlocker(task.id, `Retry blocked because repo target ${target.repo} is missing or invalid.`);
+            continue;
+          }
+
+          const scopedTask = taskForRepo(task, target.repo);
+          if (!scopedTask) {
+            continue;
+          }
+
+          const reviewContext = await input.reviewService.getContext(scopedTask, input.config.workspace.agentPrefix, repo);
+          if (!reviewContext || reviewContext.state !== "closed") {
+            continue;
+          }
+
+          const taskComments = await input.taskSystem.listComments(task.id);
+          const combinedComments = [
+            ...taskComments,
+            ...reviewContext.conversationComments.map((comment) => ({
+              ...comment,
+              taskId: task.id,
+              authorKind: comment.authoredByAgent ? ("agent" as const) : ("human" as const),
+              updatedAt: null,
+            })),
+          ];
+          if (hasStopIntent(combinedComments, input.config.workspace.agentPrefix)) {
+            continue;
+          }
+
+          const base = await resolveBaseBranch({
+            task,
+            repo,
+            repos: input.repos,
+            taskSystem: input.taskSystem,
+            reviewService: input.reviewService,
+          });
+          if (base.blockers.length > 0) {
+            for (const blocker of base.blockers) {
+              await recordBlocker(task.id, blocker);
+            }
+            continue;
+          }
+
+          chosen = {
+            task,
+            action: "retry",
+            repo,
+            baseBranch: base.baseBranch,
+            priorityRank: priorityToRank(task.priority),
+            selectionReason: "closed unmerged pull request eligible for retry",
+            selectionContext: {},
+          };
+          break;
+        }
+
+        if (chosen) {
+          break;
+        }
       }
     }
 
     if (!chosen) {
       const executionCandidates = activeCandidates
-        .filter((task) => task.state === "ready" || task.state === "in_progress")
+        .filter((task) => task.state === "ready" || task.state === "in_progress" || task.state === "in_review")
         .sort(compareExecutionTasks);
 
       for (const task of executionCandidates) {
-        if (!canSchedule(task, "execution")) {
-          continue;
-        }
-
-        if (!task.repo) {
+        const targets = resolveTaskTargets(task);
+        if (targets.length === 0) {
           await recordBlocker(task.id, "Execution blocked because Agent Repo metadata is missing.");
           continue;
         }
 
-        const repo = reposByKey.get(task.repo);
-        if (!repo) {
-          await recordBlocker(task.id, `Execution blocked because repo ${task.repo} was not discovered.`);
-          continue;
-        }
-
-        const base = await resolveBaseBranch({ task, repo, repos: input.repos, taskSystem: input.taskSystem, reviewService: input.reviewService });
-        if (base.blockers.length > 0) {
-          for (const blocker of base.blockers) {
-            await recordBlocker(task.id, blocker, { postComment: false });
+        for (const target of targets) {
+          if (!canSchedule(task, "execution", target.repo)) {
+            continue;
           }
-          continue;
+          if (input.foremanRepos.leases.hasActiveTaskLease(taskLeaseKey(task.id, target.repo))) {
+            continue;
+          }
+
+          const repo = reposByKey.get(target.repo);
+          if (!repo) {
+            await recordBlocker(task.id, `Execution blocked because repo ${target.repo} was not discovered.`);
+            continue;
+          }
+
+          const scopedTask = taskForRepo(task, target.repo);
+          if (!scopedTask) {
+            continue;
+          }
+
+          const existingPullRequest = await input.reviewService.resolvePullRequest(scopedTask, repo);
+          if (existingPullRequest) {
+            continue;
+          }
+
+          const base = await resolveBaseBranch({
+            task,
+            repo,
+            repos: input.repos,
+            taskSystem: input.taskSystem,
+            reviewService: input.reviewService,
+          });
+          if (base.blockers.length > 0) {
+            for (const blocker of base.blockers) {
+              await recordBlocker(task.id, blocker, { postComment: false });
+            }
+            continue;
+          }
+
+          chosen = {
+            task,
+            action: "execution",
+            repo,
+            baseBranch: base.baseBranch,
+            priorityRank: priorityToRank(task.priority),
+            selectionReason: task.state === "ready" ? "highest priority ready task target" : "resumable in-progress task target without active lease",
+            selectionContext: {},
+          };
+          break;
         }
 
-        chosen = {
-          task,
-          action: "execution",
-          repo,
-          baseBranch: base.baseBranch,
-          priorityRank: priorityToRank(task.priority),
-          selectionReason: task.state === "ready" ? "highest priority ready task" : "resumable in-progress task without active lease",
-          selectionContext: {},
-        };
-        break;
+        if (chosen) {
+          break;
+        }
       }
     }
 
     if (!chosen) {
       for (const task of terminalCandidates) {
-        if (!canSchedule(task, "consolidation")) {
+        const [firstTarget] = resolveTaskTargets(task);
+        if (!firstTarget || !canSchedule(task, "consolidation", firstTarget.repo)) {
           continue;
         }
 
@@ -473,7 +599,9 @@ export const runScoutSelection = async (input: {
           continue;
         }
 
-        const repo = task.repo ? reposByKey.get(task.repo) : null;
+        const repo = resolveTaskTargets(task)
+          .map((target) => reposByKey.get(target.repo) ?? null)
+          .find((candidate) => candidate !== null);
         if (!repo) {
           continue;
         }
@@ -527,27 +655,31 @@ export const runScoutSelection = async (input: {
   return { scoutRunId, jobs };
 };
 
-export const assertTaskActionableRepo = (task: Task, repos: RepoRef[]): RepoRef => {
-  if (!task.repo) {
-    throw new ForemanError("task_missing_repo", `Task ${task.id} is missing repo metadata.`);
+export const assertTaskActionableRepo = (task: Task, repoKey: string, repos: RepoRef[]): RepoRef => {
+  if (!resolveTaskTarget(task, repoKey)) {
+    throw new ForemanError("task_missing_repo", `Task ${task.id} is missing repo target ${repoKey}.`);
   }
 
-  const repo = repos.find((item) => item.key === task.repo);
+  const repo = repos.find((item) => item.key === repoKey);
   if (!repo) {
-    throw new ForemanError("task_invalid_repo", `Task ${task.id} references unknown repo ${task.repo}.`);
+    throw new ForemanError("task_invalid_repo", `Task ${task.id} references unknown repo ${repoKey}.`);
   }
 
   return repo;
 };
 
-export const leaseResourceKeysForAction = (task: Task, action: ActionType): Array<{ resourceType: "job" | "task" | "branch"; resourceKey: string }> => {
+export const leaseResourceKeysForAction = (
+  task: Task,
+  repoKey: string,
+  action: ActionType,
+): Array<{ resourceType: "job" | "task" | "branch"; resourceKey: string }> => {
   const leases: Array<{ resourceType: "job" | "task" | "branch"; resourceKey: string }> = [
-    { resourceType: "job", resourceKey: `${task.id}:${action}` },
-    { resourceType: "task", resourceKey: task.id },
+    { resourceType: "job", resourceKey: taskJobDedupeKey(task.id, repoKey, action) },
+    { resourceType: "task", resourceKey: taskLeaseKey(task.id, repoKey) },
   ];
 
   if (action !== "consolidation") {
-    leases.push({ resourceType: "branch", resourceKey: `${task.repo}:${resolveTaskBranchName(task)}` });
+    leases.push({ resourceType: "branch", resourceKey: `${repoKey}:${resolveTaskBranchName(task, repoKey)}` });
   }
 
   return leases;

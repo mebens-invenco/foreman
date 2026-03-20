@@ -97,7 +97,7 @@ export class WorkerResultApplier {
         pullRequestUrl = created.url;
         await this.deps.taskSystem.addArtifact({
           taskId: input.task.id,
-          artifact: { type: "pull_request", url: created.url, title: mutation.title, externalId: String(created.number) },
+          artifact: { type: "pull_request", url: created.url, title: mutation.title, externalId: String(created.number), repo: input.repo.key },
         });
         await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
         logger.info("created pull request", { pullRequestUrl: created.url, pullRequestNumber: created.number });
@@ -120,6 +120,7 @@ export class WorkerResultApplier {
             url: reopened.url,
             ...(mutation.title ? { title: mutation.title } : {}),
             externalId: String(reopened.number),
+            repo: input.repo.key,
           },
         });
         await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });

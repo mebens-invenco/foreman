@@ -547,8 +547,36 @@ export class GitHubReviewService implements ReviewService {
     };
   }
 
-  private pullRequestArtifact(task: Task): string | null {
-    return task.artifacts.find((artifact) => artifact.type === "pull_request")?.url ?? null;
+  private async pullRequestArtifact(task: Task, repo?: RepoRef): Promise<string | null> {
+    const artifacts = task.artifacts.filter((artifact) => artifact.type === "pull_request");
+    if (artifacts.length === 0) {
+      return null;
+    }
+
+    if (!repo) {
+      return artifacts[0]?.url ?? null;
+    }
+
+    const descriptor = await this.repoDescriptorFromRepo(repo);
+    const repoMatch = artifacts.find((artifact) => {
+      if (artifact.repo) {
+        return artifact.repo === repo.key;
+      }
+
+      try {
+        const parsed = new URL(artifact.url);
+        const [, owner, repoName] = parsed.pathname.split("/");
+        return owner === descriptor.owner && repoName === descriptor.repo;
+      } catch {
+        return false;
+      }
+    });
+
+    if (repoMatch) {
+      return repoMatch.url;
+    }
+
+    return artifacts.length === 1 ? artifacts[0]!.url : null;
   }
 
   private async resolvePullRequestFromArtifact(prUrl: string, taskId: string): Promise<ResolvedPullRequest | null> {
@@ -664,7 +692,7 @@ export class GitHubReviewService implements ReviewService {
   }
 
   async resolvePullRequest(task: Task, repo?: RepoRef): Promise<ResolvedPullRequest | null> {
-    const prUrl = this.pullRequestArtifact(task);
+    const prUrl = await this.pullRequestArtifact(task, repo);
     if (prUrl) {
       return this.resolvePullRequestFromArtifact(prUrl, task.id);
     }
