@@ -45,7 +45,7 @@ export type Task = {
   url: string | null;
 };
 
-export const taskTargetFromTask = (task: Pick<Task, "id" | "repo" | "branchName">): TaskTargetRef | null => {
+export const getTaskTargetRefFromTask = (task: Pick<Task, "id" | "repo" | "branchName">): TaskTargetRef | null => {
   if (!task.repo) {
     return null;
   }

@@ -1,5 +1,5 @@
 import {
-  taskTargetFromTask,
+  getTaskTargetRefFromTask,
   type ActionType,
   type RepoRef,
   type ResolvedPullRequest,
@@ -95,7 +95,7 @@ const compareExecutionTasks = (left: Task, right: Task): number => {
 };
 
 const resolvePersistedTaskTarget = (task: Task, foremanRepos: ForemanRepos): TaskTarget | null => {
-  const target = taskTargetFromTask(task);
+  const target = getTaskTargetRefFromTask(task);
   if (!target) {
     return null;
   }
@@ -129,7 +129,7 @@ export const resolveBaseBranch = async (input: {
     let promise = dependencyPullRequestCache.get(taskId);
     if (!promise) {
       promise = getDependencyTask(taskId).then(async (task) => {
-        const dependencyTarget = taskTargetFromTask(task);
+        const dependencyTarget = getTaskTargetRefFromTask(task);
         const dependencyRepo = dependencyTarget ? input.repos.find((item) => item.key === dependencyTarget.repoKey) : undefined;
         return input.reviewService.resolvePullRequest(task, dependencyRepo, dependencyTarget ?? undefined);
       });

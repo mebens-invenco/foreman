@@ -1,7 +1,7 @@
 import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
-import { taskTargetFromTask, type Task, type TaskTarget, type TaskTargetRef } from "../../domain/index.js";
+import { getTaskTargetRefFromTask, type Task, type TaskTarget, type TaskTargetRef } from "../../domain/index.js";
 import type {
   GetTasksOptions,
   TaskDependencyRecord,
@@ -116,7 +116,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
         .sort((left, right) => left.position - right.position || left.repoKey.localeCompare(right.repoKey));
     }
 
-    const fallbackTarget = taskTargetFromTask(task);
+    const fallbackTarget = getTaskTargetRefFromTask(task);
     return fallbackTarget ? [fallbackTarget] : [];
   }
 
