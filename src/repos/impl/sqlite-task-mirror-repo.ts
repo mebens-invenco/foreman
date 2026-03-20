@@ -1,7 +1,7 @@
 import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
-import { taskTargetFromTask, type PersistedTaskTarget, type Task, type TaskTarget } from "../../domain/index.js";
+import { taskTargetFromTask, type Task, type TaskTarget, type TaskTargetRef } from "../../domain/index.js";
 import type {
   GetTasksOptions,
   TaskDependencyRecord,
@@ -72,7 +72,7 @@ const mapStoredTask = (row: unknown): StoredTaskRecord => {
   };
 };
 
-const mapTaskTarget = (row: unknown): PersistedTaskTarget => {
+const mapTaskTarget = (row: unknown): TaskTarget => {
   const mapped = row as SqliteRow;
   return {
     id: String(mapped.id),
@@ -108,8 +108,8 @@ const mapTaskTargetDependency = (row: unknown): TaskTargetDependencyRecord => {
 export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
   constructor(private readonly sqlite: SqliteDatabase) {}
 
-  private normalizeTaskTargets(task: Task): TaskTarget[] {
-    const explicitTargets = (task as Task & { targets?: TaskTarget[] }).targets;
+  private normalizeTaskTargets(task: Task): TaskTargetRef[] {
+    const explicitTargets = (task as Task & { targets?: TaskTargetRef[] }).targets;
     if (explicitTargets && explicitTargets.length > 0) {
       return explicitTargets
         .map((target, position) => ({ ...target, position: target.position ?? position }))
@@ -174,7 +174,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     });
   }
 
-  private selectTargets(taskIds: readonly string[]): PersistedTaskTarget[] {
+  private selectTargets(taskIds: readonly string[]): TaskTarget[] {
     const normalizedIds = normalizeIds(taskIds);
     if (normalizedIds.length === 0) {
       return [];
@@ -214,7 +214,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
       return [];
     }
 
-    const targetsByTaskId = new Map<string, PersistedTaskTarget[]>();
+    const targetsByTaskId = new Map<string, TaskTarget[]>();
     for (const target of this.selectTargets(storedTasks.map((task) => task.id))) {
       const existing = targetsByTaskId.get(target.taskId) ?? [];
       existing.push(target);
@@ -397,7 +397,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     return this.hydrateTasks(this.selectTaskIds(options));
   }
 
-  getTaskTarget(taskId: string, repoKey: string): PersistedTaskTarget | null {
+  getTaskTarget(taskId: string, repoKey: string): TaskTarget | null {
     const row = this.sqlite
       .prepare(
         `SELECT id, task_id, repo_key, branch_name, position
@@ -410,7 +410,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     return row ? mapTaskTarget(row) : null;
   }
 
-  getTaskTargetById(taskTargetId: string): PersistedTaskTarget | null {
+  getTaskTargetById(taskTargetId: string): TaskTarget | null {
     const row = this.sqlite
       .prepare(
         `SELECT id, task_id, repo_key, branch_name, position
@@ -421,7 +421,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     return row ? mapTaskTarget(row) : null;
   }
 
-  getTargetsForTask(taskId: string): PersistedTaskTarget[] {
+  getTargetsForTask(taskId: string): TaskTarget[] {
     return this.selectTargets([taskId]);
   }
 

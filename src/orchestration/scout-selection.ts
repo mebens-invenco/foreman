@@ -1,13 +1,13 @@
 import {
   taskTargetFromTask,
   type ActionType,
-  type PersistedTaskTarget,
   type RepoRef,
   type ResolvedPullRequest,
   type ReviewContext,
   type Task,
   type TaskComment,
   type TaskTarget,
+  type TaskTargetRef,
 } from "../domain/index.js";
 import {
   actionableReviewThreadFingerprint,
@@ -29,7 +29,7 @@ import { branchExistsOnOrigin, isAncestorOnOrigin, resolveTaskBranchName } from 
 
 type Selection = {
   task: Task;
-  target: PersistedTaskTarget;
+  target: TaskTarget;
   action: ActionType;
   repo: RepoRef;
   baseBranch: string | null;
@@ -94,7 +94,7 @@ const compareExecutionTasks = (left: Task, right: Task): number => {
   return numericTaskId(left.id) - numericTaskId(right.id);
 };
 
-const resolvePersistedTaskTarget = (task: Task, foremanRepos: ForemanRepos): PersistedTaskTarget | null => {
+const resolvePersistedTaskTarget = (task: Task, foremanRepos: ForemanRepos): TaskTarget | null => {
   const target = taskTargetFromTask(task);
   if (!target) {
     return null;
@@ -543,11 +543,11 @@ export const runScoutSelection = async (input: {
   return { scoutRunId, jobs };
 };
 
-export const assertTaskActionableTarget = (
+export const assertTaskActionableTarget = <T extends TaskTargetRef>(
   task: Task,
   repos: RepoRef[],
-  target: TaskTarget | null,
-): { target: TaskTarget; repo: RepoRef } => {
+  target: T | null,
+): { target: T; repo: RepoRef } => {
   if (!target) {
     throw new ForemanError("task_missing_repo", `Task ${task.id} is missing repo metadata.`);
   }
@@ -563,7 +563,7 @@ export const assertTaskActionableTarget = (
 export const leaseResourceKeysForAction = (
   task: Task,
   action: ActionType,
-  target: TaskTarget,
+  target: TaskTargetRef,
 ): Array<{ resourceType: "job" | "task" | "branch"; resourceKey: string }> => {
   const leases: Array<{ resourceType: "job" | "task" | "branch"; resourceKey: string }> = [
     { resourceType: "job", resourceKey: `${task.id}:${action}` },

@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { taskTargetFromTask, deriveAttemptStatus, type RepoRef, type Task, type TaskTarget, type WorkerResult } from "../domain/index.js";
+import { deriveAttemptStatus, type RepoRef, type Task, type TaskTarget, type WorkerResult } from "../domain/index.js";
 import type { AgentRunner } from "../execution/index.js";
 import { renderWorkerPrompt } from "../execution/render-worker-prompt.js";
 import { parseWorkerResult, validateWorkerResult } from "../execution/index.js";
@@ -62,19 +62,19 @@ export class AttemptExecutor {
 
     let attempt: AttemptRecord | null = null;
     let task: Task | null = null;
-    let target: TaskTarget | null = null;
     let repo: RepoRef | null = null;
     let worktreePath: string | null = null;
     let beforeSha: string | null = null;
 
     try {
       task = await this.deps.taskSystem.getTask(job.taskId);
-      const actionableTarget = assertTaskActionableTarget(
-        task,
-        this.deps.repos,
-        this.deps.foremanRepos.taskMirror.getTaskTargetById(job.taskTargetId) ?? taskTargetFromTask(task),
-      );
-      target = actionableTarget.target;
+      const persistedTarget = this.deps.foremanRepos.taskMirror.getTaskTargetById(job.taskTargetId);
+      if (!persistedTarget) {
+        throw new ForemanError("task_missing_target", `Job ${job.id} references missing task target ${job.taskTargetId}.`);
+      }
+
+      const actionableTarget = assertTaskActionableTarget(task, this.deps.repos, persistedTarget);
+      const target: TaskTarget = actionableTarget.target;
       repo = actionableTarget.repo;
       jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
       jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });

@@ -232,7 +232,7 @@ export class WorkerResultApplier {
         try {
           this.deps.foremanRepos.reviewCheckpoints.upsertReviewCheckpoint({
             taskId: input.task.id,
-            taskTargetId: input.target.id ?? input.job.taskTargetId,
+            taskTargetId: input.target.id,
             prUrl: pullRequestUrl,
             reviewContext,
             sourceAttemptId: input.attempt.id,

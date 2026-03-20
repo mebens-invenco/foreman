@@ -1,7 +1,7 @@
 import { ForemanError } from "../../lib/errors.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
-import { resolveTaskBranchName, type CheckState, type ConversationComment, type RepoRef, type ResolvedPullRequest, type ReviewComment, type ReviewContext, type ReviewThread, type ReviewSummary, type Task, type TaskTarget } from "../../domain/index.js";
+import { resolveTaskBranchName, type CheckState, type ConversationComment, type RepoRef, type ResolvedPullRequest, type ReviewComment, type ReviewContext, type ReviewThread, type ReviewSummary, type Task, type TaskTargetRef } from "../../domain/index.js";
 import type { ReviewService } from "../review-service.js";
 
 type RepoDescriptor = { owner: string; repo: string };
@@ -603,7 +603,7 @@ export class GitHubReviewService implements ReviewService {
     return promise;
   }
 
-  private async resolvePullRequestByBranch(task: Task, repo: RepoRef, target?: TaskTarget): Promise<ResolvedPullRequest | null> {
+  private async resolvePullRequestByBranch(task: Task, repo: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null> {
     const branchName = resolveTaskBranchName(task, target);
     if (!branchName) {
       this.logger.debug("skipping branch-based GitHub pull request lookup because task branch metadata is missing", {
@@ -658,7 +658,7 @@ export class GitHubReviewService implements ReviewService {
     });
   }
 
-  async resolvePullRequest(task: Task, repo?: RepoRef, target?: TaskTarget): Promise<ResolvedPullRequest | null> {
+  async resolvePullRequest(task: Task, repo?: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null> {
     const prUrl = await this.pullRequestArtifact(task, repo);
     if (prUrl) {
       return this.resolvePullRequestFromArtifact(prUrl, task.id);
@@ -672,7 +672,7 @@ export class GitHubReviewService implements ReviewService {
     return this.resolvePullRequestByBranch(task, repo, target);
   }
 
-  async getContext(task: Task, agentPrefix: string, repo?: RepoRef, target?: TaskTarget): Promise<ReviewContext | null> {
+  async getContext(task: Task, agentPrefix: string, repo?: RepoRef, target?: TaskTargetRef): Promise<ReviewContext | null> {
     const resolvedPullRequest = await this.resolvePullRequest(task, repo, target);
     const effectivePrUrl = resolvedPullRequest?.pullRequestUrl ?? null;
     if (!effectivePrUrl) {
@@ -801,7 +801,7 @@ export class GitHubReviewService implements ReviewService {
     }
   }
 
-  async findLatestOpenPullRequestBranch(task: Task, repo?: RepoRef, target?: TaskTarget): Promise<string | null> {
+  async findLatestOpenPullRequestBranch(task: Task, repo?: RepoRef, target?: TaskTargetRef): Promise<string | null> {
     const pullRequest = await this.resolvePullRequest(task, repo, target);
     const branch = pullRequest?.state === "open" ? pullRequest.headBranch : null;
     this.logger.debug("resolved latest open pull request branch", { taskId: task.id, branch: branch ?? null });

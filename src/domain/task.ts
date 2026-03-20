@@ -6,17 +6,14 @@ export type TaskPriority = "urgent" | "high" | "normal" | "none" | "low";
 export type TaskTargetStatus = TaskState | "blocked";
 
 export type TaskTarget = {
-  id?: string;
-  taskId?: string;
+  id: string;
+  taskId: string;
   repoKey: string;
   branchName: string;
   position: number;
 };
 
-export type PersistedTaskTarget = TaskTarget & {
-  id: string;
-  taskId: string;
-};
+export type TaskTargetRef = Pick<TaskTarget, "repoKey" | "branchName" | "position">;
 
 export type TaskArtifact = {
   type: "pull_request";
@@ -48,7 +45,7 @@ export type Task = {
   url: string | null;
 };
 
-export const taskTargetFromTask = (task: Pick<Task, "id" | "repo" | "branchName">): TaskTarget | null => {
+export const taskTargetFromTask = (task: Pick<Task, "id" | "repo" | "branchName">): TaskTargetRef | null => {
   if (!task.repo) {
     return null;
   }
