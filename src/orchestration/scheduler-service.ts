@@ -323,7 +323,7 @@ export class SchedulerService extends EventEmitter {
           priorityRank: selected.priorityRank,
           repoKey: selected.repo.key,
           baseBranch: selected.baseBranch,
-          dedupeKey: `${selected.task.id}:${selected.action}`,
+          dedupeKey: `${selected.task.id}:${selected.target.repoKey}:${selected.action}`,
           selectionReason: selected.selectionReason,
           selectionContext: selected.selectionContext,
           scoutRunId: selection.scoutRunId,

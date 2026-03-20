@@ -1,7 +1,7 @@
 import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
-import { getTaskTargetRefFromTask, type Task, type TaskTarget, type TaskTargetRef } from "../../domain/index.js";
+import { getTaskTargetRefsFromTask, type Task, type TaskTarget, type TaskTargetRef } from "../../domain/index.js";
 import type {
   GetTasksOptions,
   TaskDependencyRecord,
@@ -109,15 +109,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
   constructor(private readonly sqlite: SqliteDatabase) {}
 
   private normalizeTaskTargets(task: Task): TaskTargetRef[] {
-    const explicitTargets = (task as Task & { targets?: TaskTargetRef[] }).targets;
-    if (explicitTargets && explicitTargets.length > 0) {
-      return explicitTargets
-        .map((target, position) => ({ ...target, position: target.position ?? position }))
-        .sort((left, right) => left.position - right.position || left.repoKey.localeCompare(right.repoKey));
-    }
-
-    const fallbackTarget = getTaskTargetRefFromTask(task);
-    return fallbackTarget ? [fallbackTarget] : [];
+    return getTaskTargetRefsFromTask(task);
   }
 
   private selectTaskIds(options: GetTasksOptions = {}): string[] {
@@ -245,6 +237,15 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
         assignee: storedTask.assignee,
         repo: primaryTarget?.repoKey ?? null,
         branchName: primaryTarget?.branchName ?? null,
+        ...(targets.length > 0
+          ? {
+              targets: targets.map((target) => ({
+                repoKey: target.repoKey,
+                branchName: target.branchName,
+                position: target.position,
+              })),
+            }
+          : {}),
         dependencies: {
           taskIds: dependencies.map((dependency) => dependency.dependsOnTaskId),
           baseTaskId: dependencies.find((dependency) => dependency.isBaseDependency)?.dependsOnTaskId ?? null,
@@ -257,34 +258,41 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     });
   }
 
-  private rebuildTargetDependencies(): void {
+  private rebuildTargetDependencies(tasks: Task[]): void {
     this.sqlite.prepare("DELETE FROM task_target_dependency").run();
-    const rows = this.sqlite
-      .prepare(
-        `WITH single_target AS (
-           SELECT task_id, MIN(id) AS target_id
-             FROM task_target
-            GROUP BY task_id
-           HAVING COUNT(*) = 1
-         )
-         SELECT source_target.target_id AS task_target_id,
-                dependency_target.target_id AS depends_on_task_target_id,
-                task_dependency.position AS position
-           FROM task_dependency
-           JOIN single_target AS source_target ON source_target.task_id = task_dependency.task_id
-           JOIN single_target AS dependency_target ON dependency_target.task_id = task_dependency.depends_on_task_id
-          ORDER BY task_dependency.task_id ASC, task_dependency.position ASC, task_dependency.depends_on_task_id ASC`,
-      )
-      .all() as SqliteRow[];
-
     const insertTargetDependency = this.sqlite.prepare(
       `INSERT INTO task_target_dependency(
          id, task_target_id, depends_on_task_target_id, position, source
-       ) VALUES (?, ?, ?, ?, 'derived')`,
+       ) VALUES (?, ?, ?, ?, ?)`,
     );
 
+    for (const task of tasks) {
+      for (const dependency of task.targetDependencies ?? []) {
+        const taskTarget = this.getTaskTarget(task.id, dependency.taskTargetRepoKey);
+        const dependsOnTaskTarget = this.getTaskTarget(task.id, dependency.dependsOnRepoKey);
+        if (!taskTarget || !dependsOnTaskTarget) {
+          continue;
+        }
+
+        insertTargetDependency.run(newId(), taskTarget.id, dependsOnTaskTarget.id, dependency.position, "metadata");
+      }
+    }
+
+    const rows = this.sqlite
+      .prepare(
+        `SELECT source_target.id AS task_target_id,
+                dependency_target.id AS depends_on_task_target_id,
+                task_dependency.position AS position
+           FROM task_dependency
+           JOIN task_target AS source_target ON source_target.task_id = task_dependency.task_id
+           JOIN task_target AS dependency_target ON dependency_target.task_id = task_dependency.depends_on_task_id
+            AND dependency_target.repo_key = source_target.repo_key
+           ORDER BY task_dependency.task_id ASC, task_dependency.position ASC, task_dependency.depends_on_task_id ASC`,
+      )
+      .all() as SqliteRow[];
+
     for (const row of rows) {
-      insertTargetDependency.run(newId(), row.task_target_id, row.depends_on_task_target_id, row.position);
+      insertTargetDependency.run(newId(), row.task_target_id, row.depends_on_task_target_id, row.position, "derived");
     }
   }
 
@@ -314,10 +322,14 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
          labels_json = excluded.labels_json`,
     );
     const deleteTargets = this.sqlite.prepare("DELETE FROM task_target WHERE task_id = ?");
-    const insertTarget = this.sqlite.prepare(
+    const upsertTarget = this.sqlite.prepare(
       `INSERT INTO task_target(
          id, task_id, repo_key, branch_name, position, created_at, updated_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(task_id, repo_key) DO UPDATE SET
+          branch_name = excluded.branch_name,
+          position = excluded.position,
+          updated_at = excluded.updated_at`,
     );
     const deleteDependencies = this.sqlite.prepare("DELETE FROM task_dependency WHERE task_id = ?");
     const hasTask = this.sqlite.prepare("SELECT 1 AS present FROM task WHERE id = ? LIMIT 1");
@@ -350,9 +362,16 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
           stableStringify(task.labels ?? []),
         );
 
-        deleteTargets.run(task.id);
-        for (const target of this.normalizeTaskTargets(task)) {
-          insertTarget.run(newId(), task.id, target.repoKey, target.branchName, target.position, syncedAt, syncedAt);
+        const targets = this.normalizeTaskTargets(task);
+        if (targets.length === 0) {
+          deleteTargets.run(task.id);
+        } else {
+          this.sqlite
+            .prepare(`DELETE FROM task_target WHERE task_id = ? AND repo_key NOT IN (${targets.map(() => "?").join(", ")})`)
+            .run(task.id, ...targets.map((target) => target.repoKey));
+        }
+        for (const target of targets) {
+          upsertTarget.run(newId(), task.id, target.repoKey, target.branchName, target.position, syncedAt, syncedAt);
         }
 
         deleteDependencies.run(task.id);
@@ -385,7 +404,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
         }
       }
 
-      this.rebuildTargetDependencies();
+      this.rebuildTargetDependencies(tasks);
     })();
   }
 

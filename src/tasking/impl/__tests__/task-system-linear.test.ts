@@ -196,6 +196,7 @@ describe("parseLinearMetadata", () => {
     ).toEqual({
       repo: "repo-a",
       branchName: "eng-124",
+      targets: [{ repoKey: "repo-a", branchName: "eng-124", position: 0 }],
       dependencies: {
         taskIds: ["ENG-123"],
         baseTaskId: null,
@@ -231,6 +232,31 @@ describe("parseLinearMetadata", () => {
       dependencies: {
         taskIds: ["ENG-4773"],
         baseTaskId: "ENG-4772",
+        branchNames: [],
+      },
+    });
+  });
+
+  test("parses multi-target repo metadata and explicit repo dependencies", () => {
+    expect(
+      parseLinearMetadata(
+        "Agent:\n  Repos: common, lynk-frontend, web-front-door\n  Repo dependencies: lynk-frontend<-common, web-front-door<-common\n  Branch: eng-4774\n",
+      ),
+    ).toEqual({
+      repo: null,
+      branchName: "eng-4774",
+      targets: [
+        { repoKey: "common", branchName: "eng-4774", position: 0 },
+        { repoKey: "lynk-frontend", branchName: "eng-4774", position: 1 },
+        { repoKey: "web-front-door", branchName: "eng-4774", position: 2 },
+      ],
+      targetDependencies: [
+        { taskTargetRepoKey: "lynk-frontend", dependsOnRepoKey: "common", position: 0 },
+        { taskTargetRepoKey: "web-front-door", dependsOnRepoKey: "common", position: 1 },
+      ],
+      dependencies: {
+        taskIds: [],
+        baseTaskId: null,
         branchNames: [],
       },
     });

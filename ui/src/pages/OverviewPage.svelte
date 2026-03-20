@@ -112,6 +112,7 @@
           <div class="space-y-2">
             {#each reviewTasks as task}
               {@const primaryTarget = task.targets[0] ?? null}
+              {@const isMultiTarget = task.targets.length > 1}
               <div class="panel-surface p-3">
                 <div class="flex items-center justify-between gap-3">
                   {#if primaryTarget?.review?.pullRequestUrl}
@@ -142,7 +143,34 @@
                 {:else}
                   <div class="mt-2 text-sm text-foreground">{task.title}</div>
                 {/if}
-                <div class="mt-1 text-sm text-muted-foreground">{primaryTarget?.repoKey ?? task.repo ?? "No repo"}</div>
+                {#if isMultiTarget}
+                  <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                    {#each task.targets as target}
+                      <div class="rounded-md border border-border/70 bg-muted/30 px-2 py-2">
+                        <div class="flex items-start justify-between gap-2">
+                          <div>
+                            <div class="font-mono text-[11px] text-foreground">{target.repoKey}</div>
+                            <div class="mt-1 font-mono text-[11px] text-muted-foreground">{target.branchName}</div>
+                          </div>
+                          <StatusPill value={target.status} />
+                        </div>
+                        {#if target.review?.pullRequestUrl}
+                          <a
+                            class="mt-2 inline-block font-mono text-[11px] text-foreground underline-offset-4 hover:text-primary hover:underline"
+                            href={target.review.pullRequestUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            on:click|stopPropagation
+                          >
+                            PR {target.review.pullRequestNumber}
+                          </a>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                {:else}
+                  <div class="mt-1 text-sm text-muted-foreground">{primaryTarget?.repoKey ?? task.repo ?? "No repo"}</div>
+                {/if}
               </div>
             {/each}
           </div>

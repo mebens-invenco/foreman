@@ -618,4 +618,124 @@ describe("persistence repos", () => {
       db.close();
     }
   });
+
+  test("mirrors multi-target tasks, persists metadata dependencies, and preserves target ids", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      const dependencyTask = {
+        id: "ENG-4773",
+        provider: "linear" as const,
+        providerId: "issue-4773",
+        title: "Upstream repo rollout",
+        description: "Dependency",
+        state: "in_review" as const,
+        providerState: "In Review",
+        priority: "normal" as const,
+        labels: ["Agent"],
+        assignee: null,
+        repo: null,
+        branchName: "eng-4773",
+        targets: [
+          { repoKey: "common", branchName: "eng-4773", position: 0 },
+          { repoKey: "lynk-frontend", branchName: "eng-4773", position: 1 },
+        ],
+        dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
+        artifacts: [],
+        updatedAt: "2026-03-18T12:00:00Z",
+        url: "https://linear.app/acme/issue/ENG-4773",
+      };
+      const task = {
+        id: "ENG-4774",
+        provider: "linear" as const,
+        providerId: "issue-4774",
+        title: "Multi-target rollout",
+        description: "Task",
+        state: "ready" as const,
+        providerState: "Todo",
+        priority: "high" as const,
+        labels: ["Agent"],
+        assignee: null,
+        repo: null,
+        branchName: "eng-4774",
+        targets: [
+          { repoKey: "common", branchName: "eng-4774", position: 0 },
+          { repoKey: "lynk-frontend", branchName: "eng-4774", position: 1 },
+          { repoKey: "web-front-door", branchName: "eng-4774", position: 2 },
+        ],
+        targetDependencies: [
+          { taskTargetRepoKey: "lynk-frontend", dependsOnRepoKey: "common", position: 0 },
+          { taskTargetRepoKey: "web-front-door", dependsOnRepoKey: "common", position: 1 },
+        ],
+        dependencies: { taskIds: ["ENG-4773"], baseTaskId: "ENG-4773", branchNames: [] },
+        artifacts: [],
+        updatedAt: "2026-03-18T12:05:00Z",
+        url: "https://linear.app/acme/issue/ENG-4774",
+      };
+
+      db.taskMirror.saveTasks([dependencyTask, task]);
+
+      const firstTargets = db.taskMirror.getTargetsForTask(task.id);
+      expect(firstTargets.map((target) => target.repoKey)).toEqual(["common", "lynk-frontend", "web-front-door"]);
+      const targetIdsByRepo = new Map(firstTargets.map((target) => [target.repoKey, target.id]));
+
+      db.taskMirror.saveTasks([{ ...dependencyTask }, { ...task, title: "Updated multi-target rollout" }]);
+
+      const refreshedTask = db.taskMirror.getTask(task.id);
+      expect(refreshedTask).toMatchObject({
+        id: task.id,
+        title: "Updated multi-target rollout",
+        repo: null,
+        branchName: null,
+        targets: [
+          { repoKey: "common", branchName: "eng-4774", position: 0 },
+          { repoKey: "lynk-frontend", branchName: "eng-4774", position: 1 },
+          { repoKey: "web-front-door", branchName: "eng-4774", position: 2 },
+        ],
+      });
+
+      const refreshedTargets = db.taskMirror.getTargetsForTask(task.id);
+      expect(refreshedTargets.map((target) => target.id)).toEqual([
+        targetIdsByRepo.get("common"),
+        targetIdsByRepo.get("lynk-frontend"),
+        targetIdsByRepo.get("web-front-door"),
+      ]);
+
+      const dependencyTargets = db.taskMirror.getTargetsForTask(dependencyTask.id);
+      const dependencyIdsByRepo = new Map(dependencyTargets.map((target) => [target.repoKey, target.id]));
+      expect(db.taskMirror.getTargetDependenciesForTask(task.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            taskTargetId: targetIdsByRepo.get("common"),
+            dependsOnTaskTargetId: dependencyIdsByRepo.get("common"),
+            position: 0,
+            source: "derived",
+          }),
+          expect.objectContaining({
+            taskTargetId: targetIdsByRepo.get("lynk-frontend"),
+            dependsOnTaskTargetId: targetIdsByRepo.get("common"),
+            position: 0,
+            source: "metadata",
+          }),
+          expect.objectContaining({
+            taskTargetId: targetIdsByRepo.get("lynk-frontend"),
+            dependsOnTaskTargetId: dependencyIdsByRepo.get("lynk-frontend"),
+            position: 0,
+            source: "derived",
+          }),
+          expect.objectContaining({
+            taskTargetId: targetIdsByRepo.get("web-front-door"),
+            dependsOnTaskTargetId: targetIdsByRepo.get("common"),
+            position: 1,
+            source: "metadata",
+          }),
+        ]),
+      );
+      expect(db.taskMirror.getTargetDependenciesForTask(task.id)).toHaveLength(4);
+    } finally {
+      db.close();
+    }
+  });
 });

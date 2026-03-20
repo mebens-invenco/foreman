@@ -1,4 +1,4 @@
-import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain/index.js";
+import type { Task, TaskArtifact, TaskComment, TaskState, TaskTargetDependencyRef, TaskTargetRef } from "../../domain/index.js";
 import { ForemanError, isForemanError } from "../../lib/errors.js";
 import { LoggerService } from "../../logger.js";
 import type { WorkspaceConfig } from "../../workspace/config.js";
@@ -30,6 +30,31 @@ const parseCsv = (value: string): string[] =>
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+
+const uniqueValues = (values: string[]): string[] => {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of values) {
+    if (seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    unique.push(value);
+  }
+  return unique;
+};
+
+const parseRepoDependencies = (value: string): TaskTargetDependencyRef[] => {
+  const dependencies: TaskTargetDependencyRef[] = [];
+  for (const [position, dependency] of parseCsv(value).entries()) {
+    const [taskTargetRepoKey, dependsOnRepoKey] = dependency.split("<-").map((item) => item.trim());
+    if (!taskTargetRepoKey || !dependsOnRepoKey) {
+      continue;
+    }
+    dependencies.push({ taskTargetRepoKey, dependsOnRepoKey, position });
+  }
+  return dependencies;
+};
 
 const LINEAR_ISSUE_IDENTIFIER_PATTERN = /([A-Za-z0-9]+-\d+)/;
 
@@ -81,7 +106,10 @@ const normalizeLinearTaskReference = (value: string): string => {
   return extractLinearIssueIdentifier(label) ?? extractLinearIssueIdentifier(target) ?? trimmed;
 };
 
-export const parseLinearMetadata = (description: string): Pick<Task, "repo" | "branchName" | "dependencies"> => {
+export const parseLinearMetadata = (
+  description: string,
+  defaultBranchName?: string,
+): Pick<Task, "repo" | "branchName" | "targets" | "targetDependencies" | "dependencies"> => {
   const match = description.match(/(^|\n)Agent:\s*\n((?:\s{2,}.+\n?)*)/i);
   const lines =
     match?.[2]
@@ -102,9 +130,24 @@ export const parseLinearMetadata = (description: string): Pick<Task, "repo" | "b
 
   const taskIds = parseCsv(values.get("depends on tasks") ?? "").map(normalizeLinearTaskReference);
   const baseTaskIdValue = values.get("base from task");
+  const branchName = values.get("branch") ?? null;
+  const effectiveBranchName = branchName ?? defaultBranchName ?? null;
+  const repoKeys = uniqueValues(parseCsv(values.get("repos") ?? ""));
+  const targetRepoKeys = repoKeys.length > 0 ? repoKeys : uniqueValues(parseCsv(values.get("repo") ?? ""));
+  const primaryRepoKey = targetRepoKeys.length === 1 ? targetRepoKeys[0]! : null;
+  const targets: TaskTargetRef[] = effectiveBranchName
+    ? targetRepoKeys.map((repoKey, position) => ({
+        repoKey,
+        branchName: effectiveBranchName,
+        position,
+      }))
+    : [];
+
   return {
-    repo: values.get("repo") ?? null,
-    branchName: values.get("branch") ?? null,
+    repo: primaryRepoKey,
+    branchName: effectiveBranchName,
+    ...(targets.length > 0 ? { targets } : {}),
+    ...(values.has("repo dependencies") ? { targetDependencies: parseRepoDependencies(values.get("repo dependencies") ?? "") } : {}),
     dependencies: {
       taskIds,
       baseTaskId: baseTaskIdValue ? normalizeLinearTaskReference(baseTaskIdValue) : null,
@@ -207,7 +250,7 @@ const isGithubPullRequestArtifact = (artifact: Pick<TaskArtifact, "type" | "url"
 };
 
 const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task => {
-  const metadata = parseLinearMetadata(node.description ?? "");
+  const metadata = parseLinearMetadata(node.description ?? "", node.branchName ?? node.identifier.toLowerCase());
   const branchName = metadata.branchName ?? node.branchName ?? node.identifier.toLowerCase();
   return {
     id: node.identifier,
