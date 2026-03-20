@@ -13,6 +13,7 @@ import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 const mapReviewCheckpoint = (row: SqliteRow): ReviewCheckpointRecord => ({
   id: String(row.id),
   taskId: String(row.task_id),
+  taskTargetId: String(row.task_target_id),
   prUrl: String(row.pr_url),
   headSha: String(row.head_sha),
   latestReviewSummaryId: (row.latest_review_summary_id as string | null) ?? null,
@@ -27,17 +28,18 @@ const mapReviewCheckpoint = (row: SqliteRow): ReviewCheckpointRecord => ({
 export class SqliteReviewCheckpointRepo implements ReviewCheckpointRepo {
   constructor(private readonly sqlite: SqliteDatabase) {}
 
-  getReviewCheckpoint(taskId: string, prUrl: string): ReviewCheckpointRecord | null {
+  getReviewCheckpoint(taskTargetId: string): ReviewCheckpointRecord | null {
     const row = this.sqlite
       .prepare(
-        "SELECT id, task_id, pr_url, head_sha, latest_review_summary_id, latest_conversation_comment_id, review_threads_fingerprint, checks_fingerprint, merge_state, recorded_at, source_attempt_id FROM review_checkpoint WHERE task_id = ? AND pr_url = ?",
+        "SELECT id, task_id, task_target_id, pr_url, head_sha, latest_review_summary_id, latest_conversation_comment_id, review_threads_fingerprint, checks_fingerprint, merge_state, recorded_at, source_attempt_id FROM review_checkpoint WHERE task_target_id = ?",
       )
-      .get(taskId, prUrl) as SqliteRow | undefined;
+      .get(taskTargetId) as SqliteRow | undefined;
     return row ? mapReviewCheckpoint(row) : null;
   }
 
   upsertReviewCheckpoint(input: {
     taskId: string;
+    taskTargetId: string;
     prUrl: string;
     reviewContext: ReviewContext;
     sourceAttemptId: string;
@@ -52,11 +54,13 @@ export class SqliteReviewCheckpointRepo implements ReviewCheckpointRepo {
     this.sqlite
       .prepare(
         `INSERT INTO review_checkpoint(
-          id, task_id, pr_url, head_sha, latest_review_summary_id, latest_conversation_comment_id,
+          id, task_id, task_target_id, pr_url, head_sha, latest_review_summary_id, latest_conversation_comment_id,
           review_threads_fingerprint, checks_fingerprint, merge_state, recorded_at, source_attempt_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(task_id, pr_url) DO UPDATE SET
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(task_target_id) DO UPDATE SET
+          task_id = excluded.task_id,
           head_sha = excluded.head_sha,
+          pr_url = excluded.pr_url,
           latest_review_summary_id = excluded.latest_review_summary_id,
           latest_conversation_comment_id = excluded.latest_conversation_comment_id,
           review_threads_fingerprint = excluded.review_threads_fingerprint,
@@ -68,6 +72,7 @@ export class SqliteReviewCheckpointRepo implements ReviewCheckpointRepo {
       .run(
         newId(),
         input.taskId,
+        input.taskTargetId,
         input.prUrl,
         input.reviewContext.headSha,
         latestReviewSummaryId,
@@ -80,7 +85,7 @@ export class SqliteReviewCheckpointRepo implements ReviewCheckpointRepo {
       );
   }
 
-  deleteReviewCheckpoint(taskId: string, prUrl: string): void {
-    this.sqlite.prepare("DELETE FROM review_checkpoint WHERE task_id = ? AND pr_url = ?").run(taskId, prUrl);
+  deleteReviewCheckpoint(taskTargetId: string): void {
+    this.sqlite.prepare("DELETE FROM review_checkpoint WHERE task_target_id = ?").run(taskTargetId);
   }
 }

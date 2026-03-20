@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 
-import type { ActionType, RepoRef, Task, WorkerResult } from "../domain/index.js";
+import type { ActionType, RepoRef, Task, TaskTarget, WorkerResult } from "../domain/index.js";
 import type { AgentRunner } from "../execution/index.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
@@ -317,6 +317,7 @@ export class SchedulerService extends EventEmitter {
       for (const selected of selection.jobs) {
         const job = this.deps.foremanRepos.jobs.createJob({
           taskId: selected.task.id,
+          taskTargetId: selected.target.id,
           taskProvider: selected.task.provider,
           action: selected.action,
           priorityRank: selected.priorityRank,
@@ -454,6 +455,7 @@ export class SchedulerService extends EventEmitter {
     attempt: AttemptRecord;
     job: JobRecord;
     task: Task;
+    target: TaskTarget;
     repo: RepoRef;
     worktreePath: string;
     workerResult: WorkerResult;

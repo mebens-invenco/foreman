@@ -67,7 +67,7 @@ class FakeTaskSystem implements TaskSystem {
 class FakeReviewService implements ReviewService {
   constructor(private readonly contexts: Record<string, ReviewContext | null>) {}
 
-  async resolvePullRequest(task: Task, _repo?: RepoRef): Promise<ResolvedPullRequest | null> {
+  async resolvePullRequest(task: Task, _repo?: RepoRef, _target?: { repoKey: string; branchName: string }): Promise<ResolvedPullRequest | null> {
     const context = this.contexts[task.id];
     if (!context) {
       return null;
@@ -82,11 +82,11 @@ class FakeReviewService implements ReviewService {
     };
   }
 
-  async getContext(task: Task, _agentPrefix: string, _repo?: RepoRef): Promise<ReviewContext | null> {
+  async getContext(task: Task, _agentPrefix: string, _repo?: RepoRef, _target?: { repoKey: string; branchName: string }): Promise<ReviewContext | null> {
     return this.contexts[task.id] ?? null;
   }
 
-  async findLatestOpenPullRequestBranch(task: Task, _repo?: RepoRef): Promise<string | null> {
+  async findLatestOpenPullRequestBranch(task: Task, _repo?: RepoRef, _target?: { repoKey: string; branchName: string }): Promise<string | null> {
     return this.contexts[task.id]?.state === "open" ? this.contexts[task.id]?.headBranch ?? null : null;
   }
 
@@ -462,9 +462,13 @@ describe("runScoutSelection", () => {
     db.workers.ensureWorkerSlots(1);
     const worker = db.workers.listWorkers()[0];
     expect(worker).toBeDefined();
+    db.taskMirror.saveTasks([reviewTask]);
+    const reviewTarget = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
+    expect(reviewTarget).not.toBeNull();
 
     const reviewJob = db.jobs.createJob({
       taskId: reviewTask.id,
+      taskTargetId: reviewTarget!.id,
       taskProvider: reviewTask.provider,
       action: "review",
       priorityRank: priorityToRank(reviewTask.priority),
@@ -486,6 +490,7 @@ describe("runScoutSelection", () => {
     expect(attempt).not.toBeNull();
     db.reviewCheckpoints.upsertReviewCheckpoint({
       taskId: reviewTask.id,
+      taskTargetId: reviewTarget!.id,
       prUrl: priorContext.pullRequestUrl,
       reviewContext: priorContext,
       sourceAttemptId: attempt!.id,
@@ -504,7 +509,7 @@ describe("runScoutSelection", () => {
       expect(result.jobs).toHaveLength(1);
       expect(result.jobs[0]?.action).toBe("review");
       expect(result.jobs[0]?.task.id).toBe("TASK-0004");
-      expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTask.id, priorContext.pullRequestUrl)).toBeNull();
+      expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTarget!.id)).toBeNull();
     } finally {
       db.close();
     }

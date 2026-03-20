@@ -1,9 +1,9 @@
-import type { RepoRef, ResolvedPullRequest, ReviewContext, Task } from "../domain/index.js";
+import type { RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskTargetRef } from "../domain/index.js";
 
 export interface ReviewService {
-  resolvePullRequest(task: Task, repo?: RepoRef): Promise<ResolvedPullRequest | null>;
-  getContext(task: Task, agentPrefix: string, repo?: RepoRef): Promise<ReviewContext | null>;
-  findLatestOpenPullRequestBranch(task: Task, repo?: RepoRef): Promise<string | null>;
+  resolvePullRequest(task: Task, repo?: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null>;
+  getContext(task: Task, agentPrefix: string, repo?: RepoRef, target?: TaskTargetRef): Promise<ReviewContext | null>;
+  findLatestOpenPullRequestBranch(task: Task, repo?: RepoRef, target?: TaskTargetRef): Promise<string | null>;
   createPullRequest(input: {
     cwd: string;
     title: string;

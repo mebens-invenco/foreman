@@ -1,4 +1,4 @@
-import type { RepoRef, Task, WorkerResult } from "../domain/index.js";
+import type { RepoRef, Task, TaskTarget, WorkerResult } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord } from "../repos/index.js";
@@ -36,6 +36,7 @@ type ApplyWorkerResultInput = {
   attempt: AttemptRecord;
   job: JobRecord;
   task: Task;
+  target: TaskTarget;
   repo: RepoRef;
   worktreePath: string;
   workerResult: WorkerResult;
@@ -50,7 +51,7 @@ export class WorkerResultApplier {
 
   async apply(input: ApplyWorkerResultInput): Promise<string | null> {
     const { workerResult } = input;
-    let pullRequestUrl = await this.resolveCurrentPullRequestUrl(input.task, input.repo);
+    let pullRequestUrl = await this.resolveCurrentPullRequestUrl(input.task, input.repo, input.target);
     const logger = this.logger.child({
       attemptId: input.attempt.id,
       jobId: input.job.id,
@@ -140,7 +141,7 @@ export class WorkerResultApplier {
     }
 
     if (input.job.action === "execution" && workerResult.outcome === "no_action_needed") {
-      const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(input.task, input.repo);
+      const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(input.task, input.repo, input.target);
       if (resolvedPullRequest?.state === "open") {
         pullRequestUrl = resolvedPullRequest.pullRequestUrl;
         await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
@@ -221,11 +222,17 @@ export class WorkerResultApplier {
       workerResult.signals.includes("review_checkpoint_eligible") &&
       pullRequestUrl
     ) {
-      const reviewContext = await this.deps.reviewService.getContext(input.task, this.deps.config.workspace.agentPrefix, input.repo);
+      const reviewContext = await this.deps.reviewService.getContext(
+        input.task,
+        this.deps.config.workspace.agentPrefix,
+        input.repo,
+        input.target,
+      );
       if (reviewContext) {
         try {
           this.deps.foremanRepos.reviewCheckpoints.upsertReviewCheckpoint({
             taskId: input.task.id,
+            taskTargetId: input.target.id,
             prUrl: pullRequestUrl,
             reviewContext,
             sourceAttemptId: input.attempt.id,
@@ -247,8 +254,8 @@ export class WorkerResultApplier {
     return pullRequestUrl;
   }
 
-  private async resolveCurrentPullRequestUrl(task: Task, repo: RepoRef): Promise<string | null> {
-    const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(task, repo);
+  private async resolveCurrentPullRequestUrl(task: Task, repo: RepoRef, target: TaskTarget): Promise<string | null> {
+    const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(task, repo, target);
     return resolvedPullRequest?.pullRequestUrl ?? null;
   }
 }

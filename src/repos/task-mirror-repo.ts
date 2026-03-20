@@ -1,20 +1,10 @@
-import type { Task } from "../domain/index.js";
+import type { Task, TaskTarget } from "../domain/index.js";
 
 export type GetTasksOptions = {
   taskIds?: string[];
   state?: Task["state"];
   search?: string;
   limit?: number;
-};
-
-export type TaskTargetRecord = {
-  id: string;
-  taskId: string;
-  repoKey: string;
-  branchName: string;
-  position: number;
-  createdAt: string;
-  updatedAt: string;
 };
 
 export type TaskDependencyRecord = {
@@ -37,7 +27,9 @@ export interface TaskMirrorRepo {
   saveTasks(tasks: Task[]): void;
   getTasks(options?: GetTasksOptions): Task[];
   getTask(taskId: string): Task | null;
-  getTargetsForTask(taskId: string): TaskTargetRecord[];
+  getTaskTarget(taskId: string, repoKey: string): TaskTarget | null;
+  getTaskTargetById(taskTargetId: string): TaskTarget | null;
+  getTargetsForTask(taskId: string): TaskTarget[];
   getDependenciesForTask(taskId: string): TaskDependencyRecord[];
   getTargetDependenciesForTask(taskId: string): TaskTargetDependencyRecord[];
 }

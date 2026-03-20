@@ -96,19 +96,20 @@ program
     logger.info("validated task system startup");
     await renderWorkspacePlan(workspace, repos, logger);
 
+    const reviewService = createReviewService({ env: resolvedEnv, logger });
     const scheduler = new SchedulerService({
       config,
       paths,
       foremanRepos: repos,
       taskSystem,
-      reviewService: createReviewService({ env: resolvedEnv, logger }),
+      reviewService,
       runner: createAgentRunner({ config }),
       repos: repoRefs,
       env: resolvedEnv,
       logger: logger.child({ component: "scheduler" }),
     });
 
-    const server = createHttpServer({ config, paths, repoRefs, repos, scheduler });
+    const server = createHttpServer({ config, paths, repoRefs, repos, taskSystem, reviewService, scheduler });
     await server.listen({ host: config.http.host, port: config.http.port });
     logger.info("http server listening", { host: config.http.host, port: config.http.port });
     await scheduler.start();

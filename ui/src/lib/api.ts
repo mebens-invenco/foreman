@@ -3,6 +3,35 @@ export type TaskState = "ready" | "in_progress" | "in_review" | "done" | "cancel
 export type AttemptStatus = "running" | "completed" | "failed" | "blocked" | "canceled" | "timed_out";
 export type WorkerStatus = "idle" | "leased" | "running" | "stopping" | "offline";
 export type ActionType = "execution" | "review" | "retry" | "consolidation";
+export type TaskTargetStatus = TaskState | "blocked";
+
+export type TaskTargetView = {
+  id: string;
+  repoKey: string;
+  branchName: string;
+  status: TaskTargetStatus;
+  review: {
+    pullRequestUrl: string;
+    pullRequestNumber: number;
+    state: "open" | "closed" | "merged";
+    isDraft: boolean;
+    baseBranch: string;
+    headBranch: string;
+  } | null;
+  latestJob: {
+    id: string;
+    action: ActionType;
+    status: string;
+    createdAt: string;
+    finishedAt: string | null;
+  } | null;
+  latestAttempt: {
+    id: string;
+    status: AttemptStatus;
+    startedAt: string;
+    finishedAt: string | null;
+  } | null;
+};
 
 export type StatusResponse = {
   workspace: {
@@ -42,6 +71,7 @@ export type Worker = {
   currentJob: {
     id: string;
     taskId: string;
+    taskTargetId: string;
     action: ActionType;
     repoKey: string;
     status: string;
@@ -51,6 +81,7 @@ export type Worker = {
 export type QueueJob = {
   id: string;
   taskId: string;
+  taskTargetId?: string;
   action: ActionType;
   status: string;
   priorityRank: number;
@@ -69,6 +100,7 @@ export type TaskListItem = {
   updatedAt: string;
   url: string | null;
   reviewUrl: string | null;
+  targets: TaskTargetView[];
 };
 
 export type Attempt = {

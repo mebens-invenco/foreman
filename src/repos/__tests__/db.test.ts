@@ -10,6 +10,33 @@ import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-sup
 const cleanupDirs: string[] = [];
 const projectRoot = testProjectRoot;
 
+const syncSingleTargetTask = (db: Awaited<ReturnType<typeof createMigratedDb>>, input: { taskId: string; repoKey: string; branchName?: string }) => {
+  db.taskMirror.saveTasks([
+    {
+      id: input.taskId,
+      provider: "file",
+      providerId: input.taskId,
+      title: input.taskId,
+      description: "",
+      state: "ready",
+      providerState: "ready",
+      priority: "normal",
+      labels: ["Agent"],
+      assignee: null,
+      repo: input.repoKey,
+      branchName: input.branchName ?? input.taskId.toLowerCase(),
+      dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
+      artifacts: [],
+      updatedAt: "2026-03-14T12:00:00Z",
+      url: null,
+    },
+  ]);
+
+  const target = db.taskMirror.getTaskTarget(input.taskId, input.repoKey);
+  expect(target).not.toBeNull();
+  return target!;
+};
+
 afterEach(async () => {
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
@@ -24,9 +51,11 @@ describe("persistence repos", () => {
       db.workers.ensureWorkerSlots(1);
       const worker = db.workers.listWorkers()[0];
       expect(worker).toBeDefined();
+      const taskTarget = syncSingleTargetTask(db, { taskId: "TASK-0001", repoKey: "repo-a", branchName: "task-0001" });
 
       const job = db.jobs.createJob({
         taskId: "TASK-0001",
+        taskTargetId: taskTarget.id,
         taskProvider: "file",
         action: "execution",
         priorityRank: priorityToRank("high"),
@@ -88,9 +117,11 @@ describe("persistence repos", () => {
       db.workers.ensureWorkerSlots(1);
       const worker = db.workers.listWorkers()[0];
       expect(worker).toBeDefined();
+      const taskTarget = syncSingleTargetTask(db, { taskId: "TASK-0002", repoKey: "repo-a", branchName: "task-0002" });
 
       const job = db.jobs.createJob({
         taskId: "TASK-0002",
+        taskTargetId: taskTarget.id,
         taskProvider: "file",
         action: "execution",
         priorityRank: priorityToRank("high"),
@@ -139,9 +170,11 @@ describe("persistence repos", () => {
       db.workers.ensureWorkerSlots(1);
       const worker = db.workers.listWorkers()[0];
       expect(worker).toBeDefined();
+      const taskTarget = syncSingleTargetTask(db, { taskId: "TASK-0003", repoKey: "repo-a", branchName: "task-0003" });
 
       const job = db.jobs.createJob({
         taskId: "TASK-0003",
+        taskTargetId: taskTarget.id,
         taskProvider: "file",
         action: "execution",
         priorityRank: priorityToRank("high"),
@@ -177,9 +210,11 @@ describe("persistence repos", () => {
       db.workers.ensureWorkerSlots(1);
       const worker = db.workers.listWorkers()[0];
       expect(worker).toBeDefined();
+      const taskTarget = syncSingleTargetTask(db, { taskId, repoKey: "repo-a", branchName: "task-0004" });
 
       const job = db.jobs.createJob({
         taskId,
+        taskTargetId: taskTarget.id,
         taskProvider: "file",
         action: "review",
         priorityRank: priorityToRank("high"),
@@ -208,9 +243,12 @@ describe("persistence repos", () => {
 
       expect(attemptOne).not.toBeNull();
       expect(attemptTwo).not.toBeNull();
+      expect(db.jobs.latestJobForTaskTarget(taskTarget.id)?.id).toBe(job.id);
+      expect(db.attempts.latestAttemptForTaskTarget(taskTarget.id)?.id).toBe(attemptTwo!.id);
 
       db.reviewCheckpoints.upsertReviewCheckpoint({
         taskId,
+        taskTargetId: taskTarget.id,
         prUrl,
         sourceAttemptId: attemptOne!.id,
         reviewContext: {
@@ -248,7 +286,7 @@ describe("persistence repos", () => {
         },
       });
 
-      const firstCheckpoint = db.reviewCheckpoints.getReviewCheckpoint(taskId, prUrl);
+      const firstCheckpoint = db.reviewCheckpoints.getReviewCheckpoint(taskTarget.id);
       expect(firstCheckpoint).not.toBeNull();
       expect(firstCheckpoint?.id).toBeDefined();
       expect(firstCheckpoint?.headSha).toBe("sha-1");
@@ -291,6 +329,7 @@ describe("persistence repos", () => {
 
       db.reviewCheckpoints.upsertReviewCheckpoint({
         taskId,
+        taskTargetId: taskTarget.id,
         prUrl,
         sourceAttemptId: attemptTwo!.id,
         reviewContext: {
@@ -312,7 +351,7 @@ describe("persistence repos", () => {
         },
       });
 
-      const secondCheckpoint = db.reviewCheckpoints.getReviewCheckpoint(taskId, prUrl);
+      const secondCheckpoint = db.reviewCheckpoints.getReviewCheckpoint(taskTarget.id);
       expect(secondCheckpoint?.id).toBe(firstCheckpoint?.id);
       expect(secondCheckpoint?.headSha).toBe("sha-2");
       expect(secondCheckpoint?.mergeState).toBe("dirty");

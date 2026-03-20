@@ -3,6 +3,17 @@ import type { AttemptStatus, WorkerResult } from "./orchestration.js";
 export type TaskProvider = "linear" | "file";
 export type TaskState = "ready" | "in_progress" | "in_review" | "done" | "canceled";
 export type TaskPriority = "urgent" | "high" | "normal" | "none" | "low";
+export type TaskTargetStatus = TaskState | "blocked";
+
+export type TaskTarget = {
+  id: string;
+  taskId: string;
+  repoKey: string;
+  branchName: string;
+  position: number;
+};
+
+export type TaskTargetRef = Pick<TaskTarget, "repoKey" | "branchName" | "position">;
 
 export type TaskArtifact = {
   type: "pull_request";
@@ -33,6 +44,21 @@ export type Task = {
   updatedAt: string;
   url: string | null;
 };
+
+export const getTaskTargetRefFromTask = (task: Pick<Task, "id" | "repo" | "branchName">): TaskTargetRef | null => {
+  if (!task.repo) {
+    return null;
+  }
+
+  return {
+    repoKey: task.repo,
+    branchName: task.branchName ?? task.id.toLowerCase(),
+    position: 0,
+  };
+};
+
+export const resolveTaskBranchName = (task: Pick<Task, "id" | "branchName">, target?: Pick<TaskTarget, "branchName"> | null): string =>
+  target?.branchName ?? task.branchName ?? task.id.toLowerCase();
 
 export type TaskComment = {
   id: string;

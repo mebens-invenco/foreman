@@ -111,12 +111,13 @@
         {:else}
           <div class="space-y-2">
             {#each reviewTasks as task}
+              {@const primaryTarget = task.targets[0] ?? null}
               <div class="panel-surface p-3">
                 <div class="flex items-center justify-between gap-3">
-                  {#if task.reviewUrl}
+                  {#if primaryTarget?.review?.pullRequestUrl}
                     <a
                       class="font-mono text-xs text-foreground underline-offset-4 hover:text-primary hover:underline"
-                      href={task.reviewUrl}
+                      href={primaryTarget.review.pullRequestUrl}
                       target="_blank"
                       rel="noreferrer"
                       on:click|stopPropagation
@@ -128,10 +129,10 @@
                   {/if}
                   <StatusPill value={task.state} />
                 </div>
-                {#if task.reviewUrl}
+                {#if primaryTarget?.review?.pullRequestUrl}
                   <a
                     class="mt-2 block text-sm text-foreground underline-offset-4 hover:text-primary hover:underline"
-                    href={task.reviewUrl}
+                    href={primaryTarget.review.pullRequestUrl}
                     target="_blank"
                     rel="noreferrer"
                     on:click|stopPropagation
@@ -141,7 +142,7 @@
                 {:else}
                   <div class="mt-2 text-sm text-foreground">{task.title}</div>
                 {/if}
-                <div class="mt-1 text-sm text-muted-foreground">{task.repo ?? "No repo"}</div>
+                <div class="mt-1 text-sm text-muted-foreground">{primaryTarget?.repoKey ?? task.repo ?? "No repo"}</div>
               </div>
             {/each}
           </div>

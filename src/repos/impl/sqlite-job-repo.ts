@@ -9,6 +9,7 @@ import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 const mapJob = (row: SqliteRow): JobRecord => ({
   id: String(row.id),
   taskId: String(row.task_id),
+  taskTargetId: String(row.task_target_id),
   taskProvider: row.task_provider as JobRecord["taskProvider"],
   action: row.action as ActionType,
   status: row.status as JobStatus,
@@ -46,6 +47,7 @@ export class SqliteJobRepo implements JobRepo {
 
   createJob(input: {
     taskId: string;
+    taskTargetId: string;
     taskProvider: "linear" | "file";
     action: ActionType;
     priorityRank: number;
@@ -61,13 +63,14 @@ export class SqliteJobRepo implements JobRepo {
     this.sqlite
       .prepare(
         `INSERT INTO job(
-          id, task_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+          id, task_id, task_target_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
           selection_reason, selection_context_json, scout_run_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
         input.taskId,
+        input.taskTargetId,
         input.taskProvider,
         input.action,
         input.priorityRank,
@@ -88,6 +91,7 @@ export class SqliteJobRepo implements JobRepo {
     return this.sqlite
       .prepare(
         `SELECT id, task_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+                task_target_id,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
                 started_at, finished_at, error_message
            FROM job
@@ -104,18 +108,35 @@ export class SqliteJobRepo implements JobRepo {
     return this.sqlite
       .prepare(
         `SELECT id, task_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+                task_target_id,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
-                started_at, finished_at, error_message
+                 started_at, finished_at, error_message
            FROM job WHERE status IN (${placeholders}) ORDER BY created_at ASC`,
       )
       .all(...statuses)
       .map((row: unknown) => mapJob(row as SqliteRow));
   }
 
+  latestJobForTaskTarget(taskTargetId: string): JobRecord | null {
+    const row = this.sqlite
+      .prepare(
+        `SELECT id, task_id, task_target_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
+                started_at, finished_at, error_message
+           FROM job
+          WHERE task_target_id = ?
+          ORDER BY created_at DESC
+          LIMIT 1`,
+      )
+      .get(taskTargetId) as SqliteRow | undefined;
+
+    return row ? mapJob(row) : null;
+  }
+
   getJob(jobId: string): JobRecord {
     const row = this.sqlite
       .prepare(
-        `SELECT id, task_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+        `SELECT id, task_id, task_target_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
                 started_at, finished_at, error_message
            FROM job WHERE id = ?`,
