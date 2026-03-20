@@ -89,6 +89,56 @@ const githubRepoKeyFromUrl = (url: string): string | null => {
   }
 };
 
+const LINEAR_ISSUE_IDENTIFIER_PATTERN = /([A-Za-z0-9]+-\d+)/;
+
+const parseLinearIssueIdentifier = (taskId: string): { teamKey: string; number: number } | null => {
+  const match = taskId.match(/^([A-Za-z0-9]+)-(\d+)$/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    teamKey: match[1]!,
+    number: Number.parseInt(match[2]!, 10),
+  };
+};
+
+const extractLinearIssueIdentifier = (value: string): string | null => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const directIdentifier = parseLinearIssueIdentifier(trimmed);
+  if (directIdentifier) {
+    return `${directIdentifier.teamKey}-${directIdentifier.number}`;
+  }
+
+  const match = trimmed.match(LINEAR_ISSUE_IDENTIFIER_PATTERN);
+  return match?.[1] ?? null;
+};
+
+const normalizeLinearTaskReference = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  const directIdentifier = extractLinearIssueIdentifier(trimmed);
+  if (directIdentifier) {
+    return directIdentifier;
+  }
+
+  const markdownLinkMatch = trimmed.match(/^\[([^\]]+)\]\((.+)\)$/);
+  if (!markdownLinkMatch) {
+    return trimmed;
+  }
+
+  const label = markdownLinkMatch[1] ?? "";
+  const target = markdownLinkMatch[2] ?? "";
+  return extractLinearIssueIdentifier(label) ?? extractLinearIssueIdentifier(target) ?? trimmed;
+};
+
 export const parseLinearMetadata = (
   description: string,
 ): Pick<Task, "repo" | "branchName" | "targets" | "repoDependencies" | "dependencies"> => {
@@ -114,8 +164,8 @@ export const parseLinearMetadata = (
     ...parseCsv(values.get("repo") ?? ""),
     ...parseCsv(values.get("repos") ?? ""),
   ]);
-  const taskIds = parseCsv(values.get("depends on tasks") ?? "");
-  const baseTaskId = values.get("base from task") ?? null;
+  const taskIds = parseCsv(values.get("depends on tasks") ?? "").map(normalizeLinearTaskReference);
+  const baseTaskIdValue = values.get("base from task");
   return {
     repo: repos.length === 1 ? repos[0]! : null,
     branchName: values.get("branch") ?? null,
@@ -123,21 +173,9 @@ export const parseLinearMetadata = (
     repoDependencies: parseRepoDependencies(values.get("repo dependencies") ?? "", repos),
     dependencies: {
       taskIds,
-      baseTaskId,
+      baseTaskId: baseTaskIdValue ? normalizeLinearTaskReference(baseTaskIdValue) : null,
       branchNames: parseCsv(values.get("depends on branches") ?? ""),
     },
-  };
-};
-
-const parseLinearIssueIdentifier = (taskId: string): { teamKey: string; number: number } | null => {
-  const match = taskId.match(/^([A-Za-z0-9]+)-(\d+)$/);
-  if (!match) {
-    return null;
-  }
-
-  return {
-    teamKey: match[1]!,
-    number: Number.parseInt(match[2]!, 10),
   };
 };
 

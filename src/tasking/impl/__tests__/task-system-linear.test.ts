@@ -206,6 +206,24 @@ describe("parseLinearMetadata", () => {
     });
   });
 
+  test("normalizes Markdown-linked task dependencies", () => {
+    expect(
+      parseLinearMetadata(
+        "Agent:\n  Repo: repo-a\n  Depends on tasks: [ENG-123](https://linear.app/acme/issue/ENG-123/task), ENG-124\n  Base from task: [ENG-123](https://linear.app/acme/issue/ENG-123/task)\n",
+      ),
+    ).toEqual({
+      repo: "repo-a",
+      branchName: null,
+      targets: [{ repo: "repo-a", branchName: "", position: 0 }],
+      repoDependencies: [],
+      dependencies: {
+        taskIds: ["ENG-123", "ENG-124"],
+        baseTaskId: "ENG-123",
+        branchNames: [],
+      },
+    });
+  });
+
   test("ignores legacy Foreman metadata blocks", () => {
     expect(parseLinearMetadata("Foreman:\n  Repo: repo-a\n  Depends on tasks: ENG-123\n")).toEqual({
       repo: null,
@@ -240,6 +258,24 @@ describe("parseLinearMetadata", () => {
       dependencies: {
         taskIds: [],
         baseTaskId: null,
+        branchNames: [],
+      },
+    });
+  });
+
+  test("falls back to extracting task ids from Markdown link targets", () => {
+    expect(
+      parseLinearMetadata(
+        "Agent:\n  Repo: repo-a\n  Depends on tasks: [target migration](https://linear.app/acme/issue/ENG-4773/normalize-jobs-review-state-and-task-apis-around-task-targets)\n  Base from task: [base task](https://linear.app/acme/issue/ENG-4772/persist-task-and-target-mirrors-for-lynk-tasks)\n",
+      ),
+    ).toEqual({
+      repo: "repo-a",
+      branchName: null,
+      targets: [{ repo: "repo-a", branchName: "", position: 0 }],
+      repoDependencies: [],
+      dependencies: {
+        taskIds: ["ENG-4773"],
+        baseTaskId: "ENG-4772",
         branchNames: [],
       },
     });
