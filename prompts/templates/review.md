@@ -41,6 +41,8 @@ Priority order inside this action:
 - Start with `Actionable Now`, then use the remaining history for context.
 - Only address review summaries on the current PR head.
 - Only address conversation comments created after the current PR head became current.
+- If a conversation comment or review summary asks a question, do your best to answer it within your
+reply.
 - Do not ignore older history when it explains prior decisions that still apply.
 - If the PR has merge conflicts, resolve them by merging the latest base branch into the task branch; do not rebase or cherry-pick. Reconcile both branches' intent instead of defaulting to either side.
 - If you make code changes, run the relevant automated checks for the affected scope, then commit and push the task branch before returning `completed`.
