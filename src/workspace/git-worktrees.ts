@@ -21,6 +21,27 @@ const isGitWorktree = async (targetPath: string): Promise<boolean> => {
   }
 };
 
+const fetchOriginBranch = async (repo: RepoRef, branchName: string): Promise<void> => {
+  await exec("git", ["fetch", "origin", branchName], { cwd: repo.rootPath });
+};
+
+const isWorktreeClean = async (targetPath: string): Promise<boolean> => {
+  const status = await exec("git", ["status", "--porcelain"], { cwd: targetPath });
+  return status.stdout.trim().length === 0;
+};
+
+const countUniqueCommitsSinceBase = async (targetPath: string, baseBranch: string): Promise<number> => {
+  const output = await exec("git", ["rev-list", "--count", `origin/${baseBranch}..HEAD`], { cwd: targetPath });
+  return Number.parseInt(output.stdout.trim() || "0", 10);
+};
+
+const resetWorktreeToBase = async (targetPath: string, baseBranch: string, options: { clean?: boolean } = {}): Promise<void> => {
+  await exec("git", ["reset", "--hard", `origin/${baseBranch}`], { cwd: targetPath });
+  if (options.clean) {
+    await exec("git", ["clean", "-fd"], { cwd: targetPath });
+  }
+};
+
 export const ensureTaskWorktree = async (input: {
   paths: WorkspacePaths;
   repo: RepoRef;
@@ -33,9 +54,11 @@ export const ensureTaskWorktree = async (input: {
   const targetPath = worktreePathForTask(input.paths, input.repo, input.task);
   await ensureDir(path.dirname(targetPath));
 
-  await exec("git", ["fetch", "origin", input.repo.defaultBranch, input.baseBranch, taskBranch], {
-    cwd: input.repo.rootPath,
-  }).catch(() => undefined);
+  await fetchOriginBranch(input.repo, input.baseBranch);
+
+  if (taskBranch !== input.baseBranch) {
+    await fetchOriginBranch(input.repo, taskBranch).catch(() => undefined);
+  }
 
   if (!(await pathExists(targetPath))) {
     await exec("git", ["worktree", "add", "-B", taskBranch, targetPath, `origin/${input.baseBranch}`], {
@@ -57,9 +80,17 @@ export const ensureTaskWorktree = async (input: {
   }
 
   if (input.action === "retry") {
-    await exec("git", ["fetch", "origin", input.baseBranch], { cwd: targetPath });
-    await exec("git", ["reset", "--hard", `origin/${input.baseBranch}`], { cwd: targetPath });
-    await exec("git", ["clean", "-fd"], { cwd: targetPath });
+    await resetWorktreeToBase(targetPath, input.baseBranch, { clean: true });
+    return targetPath;
+  }
+
+  const [clean, uniqueCommitCount] = await Promise.all([
+    isWorktreeClean(targetPath),
+    countUniqueCommitsSinceBase(targetPath, input.baseBranch),
+  ]);
+
+  if (clean && uniqueCommitCount === 0) {
+    await resetWorktreeToBase(targetPath, input.baseBranch);
   }
 
   return targetPath;
