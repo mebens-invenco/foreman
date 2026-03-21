@@ -436,15 +436,16 @@ Default mapping:
 
 ### Metadata
 
-Execution metadata is parsed from the task description. Required execution metadata includes `repo`. Optional metadata includes task dependencies, base task, branch dependencies, and branch name.
+Execution metadata is parsed from the task description. Required execution metadata includes one or more repo targets. Optional metadata includes task dependencies, base task, repo dependencies, branch dependencies, and branch name.
 
 The metadata block syntax is:
 
 ```text
 Agent:
-  Repo: <repo-key>
+  Repos: <repo-key[, repo-key]>
   Depends on tasks: <ENG-123, ENG-124>
   Base from task: <ENG-123>
+  Repo dependencies: <repo-b<-repo-a>
   Depends on branches: <feature/foo, eng-123>
   Branch: <task-branch-name>
 ```
@@ -452,8 +453,10 @@ Agent:
 Parsing rules:
 
 - keys are case-insensitive
-- `Repo` is required for `execution`, `review`, and `retry`
+- `Repos` is required for `execution`, `review`, and `retry`
+- `Repo` remains accepted as a single-target shorthand
 - `Depends on tasks` is an optional comma-separated list
+- `Repo dependencies` is an optional comma-separated list of `<target<-dependency>` pairs within the same task
 - `Depends on branches` is an optional comma-separated list
 - `Base from task` is required when `Depends on tasks` contains more than one task
 - `Base from task` must be one of the listed task dependencies when present
@@ -461,6 +464,14 @@ Parsing rules:
 - unknown keys are ignored
 
 If `Branch` is omitted, the default task branch name is the lowercase task id.
+
+Target rules:
+
+- a task may persist multiple `task_target` rows, one per repo in `Repos`
+- target order follows the declared `Repos` order via `position`
+- same-task repo dependencies are persisted in `task_target_dependency` with `source = 'metadata'`
+- cross-task target dependencies are derived by matching `repo_key` across task dependency pairs
+- if a cross-task dependency task does not expose a matching repo target, that target is blocked
 
 ### Base And Dependency Resolution
 
@@ -470,23 +481,35 @@ Rules:
 
 1. no task dependencies -> use the repo default branch
 2. exactly one task dependency:
-   - the dependency is satisfied only when that dependency task is either:
-     1. in review with an open linked PR, or
-     2. merged
-   - if the dependency has an open linked PR, use that PR head branch
-   - if the dependency is merged, use that PR base branch
+   - dependency resolution is target-aware and matches the current target by `repo_key`
+   - the dependency is satisfied only when that matching dependency target is either:
+     1. in review with an open linked PR,
+     2. completed without repo changes, or
+     3. merged
+   - if the matching dependency target has an open linked PR, use that PR head branch
+   - if the matching dependency target is merged, use that PR base branch
+   - if the matching dependency target completed without repo changes, keep the repo default branch
+   - if the dependency task has no matching repo target, the target is unsatisfied
    - the resolved branch must exist on origin
    - otherwise the dependency is unsatisfied
 3. more than one task dependency:
    - require valid `Base from task`
-   - all non-base task dependencies must be merged
-   - the selected base task is satisfied only when it is either:
-     1. in review with an open linked PR, or
-     2. merged
-   - if the selected base task has an open linked PR, use that PR head branch
-   - if the selected base task is merged, use that PR base branch
+   - all non-base matching dependency targets must be merged or completed without repo changes
+   - the selected base dependency target is satisfied only when it is either:
+     1. in review with an open linked PR,
+     2. completed without repo changes, or
+     3. merged
+   - if the selected base dependency target has an open linked PR, use that PR head branch
+   - if the selected base dependency target is merged, use that PR base branch
+   - if the selected base dependency target completed without repo changes, keep the repo default branch
+   - if any dependency task has no matching repo target, the target is unsatisfied
    - the resolved branch must exist on origin
    - otherwise the dependency set is unsatisfied
+
+Repo dependency rules:
+
+- same-task repo dependencies gate scheduling only; they do not change the repo-local base branch
+- a repo dependency is satisfied when the upstream target is in review with an open PR, completed without repo changes, or merged
 
 Branch dependency rules:
 

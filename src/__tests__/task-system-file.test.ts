@@ -40,6 +40,61 @@ Task body
 };
 
 describe("FileTaskSystem", () => {
+  test("parses multi-target frontmatter and preserves target dependencies on rewrite", async () => {
+    const workspaceRoot = await createTempDir("foreman-file-task-system-");
+    cleanupDirs.push(workspaceRoot);
+
+    const taskPath = path.join(workspaceRoot, "tasks", "TASK-0003.md");
+    await fs.mkdir(path.dirname(taskPath), { recursive: true });
+    await fs.writeFile(
+      taskPath,
+      `---
+id: TASK-0003
+title: Multi-target task
+state: ready
+priority: normal
+labels:
+  - Agent
+targets:
+  - repoKey: repo-a
+    branchName: task-0003
+    position: 0
+  - repoKey: repo-b
+    branchName: task-0003
+    position: 1
+targetDependencies:
+  - taskTargetRepoKey: repo-b
+    dependsOnRepoKey: repo-a
+    position: 0
+createdAt: 2026-03-14T12:00:00Z
+updatedAt: 2026-03-14T12:00:00Z
+---
+
+Task body
+`,
+      "utf8",
+    );
+
+    const paths = createWorkspacePaths(workspaceRoot, workspaceRoot);
+    const taskSystem = new FileTaskSystem(createDefaultWorkspaceConfig("foo", "file"), paths);
+
+    const task = await taskSystem.getTask("TASK-0003");
+    expect(task.repo).toBeNull();
+    expect(task.branchName).toBeNull();
+    expect(task.targets).toEqual([
+      { repoKey: "repo-a", branchName: "task-0003", position: 0 },
+      { repoKey: "repo-b", branchName: "task-0003", position: 1 },
+    ]);
+    expect(task.targetDependencies).toEqual([{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a", position: 0 }]);
+
+    await taskSystem.transition({ taskId: "TASK-0003", toState: "in_progress" });
+
+    const rewritten = await fs.readFile(taskPath, "utf8");
+    expect(rewritten).toContain("targets:");
+    expect(rewritten).toContain("targetDependencies:");
+    expect(rewritten).toContain("taskTargetRepoKey: repo-b");
+  });
+
   test("listCandidates skips unmapped states and logs the skipped task", async () => {
     const workspaceRoot = await createTempDir("foreman-file-task-system-");
     cleanupDirs.push(workspaceRoot);

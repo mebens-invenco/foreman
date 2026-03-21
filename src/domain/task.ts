@@ -15,6 +15,12 @@ export type TaskTarget = {
 
 export type TaskTargetRef = Pick<TaskTarget, "repoKey" | "branchName" | "position">;
 
+export type TaskTargetDependencyRef = {
+  taskTargetRepoKey: string;
+  dependsOnRepoKey: string;
+  position: number;
+};
+
 export type TaskArtifact = {
   type: "pull_request";
   url: string;
@@ -33,8 +39,12 @@ export type Task = {
   priority: TaskPriority;
   labels: string[];
   assignee: string | null;
+  /** @deprecated Use `targets` instead. */
   repo: string | null;
+  /** @deprecated Use target branch names instead. */
   branchName: string | null;
+  targets: TaskTargetRef[];
+  targetDependencies: TaskTargetDependencyRef[];
   dependencies: {
     taskIds: string[];
     baseTaskId: string | null;
@@ -55,6 +65,23 @@ export const getTaskTargetRefFromTask = (task: Pick<Task, "id" | "repo" | "branc
     branchName: task.branchName ?? task.id.toLowerCase(),
     position: 0,
   };
+};
+
+export const getTaskTargetRefsFromTask = (
+  task: Pick<Task, "id" | "repo" | "branchName" | "targets">,
+): TaskTargetRef[] => {
+  if (task.targets.length > 0) {
+    return task.targets
+      .map((target, position) => ({
+        repoKey: target.repoKey,
+        branchName: target.branchName,
+        position: target.position ?? position,
+      }))
+      .sort((left, right) => left.position - right.position || left.repoKey.localeCompare(right.repoKey));
+  }
+
+  const fallbackTarget = getTaskTargetRefFromTask(task);
+  return fallbackTarget ? [fallbackTarget] : [];
 };
 
 export const resolveTaskBranchName = (task: Pick<Task, "id" | "branchName">, target?: Pick<TaskTarget, "branchName"> | null): string =>

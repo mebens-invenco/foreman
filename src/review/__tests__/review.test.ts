@@ -32,6 +32,14 @@ const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   updatedAt: "2026-03-16T04:19:52Z",
   url: null,
   ...overrides,
+  targets:
+    overrides.targets ??
+    (overrides.repo === undefined
+      ? [{ repoKey: "lynk-frontend", branchName: overrides.branchName ?? "eng-4737", position: 0 }]
+      : overrides.repo
+        ? [{ repoKey: overrides.repo, branchName: overrides.branchName ?? "eng-4737", position: 0 }]
+        : []),
+  targetDependencies: overrides.targetDependencies ?? [],
 });
 
 const jsonResponse = (body: unknown, status = 200): Response =>

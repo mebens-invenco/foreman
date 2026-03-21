@@ -14,13 +14,18 @@ Use this metadata syntax:
 
 ```text
 Agent:
-  Repo: <repo-key>
+  Repos: <repo-key[, repo-key]>
   Depends on tasks: <ENG-123, ENG-124>
   Base from task: <ENG-123>
+  Repo dependencies: <repo-b<-repo-a>
   Depends on branches: <feature/foo, eng-123>
+  Branch: <task-branch-name>
 ```
 
-- `Repo` is required.
+- Prefer a single repo in `Repos` unless the work truly spans multiple repos.
+- Add `Repo dependencies` only when one repo target must wait on another repo target from the same task.
+- `Repos` is required.
 - `Base from task` is required when there is more than one task dependency.
-- `Branch` is optional. Omit it to use the default branch naming convention for the task system/executor.
+- `Branch` is optional. Only use when overriding the default branch naming convention for the task system/executor is needed.
+- Cross-task dependencies still belong in `Depends on tasks` and `Base from task`.
 - Omit dependency keys entirely when they are not needed.

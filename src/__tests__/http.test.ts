@@ -28,6 +28,8 @@ const sampleTask: Task = {
   assignee: null,
   repo: "repo-a",
   branchName: "task-0001",
+  targets: [{ repoKey: "repo-a", branchName: "task-0001", position: 0 }],
+  targetDependencies: [],
   dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
   artifacts: [],
   updatedAt: "2026-03-14T12:00:00Z",
@@ -42,6 +44,8 @@ const secondaryTask: Task = {
   state: "in_review",
   repo: null,
   branchName: null,
+  targets: [],
+  targetDependencies: [],
   updatedAt: "2026-03-13T12:00:00Z",
 };
 
@@ -223,6 +227,70 @@ describe("HTTP query validation", () => {
       db.close();
     }
   });
+
+  test("returns per-target blocked state for multi-target tasks", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const multiTargetTask: Task = {
+      ...sampleTask,
+      id: "ENG-4774",
+      providerId: "ENG-4774",
+      title: "Multi-target task",
+      repo: null,
+      branchName: "eng-4774",
+      targets: [
+        { repoKey: "repo-a", branchName: "eng-4774", position: 0 },
+        { repoKey: "repo-b", branchName: "eng-4774", position: 1 },
+      ],
+      targetDependencies: [{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a", position: 0 }],
+    };
+
+    db.taskMirror.saveTasks([multiTargetTask]);
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [
+        { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        { key: "repo-b", rootPath: "/repos/repo-b", defaultBranch: "main" },
+      ],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [multiTargetTask]),
+        getTask: vi.fn(async () => multiTargetTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({ method: "GET", url: "/api/tasks" });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().tasks).toMatchObject([
+        {
+          id: multiTargetTask.id,
+          targets: [
+            { repoKey: "repo-a", status: "ready" },
+            { repoKey: "repo-b", status: "blocked" },
+          ],
+        },
+      ]);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
 });
 
 describe("HTTP scheduler control", () => {
@@ -254,6 +322,9 @@ describe("HTTP scheduler control", () => {
         listCandidates: vi.fn(async () => [sampleTask]),
         getTask: vi.fn(async () => sampleTask),
         listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
       } as any,
       scheduler: {
         getStatus: () => ({ status: schedulerStatus, nextScoutPollAt: null }),

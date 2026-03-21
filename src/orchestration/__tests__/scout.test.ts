@@ -127,6 +127,14 @@ const task = (input: Partial<Task> & Pick<Task, "id" | "title" | "state" | "prov
   artifacts: [],
   url: null,
   ...input,
+  targets:
+    input.targets ??
+    (input.repo === undefined
+      ? [{ repoKey: "repo-a", branchName: input.branchName ?? input.id.toLowerCase(), position: 0 }]
+      : input.repo
+        ? [{ repoKey: input.repo, branchName: input.branchName ?? input.id.toLowerCase(), position: 0 }]
+        : []),
+  targetDependencies: input.targetDependencies ?? [],
 });
 
 const writeFileTask = async (workspaceRoot: string, input: { id: string; title: string; state: string; repo?: string }): Promise<void> => {
@@ -936,6 +944,142 @@ describe("runScoutSelection", () => {
       expect(taskSystem.comments.get("ENG-4681") ?? []).toHaveLength(0);
       expect(worktrees.branchExistsOnOrigin).toHaveBeenCalledWith({ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }, "eng-4680");
       expect(worktrees.isAncestorOnOrigin).toHaveBeenCalledWith({ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }, "master", "master");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("fans out independent repo targets from one task", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 2;
+
+    const multiTargetTask = task({
+      id: "ENG-4774",
+      title: "Multi-target task",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T12:00:00Z",
+      repo: null,
+      branchName: "eng-4774",
+      targets: [
+        { repoKey: "repo-a", branchName: "eng-4774", position: 0 },
+        { repoKey: "repo-b", branchName: "eng-4774", position: 1 },
+      ],
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([multiTargetTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [
+          { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+          { key: "repo-b", rootPath: "/repos/repo-b", defaultBranch: "main" },
+        ],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(2);
+      expect(result.jobs.map((job) => `${job.action}:${job.target.repoKey}`)).toEqual([
+        "execution:repo-a",
+        "execution:repo-b",
+      ]);
+      expect(result.jobs.map((job) => job.baseBranch)).toEqual(["main", "main"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("waits for same-task repo dependencies before scheduling downstream targets", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 2;
+
+    const multiTargetTask = task({
+      id: "ENG-4775",
+      title: "Sequenced multi-target task",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T12:00:00Z",
+      repo: null,
+      branchName: "eng-4775",
+      targets: [
+        { repoKey: "repo-a", branchName: "eng-4775", position: 0 },
+        { repoKey: "repo-b", branchName: "eng-4775", position: 1 },
+      ],
+      targetDependencies: [{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a", position: 0 }],
+    });
+
+    db.workers.ensureWorkerSlots(1);
+    const worker = db.workers.listWorkers()[0];
+    expect(worker).toBeDefined();
+
+    try {
+      const initial = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([multiTargetTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [
+          { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+          { key: "repo-b", rootPath: "/repos/repo-b", defaultBranch: "main" },
+        ],
+        triggerType: "manual",
+      });
+
+      expect(initial.jobs).toHaveLength(1);
+      expect(initial.jobs[0]?.target.repoKey).toBe("repo-a");
+
+      const repoATarget = db.taskMirror.getTaskTarget(multiTargetTask.id, "repo-a");
+      expect(repoATarget).not.toBeNull();
+      const repoAJob = db.jobs.createJob({
+        taskId: multiTargetTask.id,
+        taskTargetId: repoATarget!.id,
+        taskProvider: multiTargetTask.provider,
+        action: "execution",
+        priorityRank: priorityToRank(multiTargetTask.priority),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: `${multiTargetTask.id}:repo-a:execution`,
+        selectionReason: "test",
+      });
+      db.jobs.updateJobStatus(repoAJob.id, "completed", { finishedAt: "2026-03-14T12:10:00Z" });
+      const attempt = db.attempts.createAttemptWithLeases({
+        jobId: repoAJob.id,
+        workerId: worker!.id,
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+        expiresAt: "2026-03-14T12:20:00Z",
+        leases: [],
+      });
+      expect(attempt).not.toBeNull();
+      db.attempts.finalizeAttempt(attempt!.id, "completed", {
+        finishedAt: "2026-03-14T12:10:00Z",
+        summary: "repo-a complete",
+      });
+
+      const followUp = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([multiTargetTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [
+          { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+          { key: "repo-b", rootPath: "/repos/repo-b", defaultBranch: "main" },
+        ],
+        triggerType: "manual",
+      });
+
+      expect(followUp.jobs).toHaveLength(1);
+      expect(followUp.jobs[0]?.target.repoKey).toBe("repo-b");
     } finally {
       db.close();
     }

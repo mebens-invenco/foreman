@@ -15,14 +15,30 @@ Required frontmatter fields:
 - `createdAt`
 - `updatedAt`
 
-Expected executable-task metadata fields:
+Expected executable-task frontmatter fields:
 
-- `repo`
-- `branchName`
+- `targets`
+- `targetDependencies`
 - `dependsOnTasks`
 - `baseFromTask`
 - `dependsOnBranches`
 - `assignee`
+
+Use this frontmatter shape for executable tasks:
+
+```yaml
+targets:
+  - repoKey: <repo-key>
+    branchName: <task-branch-name>
+    position: 0
+targetDependencies: []
+```
+
+- `targets` is required and should list repo targets in execution order.
+- Prefer a single target unless the work truly spans multiple repos.
+- Add `targetDependencies` only when one repo target must wait on another repo target from the same task.
+- Omit dependency keys entirely when they are not needed.
+- Legacy `repo` and `branchName` frontmatter is deprecated; use `targets` instead.
 
 Each executable task body must also include a compact `## Relevant Learnings` section:
 

@@ -5,7 +5,7 @@ import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 
 import type { JobRecord } from "./repos/index.js";
-import type { RepoRef, ResolvedPullRequest, Task, TaskState, TaskTargetStatus } from "./domain/index.js";
+import type { RepoRef, ResolvedPullRequest, Task, TaskState, TaskTarget, TaskTargetStatus } from "./domain/index.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
 import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
@@ -84,6 +84,37 @@ const parseEnumQuery = <T extends string>(name: string, value: string | undefine
 const taskStates = ["ready", "in_progress", "in_review", "done", "canceled"] as const satisfies readonly TaskState[];
 const attemptStatuses = ["running", "completed", "failed", "blocked", "canceled", "timed_out"] as const;
 const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
+type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable";
+
+type BuiltTaskTarget = {
+  id: string;
+  taskId: string;
+  repoKey: string;
+  branchName: string;
+  status: TaskTargetStatus;
+  progressState: TargetProgressState;
+  review: {
+    pullRequestUrl: string;
+    pullRequestNumber: number;
+    state: "open" | "closed" | "merged";
+    isDraft: boolean;
+    baseBranch: string;
+    headBranch: string;
+  } | null;
+  latestJob: {
+    id: string;
+    action: JobRecord["action"];
+    status: JobRecord["status"];
+    createdAt: string;
+    finishedAt: string | null;
+  } | null;
+  latestAttempt: {
+    id: string;
+    status: "running" | "completed" | "failed" | "blocked" | "canceled" | "timed_out";
+    startedAt: string;
+    finishedAt: string | null;
+  } | null;
+};
 
 const dependenciesSatisfiedForTask = (task: Task, tasksById: ReadonlyMap<string, Task>): boolean => {
   if (task.dependencies.taskIds.length === 0) {
@@ -107,23 +138,29 @@ const dependenciesSatisfiedForTask = (task: Task, tasksById: ReadonlyMap<string,
 const deriveTaskTargetStatus = (input: {
   task: Task;
   latestJob: JobRecord | null;
-  pullRequest: ResolvedPullRequest | null;
+  progressState: TargetProgressState;
   dependenciesSatisfied: boolean;
 }): TaskTargetStatus => {
   if (input.task.state === "done" || input.task.state === "canceled") {
     return input.task.state;
   }
 
-  if (input.latestJob && activeJobStatuses.has(input.latestJob.status)) {
-    return input.latestJob.action === "review" ? "in_review" : "in_progress";
-  }
-
-  if (input.pullRequest?.state === "open" || input.task.state === "in_review") {
-    return "in_review";
-  }
-
   if (!input.dependenciesSatisfied) {
     return "blocked";
+  }
+
+  switch (input.progressState) {
+    case "active":
+      return input.latestJob?.action === "review" ? "in_review" : "in_progress";
+    case "in_review":
+      return "in_review";
+    case "merged":
+    case "completed":
+      return "done";
+    case "retryable":
+      return "in_review";
+    case "pending":
+      return input.task.state === "in_review" ? "ready" : input.task.state;
   }
 
   return input.task.state;
@@ -135,74 +172,139 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   const hasUiBuild = existsSync(uiRoot);
   const getAllMirroredTasks = (): Task[] => deps.repos.taskMirror.getTasks();
 
-  const buildTaskTargets = async (task: Task, tasksById: ReadonlyMap<string, Task>) => {
+  const fallbackTargetsForTask = (task: Task): TaskTarget[] =>
+    task.repo
+      ? [
+          {
+            id: `unpersisted:${task.id}:${task.repo}`,
+            taskId: task.id,
+            repoKey: task.repo,
+            branchName: task.branchName ?? task.id.toLowerCase(),
+            position: 0,
+          },
+        ]
+      : [];
+
+  const persistedOrFallbackTargets = (task: Task): TaskTarget[] => {
     const persistedTargets = deps.repos.taskMirror.getTargetsForTask(task.id);
-    const targets =
-      persistedTargets.length > 0
-        ? persistedTargets
-        : task.repo
-          ? [
-              {
-                id: `unpersisted:${task.id}:${task.repo}`,
-                taskId: task.id,
-                repoKey: task.repo,
-                branchName: task.branchName ?? task.id.toLowerCase(),
-                position: 0,
-              },
-            ]
-          : [];
-
-    return Promise.all(
-      targets.map(async (target) => {
-        const repo = deps.repoRefs.find((item) => item.key === target.repoKey);
-        const pullRequest = repo ? await deps.reviewService.resolvePullRequest(task, repo, target) : null;
-        const latestJob = deps.repos.jobs.latestJobForTaskTarget(target.id);
-        const latestAttempt = deps.repos.attempts.latestAttemptForTaskTarget(target.id);
-        const dependenciesSatisfied = dependenciesSatisfiedForTask(task, tasksById);
-
-        return {
-          id: target.id,
-          repoKey: target.repoKey,
-          branchName: target.branchName,
-          status: deriveTaskTargetStatus({ task, latestJob, pullRequest, dependenciesSatisfied }),
-          review:
-            pullRequest === null
-              ? null
-              : {
-                  pullRequestUrl: pullRequest.pullRequestUrl,
-                  pullRequestNumber: pullRequest.pullRequestNumber,
-                  state: pullRequest.state,
-                  isDraft: pullRequest.isDraft,
-                  baseBranch: pullRequest.baseBranch,
-                  headBranch: pullRequest.headBranch,
-                },
-          latestJob:
-            latestJob === null
-              ? null
-              : {
-                  id: latestJob.id,
-                  action: latestJob.action,
-                  status: latestJob.status,
-                  createdAt: latestJob.createdAt,
-                  finishedAt: latestJob.finishedAt,
-                },
-          latestAttempt:
-            latestAttempt === null
-              ? null
-              : {
-                  id: latestAttempt.id,
-                  status: latestAttempt.status,
-                  startedAt: latestAttempt.startedAt,
-                  finishedAt: latestAttempt.finishedAt,
-                },
-        };
-      }),
-    );
+    return persistedTargets.length > 0 ? persistedTargets : fallbackTargetsForTask(task);
   };
 
-  const serializeTask = async (task: Task, tasksById: ReadonlyMap<string, Task>) => {
-    const targets = await buildTaskTargets(task, tasksById);
+  const buildTaskTargets = async (
+    task: Task,
+    tasksById: ReadonlyMap<string, Task>,
+    cache = new Map<string, Promise<BuiltTaskTarget>>(),
+  ): Promise<BuiltTaskTarget[]> => {
+    const buildTarget = async (targetTask: Task, target: TaskTarget): Promise<BuiltTaskTarget> => {
+      let promise = cache.get(target.id);
+      if (!promise) {
+        promise = (async () => {
+          const repo = deps.repoRefs.find((item) => item.key === target.repoKey);
+          const pullRequest = repo ? await deps.reviewService.resolvePullRequest(targetTask, repo, target) : null;
+          const latestJob = deps.repos.jobs.latestJobForTaskTarget(target.id);
+          const latestAttempt = deps.repos.attempts.latestAttemptForTaskTarget(target.id);
+          const missingCrossTaskDependency = targetTask.dependencies.taskIds.some((dependencyTaskId) => {
+            const dependencyTask = tasksById.get(dependencyTaskId) ?? deps.repos.taskMirror.getTask(dependencyTaskId);
+            if (!dependencyTask) {
+              return true;
+            }
+
+            return deps.repos.taskMirror.getTaskTarget(dependencyTaskId, target.repoKey) === null;
+          });
+          const dependencyRecords = deps.repos.taskMirror
+            .getTargetDependenciesForTask(targetTask.id)
+            .filter((dependency) => dependency.taskTargetId === target.id);
+          const dependencyStatuses = await Promise.all(
+            dependencyRecords.map(async (dependency) => {
+              const dependencyTarget = deps.repos.taskMirror.getTaskTargetById(dependency.dependsOnTaskTargetId);
+              if (!dependencyTarget) {
+                return false;
+              }
+
+              const dependencyTask =
+                tasksById.get(dependencyTarget.taskId) ??
+                deps.repos.taskMirror.getTask(dependencyTarget.taskId) ??
+                (await deps.taskSystem.getTask(dependencyTarget.taskId));
+              const builtDependency = await buildTarget(dependencyTask, dependencyTarget);
+              return (
+                builtDependency.progressState === "in_review" ||
+                builtDependency.progressState === "merged" ||
+                builtDependency.progressState === "completed"
+              );
+            }),
+          );
+          const dependenciesSatisfied = !missingCrossTaskDependency && dependencyStatuses.every(Boolean);
+          const progressState: TargetProgressState = latestJob && activeJobStatuses.has(latestJob.status)
+            ? "active"
+            : pullRequest?.state === "open"
+              ? "in_review"
+              : pullRequest?.state === "merged"
+                ? "merged"
+                : pullRequest?.state === "closed"
+                  ? "retryable"
+                  : latestJob &&
+                      (latestJob.action === "execution" || latestJob.action === "retry") &&
+                      latestJob.status === "completed" &&
+                      latestAttempt?.status === "completed"
+                    ? "completed"
+                    : "pending";
+
+          return {
+            id: target.id,
+            taskId: target.taskId,
+            repoKey: target.repoKey,
+            branchName: target.branchName,
+            status: deriveTaskTargetStatus({ task: targetTask, latestJob, progressState, dependenciesSatisfied }),
+            progressState,
+            review:
+              pullRequest === null
+                ? null
+                : {
+                    pullRequestUrl: pullRequest.pullRequestUrl,
+                    pullRequestNumber: pullRequest.pullRequestNumber,
+                    state: pullRequest.state,
+                    isDraft: pullRequest.isDraft,
+                    baseBranch: pullRequest.baseBranch,
+                    headBranch: pullRequest.headBranch,
+                  },
+            latestJob:
+              latestJob === null
+                ? null
+                : {
+                    id: latestJob.id,
+                    action: latestJob.action,
+                    status: latestJob.status,
+                    createdAt: latestJob.createdAt,
+                    finishedAt: latestJob.finishedAt,
+                  },
+            latestAttempt:
+              latestAttempt === null
+                ? null
+                : {
+                    id: latestAttempt.id,
+                    status: latestAttempt.status,
+                    startedAt: latestAttempt.startedAt,
+                    finishedAt: latestAttempt.finishedAt,
+                  },
+          };
+        })();
+        cache.set(target.id, promise);
+      }
+
+      return promise;
+    };
+
+    return Promise.all(persistedOrFallbackTargets(task).map((target) => buildTarget(task, target)));
+  };
+
+  const serializeTask = async (
+    task: Task,
+    tasksById: ReadonlyMap<string, Task>,
+    cache = new Map<string, Promise<BuiltTaskTarget>>(),
+  ) => {
+    const targets = await buildTaskTargets(task, tasksById, cache);
     const primaryTarget = targets[0] ?? null;
+    const firstReviewTarget = targets.find((target) => target.review?.state === "open") ?? primaryTarget;
 
     return {
       id: task.id,
@@ -221,7 +323,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       artifacts: task.artifacts,
       updatedAt: task.updatedAt,
       url: task.url,
-      reviewUrl: primaryTarget?.review?.pullRequestUrl ?? null,
+      reviewUrl: firstReviewTarget?.review?.pullRequestUrl ?? null,
       targets,
     };
   };
