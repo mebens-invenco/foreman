@@ -6,6 +6,11 @@ const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
 });
 
+const compactNumberFormatter = new Intl.NumberFormat(undefined, {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
 export const formatTimestamp = (value: string | null | undefined): string => {
   if (!value) {
     return "-";
@@ -77,3 +82,25 @@ export const truncate = (value: string, length = 120): string => {
 
   return `${value.slice(0, Math.max(0, length - 1))}...`;
 };
+
+export const truncateMiddle = (value: string, edgeLength = 8): string => {
+  if (value.length <= edgeLength * 2 + 3) {
+    return value;
+  }
+
+  return `${value.slice(0, edgeLength)}...${value.slice(-edgeLength)}`;
+};
+
+export const formatNumber = (value: number): string => compactNumberFormatter.format(value);
+
+export const formatCount = (value: number, singular: string, plural = `${singular}s`): string =>
+  `${value} ${value === 1 ? singular : plural}`;
+
+export const repoLabel = (value: string): string => value.split("/").filter(Boolean).pop() ?? value;
+
+export const titleCase = (value: string): string =>
+  value
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part[0]?.toUpperCase() + part.slice(1))
+    .join(" ");
