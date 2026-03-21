@@ -96,10 +96,8 @@ export type TaskListItem = {
   state: TaskState;
   providerState: string;
   priority: string;
-  repo: string | null;
   updatedAt: string;
   url: string | null;
-  reviewUrl: string | null;
   targets: TaskTargetView[];
 };
 

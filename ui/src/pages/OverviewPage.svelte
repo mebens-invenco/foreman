@@ -169,7 +169,7 @@
                     {/each}
                   </div>
                 {:else}
-                  <div class="mt-1 text-sm text-muted-foreground">{primaryTarget?.repoKey ?? task.repo ?? "No repo"}</div>
+                  <div class="mt-1 text-sm text-muted-foreground">{primaryTarget?.repoKey ?? "No repo"}</div>
                 {/if}
               </div>
             {/each}

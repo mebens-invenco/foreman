@@ -26,7 +26,7 @@ Do not start implementation work. Do not reprioritize outside the supplied works
 ## Planning Requirements
 
 - Break work into the smallest tasks that can be executed safely and independently.
-- Assign each task to exactly one repo.
+- Prefer single-target tasks unless the work truly spans multiple repos.
 - Capture dependencies only when they are real execution constraints.
 - Use explicit base-task relationships when multiple task dependencies exist.
 - Prefer tasks that can move directly into Foreman-ready execution without additional interpretation.

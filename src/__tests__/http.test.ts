@@ -26,11 +26,9 @@ const sampleTask: Task = {
   priority: "normal",
   labels: ["Agent"],
   assignee: null,
-  repo: "repo-a",
-  branchName: "task-0001",
   targets: [{ repoKey: "repo-a", branchName: "task-0001", position: 0 }],
   targetDependencies: [],
-  dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
+  dependencies: { taskIds: [], baseTaskId: null },
   artifacts: [],
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
@@ -42,8 +40,6 @@ const secondaryTask: Task = {
   providerId: "TASK-0002",
   title: "Other task",
   state: "in_review",
-  repo: null,
-  branchName: null,
   targets: [],
   targetDependencies: [],
   updatedAt: "2026-03-13T12:00:00Z",
@@ -168,14 +164,15 @@ describe("HTTP query validation", () => {
     try {
       const listResponse = await server.inject({ method: "GET", url: "/api/tasks" });
       expect(listResponse.statusCode).toBe(200);
-      expect(db.taskMirror.getTask(taskWithPr.id)).toMatchObject({ id: taskWithPr.id, repo: "repo-a", branchName: "task-0001" });
+      expect(db.taskMirror.getTask(taskWithPr.id)).toMatchObject({
+        id: taskWithPr.id,
+        targets: [{ repoKey: "repo-a", branchName: "task-0001", position: 0 }],
+      });
       expect(taskSystem.listCandidates).not.toHaveBeenCalled();
       expect(listResponse.json()).toMatchObject({
         tasks: [
           {
             id: "TASK-0001",
-            repo: "repo-a",
-            reviewUrl: "https://github.com/acme/repo-a/pull/7",
             targets: [
               {
                 repoKey: "repo-a",
@@ -194,8 +191,6 @@ describe("HTTP query validation", () => {
           },
           expect.objectContaining({
             id: secondaryTask.id,
-            repo: null,
-            reviewUrl: null,
             targets: [],
           }),
         ],
@@ -238,8 +233,6 @@ describe("HTTP query validation", () => {
       id: "ENG-4774",
       providerId: "ENG-4774",
       title: "Multi-target task",
-      repo: null,
-      branchName: "eng-4774",
       targets: [
         { repoKey: "repo-a", branchName: "eng-4774", position: 0 },
         { repoKey: "repo-b", branchName: "eng-4774", position: 1 },

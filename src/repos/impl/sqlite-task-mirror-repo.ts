@@ -223,7 +223,6 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     return storedTasks.map((storedTask) => {
       const targets = targetsByTaskId.get(storedTask.id) ?? [];
       const dependencies = dependenciesByTaskId.get(storedTask.id) ?? [];
-      const primaryTarget = targets.length === 1 ? targets[0] : null;
       return {
         id: storedTask.id,
         provider: storedTask.provider,
@@ -235,8 +234,6 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
         priority: storedTask.priority,
         labels: storedTask.labels,
         assignee: storedTask.assignee,
-        repo: primaryTarget?.repoKey ?? null,
-        branchName: primaryTarget?.branchName ?? null,
         targets: targets.map((target) => ({
           repoKey: target.repoKey,
           branchName: target.branchName,
@@ -260,7 +257,6 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
         dependencies: {
           taskIds: dependencies.map((dependency) => dependency.dependsOnTaskId),
           baseTaskId: dependencies.find((dependency) => dependency.isBaseDependency)?.dependsOnTaskId ?? null,
-          branchNames: [],
         },
         artifacts: [],
         updatedAt: storedTask.updatedAt,

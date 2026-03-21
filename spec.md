@@ -354,12 +354,11 @@ type Task = {
   priority: "urgent" | "high" | "normal" | "none" | "low"
   labels: string[]
   assignee: string | null
-  repo: string | null
-  branchName: string | null
+  targets: TaskTargetRef[]
+  targetDependencies: TaskTargetDependencyRef[]
   dependencies: {
     taskIds: string[]
     baseTaskId: string | null
-    branchNames: string[]
   }
   artifacts: TaskArtifact[]
   updatedAt: string
@@ -436,7 +435,7 @@ Default mapping:
 
 ### Metadata
 
-Execution metadata is parsed from the task description. Required execution metadata includes one or more repo targets. Optional metadata includes task dependencies, base task, repo dependencies, branch dependencies, and branch name.
+Execution metadata is parsed from the task description. Required execution metadata includes one or more repo targets. Optional metadata includes task dependencies, base task, repo dependencies, and branch name.
 
 The metadata block syntax is:
 
@@ -446,7 +445,6 @@ Agent:
   Depends on tasks: <ENG-123, ENG-124>
   Base from task: <ENG-123>
   Repo dependencies: <repo-b<-repo-a>
-  Depends on branches: <feature/foo, eng-123>
   Branch: <task-branch-name>
 ```
 
@@ -457,7 +455,6 @@ Parsing rules:
 - `Repo` remains accepted as a single-target shorthand
 - `Depends on tasks` is an optional comma-separated list
 - `Repo dependencies` is an optional comma-separated list of `<target<-dependency>` pairs within the same task
-- `Depends on branches` is an optional comma-separated list
 - `Base from task` is required when `Depends on tasks` contains more than one task
 - `Base from task` must be one of the listed task dependencies when present
 - `Branch` is optional and, when present, is the preferred task branch name
@@ -510,12 +507,6 @@ Repo dependency rules:
 
 - same-task repo dependencies gate scheduling only; they do not change the repo-local base branch
 - a repo dependency is satisfied when the upstream target is in review with an open PR, completed without repo changes, or merged
-
-Branch dependency rules:
-
-- branch dependencies are repo-local only
-- a branch dependency is satisfied only when the branch exists on origin and its tip is an ancestor of the resolved base branch tip
-- if a required dependency branch does not exist on origin, the dependency is unsatisfied
 
 If required metadata is missing or invalid for a task that would otherwise be selected, Foreman must not schedule that action.
 
@@ -1506,12 +1497,17 @@ Returns the full normalized task and all current task comments:
     "priority": "high",
     "labels": ["Agent"],
     "assignee": "me",
-    "repo": "product-app",
-    "branchName": "eng-1234",
+    "targets": [
+      {
+        "repoKey": "product-app",
+        "branchName": "eng-1234",
+        "position": 0
+      }
+    ],
+    "targetDependencies": [],
     "dependencies": {
       "taskIds": [],
-      "baseTaskId": null,
-      "branchNames": []
+      "baseTaskId": null
     },
     "artifacts": [],
     "updatedAt": "2026-03-14T12:00:00Z",

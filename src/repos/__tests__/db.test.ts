@@ -23,11 +23,9 @@ const syncSingleTargetTask = (db: Awaited<ReturnType<typeof createMigratedDb>>, 
       priority: "normal",
       labels: ["Agent"],
       assignee: null,
-      repo: input.repoKey,
-      branchName: input.branchName ?? input.taskId.toLowerCase(),
       targets: [{ repoKey: input.repoKey, branchName: input.branchName ?? input.taskId.toLowerCase(), position: 0 }],
       targetDependencies: [],
-      dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
+      dependencies: { taskIds: [], baseTaskId: null },
       artifacts: [],
       updatedAt: "2026-03-14T12:00:00Z",
       url: null,
@@ -515,11 +513,9 @@ describe("persistence repos", () => {
           priority: "high",
           labels: ["Agent"],
           assignee: "Test User",
-          repo: "repo-a",
-          branchName: "eng-4700",
           targets: [{ repoKey: "repo-a", branchName: "eng-4700", position: 0 }],
           targetDependencies: [],
-          dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
+          dependencies: { taskIds: [], baseTaskId: null },
           artifacts: [],
           updatedAt: "2026-03-18T12:00:00Z",
           url: "https://linear.app/acme/issue/ENG-4700",
@@ -535,11 +531,9 @@ describe("persistence repos", () => {
           priority: "normal",
           labels: ["Agent", "Backend"],
           assignee: null,
-          repo: "repo-a",
-          branchName: "eng-4701",
           targets: [{ repoKey: "repo-a", branchName: "eng-4701", position: 0 }],
           targetDependencies: [],
-          dependencies: { taskIds: [], baseTaskId: "ENG-4700", branchNames: ["eng-4700"] },
+          dependencies: { taskIds: [], baseTaskId: "ENG-4700" },
           artifacts: [],
           updatedAt: "2026-03-18T12:05:00Z",
           url: "https://linear.app/acme/issue/ENG-4701",
@@ -555,11 +549,9 @@ describe("persistence repos", () => {
           priority: "low",
           labels: ["Agent"],
           assignee: null,
-          repo: null,
-          branchName: null,
           targets: [],
           targetDependencies: [],
-          dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
+          dependencies: { taskIds: [], baseTaskId: null },
           artifacts: [],
           updatedAt: "2026-03-18T12:10:00Z",
           url: "https://linear.app/acme/issue/ENG-4702",
@@ -572,8 +564,7 @@ describe("persistence repos", () => {
         state: "ready",
         providerState: "Todo",
         labels: ["Agent", "Backend"],
-        repo: "repo-a",
-        branchName: "eng-4701",
+        targets: [{ repoKey: "repo-a", branchName: "eng-4701", position: 0 }],
       });
       expect(db.taskMirror.getTasks({ state: "ready" }).map((task) => task.id)).toEqual(["ENG-4702", "ENG-4701"]);
       expect(db.taskMirror.getTasks({ search: "dependent" }).map((task) => task.id)).toEqual(["ENG-4701"]);
@@ -613,15 +604,13 @@ describe("persistence repos", () => {
 
       expect(db.taskMirror.getTask("ENG-4701")).toMatchObject({
         id: "ENG-4701",
-        repo: "repo-a",
-        branchName: "eng-4701",
+        targets: [{ repoKey: "repo-a", branchName: "eng-4701", position: 0 }],
         dependencies: {
           taskIds: ["ENG-4700"],
           baseTaskId: "ENG-4700",
-          branchNames: [],
         },
       });
-      expect(db.taskMirror.getTask("ENG-4702")).toMatchObject({ id: "ENG-4702", repo: null, branchName: null });
+      expect(db.taskMirror.getTask("ENG-4702")).toMatchObject({ id: "ENG-4702", targets: [] });
     } finally {
       db.close();
     }
@@ -644,14 +633,12 @@ describe("persistence repos", () => {
         priority: "normal" as const,
         labels: ["Agent"],
         assignee: null,
-        repo: null,
-        branchName: "eng-4773",
         targets: [
           { repoKey: "common", branchName: "eng-4773", position: 0 },
           { repoKey: "lynk-frontend", branchName: "eng-4773", position: 1 },
         ],
         targetDependencies: [],
-        dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
+        dependencies: { taskIds: [], baseTaskId: null },
         artifacts: [],
         updatedAt: "2026-03-18T12:00:00Z",
         url: "https://linear.app/acme/issue/ENG-4773",
@@ -667,8 +654,6 @@ describe("persistence repos", () => {
         priority: "high" as const,
         labels: ["Agent"],
         assignee: null,
-        repo: null,
-        branchName: "eng-4774",
         targets: [
           { repoKey: "common", branchName: "eng-4774", position: 0 },
           { repoKey: "lynk-frontend", branchName: "eng-4774", position: 1 },
@@ -678,7 +663,7 @@ describe("persistence repos", () => {
           { taskTargetRepoKey: "lynk-frontend", dependsOnRepoKey: "common", position: 0 },
           { taskTargetRepoKey: "web-front-door", dependsOnRepoKey: "common", position: 1 },
         ],
-        dependencies: { taskIds: ["ENG-4773"], baseTaskId: "ENG-4773", branchNames: [] },
+        dependencies: { taskIds: ["ENG-4773"], baseTaskId: "ENG-4773" },
         artifacts: [],
         updatedAt: "2026-03-18T12:05:00Z",
         url: "https://linear.app/acme/issue/ENG-4774",
@@ -696,8 +681,6 @@ describe("persistence repos", () => {
       expect(refreshedTask).toMatchObject({
         id: task.id,
         title: "Updated multi-target rollout",
-        repo: null,
-        branchName: null,
         targets: [
           { repoKey: "common", branchName: "eng-4774", position: 0 },
           { repoKey: "lynk-frontend", branchName: "eng-4774", position: 1 },

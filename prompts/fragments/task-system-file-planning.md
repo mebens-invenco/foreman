@@ -21,7 +21,6 @@ Expected executable-task frontmatter fields:
 - `targetDependencies`
 - `dependsOnTasks`
 - `baseFromTask`
-- `dependsOnBranches`
 - `assignee`
 
 Use this frontmatter shape for executable tasks:

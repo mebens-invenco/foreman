@@ -1,7 +1,7 @@
 import { ForemanError } from "../../lib/errors.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
-import { resolveTaskBranchName, type CheckState, type ConversationComment, type RepoRef, type ResolvedPullRequest, type ReviewComment, type ReviewContext, type ReviewThread, type ReviewSummary, type Task, type TaskTargetRef } from "../../domain/index.js";
+import { resolveTaskBranchName, resolveTaskTargetRef, type CheckState, type ConversationComment, type RepoRef, type ResolvedPullRequest, type ReviewComment, type ReviewContext, type ReviewThread, type ReviewSummary, type Task, type TaskTargetRef } from "../../domain/index.js";
 import type { ReviewService } from "../review-service.js";
 
 type RepoDescriptor = { owner: string; repo: string };
@@ -629,14 +629,15 @@ export class GitHubReviewService implements ReviewService {
   }
 
   private async resolvePullRequestByBranch(task: Task, repo: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null> {
-    const branchName = resolveTaskBranchName(task, target);
-    if (!branchName) {
-      this.logger.debug("skipping branch-based GitHub pull request lookup because task branch metadata is missing", {
+    const effectiveTarget = target ?? resolveTaskTargetRef(task, repo.key);
+    if (!effectiveTarget) {
+      this.logger.debug("skipping branch-based GitHub pull request lookup because task has no target for repo", {
         taskId: task.id,
         repoKey: repo.key,
       });
       return null;
     }
+    const branchName = resolveTaskBranchName(task, effectiveTarget);
 
     const descriptor = await this.repoDescriptorFromRepo(repo);
     const query = new URLSearchParams({

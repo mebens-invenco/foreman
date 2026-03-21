@@ -77,11 +77,8 @@ const fileFrontmatterOrder: Array<keyof FileTaskFrontmatter> = [
   "labels",
   "targets",
   "targetDependencies",
-  "repo",
-  "branchName",
   "dependsOnTasks",
   "baseFromTask",
-  "dependsOnBranches",
   "artifacts",
   "assignee",
   "createdAt",
@@ -127,14 +124,6 @@ const normalizeTargetDependencies = (data: FileTaskFrontmatter): TaskTargetDepen
     }))
     .sort((left, right) => left.position - right.position || left.taskTargetRepoKey.localeCompare(right.taskTargetRepoKey));
 
-const deriveLegacyRepoFields = (targets: TaskTargetRef[]): { repo: string | null; branchName: string | null } => {
-  const primaryTarget = targets.length === 1 ? targets[0] : null;
-  return {
-    repo: primaryTarget ? primaryTarget.repoKey : null,
-    branchName: primaryTarget ? primaryTarget.branchName : null,
-  };
-};
-
 const parseFileTaskDocument = (config: WorkspaceConfig, filePath: string, contents: string): Task => {
   const parsed = matter(contents);
   const data = parsed.data as FileTaskFrontmatter;
@@ -142,10 +131,15 @@ const parseFileTaskDocument = (config: WorkspaceConfig, filePath: string, conten
   if (data.id !== stem) {
     throw new ForemanError("invalid_file_task", `Task id ${data.id} does not match filename ${stem}`);
   }
+  if ((data.dependsOnBranches?.length ?? 0) > 0) {
+    throw new ForemanError(
+      "invalid_task_metadata",
+      `Task ${data.id} uses deprecated dependsOnBranches metadata; use task dependencies and repo dependencies instead.`,
+    );
+  }
 
   const targets = normalizeTaskTargets(data);
   const targetDependencies = normalizeTargetDependencies(data);
-  const { repo, branchName } = deriveLegacyRepoFields(targets);
 
   return {
     id: data.id,
@@ -158,14 +152,11 @@ const parseFileTaskDocument = (config: WorkspaceConfig, filePath: string, conten
     priority: normalizePriority(data.priority),
     labels: data.labels ?? [],
     assignee: data.assignee ?? null,
-    repo,
-    branchName,
     targets,
     targetDependencies,
     dependencies: {
       taskIds: data.dependsOnTasks ?? [],
       baseTaskId: data.baseFromTask ?? null,
-      branchNames: data.dependsOnBranches ?? [],
     },
     artifacts: data.artifacts ?? [],
     updatedAt: data.updatedAt,
@@ -183,10 +174,8 @@ const toFileFrontmatter = (task: Task, createdAt: string): FileTaskFrontmatter =
     labels: task.labels,
     targets,
     targetDependencies: task.targetDependencies,
-    ...deriveLegacyRepoFields(targets),
     dependsOnTasks: task.dependencies.taskIds,
     baseFromTask: task.dependencies.baseTaskId,
-    dependsOnBranches: task.dependencies.branchNames,
     artifacts: task.artifacts,
     assignee: task.assignee,
     createdAt,

@@ -16,20 +16,14 @@ const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   priority: "normal",
   labels: ["Agent"],
   assignee: null,
-  repo: "repo-a",
-  branchName: "task-0001",
-  dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
+  dependencies: { taskIds: [], baseTaskId: null },
   artifacts: [],
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
   ...overrides,
   targets:
     overrides.targets ??
-    (overrides.repo === undefined
-      ? [{ repoKey: "repo-a", branchName: overrides.branchName ?? "task-0001", position: 0 }]
-      : overrides.repo
-        ? [{ repoKey: overrides.repo, branchName: overrides.branchName ?? "task-0001", position: 0 }]
-        : []),
+    [{ repoKey: "repo-a", branchName: "task-0001", position: 0 }],
   targetDependencies: overrides.targetDependencies ?? [],
 });
 

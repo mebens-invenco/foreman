@@ -40,6 +40,30 @@ Task body
 };
 
 describe("FileTaskSystem", () => {
+  test("normalizes legacy repo frontmatter to targets on rewrite", async () => {
+    const workspaceRoot = await createTempDir("foreman-file-task-system-");
+    cleanupDirs.push(workspaceRoot);
+
+    const taskPath = await writeTask(workspaceRoot, {
+      id: "TASK-0004",
+      title: "Legacy task",
+      state: "ready",
+    });
+
+    const paths = createWorkspacePaths(workspaceRoot, workspaceRoot);
+    const taskSystem = new FileTaskSystem(createDefaultWorkspaceConfig("foo", "file"), paths);
+
+    const task = await taskSystem.getTask("TASK-0004");
+    expect(task.targets).toEqual([{ repoKey: "repo-a", branchName: "task-0004", position: 0 }]);
+
+    await taskSystem.transition({ taskId: "TASK-0004", toState: "in_progress" });
+
+    const rewritten = await fs.readFile(taskPath, "utf8");
+    expect(rewritten).toContain("targets:");
+    expect(rewritten).not.toContain("\nrepo:");
+    expect(rewritten).not.toContain("\nbranchName:");
+  });
+
   test("parses multi-target frontmatter and preserves target dependencies on rewrite", async () => {
     const workspaceRoot = await createTempDir("foreman-file-task-system-");
     cleanupDirs.push(workspaceRoot);
@@ -79,8 +103,6 @@ Task body
     const taskSystem = new FileTaskSystem(createDefaultWorkspaceConfig("foo", "file"), paths);
 
     const task = await taskSystem.getTask("TASK-0003");
-    expect(task.repo).toBeNull();
-    expect(task.branchName).toBeNull();
     expect(task.targets).toEqual([
       { repoKey: "repo-a", branchName: "task-0003", position: 0 },
       { repoKey: "repo-b", branchName: "task-0003", position: 1 },
@@ -93,6 +115,39 @@ Task body
     expect(rewritten).toContain("targets:");
     expect(rewritten).toContain("targetDependencies:");
     expect(rewritten).toContain("taskTargetRepoKey: repo-b");
+  });
+
+  test("rejects deprecated dependsOnBranches metadata", async () => {
+    const workspaceRoot = await createTempDir("foreman-file-task-system-");
+    cleanupDirs.push(workspaceRoot);
+
+    const taskPath = path.join(workspaceRoot, "tasks", "TASK-0005.md");
+    await fs.mkdir(path.dirname(taskPath), { recursive: true });
+    await fs.writeFile(
+      taskPath,
+      `---
+id: TASK-0005
+title: Deprecated metadata
+state: ready
+priority: normal
+labels:
+  - Agent
+repo: repo-a
+dependsOnBranches:
+  - eng-123
+createdAt: 2026-03-14T12:00:00Z
+updatedAt: 2026-03-14T12:00:00Z
+---
+
+Task body
+`,
+      "utf8",
+    );
+
+    const paths = createWorkspacePaths(workspaceRoot, workspaceRoot);
+    const taskSystem = new FileTaskSystem(createDefaultWorkspaceConfig("foo", "file"), paths);
+
+    await expect(taskSystem.getTask("TASK-0005")).rejects.toMatchObject({ code: "invalid_task_metadata" });
   });
 
   test("listCandidates skips unmapped states and logs the skipped task", async () => {

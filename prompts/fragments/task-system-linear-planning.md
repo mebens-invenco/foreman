@@ -18,7 +18,6 @@ Agent:
   Depends on tasks: <ENG-123, ENG-124>
   Base from task: <ENG-123>
   Repo dependencies: <repo-b<-repo-a>
-  Depends on branches: <feature/foo, eng-123>
   Branch: <task-branch-name>
 ```
 

@@ -109,7 +109,7 @@ const normalizeLinearTaskReference = (value: string): string => {
 export const parseLinearMetadata = (
   description: string,
   defaultBranchName?: string,
-): Pick<Task, "repo" | "branchName" | "targets" | "targetDependencies" | "dependencies"> => {
+): Pick<Task, "targets" | "targetDependencies" | "dependencies"> => {
   const match = description.match(/(^|\n)Agent:\s*\n((?:\s{2,}.+\n?)*)/i);
   const lines =
     match?.[2]
@@ -130,11 +130,16 @@ export const parseLinearMetadata = (
 
   const taskIds = parseCsv(values.get("depends on tasks") ?? "").map(normalizeLinearTaskReference);
   const baseTaskIdValue = values.get("base from task");
+  if (values.has("depends on branches")) {
+    throw new ForemanError(
+      "invalid_task_metadata",
+      "Depends on branches is no longer supported; use task dependencies and repo dependencies instead.",
+    );
+  }
   const branchName = values.get("branch") ?? null;
   const effectiveBranchName = branchName ?? defaultBranchName ?? null;
   const repoKeys = uniqueValues(parseCsv(values.get("repos") ?? ""));
   const targetRepoKeys = repoKeys.length > 0 ? repoKeys : uniqueValues(parseCsv(values.get("repo") ?? ""));
-  const primaryRepoKey = targetRepoKeys.length === 1 ? targetRepoKeys[0]! : null;
   const targets: TaskTargetRef[] = effectiveBranchName
     ? targetRepoKeys.map((repoKey, position) => ({
         repoKey,
@@ -144,14 +149,11 @@ export const parseLinearMetadata = (
     : [];
 
   return {
-    repo: primaryRepoKey,
-    branchName: effectiveBranchName,
     targets,
     targetDependencies: values.has("repo dependencies") ? parseRepoDependencies(values.get("repo dependencies") ?? "") : [],
     dependencies: {
       taskIds,
       baseTaskId: baseTaskIdValue ? normalizeLinearTaskReference(baseTaskIdValue) : null,
-      branchNames: parseCsv(values.get("depends on branches") ?? ""),
     },
   };
 };
@@ -251,7 +253,6 @@ const isGithubPullRequestArtifact = (artifact: Pick<TaskArtifact, "type" | "url"
 
 const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task => {
   const metadata = parseLinearMetadata(node.description ?? "", node.branchName ?? node.identifier.toLowerCase());
-  const branchName = metadata.branchName ?? node.branchName ?? node.identifier.toLowerCase();
   return {
     id: node.identifier,
     provider: "linear",
@@ -263,8 +264,6 @@ const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task
     priority: linearPriorityToNormalized(node.priorityLabel),
     labels: node.labels.nodes.map((label) => label.name),
     assignee: node.assignee?.name ?? null,
-    repo: metadata.repo,
-    branchName,
     targets: metadata.targets,
     targetDependencies: metadata.targetDependencies,
     dependencies: metadata.dependencies,

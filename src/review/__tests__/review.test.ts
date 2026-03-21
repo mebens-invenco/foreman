@@ -25,20 +25,14 @@ const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   priority: "normal",
   labels: ["Agent"],
   assignee: null,
-  repo: "lynk-frontend",
-  branchName: "eng-4737",
-  dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
+  dependencies: { taskIds: [], baseTaskId: null },
   artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo/pull/946", title: "PR 946" }],
   updatedAt: "2026-03-16T04:19:52Z",
   url: null,
   ...overrides,
   targets:
     overrides.targets ??
-    (overrides.repo === undefined
-      ? [{ repoKey: "lynk-frontend", branchName: overrides.branchName ?? "eng-4737", position: 0 }]
-      : overrides.repo
-        ? [{ repoKey: overrides.repo, branchName: overrides.branchName ?? "eng-4737", position: 0 }]
-        : []),
+    [{ repoKey: "repo-a", branchName: "eng-4737", position: 0 }],
   targetDependencies: overrides.targetDependencies ?? [],
 });
 
