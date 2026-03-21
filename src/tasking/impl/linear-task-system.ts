@@ -146,8 +146,8 @@ export const parseLinearMetadata = (
   return {
     repo: primaryRepoKey,
     branchName: effectiveBranchName,
-    ...(targets.length > 0 ? { targets } : {}),
-    ...(values.has("repo dependencies") ? { targetDependencies: parseRepoDependencies(values.get("repo dependencies") ?? "") } : {}),
+    targets,
+    targetDependencies: values.has("repo dependencies") ? parseRepoDependencies(values.get("repo dependencies") ?? "") : [],
     dependencies: {
       taskIds,
       baseTaskId: baseTaskIdValue ? normalizeLinearTaskReference(baseTaskIdValue) : null,
@@ -265,6 +265,8 @@ const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task
     assignee: node.assignee?.name ?? null,
     repo: metadata.repo,
     branchName,
+    targets: metadata.targets,
+    targetDependencies: metadata.targetDependencies,
     dependencies: metadata.dependencies,
     artifacts: node.attachments.nodes.flatMap((attachment) =>
       isGithubPullRequestArtifact({ type: "pull_request", url: attachment.url })

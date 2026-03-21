@@ -53,6 +53,8 @@ const createTask = (): Task => ({
   assignee: null,
   repo: "repo-a",
   branchName: null,
+  targets: [{ repoKey: "repo-a", branchName: "task-123", position: 0 }],
+  targetDependencies: [],
   dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
   artifacts: [],
   updatedAt: "2026-03-20T00:00:00Z",

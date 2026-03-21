@@ -197,6 +197,7 @@ describe("parseLinearMetadata", () => {
       repo: "repo-a",
       branchName: "eng-124",
       targets: [{ repoKey: "repo-a", branchName: "eng-124", position: 0 }],
+      targetDependencies: [],
       dependencies: {
         taskIds: ["ENG-123"],
         baseTaskId: null,
@@ -213,6 +214,8 @@ describe("parseLinearMetadata", () => {
     ).toEqual({
       repo: "repo-a",
       branchName: null,
+      targets: [],
+      targetDependencies: [],
       dependencies: {
         taskIds: ["ENG-123", "ENG-124"],
         baseTaskId: "ENG-123",
@@ -229,6 +232,8 @@ describe("parseLinearMetadata", () => {
     ).toEqual({
       repo: "repo-a",
       branchName: null,
+      targets: [],
+      targetDependencies: [],
       dependencies: {
         taskIds: ["ENG-4773"],
         baseTaskId: "ENG-4772",
@@ -260,6 +265,48 @@ describe("parseLinearMetadata", () => {
         branchNames: [],
       },
     });
+  });
+
+  test("hydrates multi-target Linear tasks with targets and repo dependencies", async () => {
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string };
+
+      if (body.query.includes("query ForemanIssue")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              issues: {
+                nodes: [
+                  {
+                    ...linearIssue([], "Test User").issues.nodes[0],
+                    description:
+                      "Agent:\n  Repos: common, lynk-frontend\n  Repo dependencies: lynk-frontend<-common\n  Branch: eng-4774\n",
+                    branchName: "eng-4774",
+                  },
+                ],
+              },
+            },
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    const task = await taskSystem.getTask("ENG-123");
+
+    expect(task.targets).toEqual([
+      { repoKey: "common", branchName: "eng-4774", position: 0 },
+      { repoKey: "lynk-frontend", branchName: "eng-4774", position: 1 },
+    ]);
+    expect(task.targetDependencies).toEqual([
+      { taskTargetRepoKey: "lynk-frontend", dependsOnRepoKey: "common", position: 0 },
+    ]);
   });
 });
 

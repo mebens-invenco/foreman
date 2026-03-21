@@ -237,15 +237,26 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
         assignee: storedTask.assignee,
         repo: primaryTarget?.repoKey ?? null,
         branchName: primaryTarget?.branchName ?? null,
-        ...(targets.length > 0
-          ? {
-              targets: targets.map((target) => ({
-                repoKey: target.repoKey,
-                branchName: target.branchName,
-                position: target.position,
-              })),
-            }
-          : {}),
+        targets: targets.map((target) => ({
+          repoKey: target.repoKey,
+          branchName: target.branchName,
+          position: target.position,
+        })),
+        targetDependencies: this.getTargetDependenciesForTask(storedTask.id).flatMap((dependency) => {
+          const taskTarget = this.getTaskTargetById(dependency.taskTargetId);
+          const dependsOnTaskTarget = this.getTaskTargetById(dependency.dependsOnTaskTargetId);
+          if (!taskTarget || !dependsOnTaskTarget) {
+            return [];
+          }
+
+          return [
+            {
+              taskTargetRepoKey: taskTarget.repoKey,
+              dependsOnRepoKey: dependsOnTaskTarget.repoKey,
+              position: dependency.position,
+            },
+          ];
+        }),
         dependencies: {
           taskIds: dependencies.map((dependency) => dependency.dependsOnTaskId),
           baseTaskId: dependencies.find((dependency) => dependency.isBaseDependency)?.dependsOnTaskId ?? null,
@@ -267,7 +278,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     );
 
     for (const task of tasks) {
-      for (const dependency of task.targetDependencies ?? []) {
+      for (const dependency of task.targetDependencies) {
         const taskTarget = this.getTaskTarget(task.id, dependency.taskTargetRepoKey);
         const dependsOnTaskTarget = this.getTaskTarget(task.id, dependency.dependsOnRepoKey);
         if (!taskTarget || !dependsOnTaskTarget) {

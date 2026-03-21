@@ -26,6 +26,6 @@ Agent:
 - Add `Repo dependencies` only when one repo target must wait on another repo target from the same task.
 - `Repos` is required.
 - `Base from task` is required when there is more than one task dependency.
-- `Branch` is optional. Omit it to use the default branch naming convention for the task system/executor.
+- `Branch` is optional. Only use when overriding the default branch naming convention for the task system/executor is needed.
 - Cross-task dependencies still belong in `Depends on tasks` and `Base from task`.
 - Omit dependency keys entirely when they are not needed.

@@ -127,6 +127,14 @@ const task = (input: Partial<Task> & Pick<Task, "id" | "title" | "state" | "prov
   artifacts: [],
   url: null,
   ...input,
+  targets:
+    input.targets ??
+    (input.repo === undefined
+      ? [{ repoKey: "repo-a", branchName: input.branchName ?? input.id.toLowerCase(), position: 0 }]
+      : input.repo
+        ? [{ repoKey: input.repo, branchName: input.branchName ?? input.id.toLowerCase(), position: 0 }]
+        : []),
+  targetDependencies: input.targetDependencies ?? [],
 });
 
 const writeFileTask = async (workspaceRoot: string, input: { id: string; title: string; state: string; repo?: string }): Promise<void> => {

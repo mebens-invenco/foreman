@@ -23,6 +23,14 @@ const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
   ...overrides,
+  targets:
+    overrides.targets ??
+    (overrides.repo === undefined
+      ? [{ repoKey: "repo-a", branchName: overrides.branchName ?? "task-0001", position: 0 }]
+      : overrides.repo
+        ? [{ repoKey: overrides.repo, branchName: overrides.branchName ?? "task-0001", position: 0 }]
+        : []),
+  targetDependencies: overrides.targetDependencies ?? [],
 });
 
 const baseWorkerResult = (overrides: Partial<WorkerResult> = {}): WorkerResult => ({

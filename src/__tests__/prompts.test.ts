@@ -29,6 +29,8 @@ const sampleTask: Task = {
   assignee: null,
   repo: "repo-a",
   branchName: "task-0001",
+  targets: [{ repoKey: "repo-a", branchName: "task-0001", position: 0 }],
+  targetDependencies: [],
   dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
   artifacts: [],
   updatedAt: "2026-03-14T12:00:00Z",
@@ -110,6 +112,7 @@ describe("prompt rendering", () => {
 
     expect(result.markdown).toContain("# Planning Prompt");
     expect(result.markdown).toContain("## File Task Planning Rules");
+    expect(result.markdown).toContain("`targets`");
     expect(result.markdown).toContain("## Workspace Context");
     expect(result.markdown).toContain("## Discovered Repositories");
     expect(result.markdown).toContain("## Learnings CLI");

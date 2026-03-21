@@ -28,6 +28,8 @@ const sampleTask: Task = {
   assignee: null,
   repo: "repo-a",
   branchName: "task-0001",
+  targets: [{ repoKey: "repo-a", branchName: "task-0001", position: 0 }],
+  targetDependencies: [],
   dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
   artifacts: [],
   updatedAt: "2026-03-14T12:00:00Z",
@@ -42,6 +44,8 @@ const secondaryTask: Task = {
   state: "in_review",
   repo: null,
   branchName: null,
+  targets: [],
+  targetDependencies: [],
   updatedAt: "2026-03-13T12:00:00Z",
 };
 

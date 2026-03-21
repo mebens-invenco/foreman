@@ -5,7 +5,15 @@ import fg from "fast-glob";
 import matter from "gray-matter";
 import YAML from "yaml";
 
-import type { Task, TaskArtifact, TaskComment, TaskState } from "../../domain/index.js";
+import {
+  getTaskTargetRefsFromTask,
+  type Task,
+  type TaskArtifact,
+  type TaskComment,
+  type TaskState,
+  type TaskTargetDependencyRef,
+  type TaskTargetRef,
+} from "../../domain/index.js";
 import { ForemanError, isForemanError } from "../../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists } from "../../lib/fs.js";
 import { newId } from "../../lib/ids.js";
@@ -48,6 +56,8 @@ type FileTaskFrontmatter = {
   state: string;
   priority: string;
   labels?: string[];
+  targets?: TaskTargetRef[];
+  targetDependencies?: TaskTargetDependencyRef[];
   repo?: string | null;
   branchName?: string | null;
   dependsOnTasks?: string[];
@@ -65,6 +75,8 @@ const fileFrontmatterOrder: Array<keyof FileTaskFrontmatter> = [
   "state",
   "priority",
   "labels",
+  "targets",
+  "targetDependencies",
   "repo",
   "branchName",
   "dependsOnTasks",
@@ -82,6 +94,47 @@ const stringifyFileTask = (frontmatter: FileTaskFrontmatter, body: string): stri
   return `---\n${yaml}\n---\n\n${body.trim()}\n`;
 };
 
+const normalizeTaskTargets = (data: FileTaskFrontmatter): TaskTargetRef[] => {
+  if (data.targets && data.targets.length > 0) {
+    return data.targets
+      .map((target, position) => ({
+        repoKey: target.repoKey,
+        branchName: target.branchName,
+        position: target.position ?? position,
+      }))
+      .sort((left, right) => left.position - right.position || left.repoKey.localeCompare(right.repoKey));
+  }
+
+  if (!data.repo) {
+    return [];
+  }
+
+  return [
+    {
+      repoKey: data.repo,
+      branchName: data.branchName ?? data.id.toLowerCase(),
+      position: 0,
+    },
+  ];
+};
+
+const normalizeTargetDependencies = (data: FileTaskFrontmatter): TaskTargetDependencyRef[] =>
+  (data.targetDependencies ?? [])
+    .map((dependency, position) => ({
+      taskTargetRepoKey: dependency.taskTargetRepoKey,
+      dependsOnRepoKey: dependency.dependsOnRepoKey,
+      position: dependency.position ?? position,
+    }))
+    .sort((left, right) => left.position - right.position || left.taskTargetRepoKey.localeCompare(right.taskTargetRepoKey));
+
+const deriveLegacyRepoFields = (targets: TaskTargetRef[]): { repo: string | null; branchName: string | null } => {
+  const primaryTarget = targets.length === 1 ? targets[0] : null;
+  return {
+    repo: primaryTarget ? primaryTarget.repoKey : null,
+    branchName: primaryTarget ? primaryTarget.branchName : null,
+  };
+};
+
 const parseFileTaskDocument = (config: WorkspaceConfig, filePath: string, contents: string): Task => {
   const parsed = matter(contents);
   const data = parsed.data as FileTaskFrontmatter;
@@ -89,6 +142,10 @@ const parseFileTaskDocument = (config: WorkspaceConfig, filePath: string, conten
   if (data.id !== stem) {
     throw new ForemanError("invalid_file_task", `Task id ${data.id} does not match filename ${stem}`);
   }
+
+  const targets = normalizeTaskTargets(data);
+  const targetDependencies = normalizeTargetDependencies(data);
+  const { repo, branchName } = deriveLegacyRepoFields(targets);
 
   return {
     id: data.id,
@@ -101,8 +158,10 @@ const parseFileTaskDocument = (config: WorkspaceConfig, filePath: string, conten
     priority: normalizePriority(data.priority),
     labels: data.labels ?? [],
     assignee: data.assignee ?? null,
-    repo: data.repo ?? null,
-    branchName: data.branchName ?? data.id.toLowerCase(),
+    repo,
+    branchName,
+    targets,
+    targetDependencies,
     dependencies: {
       taskIds: data.dependsOnTasks ?? [],
       baseTaskId: data.baseFromTask ?? null,
@@ -114,22 +173,26 @@ const parseFileTaskDocument = (config: WorkspaceConfig, filePath: string, conten
   };
 };
 
-const toFileFrontmatter = (task: Task, createdAt: string): FileTaskFrontmatter => ({
-  id: task.id,
-  title: task.title,
-  state: task.providerState,
-  priority: task.priority,
-  labels: task.labels,
-  repo: task.repo,
-  branchName: task.branchName ?? task.id.toLowerCase(),
-  dependsOnTasks: task.dependencies.taskIds,
-  baseFromTask: task.dependencies.baseTaskId,
-  dependsOnBranches: task.dependencies.branchNames,
-  artifacts: task.artifacts,
-  assignee: task.assignee,
-  createdAt,
-  updatedAt: task.updatedAt,
-});
+const toFileFrontmatter = (task: Task, createdAt: string): FileTaskFrontmatter => {
+  const targets = getTaskTargetRefsFromTask(task);
+  return {
+    id: task.id,
+    title: task.title,
+    state: task.providerState,
+    priority: task.priority,
+    labels: task.labels,
+    targets,
+    targetDependencies: task.targetDependencies,
+    ...deriveLegacyRepoFields(targets),
+    dependsOnTasks: task.dependencies.taskIds,
+    baseFromTask: task.dependencies.baseTaskId,
+    dependsOnBranches: task.dependencies.branchNames,
+    artifacts: task.artifacts,
+    assignee: task.assignee,
+    createdAt,
+    updatedAt: task.updatedAt,
+  };
+};
 
 const fileCommentsPath = (taskPath: string): string => taskPath.replace(/\.md$/, ".comments.ndjson");
 

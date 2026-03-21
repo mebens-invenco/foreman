@@ -39,10 +39,12 @@ export type Task = {
   priority: TaskPriority;
   labels: string[];
   assignee: string | null;
+  /** @deprecated Use `targets` instead. */
   repo: string | null;
+  /** @deprecated Use target branch names instead. */
   branchName: string | null;
-  targets?: TaskTargetRef[];
-  targetDependencies?: TaskTargetDependencyRef[];
+  targets: TaskTargetRef[];
+  targetDependencies: TaskTargetDependencyRef[];
   dependencies: {
     taskIds: string[];
     baseTaskId: string | null;
@@ -68,7 +70,7 @@ export const getTaskTargetRefFromTask = (task: Pick<Task, "id" | "repo" | "branc
 export const getTaskTargetRefsFromTask = (
   task: Pick<Task, "id" | "repo" | "branchName" | "targets">,
 ): TaskTargetRef[] => {
-  if (task.targets && task.targets.length > 0) {
+  if (task.targets.length > 0) {
     return task.targets
       .map((target, position) => ({
         repoKey: target.repoKey,
