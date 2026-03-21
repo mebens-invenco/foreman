@@ -30,7 +30,7 @@ Do not start implementation work. Do not reprioritize outside the supplied works
 - Capture dependencies only when they are real execution constraints.
 - Use explicit base-task relationships when multiple task dependencies exist.
 - Prefer tasks that can move directly into Foreman-ready execution without additional interpretation.
-- Keep task titles concise and action-oriented.
+- Keep task titles concise and action-oriented. Do not include the agent prefix in task titles.
 - Ground decomposition in the learnings you fetched with the CLI, and call out when no strong learning applies.
 
 ## Output Expectations
