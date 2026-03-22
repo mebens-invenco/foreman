@@ -22,7 +22,7 @@ import type { AttemptRecord, ForemanRepos, JobRecord, ScoutRunTrigger } from "..
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
-import { branchExistsOnOrigin, isAncestorOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
+import { branchExistsOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
 
 type Selection = {
   task: Task;
@@ -119,6 +119,24 @@ const dedupeKeyForAction = (taskId: string, repoKey: string, action: ActionType)
 const resolvePersistedTaskTargets = (task: Task, foremanRepos: ForemanRepos): TaskTarget[] =>
   foremanRepos.taskMirror.getTargetsForTask(task.id);
 
+const syncResolvedPullRequest = (input: {
+  task: Task;
+  target: TaskTarget;
+  foremanRepos: ForemanRepos;
+  pullRequest: ResolvedPullRequest;
+}): void => {
+  const existing = input.task.pullRequests.find((pullRequest) => pullRequest.repoKey === input.target.repoKey);
+  input.foremanRepos.taskMirror.upsertTaskPullRequest({
+    taskId: input.task.id,
+    pullRequest: {
+      repoKey: input.target.repoKey,
+      url: input.pullRequest.pullRequestUrl,
+      ...(existing?.title ? { title: existing.title } : {}),
+      source: existing?.source ?? "branch_inferred",
+    },
+  });
+};
+
 const resolveTargetProgress = async (input: {
   task: Task;
   target: TaskTarget;
@@ -131,6 +149,14 @@ const resolveTargetProgress = async (input: {
   const latestJob = input.foremanRepos.jobs.latestJobForTaskTarget(input.target.id);
   const latestAttempt = input.foremanRepos.attempts.latestAttemptForTaskTarget(input.target.id);
   const pullRequest = await input.reviewService.resolvePullRequest(input.task, input.repo, input.target);
+  if (pullRequest) {
+    syncResolvedPullRequest({
+      task: input.task,
+      target: input.target,
+      foremanRepos: input.foremanRepos,
+      pullRequest,
+    });
+  }
 
   if (selectedTargetKeys.has(targetKey(input.task.id, input.target.repoKey))) {
     return { latestJob, latestAttempt, pullRequest, state: "active" };
@@ -186,7 +212,7 @@ export const resolveBaseBranch = async (input: {
     if (!promise) {
       promise = input.taskSystem.getTask(taskId).then((task) => {
         input.foremanRepos.taskMirror.saveTasks([task]);
-        return task;
+        return input.foremanRepos.taskMirror.getTask(task.id) ?? task;
       });
       dependencyTaskCache.set(taskId, promise);
     }
@@ -305,23 +331,6 @@ export const resolveBaseBranch = async (input: {
     );
   };
 
-  const resolveMergedDependencyBaseBranch = async (branchName: string): Promise<string | null> => {
-    for (const taskId of dependencies) {
-      const dependency = await resolveMatchedDependency(taskId);
-      if (!dependency || dependency.progress.state !== "merged" || !dependency.progress.pullRequest) {
-        continue;
-      }
-
-      if (
-        resolveTaskBranchName(dependency.task, dependency.target) === branchName ||
-        dependency.progress.pullRequest.headBranch === branchName
-      ) {
-        return dependency.progress.pullRequest.baseBranch;
-      }
-    }
-    return null;
-  };
-
   const targetDependencies = input.foremanRepos.taskMirror
     .getTargetDependenciesForTask(input.task.id)
     .filter((dependency) => dependency.source === "metadata" && dependency.taskTargetId === input.target.id);
@@ -378,29 +387,6 @@ export const resolveBaseBranch = async (input: {
     return { baseBranch, blockers };
   }
 
-  for (const branchName of input.task.dependencies.branchNames) {
-    let effectiveBranchName = branchName;
-    const exists = await branchExistsOnOrigin(input.repo, branchName);
-    if (!exists) {
-      const mergedBaseBranch = await resolveMergedDependencyBaseBranch(branchName);
-      if (mergedBaseBranch) {
-        effectiveBranchName = mergedBaseBranch;
-      } else {
-        blockers.push(`Dependency branch ${branchName} does not exist on origin.`);
-        continue;
-      }
-    }
-
-    const ancestor = await isAncestorOnOrigin(input.repo, effectiveBranchName, baseBranch);
-    if (!ancestor) {
-      if (effectiveBranchName === branchName) {
-        blockers.push(`Dependency branch ${branchName} is not an ancestor of ${baseBranch}.`);
-      } else {
-        blockers.push(`Merged dependency branch ${branchName} resolves to ${effectiveBranchName}, which is not an ancestor of ${baseBranch}.`);
-      }
-    }
-  }
-
   return { baseBranch, blockers };
 };
 
@@ -414,8 +400,9 @@ export const runScoutSelection = async (input: {
   logger?: LoggerService;
 }): Promise<{ scoutRunId: string; jobs: Selection[] }> => {
   const logger = input.logger?.child({ component: "scout.selection", trigger: input.triggerType });
-  const allTasks = await input.taskSystem.listCandidates();
-  input.foremanRepos.taskMirror.saveTasks(allTasks);
+  const listedTasks = await input.taskSystem.listCandidates();
+  input.foremanRepos.taskMirror.saveTasks(listedTasks);
+  const allTasks = listedTasks.map((task) => input.foremanRepos.taskMirror.getTask(task.id) ?? task);
   const reposByKey = new Map(input.repos.map((repo) => [repo.key, repo]));
   const activeCandidates = allTasks.filter(
     (task) => task.state === "ready" || task.state === "in_review" || task.state === "in_progress",

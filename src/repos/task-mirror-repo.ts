@@ -1,4 +1,4 @@
-import type { Task, TaskTarget } from "../domain/index.js";
+import type { Task, TaskPullRequest, TaskTarget } from "../domain/index.js";
 
 export type GetTasksOptions = {
   taskIds?: string[];
@@ -25,6 +25,7 @@ export type TaskTargetDependencyRecord = {
 
 export interface TaskMirrorRepo {
   saveTasks(tasks: Task[]): void;
+  upsertTaskPullRequest(input: { taskId: string; pullRequest: TaskPullRequest }): void;
   getTasks(options?: GetTasksOptions): Task[];
   getTask(taskId: string): Task | null;
   getTaskTarget(taskId: string, repoKey: string): TaskTarget | null;

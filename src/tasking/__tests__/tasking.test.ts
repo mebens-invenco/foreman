@@ -27,6 +27,7 @@ describe("createTaskSystem", () => {
         config,
         paths,
         env: {},
+        repos: [],
       }),
     ).toThrow("File task system config is required when type=file");
   });
@@ -40,6 +41,7 @@ describe("createTaskSystem", () => {
         config,
         paths,
         env: { LINEAR_API_KEY: "test-key" },
+        repos: [],
       }),
     ).toThrow("Linear task system config is required when type=linear");
   });
@@ -53,6 +55,7 @@ describe("createTaskSystem", () => {
         config,
         paths,
         env: {},
+        repos: [],
       }),
     ).toThrow("Unsupported task system type: bogus");
   });

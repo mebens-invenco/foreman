@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewContext, type Task, type TaskArtifact, type TaskComment } from "../../domain/index.js";
+import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewContext, type Task, type TaskComment, type TaskPullRequest } from "../../domain/index.js";
 import { runScoutSelection } from "../index.js";
 import type { ReviewService } from "../../review/index.js";
 import { FileTaskSystem } from "../../tasking/index.js";
@@ -60,7 +60,7 @@ class FakeTaskSystem implements TaskSystem {
   }
 
   async transition(): Promise<void> {}
-  async addArtifact(): Promise<void> {}
+  async upsertPullRequest(): Promise<void> {}
   async updateLabels(): Promise<void> {}
 }
 
@@ -121,19 +121,13 @@ const task = (input: Partial<Task> & Pick<Task, "id" | "title" | "state" | "prov
   description: "",
   labels: ["Agent"],
   assignee: null,
-  repo: "repo-a",
-  branchName: input.id.toLowerCase(),
-  dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
-  artifacts: [],
+  dependencies: { taskIds: [], baseTaskId: null },
+  pullRequests: [],
   url: null,
   ...input,
   targets:
     input.targets ??
-    (input.repo === undefined
-      ? [{ repoKey: "repo-a", branchName: input.branchName ?? input.id.toLowerCase(), position: 0 }]
-      : input.repo
-        ? [{ repoKey: input.repo, branchName: input.branchName ?? input.id.toLowerCase(), position: 0 }]
-        : []),
+    [{ repoKey: "repo-a", branchName: input.id.toLowerCase(), position: 0 }],
   targetDependencies: input.targetDependencies ?? [],
 });
 
@@ -173,7 +167,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T12:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/1" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/1", source: "provider" } satisfies TaskPullRequest],
     });
     const readyTask = task({
       id: "TASK-0001",
@@ -219,7 +213,10 @@ describe("runScoutSelection", () => {
       expect(result.jobs[0]?.action).toBe("review");
       expect(result.jobs[0]?.task.id).toBe("TASK-0002");
       expect(result.jobs[1]?.action).toBe("execution");
-      expect(db.taskMirror.getTask("TASK-0002")).toMatchObject({ id: "TASK-0002", repo: "repo-a", branchName: "task-0002" });
+      expect(db.taskMirror.getTask("TASK-0002")).toMatchObject({
+        id: "TASK-0002",
+        targets: [{ repoKey: "repo-a", branchName: "task-0002", position: 0 }],
+      });
     } finally {
       db.close();
     }
@@ -277,7 +274,7 @@ describe("runScoutSelection", () => {
       providerState: "in_progress",
       priority: "normal",
       updatedAt: "2026-03-14T12:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/2" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/2", source: "provider" } satisfies TaskPullRequest],
     });
     const readyTask = task({
       id: "TASK-0004",
@@ -352,7 +349,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T12:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/2" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/2", source: "provider" } satisfies TaskPullRequest],
     });
 
     const taskSystem = new FakeTaskSystem([reviewTask]);
@@ -407,7 +404,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T12:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/4" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/4", source: "provider" } satisfies TaskPullRequest],
     });
 
     const priorContext: ReviewContext = {
@@ -546,7 +543,7 @@ describe("runScoutSelection", () => {
         providerState: "ready",
         priority: "normal",
         updatedAt: "2026-03-14T10:01:00Z",
-        dependencies: { taskIds: ["ENG-4746"], baseTaskId: null, branchNames: [] },
+        dependencies: { taskIds: ["ENG-4746"], baseTaskId: null },
       }),
       task({
         id: "ENG-4748",
@@ -555,7 +552,7 @@ describe("runScoutSelection", () => {
         providerState: "ready",
         priority: "normal",
         updatedAt: "2026-03-14T10:02:00Z",
-        dependencies: { taskIds: ["ENG-4747"], baseTaskId: null, branchNames: [] },
+        dependencies: { taskIds: ["ENG-4747"], baseTaskId: null },
       }),
       task({
         id: "ENG-4749",
@@ -564,7 +561,7 @@ describe("runScoutSelection", () => {
         providerState: "ready",
         priority: "normal",
         updatedAt: "2026-03-14T10:03:00Z",
-        dependencies: { taskIds: ["ENG-4748"], baseTaskId: null, branchNames: [] },
+        dependencies: { taskIds: ["ENG-4748"], baseTaskId: null },
       }),
       task({
         id: "ENG-4750",
@@ -573,7 +570,7 @@ describe("runScoutSelection", () => {
         providerState: "ready",
         priority: "normal",
         updatedAt: "2026-03-14T10:04:00Z",
-        dependencies: { taskIds: ["ENG-4749"], baseTaskId: null, branchNames: [] },
+        dependencies: { taskIds: ["ENG-4749"], baseTaskId: null },
       }),
     ];
 
@@ -618,7 +615,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T10:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/10" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/10", source: "provider" } satisfies TaskPullRequest],
     });
     const dependentTask = task({
       id: "ENG-4681",
@@ -627,7 +624,7 @@ describe("runScoutSelection", () => {
       providerState: "ready",
       priority: "high",
       updatedAt: "2026-03-14T11:00:00Z",
-      dependencies: { taskIds: ["ENG-4680"], baseTaskId: null, branchNames: [] },
+        dependencies: { taskIds: ["ENG-4680"], baseTaskId: null },
     });
 
     const taskSystem = new FakeTaskSystem([dependencyTask, dependentTask]);
@@ -684,7 +681,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T10:00:00Z",
-      artifacts: [],
+      pullRequests: [],
     });
     const dependentTask = task({
       id: "ENG-4681",
@@ -693,7 +690,7 @@ describe("runScoutSelection", () => {
       providerState: "ready",
       priority: "high",
       updatedAt: "2026-03-14T11:00:00Z",
-      dependencies: { taskIds: ["ENG-4680"], baseTaskId: null, branchNames: [] },
+        dependencies: { taskIds: ["ENG-4680"], baseTaskId: null },
     });
 
     const taskSystem = new FakeTaskSystem([dependencyTask, dependentTask]);
@@ -753,7 +750,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T10:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/20" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/20", source: "provider" } satisfies TaskPullRequest],
     });
     const nonBaseTask = task({
       id: "ENG-4701",
@@ -762,7 +759,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T10:01:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/21" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/21", source: "provider" } satisfies TaskPullRequest],
     });
     const dependentTask = task({
       id: "ENG-4702",
@@ -771,7 +768,7 @@ describe("runScoutSelection", () => {
       providerState: "ready",
       priority: "high",
       updatedAt: "2026-03-14T11:00:00Z",
-      dependencies: { taskIds: ["ENG-4700", "ENG-4701"], baseTaskId: "ENG-4700", branchNames: [] },
+        dependencies: { taskIds: ["ENG-4700", "ENG-4701"], baseTaskId: "ENG-4700" },
     });
 
     const taskSystem = new FakeTaskSystem([baseTask, nonBaseTask, dependentTask]);
@@ -843,7 +840,7 @@ describe("runScoutSelection", () => {
       providerState: "ready",
       priority: "high",
       updatedAt: "2026-03-14T10:00:00Z",
-      repo: null,
+      targets: [],
     });
 
     const taskSystem = new FakeTaskSystem([blockedTask]);
@@ -877,78 +874,6 @@ describe("runScoutSelection", () => {
     }
   });
 
-  test("uses a merged dependency pull request base branch when the dependency branch no longer exists", async () => {
-    const tempDir = await createTempDir("foreman-scout-test-");
-    cleanupDirs.push(tempDir);
-    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
-    const config = createDefaultWorkspaceConfig("foo", "file");
-    config.scheduler.workerConcurrency = 1;
-
-    vi.spyOn(worktrees, "branchExistsOnOrigin").mockImplementation(async (_repo, branchName) => branchName !== "eng-4680");
-    vi.spyOn(worktrees, "isAncestorOnOrigin").mockResolvedValue(true);
-
-    const mergedDependency = task({
-      id: "ENG-4680",
-      title: "Merged dependency",
-      state: "done",
-      providerState: "done",
-      priority: "normal",
-      updatedAt: "2026-03-14T10:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/10" } satisfies TaskArtifact],
-    });
-    const dependentTask = task({
-      id: "ENG-4681",
-      title: "Dependent task",
-      state: "ready",
-      providerState: "ready",
-      priority: "high",
-      updatedAt: "2026-03-14T11:00:00Z",
-      dependencies: { taskIds: ["ENG-4680"], baseTaskId: null, branchNames: ["eng-4680"] },
-    });
-
-    const taskSystem = new FakeTaskSystem([mergedDependency, dependentTask]);
-    const reviewService = new FakeReviewService({
-      [mergedDependency.id]: {
-        provider: "github",
-        pullRequestUrl: "https://github.com/acme/repo-a/pull/10",
-        pullRequestNumber: 10,
-        state: "merged",
-        isDraft: false,
-        headSha: "abc",
-        headBranch: "eng-4680",
-        baseBranch: "master",
-        headIntroducedAt: "2026-03-14T10:00:00Z",
-        mergeState: "clean",
-        reviewSummaries: [],
-        conversationComments: [],
-        reviewThreads: [],
-        failingChecks: [],
-        pendingChecks: [],
-      },
-    });
-
-    try {
-      const result = await runScoutSelection({
-        config,
-        foremanRepos: db,
-        taskSystem,
-        reviewService,
-        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }],
-        triggerType: "manual",
-      });
-
-      expect(result.jobs).toHaveLength(1);
-      expect(result.jobs[0]?.task.id).toBe("ENG-4681");
-      expect(result.jobs[0]?.action).toBe("execution");
-      expect(result.jobs[0]?.baseBranch).toBe("master");
-      expect(taskSystem.comments.get("ENG-4681") ?? []).toHaveLength(0);
-      expect(worktrees.branchExistsOnOrigin).toHaveBeenCalledWith({ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }, "eng-4680");
-      expect(worktrees.isAncestorOnOrigin).toHaveBeenCalledWith({ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "master" }, "master", "master");
-    } finally {
-      db.close();
-    }
-  });
-
   test("fans out independent repo targets from one task", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);
@@ -963,8 +888,6 @@ describe("runScoutSelection", () => {
       providerState: "ready",
       priority: "high",
       updatedAt: "2026-03-14T12:00:00Z",
-      repo: null,
-      branchName: "eng-4774",
       targets: [
         { repoKey: "repo-a", branchName: "eng-4774", position: 0 },
         { repoKey: "repo-b", branchName: "eng-4774", position: 1 },
@@ -1009,8 +932,6 @@ describe("runScoutSelection", () => {
       providerState: "ready",
       priority: "high",
       updatedAt: "2026-03-14T12:00:00Z",
-      repo: null,
-      branchName: "eng-4775",
       targets: [
         { repoKey: "repo-a", branchName: "eng-4775", position: 0 },
         { repoKey: "repo-b", branchName: "eng-4775", position: 1 },

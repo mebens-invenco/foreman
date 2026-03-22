@@ -21,11 +21,11 @@ export type TaskTargetDependencyRef = {
   position: number;
 };
 
-export type TaskArtifact = {
-  type: "pull_request";
+export type TaskPullRequest = {
+  repoKey: string;
   url: string;
   title?: string;
-  externalId?: string;
+  source: "local" | "provider" | "provider_inferred" | "branch_inferred";
 };
 
 export type Task = {
@@ -39,53 +39,62 @@ export type Task = {
   priority: TaskPriority;
   labels: string[];
   assignee: string | null;
-  /** @deprecated Use `targets` instead. */
-  repo: string | null;
-  /** @deprecated Use target branch names instead. */
-  branchName: string | null;
   targets: TaskTargetRef[];
   targetDependencies: TaskTargetDependencyRef[];
   dependencies: {
     taskIds: string[];
     baseTaskId: string | null;
-    branchNames: string[];
   };
-  artifacts: TaskArtifact[];
+  pullRequests: TaskPullRequest[];
   updatedAt: string;
   url: string | null;
 };
 
-export const getTaskTargetRefFromTask = (task: Pick<Task, "id" | "repo" | "branchName">): TaskTargetRef | null => {
-  if (!task.repo) {
+export const resolveTaskPullRequest = (
+  task: Pick<Task, "pullRequests">,
+  repoKey?: string | null,
+): TaskPullRequest | null => {
+  if (repoKey) {
+    return task.pullRequests.find((pullRequest) => pullRequest.repoKey === repoKey) ?? null;
+  }
+
+  if (task.pullRequests.length === 1) {
+    return task.pullRequests[0] ?? null;
+  }
+
+  return null;
+};
+
+export const getTaskTargetRefsFromTask = (task: Pick<Task, "targets">): TaskTargetRef[] =>
+  task.targets
+    .map((target, position) => ({
+      repoKey: target.repoKey,
+      branchName: target.branchName,
+      position: target.position ?? position,
+    }))
+    .sort((left, right) => left.position - right.position || left.repoKey.localeCompare(right.repoKey));
+
+export const resolveTaskTargetRef = (
+  task: Pick<Task, "targets">,
+  repoKey?: string | null,
+): TaskTargetRef | null => {
+  const targets = getTaskTargetRefsFromTask(task);
+  if (targets.length === 0) {
     return null;
   }
-
-  return {
-    repoKey: task.repo,
-    branchName: task.branchName ?? task.id.toLowerCase(),
-    position: 0,
-  };
-};
-
-export const getTaskTargetRefsFromTask = (
-  task: Pick<Task, "id" | "repo" | "branchName" | "targets">,
-): TaskTargetRef[] => {
-  if (task.targets.length > 0) {
-    return task.targets
-      .map((target, position) => ({
-        repoKey: target.repoKey,
-        branchName: target.branchName,
-        position: target.position ?? position,
-      }))
-      .sort((left, right) => left.position - right.position || left.repoKey.localeCompare(right.repoKey));
+  if (repoKey) {
+    return targets.find((target) => target.repoKey === repoKey) ?? null;
   }
-
-  const fallbackTarget = getTaskTargetRefFromTask(task);
-  return fallbackTarget ? [fallbackTarget] : [];
+  if (targets.length === 1) {
+    return targets[0] ?? null;
+  }
+  return targets[0] ?? null;
 };
 
-export const resolveTaskBranchName = (task: Pick<Task, "id" | "branchName">, target?: Pick<TaskTarget, "branchName"> | null): string =>
-  target?.branchName ?? task.branchName ?? task.id.toLowerCase();
+export const resolveTaskBranchName = (
+  task: Pick<Task, "id" | "targets">,
+  target?: Pick<TaskTarget, "repoKey" | "branchName"> | null,
+): string => target?.branchName ?? resolveTaskTargetRef(task, target?.repoKey)?.branchName ?? task.id.toLowerCase();
 
 export type TaskComment = {
   id: string;

@@ -1,4 +1,4 @@
-import type { RepoRef, Task, TaskTarget, WorkerResult } from "../domain/index.js";
+import type { RepoRef, Task, TaskPullRequest, TaskTarget, WorkerResult } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord } from "../repos/index.js";
@@ -96,9 +96,11 @@ export class WorkerResultApplier {
           headBranch: mutation.headBranch,
         });
         pullRequestUrl = created.url;
-        await this.deps.taskSystem.addArtifact({
-          taskId: input.task.id,
-          artifact: { type: "pull_request", url: created.url, title: mutation.title, externalId: String(created.number) },
+        await this.recordPullRequest(input.task.id, {
+          repoKey: input.target.repoKey,
+          url: created.url,
+          title: mutation.title,
+          source: "local",
         });
         await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
         logger.info("created pull request", { pullRequestUrl: created.url, pullRequestNumber: created.number });
@@ -114,14 +116,11 @@ export class WorkerResultApplier {
           ...(mutation.body ? { body: mutation.body } : {}),
         });
         pullRequestUrl = reopened.url;
-        await this.deps.taskSystem.addArtifact({
-          taskId: input.task.id,
-          artifact: {
-            type: "pull_request",
-            url: reopened.url,
-            ...(mutation.title ? { title: mutation.title } : {}),
-            externalId: String(reopened.number),
-          },
+        await this.recordPullRequest(input.task.id, {
+          repoKey: input.target.repoKey,
+          url: reopened.url,
+          ...(mutation.title ? { title: mutation.title } : {}),
+          source: "local",
         });
         await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
         logger.info("reopened pull request", { pullRequestUrl: reopened.url, pullRequestNumber: reopened.number });
@@ -144,6 +143,11 @@ export class WorkerResultApplier {
       const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(input.task, input.repo, input.target);
       if (resolvedPullRequest?.state === "open") {
         pullRequestUrl = resolvedPullRequest.pullRequestUrl;
+        await this.recordPullRequest(input.task.id, {
+          repoKey: input.target.repoKey,
+          url: resolvedPullRequest.pullRequestUrl,
+          source: "branch_inferred",
+        });
         await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
         logger.info("transitioned task to in_review after execution no-op on open pull request", { pullRequestUrl });
       }
@@ -257,5 +261,10 @@ export class WorkerResultApplier {
   private async resolveCurrentPullRequestUrl(task: Task, repo: RepoRef, target: TaskTarget): Promise<string | null> {
     const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(task, repo, target);
     return resolvedPullRequest?.pullRequestUrl ?? null;
+  }
+
+  private async recordPullRequest(taskId: string, pullRequest: TaskPullRequest): Promise<void> {
+    await this.deps.taskSystem.upsertPullRequest({ taskId, pullRequest });
+    this.deps.foremanRepos.taskMirror.upsertTaskPullRequest({ taskId, pullRequest });
   }
 }

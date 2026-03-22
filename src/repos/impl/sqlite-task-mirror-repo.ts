@@ -1,7 +1,7 @@
 import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
-import { getTaskTargetRefsFromTask, type Task, type TaskTarget, type TaskTargetRef } from "../../domain/index.js";
+import { getTaskTargetRefsFromTask, type Task, type TaskPullRequest, type TaskTarget, type TaskTargetRef } from "../../domain/index.js";
 import type {
   GetTasksOptions,
   TaskDependencyRecord,
@@ -105,6 +105,18 @@ const mapTaskTargetDependency = (row: unknown): TaskTargetDependencyRecord => {
   };
 };
 
+const mapTaskPullRequest = (row: unknown): (TaskPullRequest & { taskId: string; taskTargetId: string }) => {
+  const mapped = row as SqliteRow;
+  return {
+    taskId: String(mapped.task_id),
+    taskTargetId: String(mapped.task_target_id),
+    repoKey: String(mapped.repo_key),
+    url: String(mapped.url),
+    ...((mapped.title as string | null) ? { title: String(mapped.title) } : {}),
+    source: mapped.source as TaskPullRequest["source"],
+  };
+};
+
 export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
   constructor(private readonly sqlite: SqliteDatabase) {}
 
@@ -200,6 +212,29 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
       .map(mapTaskDependency);
   }
 
+  private selectPullRequests(taskIds: readonly string[]): Array<TaskPullRequest & { taskId: string; taskTargetId: string }> {
+    const normalizedIds = normalizeIds(taskIds);
+    if (normalizedIds.length === 0) {
+      return [];
+    }
+
+    return this.sqlite
+      .prepare(
+        `SELECT task_target.task_id,
+                task_pull_request.task_target_id,
+                task_target.repo_key,
+                task_pull_request.url,
+                task_pull_request.title,
+                task_pull_request.source
+           FROM task_pull_request
+           JOIN task_target ON task_target.id = task_pull_request.task_target_id
+          WHERE task_target.task_id IN (${normalizedIds.map(() => "?").join(", ")})
+          ORDER BY task_target.task_id ASC, task_target.position ASC, task_target.repo_key ASC`,
+      )
+      .all(...normalizedIds)
+      .map(mapTaskPullRequest);
+  }
+
   private hydrateTasks(taskIds: readonly string[]): Task[] {
     const storedTasks = this.selectStoredTasks(taskIds);
     if (storedTasks.length === 0) {
@@ -220,10 +255,21 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
       dependenciesByTaskId.set(dependency.taskId, existing);
     }
 
+    const pullRequestsByTaskId = new Map<string, TaskPullRequest[]>();
+    for (const pullRequest of this.selectPullRequests(storedTasks.map((task) => task.id))) {
+      const existing = pullRequestsByTaskId.get(pullRequest.taskId) ?? [];
+      existing.push({
+        repoKey: pullRequest.repoKey,
+        url: pullRequest.url,
+        ...(pullRequest.title ? { title: pullRequest.title } : {}),
+        source: pullRequest.source,
+      });
+      pullRequestsByTaskId.set(pullRequest.taskId, existing);
+    }
+
     return storedTasks.map((storedTask) => {
       const targets = targetsByTaskId.get(storedTask.id) ?? [];
       const dependencies = dependenciesByTaskId.get(storedTask.id) ?? [];
-      const primaryTarget = targets.length === 1 ? targets[0] : null;
       return {
         id: storedTask.id,
         provider: storedTask.provider,
@@ -235,8 +281,6 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
         priority: storedTask.priority,
         labels: storedTask.labels,
         assignee: storedTask.assignee,
-        repo: primaryTarget?.repoKey ?? null,
-        branchName: primaryTarget?.branchName ?? null,
         targets: targets.map((target) => ({
           repoKey: target.repoKey,
           branchName: target.branchName,
@@ -260,9 +304,8 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
         dependencies: {
           taskIds: dependencies.map((dependency) => dependency.dependsOnTaskId),
           baseTaskId: dependencies.find((dependency) => dependency.isBaseDependency)?.dependsOnTaskId ?? null,
-          branchNames: [],
         },
-        artifacts: [],
+        pullRequests: pullRequestsByTaskId.get(storedTask.id) ?? [],
         updatedAt: storedTask.updatedAt,
         url: storedTask.url,
       } satisfies Task;
@@ -343,6 +386,24 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
           updated_at = excluded.updated_at`,
     );
     const deleteDependencies = this.sqlite.prepare("DELETE FROM task_dependency WHERE task_id = ?");
+    const deletePullRequestsForTask = this.sqlite.prepare(
+      `DELETE FROM task_pull_request
+         WHERE task_target_id IN (SELECT id FROM task_target WHERE task_id = ?)`,
+    );
+    const deleteProviderPullRequestsForTask = this.sqlite.prepare(
+      `DELETE FROM task_pull_request
+         WHERE task_target_id IN (SELECT id FROM task_target WHERE task_id = ?)
+           AND source IN ('provider', 'provider_inferred')`,
+    );
+    const upsertPullRequest = this.sqlite.prepare(
+      `INSERT INTO task_pull_request(id, task_target_id, url, title, source, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(task_target_id) DO UPDATE SET
+         url = excluded.url,
+         title = excluded.title,
+         source = excluded.source,
+         updated_at = excluded.updated_at`,
+    );
     const hasTask = this.sqlite.prepare("SELECT 1 AS present FROM task WHERE id = ? LIMIT 1");
     const insertDependency = this.sqlite.prepare(
       `INSERT INTO task_dependency(
@@ -385,6 +446,27 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
           upsertTarget.run(newId(), task.id, target.repoKey, target.branchName, target.position, syncedAt, syncedAt);
         }
 
+        if (task.provider === "linear") {
+          deleteProviderPullRequestsForTask.run(task.id);
+        } else {
+          deletePullRequestsForTask.run(task.id);
+        }
+        for (const pullRequest of task.pullRequests) {
+          const taskTarget = this.getTaskTarget(task.id, pullRequest.repoKey);
+          if (!taskTarget) {
+            continue;
+          }
+          upsertPullRequest.run(
+            newId(),
+            taskTarget.id,
+            pullRequest.url,
+            pullRequest.title ?? null,
+            pullRequest.source,
+            syncedAt,
+            syncedAt,
+          );
+        }
+
         deleteDependencies.run(task.id);
         const dependencyIds = [...task.dependencies.taskIds];
         if (task.dependencies.baseTaskId && !dependencyIds.includes(task.dependencies.baseTaskId)) {
@@ -417,6 +499,26 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
 
       this.rebuildTargetDependencies(tasks);
     })();
+  }
+
+  upsertTaskPullRequest(input: { taskId: string; pullRequest: TaskPullRequest }): void {
+    const target = this.getTaskTarget(input.taskId, input.pullRequest.repoKey);
+    if (!target) {
+      return;
+    }
+
+    const now = isoNow();
+    this.sqlite
+      .prepare(
+        `INSERT INTO task_pull_request(id, task_target_id, url, title, source, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(task_target_id) DO UPDATE SET
+           url = excluded.url,
+           title = excluded.title,
+           source = excluded.source,
+           updated_at = excluded.updated_at`,
+      )
+      .run(newId(), target.id, input.pullRequest.url, input.pullRequest.title ?? null, input.pullRequest.source, now, now);
   }
 
   getTask(taskId: string): Task | null {

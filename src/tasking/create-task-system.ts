@@ -1,3 +1,4 @@
+import type { RepoRef } from "../domain/index.js";
 import { LoggerService } from "../logger.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
@@ -9,6 +10,7 @@ export const createTaskSystem = (input: {
   config: WorkspaceConfig;
   paths: WorkspacePaths;
   env: Record<string, string>;
+  repos: RepoRef[];
   logger?: LoggerService;
 }): TaskSystem => {
   switch (input.config.taskSystem.type) {
@@ -25,7 +27,7 @@ export const createTaskSystem = (input: {
         throw new Error("Linear task system config is required when type=linear");
       }
 
-      return new LinearTaskSystem(input.config, input.env, input.logger?.child({ component: "taskSystem.linear" }));
+      return new LinearTaskSystem(input.config, input.env, input.repos, input.logger?.child({ component: "taskSystem.linear" }));
     }
 
     default:

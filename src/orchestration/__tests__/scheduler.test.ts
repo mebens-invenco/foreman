@@ -16,20 +16,14 @@ const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   priority: "normal",
   labels: ["Agent"],
   assignee: null,
-  repo: "repo-a",
-  branchName: "task-0001",
-  dependencies: { taskIds: [], baseTaskId: null, branchNames: [] },
-  artifacts: [],
+  dependencies: { taskIds: [], baseTaskId: null },
+  pullRequests: [],
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
   ...overrides,
   targets:
     overrides.targets ??
-    (overrides.repo === undefined
-      ? [{ repoKey: "repo-a", branchName: overrides.branchName ?? "task-0001", position: 0 }]
-      : overrides.repo
-        ? [{ repoKey: overrides.repo, branchName: overrides.branchName ?? "task-0001", position: 0 }]
-        : []),
+    [{ repoKey: "repo-a", branchName: "task-0001", position: 0 }],
   targetDependencies: overrides.targetDependencies ?? [],
 });
 
@@ -75,14 +69,15 @@ const resolvedPullRequest: ResolvedPullRequest = {
 
 const sampleTarget = {
   id: "target-1",
+  taskId: "TASK-0001",
   repoKey: "repo-a",
   branchName: "task-0001",
   position: 0,
 };
 
 const resolvePullRequestFromTask = async (task: Task, _repo?: unknown, _target?: unknown): Promise<ResolvedPullRequest | null> => {
-  const artifactUrl = task.artifacts.find((artifact) => artifact.type === "pull_request")?.url;
-  return artifactUrl ? { ...resolvedPullRequest, pullRequestUrl: artifactUrl } : null;
+  const pullRequestUrl = task.pullRequests.find((pullRequest) => pullRequest.repoKey === "repo-a")?.url;
+  return pullRequestUrl ? { ...resolvedPullRequest, pullRequestUrl } : null;
 };
 
 const fakeLogger = {
@@ -149,6 +144,7 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     ...((overrides.scoutRuns as object | undefined) ?? {}),
   },
   taskMirror: {
+    upsertTaskPullRequest: vi.fn(),
     getTask: vi.fn(() => null),
     getTaskTarget: vi.fn(() => null),
     getTaskTargetById: vi.fn(() => sampleTarget),
@@ -203,12 +199,12 @@ describe("SchedulerService applyWorkerResult", () => {
         planPath: "/tmp/workspace/plan.md",
       },
       foremanRepos: createMockRepos(),
-      taskSystem: {
-        addComment: vi.fn(async () => undefined),
-        addArtifact: vi.fn(async () => undefined),
-        transition: vi.fn(async () => undefined),
-        updateLabels,
-      } as any,
+        taskSystem: {
+          addComment: vi.fn(async () => undefined),
+          upsertPullRequest: vi.fn(async () => undefined),
+          transition: vi.fn(async () => undefined),
+          updateLabels,
+        } as any,
       reviewService: {
         getContext: vi.fn(async () => reviewContext),
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
@@ -263,12 +259,12 @@ describe("SchedulerService applyWorkerResult", () => {
           }),
         },
       }),
-      taskSystem: {
-        addComment: vi.fn(async () => undefined),
-        addArtifact: vi.fn(async () => undefined),
-        transition: vi.fn(async () => undefined),
-        updateLabels: vi.fn(async () => undefined),
-      } as any,
+        taskSystem: {
+          addComment: vi.fn(async () => undefined),
+          upsertPullRequest: vi.fn(async () => undefined),
+          transition: vi.fn(async () => undefined),
+          updateLabels: vi.fn(async () => undefined),
+        } as any,
       reviewService: {
         getContext: vi.fn(async () => reviewContext),
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
@@ -285,7 +281,7 @@ describe("SchedulerService applyWorkerResult", () => {
       applyWorkerResult({
         attempt: { id: "attempt-2" },
         job: { action: "review", taskTargetId: sampleTarget.id },
-        task: sampleTask({ artifacts: [{ type: "pull_request", url: reviewContext.pullRequestUrl }] }),
+        task: sampleTask({ pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }] }),
         target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
@@ -320,12 +316,12 @@ describe("SchedulerService applyWorkerResult", () => {
         planPath: "/tmp/workspace/plan.md",
       },
       foremanRepos: createMockRepos(),
-      taskSystem: {
-        addComment: vi.fn(async () => undefined),
-        addArtifact: vi.fn(async () => undefined),
-        transition: vi.fn(async () => undefined),
-        updateLabels: vi.fn(async () => undefined),
-      } as any,
+        taskSystem: {
+          addComment: vi.fn(async () => undefined),
+          upsertPullRequest: vi.fn(async () => undefined),
+          transition: vi.fn(async () => undefined),
+          updateLabels: vi.fn(async () => undefined),
+        } as any,
       reviewService: {
         getContext: vi.fn(async () => reviewContext),
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
@@ -342,7 +338,7 @@ describe("SchedulerService applyWorkerResult", () => {
       applyWorkerResult({
         attempt: { id: "attempt-3" },
         job: { action: "execution", taskTargetId: sampleTarget.id },
-        task: sampleTask({ state: "in_progress", providerState: "in_progress", artifacts: [] }),
+        task: sampleTask({ state: "in_progress", providerState: "in_progress", pullRequests: [] }),
         target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
@@ -374,12 +370,12 @@ describe("SchedulerService applyWorkerResult", () => {
         planPath: "/tmp/workspace/plan.md",
       },
       foremanRepos: createMockRepos(),
-      taskSystem: {
-        addComment: vi.fn(async () => undefined),
-        addArtifact: vi.fn(async () => undefined),
-        transition,
-        updateLabels: vi.fn(async () => undefined),
-      } as any,
+        taskSystem: {
+          addComment: vi.fn(async () => undefined),
+          upsertPullRequest: vi.fn(async () => undefined),
+          transition,
+          updateLabels: vi.fn(async () => undefined),
+        } as any,
       reviewService: {
         getContext: vi.fn(async () => reviewContext),
         resolvePullRequest,
@@ -399,7 +395,7 @@ describe("SchedulerService applyWorkerResult", () => {
         task: sampleTask({
           state: "in_progress",
           providerState: "in_progress",
-          artifacts: [{ type: "pull_request", url: reviewContext.pullRequestUrl }],
+          pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }],
         }),
         target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
@@ -437,12 +433,12 @@ describe("SchedulerService applyWorkerResult", () => {
         planPath: "/tmp/workspace/plan.md",
       },
       foremanRepos: createMockRepos(),
-      taskSystem: {
-        addComment: vi.fn(async () => undefined),
-        addArtifact: vi.fn(async () => undefined),
-        transition: vi.fn(async () => undefined),
-        updateLabels: vi.fn(async () => undefined),
-      } as any,
+        taskSystem: {
+          addComment: vi.fn(async () => undefined),
+          upsertPullRequest: vi.fn(async () => undefined),
+          transition: vi.fn(async () => undefined),
+          updateLabels: vi.fn(async () => undefined),
+        } as any,
       reviewService: {
         resolvePullRequest,
         replyToReviewSummary,
@@ -462,7 +458,7 @@ describe("SchedulerService applyWorkerResult", () => {
       applyWorkerResult({
         attempt: { id: "attempt-3b" },
         job: { action: "review", taskTargetId: sampleTarget.id },
-        task: sampleTask({ artifacts: [{ type: "pull_request", url: reviewContext.pullRequestUrl }] }),
+        task: sampleTask({ pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }] }),
         target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
@@ -504,12 +500,12 @@ describe("SchedulerService applyWorkerResult", () => {
         planPath: "/tmp/workspace/plan.md",
       },
       foremanRepos: createMockRepos(),
-      taskSystem: {
-        addComment: vi.fn(async () => undefined),
-        addArtifact: vi.fn(async () => undefined),
-        transition: vi.fn(async () => undefined),
-        updateLabels: vi.fn(async () => undefined),
-      } as any,
+        taskSystem: {
+          addComment: vi.fn(async () => undefined),
+          upsertPullRequest: vi.fn(async () => undefined),
+          transition: vi.fn(async () => undefined),
+          updateLabels: vi.fn(async () => undefined),
+        } as any,
       reviewService: {
         resolvePullRequest,
         replyToThreadComment,
@@ -527,7 +523,7 @@ describe("SchedulerService applyWorkerResult", () => {
       applyWorkerResult({
         attempt: { id: "attempt-3c" },
         job: { action: "review", taskTargetId: sampleTarget.id },
-        task: sampleTask({ artifacts: [] }),
+        task: sampleTask({ pullRequests: [] }),
         target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
@@ -540,7 +536,7 @@ describe("SchedulerService applyWorkerResult", () => {
       }),
     ).resolves.toBe(reviewContext.pullRequestUrl);
 
-    expect(resolvePullRequest).toHaveBeenCalledWith(sampleTask({ artifacts: [] }), {
+    expect(resolvePullRequest).toHaveBeenCalledWith(sampleTask({ pullRequests: [] }), {
       key: "repo-a",
       rootPath: "/repos/repo-a",
       defaultBranch: "main",

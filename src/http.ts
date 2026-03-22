@@ -172,22 +172,18 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   const hasUiBuild = existsSync(uiRoot);
   const getAllMirroredTasks = (): Task[] => deps.repos.taskMirror.getTasks();
 
-  const fallbackTargetsForTask = (task: Task): TaskTarget[] =>
-    task.repo
-      ? [
-          {
-            id: `unpersisted:${task.id}:${task.repo}`,
-            taskId: task.id,
-            repoKey: task.repo,
-            branchName: task.branchName ?? task.id.toLowerCase(),
-            position: 0,
-          },
-        ]
-      : [];
-
-  const persistedOrFallbackTargets = (task: Task): TaskTarget[] => {
+  const persistedOrTaskTargets = (task: Task): TaskTarget[] => {
     const persistedTargets = deps.repos.taskMirror.getTargetsForTask(task.id);
-    return persistedTargets.length > 0 ? persistedTargets : fallbackTargetsForTask(task);
+    if (persistedTargets.length > 0) {
+      return persistedTargets;
+    }
+    return task.targets.map((target, position) => ({
+      id: `unpersisted:${task.id}:${target.repoKey}`,
+      taskId: task.id,
+      repoKey: target.repoKey,
+      branchName: target.branchName,
+      position: target.position ?? position,
+    }));
   };
 
   const buildTaskTargets = async (
@@ -294,7 +290,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       return promise;
     };
 
-    return Promise.all(persistedOrFallbackTargets(task).map((target) => buildTarget(task, target)));
+    return Promise.all(persistedOrTaskTargets(task).map((target) => buildTarget(task, target)));
   };
 
   const serializeTask = async (
@@ -303,8 +299,6 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     cache = new Map<string, Promise<BuiltTaskTarget>>(),
   ) => {
     const targets = await buildTaskTargets(task, tasksById, cache);
-    const primaryTarget = targets[0] ?? null;
-    const firstReviewTarget = targets.find((target) => target.review?.state === "open") ?? primaryTarget;
 
     return {
       id: task.id,
@@ -317,13 +311,10 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       priority: task.priority,
       labels: task.labels,
       assignee: task.assignee,
-      repo: primaryTarget?.repoKey ?? task.repo,
-      branchName: primaryTarget?.branchName ?? task.branchName,
       dependencies: task.dependencies,
-      artifacts: task.artifacts,
+      pullRequests: task.pullRequests,
       updatedAt: task.updatedAt,
       url: task.url,
-      reviewUrl: firstReviewTarget?.review?.pullRequestUrl ?? null,
       targets,
     };
   };

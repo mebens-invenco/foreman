@@ -16,6 +16,18 @@ import { formatHeartbeat, formatRelativeTimestamp, formatTimestamp, repoLabel, t
 
 const RECENT_HISTORY_LIMIT = 6;
 
+const getTaskPullRequestUrl = (task: TaskListItem, repoKey?: string): string | null => {
+  if (repoKey) {
+    return task.pullRequests.find((pullRequest) => pullRequest.repoKey === repoKey)?.url ?? null;
+  }
+
+  if (task.pullRequests.length === 1) {
+    return task.pullRequests[0]?.url ?? null;
+  }
+
+  return null;
+};
+
 export function OverviewPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -408,6 +420,8 @@ function ReviewTaskList({ tasks, pending, error }: ReviewTaskListProps) {
       {tasks.map((task) => {
         const primaryTarget = task.targets[0] ?? null;
         const multiTarget = task.targets.length > 1;
+        const primaryPullRequestUrl = primaryTarget?.review?.pullRequestUrl ?? getTaskPullRequestUrl(task, primaryTarget?.repoKey);
+        const primaryRepoKey = primaryTarget?.repoKey ?? task.pullRequests[0]?.repoKey ?? null;
 
         return (
           <div key={task.id} className="border border-border/70 bg-background/60 p-4">
@@ -437,10 +451,10 @@ function ReviewTaskList({ tasks, pending, error }: ReviewTaskListProps) {
               </div>
             ) : (
               <div className="mt-3 flex items-center justify-between gap-3 text-sm text-muted-foreground">
-                <span>{primaryTarget?.repoKey ?? task.repo ?? "No repo"}</span>
-                {primaryTarget?.review?.pullRequestUrl ? (
-                  <a className="inline-flex items-center gap-1 text-primary hover:underline" href={primaryTarget.review.pullRequestUrl} rel="noreferrer" target="_blank">
-                    PR {primaryTarget.review.pullRequestNumber}
+                <span>{primaryRepoKey ?? "No repo"}</span>
+                {primaryPullRequestUrl ? (
+                  <a className="inline-flex items-center gap-1 text-primary hover:underline" href={primaryPullRequestUrl} rel="noreferrer" target="_blank">
+                    {primaryTarget?.review?.pullRequestNumber ? `PR ${primaryTarget.review.pullRequestNumber}` : "Open PR"}
                   </a>
                 ) : null}
               </div>

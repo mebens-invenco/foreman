@@ -354,23 +354,22 @@ type Task = {
   priority: "urgent" | "high" | "normal" | "none" | "low"
   labels: string[]
   assignee: string | null
-  repo: string | null
-  branchName: string | null
+  targets: TaskTargetRef[]
+  targetDependencies: TaskTargetDependencyRef[]
   dependencies: {
     taskIds: string[]
     baseTaskId: string | null
-    branchNames: string[]
   }
-  artifacts: TaskArtifact[]
+  pullRequests: TaskPullRequest[]
   updatedAt: string
   url: string | null
 }
 
-type TaskArtifact = {
-  type: "pull_request"
+type TaskPullRequest = {
+  repoKey: string
   url: string
   title?: string
-  externalId?: string
+  source: "local" | "provider" | "provider_inferred" | "branch_inferred"
 }
 ```
 
@@ -398,7 +397,7 @@ interface TaskSystem {
   listComments(taskId: string): Promise<TaskComment[]>
   addComment(input: { taskId: string; body: string }): Promise<void>
   transition(input: { taskId: string; toState: Task["state"] }): Promise<void>
-  addArtifact(input: { taskId: string; artifact: TaskArtifact }): Promise<void>
+  upsertPullRequest(input: { taskId: string; pullRequest: TaskPullRequest }): Promise<void>
   updateLabels(input: { taskId: string; add: string[]; remove: string[] }): Promise<void>
 }
 ```
@@ -436,7 +435,7 @@ Default mapping:
 
 ### Metadata
 
-Execution metadata is parsed from the task description. Required execution metadata includes one or more repo targets. Optional metadata includes task dependencies, base task, repo dependencies, branch dependencies, and branch name.
+Execution metadata is parsed from the task description. Required execution metadata includes one or more repo targets. Optional metadata includes task dependencies, base task, repo dependencies, and branch name.
 
 The metadata block syntax is:
 
@@ -446,7 +445,6 @@ Agent:
   Depends on tasks: <ENG-123, ENG-124>
   Base from task: <ENG-123>
   Repo dependencies: <repo-b<-repo-a>
-  Depends on branches: <feature/foo, eng-123>
   Branch: <task-branch-name>
 ```
 
@@ -457,7 +455,6 @@ Parsing rules:
 - `Repo` remains accepted as a single-target shorthand
 - `Depends on tasks` is an optional comma-separated list
 - `Repo dependencies` is an optional comma-separated list of `<target<-dependency>` pairs within the same task
-- `Depends on branches` is an optional comma-separated list
 - `Base from task` is required when `Depends on tasks` contains more than one task
 - `Base from task` must be one of the listed task dependencies when present
 - `Branch` is optional and, when present, is the preferred task branch name
@@ -511,12 +508,6 @@ Repo dependency rules:
 - same-task repo dependencies gate scheduling only; they do not change the repo-local base branch
 - a repo dependency is satisfied when the upstream target is in review with an open PR, completed without repo changes, or merged
 
-Branch dependency rules:
-
-- branch dependencies are repo-local only
-- a branch dependency is satisfied only when the branch exists on origin and its tip is an ancestor of the resolved base branch tip
-- if a required dependency branch does not exist on origin, the dependency is unsatisfied
-
 If required metadata is missing or invalid for a task that would otherwise be selected, Foreman must not schedule that action.
 
 Blocker comment rules:
@@ -553,7 +544,7 @@ branchName: task-0001
 dependsOnTasks: []
 baseFromTask: null
 dependsOnBranches: []
-artifacts: []
+pullRequests: []
 assignee: null
 createdAt: 2026-03-14T12:00:00Z
 updatedAt: 2026-03-14T12:00:00Z
@@ -613,7 +604,7 @@ Foreman uses a GitHub-first review service in v1.
 
 Responsibilities:
 
-- resolve linked PRs from task artifacts
+- resolve linked PRs from target-scoped task pull requests
 - fetch current PR state
 - fetch review threads
 - fetch nested comments for unresolved review threads
@@ -934,7 +925,7 @@ After a valid worker result:
 3. if `failed`, stop and mark attempt failed
 4. if `blocked`, apply blocker comments first, then finalize as blocked
 5. apply review mutations that create or reopen the PR
-6. apply task artifact upserts for PR links
+6. apply task pull request upserts for target-scoped PR links
 7. perform system-owned task transition to `in_review` when PR creation/reopen succeeded
 8. apply remaining review mutations
 9. apply remaining task mutations in listed order, unchanged
@@ -1506,14 +1497,19 @@ Returns the full normalized task and all current task comments:
     "priority": "high",
     "labels": ["Agent"],
     "assignee": "me",
-    "repo": "product-app",
-    "branchName": "eng-1234",
+    "targets": [
+      {
+        "repoKey": "product-app",
+        "branchName": "eng-1234",
+        "position": 0
+      }
+    ],
+    "targetDependencies": [],
     "dependencies": {
       "taskIds": [],
-      "baseTaskId": null,
-      "branchNames": []
+      "baseTaskId": null
     },
-    "artifacts": [],
+    "pullRequests": [],
     "updatedAt": "2026-03-14T12:00:00Z",
     "url": "https://linear.app/..."
   },
