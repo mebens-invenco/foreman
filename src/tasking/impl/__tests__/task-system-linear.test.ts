@@ -70,7 +70,7 @@ describe("LinearTaskSystem.listCandidates", () => {
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
-    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
     const tasks = await taskSystem.listCandidates();
 
     expect(tasks).toHaveLength(1);
@@ -103,7 +103,7 @@ describe("LinearTaskSystem.listCandidates", () => {
 
     const config = createDefaultWorkspaceConfig("foo", "linear");
     config.taskSystem.linear!.assignee = "Jane Doe";
-    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
     const tasks = await taskSystem.listCandidates();
 
     expect(tasks).toHaveLength(1);
@@ -176,7 +176,7 @@ describe("LinearTaskSystem.listCandidates", () => {
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
-    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, logger as any);
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], logger as any);
     const tasks = await taskSystem.listCandidates();
 
     expect(tasks.map((task) => task.id)).toEqual(["ENG-123"]);
@@ -289,7 +289,7 @@ describe("parseLinearMetadata", () => {
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
-    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
     const task = await taskSystem.getTask("ENG-123");
 
     expect(task.targets).toEqual([
@@ -319,7 +319,7 @@ describe("LinearTaskSystem.getTask", () => {
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
-    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
     const task = await taskSystem.getTask("ENG-123");
 
     expect(task.id).toBe("ENG-123");
@@ -329,7 +329,7 @@ describe("LinearTaskSystem.getTask", () => {
     expect(requests[0]?.variables).toEqual({ teamKey: "ENG", number: 123 });
   });
 
-  test("ignores non-GitHub attachments when hydrating task artifacts", async () => {
+  test("ignores non-GitHub attachments when hydrating task pull requests", async () => {
     const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
     global.fetch = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
@@ -353,15 +353,15 @@ describe("LinearTaskSystem.getTask", () => {
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
-    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
     const task = await taskSystem.getTask("ENG-123");
 
-    expect(task.artifacts).toEqual([
+    expect(task.pullRequests).toEqual([
       {
-        type: "pull_request",
+        repoKey: "repo-a",
         url: "https://github.com/acme/repo-a/pull/1",
         title: "PR 1",
-        externalId: "att-pr",
+        source: "provider_inferred",
       },
     ]);
   });
@@ -418,7 +418,7 @@ describe("LinearTaskSystem.transition", () => {
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
-    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
     await taskSystem.transition({ taskId: "ENG-123", toState: "in_progress" });
 
     expect(requests).toHaveLength(3);
@@ -433,8 +433,8 @@ describe("LinearTaskSystem.transition", () => {
   });
 });
 
-describe("LinearTaskSystem.addArtifact", () => {
-  test("skips pull request artifacts because Linear auto-links them", async () => {
+describe("LinearTaskSystem.upsertPullRequest", () => {
+  test("skips pull request updates because Linear auto-links them", async () => {
     const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
     global.fetch = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
@@ -442,13 +442,14 @@ describe("LinearTaskSystem.addArtifact", () => {
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
-    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
-    await taskSystem.addArtifact({
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    await taskSystem.upsertPullRequest({
       taskId: "ENG-123",
-      artifact: {
-        type: "pull_request",
+      pullRequest: {
+        repoKey: "repo-a",
         url: "https://github.com/acme/repo-a/pull/1",
         title: "PR 1",
+        source: "local",
       },
     });
 
@@ -463,13 +464,14 @@ describe("LinearTaskSystem.addArtifact", () => {
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
-    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, fakeLogger as any);
-    await taskSystem.addArtifact({
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    await taskSystem.upsertPullRequest({
       taskId: "ENG-123",
-      artifact: {
-        type: "pull_request",
+      pullRequest: {
+        repoKey: "repo-a",
         url: "https://example.com/pull/1",
         title: "PR 1",
+        source: "local",
       },
     });
 

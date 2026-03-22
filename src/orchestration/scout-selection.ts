@@ -119,6 +119,24 @@ const dedupeKeyForAction = (taskId: string, repoKey: string, action: ActionType)
 const resolvePersistedTaskTargets = (task: Task, foremanRepos: ForemanRepos): TaskTarget[] =>
   foremanRepos.taskMirror.getTargetsForTask(task.id);
 
+const syncResolvedPullRequest = (input: {
+  task: Task;
+  target: TaskTarget;
+  foremanRepos: ForemanRepos;
+  pullRequest: ResolvedPullRequest;
+}): void => {
+  const existing = input.task.pullRequests.find((pullRequest) => pullRequest.repoKey === input.target.repoKey);
+  input.foremanRepos.taskMirror.upsertTaskPullRequest({
+    taskId: input.task.id,
+    pullRequest: {
+      repoKey: input.target.repoKey,
+      url: input.pullRequest.pullRequestUrl,
+      ...(existing?.title ? { title: existing.title } : {}),
+      source: existing?.source ?? "branch_inferred",
+    },
+  });
+};
+
 const resolveTargetProgress = async (input: {
   task: Task;
   target: TaskTarget;
@@ -131,6 +149,14 @@ const resolveTargetProgress = async (input: {
   const latestJob = input.foremanRepos.jobs.latestJobForTaskTarget(input.target.id);
   const latestAttempt = input.foremanRepos.attempts.latestAttemptForTaskTarget(input.target.id);
   const pullRequest = await input.reviewService.resolvePullRequest(input.task, input.repo, input.target);
+  if (pullRequest) {
+    syncResolvedPullRequest({
+      task: input.task,
+      target: input.target,
+      foremanRepos: input.foremanRepos,
+      pullRequest,
+    });
+  }
 
   if (selectedTargetKeys.has(targetKey(input.task.id, input.target.repoKey))) {
     return { latestJob, latestAttempt, pullRequest, state: "active" };
@@ -186,7 +212,7 @@ export const resolveBaseBranch = async (input: {
     if (!promise) {
       promise = input.taskSystem.getTask(taskId).then((task) => {
         input.foremanRepos.taskMirror.saveTasks([task]);
-        return task;
+        return input.foremanRepos.taskMirror.getTask(task.id) ?? task;
       });
       dependencyTaskCache.set(taskId, promise);
     }
@@ -374,8 +400,9 @@ export const runScoutSelection = async (input: {
   logger?: LoggerService;
 }): Promise<{ scoutRunId: string; jobs: Selection[] }> => {
   const logger = input.logger?.child({ component: "scout.selection", trigger: input.triggerType });
-  const allTasks = await input.taskSystem.listCandidates();
-  input.foremanRepos.taskMirror.saveTasks(allTasks);
+  const listedTasks = await input.taskSystem.listCandidates();
+  input.foremanRepos.taskMirror.saveTasks(listedTasks);
+  const allTasks = listedTasks.map((task) => input.foremanRepos.taskMirror.getTask(task.id) ?? task);
   const reposByKey = new Map(input.repos.map((repo) => [repo.key, repo]));
   const activeCandidates = allTasks.filter(
     (task) => task.state === "ready" || task.state === "in_review" || task.state === "in_progress",

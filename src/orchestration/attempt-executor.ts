@@ -68,6 +68,10 @@ export class AttemptExecutor {
 
     try {
       task = await this.deps.taskSystem.getTask(job.taskId);
+      const mirroredTask = this.deps.foremanRepos.taskMirror.getTask(job.taskId);
+      if (mirroredTask && mirroredTask.pullRequests.length > 0) {
+        task = { ...task, pullRequests: mirroredTask.pullRequests };
+      }
       const persistedTarget = this.deps.foremanRepos.taskMirror.getTaskTargetById(job.taskTargetId);
       if (!persistedTarget) {
         throw new ForemanError("task_missing_target", `Job ${job.id} references missing task target ${job.taskTargetId}.`);

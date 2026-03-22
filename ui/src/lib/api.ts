@@ -33,6 +33,13 @@ export type TaskTargetView = {
   } | null;
 };
 
+export type TaskPullRequest = {
+  repoKey: string;
+  url: string;
+  title?: string;
+  source: "local" | "provider" | "provider_inferred" | "branch_inferred";
+};
+
 export type StatusResponse = {
   workspace: {
     name: string;
@@ -98,6 +105,7 @@ export type TaskListItem = {
   priority: string;
   updatedAt: string;
   url: string | null;
+  pullRequests: TaskPullRequest[];
   targets: TaskTargetView[];
 };
 

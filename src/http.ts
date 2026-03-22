@@ -312,7 +312,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       labels: task.labels,
       assignee: task.assignee,
       dependencies: task.dependencies,
-      artifacts: task.artifacts,
+      pullRequests: task.pullRequests,
       updatedAt: task.updatedAt,
       url: task.url,
       targets,

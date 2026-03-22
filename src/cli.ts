@@ -90,6 +90,7 @@ program
       config,
       paths,
       env: resolvedEnv,
+      repos: repoRefs,
       logger: logger.child({ component: "taskSystem" }),
     });
     await taskSystem.validateStartup?.();

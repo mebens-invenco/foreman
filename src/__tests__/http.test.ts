@@ -29,7 +29,7 @@ const sampleTask: Task = {
   targets: [{ repoKey: "repo-a", branchName: "task-0001", position: 0 }],
   targetDependencies: [],
   dependencies: { taskIds: [], baseTaskId: null },
-  artifacts: [],
+  pullRequests: [],
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
 };
@@ -121,7 +121,7 @@ describe("HTTP query validation", () => {
       ...sampleTask,
       state: "in_review",
       providerState: "in_review",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/7" }],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/7", source: "provider" }],
     };
 
     const taskSystem = {

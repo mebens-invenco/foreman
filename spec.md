@@ -360,16 +360,16 @@ type Task = {
     taskIds: string[]
     baseTaskId: string | null
   }
-  artifacts: TaskArtifact[]
+  pullRequests: TaskPullRequest[]
   updatedAt: string
   url: string | null
 }
 
-type TaskArtifact = {
-  type: "pull_request"
+type TaskPullRequest = {
+  repoKey: string
   url: string
   title?: string
-  externalId?: string
+  source: "local" | "provider" | "provider_inferred" | "branch_inferred"
 }
 ```
 
@@ -397,7 +397,7 @@ interface TaskSystem {
   listComments(taskId: string): Promise<TaskComment[]>
   addComment(input: { taskId: string; body: string }): Promise<void>
   transition(input: { taskId: string; toState: Task["state"] }): Promise<void>
-  addArtifact(input: { taskId: string; artifact: TaskArtifact }): Promise<void>
+  upsertPullRequest(input: { taskId: string; pullRequest: TaskPullRequest }): Promise<void>
   updateLabels(input: { taskId: string; add: string[]; remove: string[] }): Promise<void>
 }
 ```
@@ -544,7 +544,7 @@ branchName: task-0001
 dependsOnTasks: []
 baseFromTask: null
 dependsOnBranches: []
-artifacts: []
+pullRequests: []
 assignee: null
 createdAt: 2026-03-14T12:00:00Z
 updatedAt: 2026-03-14T12:00:00Z
@@ -604,7 +604,7 @@ Foreman uses a GitHub-first review service in v1.
 
 Responsibilities:
 
-- resolve linked PRs from task artifacts
+- resolve linked PRs from target-scoped task pull requests
 - fetch current PR state
 - fetch review threads
 - fetch nested comments for unresolved review threads
@@ -925,7 +925,7 @@ After a valid worker result:
 3. if `failed`, stop and mark attempt failed
 4. if `blocked`, apply blocker comments first, then finalize as blocked
 5. apply review mutations that create or reopen the PR
-6. apply task artifact upserts for PR links
+6. apply task pull request upserts for target-scoped PR links
 7. perform system-owned task transition to `in_review` when PR creation/reopen succeeded
 8. apply remaining review mutations
 9. apply remaining task mutations in listed order, unchanged
@@ -1509,7 +1509,7 @@ Returns the full normalized task and all current task comments:
       "taskIds": [],
       "baseTaskId": null
     },
-    "artifacts": [],
+    "pullRequests": [],
     "updatedAt": "2026-03-14T12:00:00Z",
     "url": "https://linear.app/..."
   },

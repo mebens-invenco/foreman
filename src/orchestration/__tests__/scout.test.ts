@@ -3,7 +3,7 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewContext, type Task, type TaskArtifact, type TaskComment } from "../../domain/index.js";
+import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewContext, type Task, type TaskComment, type TaskPullRequest } from "../../domain/index.js";
 import { runScoutSelection } from "../index.js";
 import type { ReviewService } from "../../review/index.js";
 import { FileTaskSystem } from "../../tasking/index.js";
@@ -60,7 +60,7 @@ class FakeTaskSystem implements TaskSystem {
   }
 
   async transition(): Promise<void> {}
-  async addArtifact(): Promise<void> {}
+  async upsertPullRequest(): Promise<void> {}
   async updateLabels(): Promise<void> {}
 }
 
@@ -122,7 +122,7 @@ const task = (input: Partial<Task> & Pick<Task, "id" | "title" | "state" | "prov
   labels: ["Agent"],
   assignee: null,
   dependencies: { taskIds: [], baseTaskId: null },
-  artifacts: [],
+  pullRequests: [],
   url: null,
   ...input,
   targets:
@@ -167,7 +167,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T12:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/1" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/1", source: "provider" } satisfies TaskPullRequest],
     });
     const readyTask = task({
       id: "TASK-0001",
@@ -274,7 +274,7 @@ describe("runScoutSelection", () => {
       providerState: "in_progress",
       priority: "normal",
       updatedAt: "2026-03-14T12:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/2" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/2", source: "provider" } satisfies TaskPullRequest],
     });
     const readyTask = task({
       id: "TASK-0004",
@@ -349,7 +349,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T12:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/2" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/2", source: "provider" } satisfies TaskPullRequest],
     });
 
     const taskSystem = new FakeTaskSystem([reviewTask]);
@@ -404,7 +404,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T12:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/4" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/4", source: "provider" } satisfies TaskPullRequest],
     });
 
     const priorContext: ReviewContext = {
@@ -615,7 +615,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T10:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/10" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/10", source: "provider" } satisfies TaskPullRequest],
     });
     const dependentTask = task({
       id: "ENG-4681",
@@ -681,7 +681,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T10:00:00Z",
-      artifacts: [],
+      pullRequests: [],
     });
     const dependentTask = task({
       id: "ENG-4681",
@@ -750,7 +750,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T10:00:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/20" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/20", source: "provider" } satisfies TaskPullRequest],
     });
     const nonBaseTask = task({
       id: "ENG-4701",
@@ -759,7 +759,7 @@ describe("runScoutSelection", () => {
       providerState: "in_review",
       priority: "normal",
       updatedAt: "2026-03-14T10:01:00Z",
-      artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo-a/pull/21" } satisfies TaskArtifact],
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/21", source: "provider" } satisfies TaskPullRequest],
     });
     const dependentTask = task({
       id: "ENG-4702",

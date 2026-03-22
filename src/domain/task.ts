@@ -21,11 +21,11 @@ export type TaskTargetDependencyRef = {
   position: number;
 };
 
-export type TaskArtifact = {
-  type: "pull_request";
+export type TaskPullRequest = {
+  repoKey: string;
   url: string;
   title?: string;
-  externalId?: string;
+  source: "local" | "provider" | "provider_inferred" | "branch_inferred";
 };
 
 export type Task = {
@@ -45,9 +45,24 @@ export type Task = {
     taskIds: string[];
     baseTaskId: string | null;
   };
-  artifacts: TaskArtifact[];
+  pullRequests: TaskPullRequest[];
   updatedAt: string;
   url: string | null;
+};
+
+export const resolveTaskPullRequest = (
+  task: Pick<Task, "pullRequests">,
+  repoKey?: string | null,
+): TaskPullRequest | null => {
+  if (repoKey) {
+    return task.pullRequests.find((pullRequest) => pullRequest.repoKey === repoKey) ?? null;
+  }
+
+  if (task.pullRequests.length === 1) {
+    return task.pullRequests[0] ?? null;
+  }
+
+  return null;
 };
 
 export const getTaskTargetRefsFromTask = (task: Pick<Task, "targets">): TaskTargetRef[] =>

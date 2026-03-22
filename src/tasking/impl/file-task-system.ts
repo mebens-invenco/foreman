@@ -8,8 +8,8 @@ import YAML from "yaml";
 import {
   getTaskTargetRefsFromTask,
   type Task,
-  type TaskArtifact,
   type TaskComment,
+  type TaskPullRequest,
   type TaskState,
   type TaskTargetDependencyRef,
   type TaskTargetRef,
@@ -63,7 +63,7 @@ type FileTaskFrontmatter = {
   dependsOnTasks?: string[];
   baseFromTask?: string | null;
   dependsOnBranches?: string[];
-  artifacts?: TaskArtifact[];
+  pullRequests?: TaskPullRequest[];
   assignee?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -79,7 +79,7 @@ const fileFrontmatterOrder: Array<keyof FileTaskFrontmatter> = [
   "targetDependencies",
   "dependsOnTasks",
   "baseFromTask",
-  "artifacts",
+  "pullRequests",
   "assignee",
   "createdAt",
   "updatedAt",
@@ -158,7 +158,7 @@ const parseFileTaskDocument = (config: WorkspaceConfig, filePath: string, conten
       taskIds: data.dependsOnTasks ?? [],
       baseTaskId: data.baseFromTask ?? null,
     },
-    artifacts: data.artifacts ?? [],
+    pullRequests: data.pullRequests ?? [],
     updatedAt: data.updatedAt,
     url: null,
   };
@@ -176,7 +176,7 @@ const toFileFrontmatter = (task: Task, createdAt: string): FileTaskFrontmatter =
     targetDependencies: task.targetDependencies,
     dependsOnTasks: task.dependencies.taskIds,
     baseFromTask: task.dependencies.baseTaskId,
-    artifacts: task.artifacts,
+    pullRequests: task.pullRequests,
     assignee: task.assignee,
     createdAt,
     updatedAt: task.updatedAt,
@@ -306,16 +306,14 @@ export class FileTaskSystem implements TaskSystem {
     await atomicWriteFile(taskPath, stringifyFileTask(updatedFrontmatter, task.description));
   }
 
-  async addArtifact(input: { taskId: string; artifact: TaskArtifact }): Promise<void> {
+  async upsertPullRequest(input: { taskId: string; pullRequest: TaskPullRequest }): Promise<void> {
     const { task, frontmatter, path: taskPath } = await this.loadTaskDocument(input.taskId);
-    const existingIndex = task.artifacts.findIndex(
-      (artifact) => artifact.type === input.artifact.type && artifact.url === input.artifact.url,
-    );
+    const existingIndex = task.pullRequests.findIndex((pullRequest) => pullRequest.repoKey === input.pullRequest.repoKey);
 
     if (existingIndex >= 0) {
-      task.artifacts[existingIndex] = { ...task.artifacts[existingIndex], ...input.artifact };
+      task.pullRequests[existingIndex] = { ...task.pullRequests[existingIndex], ...input.pullRequest };
     } else {
-      task.artifacts.push(input.artifact);
+      task.pullRequests.push(input.pullRequest);
     }
 
     await atomicWriteFile(
@@ -323,7 +321,7 @@ export class FileTaskSystem implements TaskSystem {
       stringifyFileTask(
         {
           ...toFileFrontmatter(task, frontmatter.createdAt),
-          artifacts: task.artifacts,
+          pullRequests: task.pullRequests,
           updatedAt: isoNow(),
         },
         task.description,

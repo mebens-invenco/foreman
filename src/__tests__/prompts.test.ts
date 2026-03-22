@@ -30,7 +30,7 @@ const sampleTask: Task = {
   targets: [{ repoKey: "repo-a", branchName: "task-0001", position: 0 }],
   targetDependencies: [],
   dependencies: { taskIds: [], baseTaskId: null },
-  artifacts: [],
+  pullRequests: [],
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
 };

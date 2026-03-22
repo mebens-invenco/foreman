@@ -54,7 +54,7 @@ const createTask = (): Task => ({
   targets: [{ repoKey: "repo-a", branchName: "task-123", position: 0 }],
   targetDependencies: [],
   dependencies: { taskIds: [], baseTaskId: null },
-  artifacts: [],
+  pullRequests: [],
   updatedAt: "2026-03-20T00:00:00Z",
   url: null,
 });

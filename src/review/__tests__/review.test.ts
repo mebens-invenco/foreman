@@ -26,7 +26,7 @@ const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   labels: ["Agent"],
   assignee: null,
   dependencies: { taskIds: [], baseTaskId: null },
-  artifacts: [{ type: "pull_request", url: "https://github.com/acme/repo/pull/946", title: "PR 946" }],
+  pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo/pull/946", title: "PR 946", source: "provider" }],
   updatedAt: "2026-03-16T04:19:52Z",
   url: null,
   ...overrides,
@@ -47,6 +47,12 @@ const jsonResponse = (body: unknown, status = 200): Response =>
 const sampleRepo: RepoRef = {
   key: "repo-a",
   rootPath: "/repos/repo-a",
+  defaultBranch: "master",
+};
+
+const sampleRepoB: RepoRef = {
+  key: "repo-b",
+  rootPath: "/repos/repo-b",
   defaultBranch: "master",
 };
 
@@ -143,7 +149,7 @@ describe("GitHubReviewService.getContext", () => {
       .mockResolvedValueOnce(jsonResponse({ statuses: [] })) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    const context = await service.getContext(sampleTask({ artifacts: [] }), "[agent]", sampleRepo);
+    const context = await service.getContext(sampleTask({ pullRequests: [] }), "[agent]", sampleRepo);
 
     expect(context).not.toBeNull();
     expect(context?.pullRequestUrl).toBe("https://github.com/acme/repo/pull/946");
@@ -152,6 +158,29 @@ describe("GitHubReviewService.getContext", () => {
     expect(global.fetch).toHaveBeenCalledTimes(7);
     expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe(
       "https://api.github.com/repos/acme/repo/pulls?state=all&head=acme%3Aeng-4737&per_page=20",
+    );
+  });
+
+  test("does not reuse another target's pull request when repo context differs", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo-b.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse([])) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const resolved = await service.resolvePullRequest(
+      sampleTask({
+        targets: [
+          { repoKey: "repo-a", branchName: "eng-4737", position: 0 },
+          { repoKey: "repo-b", branchName: "eng-4737", position: 1 },
+        ],
+      }),
+      sampleRepoB,
+      { repoKey: "repo-b", branchName: "eng-4737", position: 1 },
+    );
+
+    expect(resolved).toBeNull();
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe(
+      "https://api.github.com/repos/acme/repo-b/pulls?state=all&head=acme%3Aeng-4737&per_page=20",
     );
   });
 

@@ -188,6 +188,45 @@ Task body
     expect(workspaceLog).toContain('providerState="blocked"');
   });
 
+  test("upserts target-scoped pull requests in frontmatter", async () => {
+    const workspaceRoot = await createTempDir("foreman-file-task-system-");
+    cleanupDirs.push(workspaceRoot);
+
+    const taskPath = await writeTask(workspaceRoot, {
+      id: "TASK-0006",
+      title: "Pull request task",
+      state: "in_review",
+    });
+
+    const paths = createWorkspacePaths(workspaceRoot, workspaceRoot);
+    const taskSystem = new FileTaskSystem(createDefaultWorkspaceConfig("foo", "file"), paths);
+
+    await taskSystem.upsertPullRequest({
+      taskId: "TASK-0006",
+      pullRequest: {
+        repoKey: "repo-a",
+        url: "https://github.com/acme/repo-a/pull/7",
+        title: "PR 7",
+        source: "local",
+      },
+    });
+
+    const task = await taskSystem.getTask("TASK-0006");
+    expect(task.pullRequests).toEqual([
+      {
+        repoKey: "repo-a",
+        url: "https://github.com/acme/repo-a/pull/7",
+        title: "PR 7",
+        source: "local",
+      },
+    ]);
+
+    const rewritten = await fs.readFile(taskPath, "utf8");
+    expect(rewritten).toContain("pullRequests:");
+    expect(rewritten).toContain("repoKey: repo-a");
+    expect(rewritten).toContain("source: local");
+  });
+
   test("getTask still fails for unmapped provider states", async () => {
     const workspaceRoot = await createTempDir("foreman-file-task-system-");
     cleanupDirs.push(workspaceRoot);

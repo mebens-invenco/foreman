@@ -1,5 +1,6 @@
-import type { Task, TaskArtifact, TaskComment, TaskState, TaskTargetDependencyRef, TaskTargetRef } from "../../domain/index.js";
+import type { RepoRef, Task, TaskComment, TaskPullRequest, TaskState, TaskTargetDependencyRef, TaskTargetRef } from "../../domain/index.js";
 import { ForemanError, isForemanError } from "../../lib/errors.js";
+import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
 import type { WorkspaceConfig } from "../../workspace/config.js";
 import type { TaskSystem } from "../task-system.js";
@@ -24,6 +25,8 @@ type LinearViewer = {
   id: string;
   name: string;
 };
+
+type RepoDescriptor = { owner: string; repo: string };
 
 const parseCsv = (value: string): string[] =>
   value
@@ -238,50 +241,33 @@ const linearPriorityToNormalized = (label: string | null): Task["priority"] => {
   }
 };
 
-const isGithubPullRequestArtifact = (artifact: Pick<TaskArtifact, "type" | "url">): boolean => {
-  if (artifact.type !== "pull_request") {
-    return false;
-  }
-
+const isGithubPullRequestUrl = (url: string): boolean => {
   try {
-    const parsed = new URL(artifact.url);
+    const parsed = new URL(url);
     return (parsed.hostname === "github.com" || parsed.hostname.endsWith(".github.com")) && /\/pull\/\d+$/.test(parsed.pathname);
   } catch {
     return false;
   }
 };
 
-const linearIssueToTask = (config: WorkspaceConfig, node: LinearIssueNode): Task => {
-  const metadata = parseLinearMetadata(node.description ?? "", node.branchName ?? node.identifier.toLowerCase());
-  return {
-    id: node.identifier,
-    provider: "linear",
-    providerId: node.id,
-    title: node.title,
-    description: node.description ?? "",
-    state: normalizeTaskState(config, node.state.name),
-    providerState: node.state.name,
-    priority: linearPriorityToNormalized(node.priorityLabel),
-    labels: node.labels.nodes.map((label) => label.name),
-    assignee: node.assignee?.name ?? null,
-    targets: metadata.targets,
-    targetDependencies: metadata.targetDependencies,
-    dependencies: metadata.dependencies,
-    artifacts: node.attachments.nodes.flatMap((attachment) =>
-      isGithubPullRequestArtifact({ type: "pull_request", url: attachment.url })
-        ? [
-            {
-              type: "pull_request" as const,
-              url: attachment.url,
-              ...(attachment.title ? { title: attachment.title } : {}),
-              externalId: attachment.id,
-            },
-          ]
-        : [],
-    ),
-    updatedAt: node.updatedAt,
-    url: node.url,
-  };
+const parseGitHubPullRequestUrl = (url: string): RepoDescriptor & { number: number } => {
+  const parsed = new URL(url);
+  const match = parsed.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
+  if (!match) {
+    throw new ForemanError("invalid_pr_url", `Invalid GitHub pull request URL: ${url}`);
+  }
+
+  return { owner: match[1]!, repo: match[2]!, number: Number(match[3]!) };
+};
+
+const parseGitRemote = (remoteUrl: string): RepoDescriptor => {
+  const trimmed = remoteUrl.trim();
+  const httpsMatch = trimmed.match(/github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?$/);
+  if (httpsMatch) {
+    return { owner: httpsMatch[1]!, repo: httpsMatch[2]! };
+  }
+
+  throw new ForemanError("unsupported_git_remote", `Unsupported GitHub remote URL: ${remoteUrl}`);
 };
 
 const isUnknownProviderStateError = (error: unknown): error is ForemanError =>
@@ -292,10 +278,12 @@ export class LinearTaskSystem implements TaskSystem {
   private readonly logger: LoggerService;
   private viewerPromise: Promise<LinearViewer> | null = null;
   private teamInfoPromise: Promise<{ id: string; name: string; states: Array<{ id: string; name: string }> }> | null = null;
+  private readonly repoDescriptorPromises = new Map<string, Promise<RepoDescriptor>>();
 
   constructor(
     private readonly config: WorkspaceConfig,
     private readonly env: Record<string, string>,
+    private readonly repos: RepoRef[],
     logger?: LoggerService,
   ) {
     this.logger = (logger ?? LoggerService.create({ context: { component: "taskSystem.linear" }, colorMode: "never" })).child({
@@ -312,6 +300,95 @@ export class LinearTaskSystem implements TaskSystem {
 
   getProvider(): "linear" {
     return "linear";
+  }
+
+  private async repoDescriptorFromRepo(repo: RepoRef): Promise<RepoDescriptor> {
+    let promise = this.repoDescriptorPromises.get(repo.rootPath);
+    if (!promise) {
+      promise = exec("git", ["config", "--get", "remote.origin.url"], { cwd: repo.rootPath }).then((result) =>
+        parseGitRemote(result.stdout),
+      );
+      this.repoDescriptorPromises.set(repo.rootPath, promise);
+    }
+
+    return promise;
+  }
+
+  private async resolveRepoKeyForPullRequest(url: string): Promise<string | null> {
+    if (!isGithubPullRequestUrl(url)) {
+      return null;
+    }
+
+    const parsed = parseGitHubPullRequestUrl(url);
+    for (const repo of this.repos) {
+      try {
+        const descriptor = await this.repoDescriptorFromRepo(repo);
+        if (descriptor.owner === parsed.owner && descriptor.repo === parsed.repo) {
+          return repo.key;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return null;
+  }
+
+  private async resolvePullRequests(
+    attachments: LinearIssueNode["attachments"]["nodes"],
+    targets: TaskTargetRef[],
+  ): Promise<TaskPullRequest[]> {
+    const uniqueByRepoKey = new Map<string, TaskPullRequest>();
+
+    for (const attachment of attachments) {
+      if (!isGithubPullRequestUrl(attachment.url)) {
+        continue;
+      }
+
+      const resolvedRepoKey = await this.resolveRepoKeyForPullRequest(attachment.url);
+      if (resolvedRepoKey && targets.some((target) => target.repoKey === resolvedRepoKey)) {
+        uniqueByRepoKey.set(resolvedRepoKey, {
+          repoKey: resolvedRepoKey,
+          url: attachment.url,
+          ...(attachment.title ? { title: attachment.title } : {}),
+          source: "provider",
+        });
+        continue;
+      }
+
+      if (targets.length === 1) {
+        uniqueByRepoKey.set(targets[0]!.repoKey, {
+          repoKey: targets[0]!.repoKey,
+          url: attachment.url,
+          ...(attachment.title ? { title: attachment.title } : {}),
+          source: "provider_inferred",
+        });
+      }
+    }
+
+    return [...uniqueByRepoKey.values()];
+  }
+
+  private async linearIssueToTask(node: LinearIssueNode): Promise<Task> {
+    const metadata = parseLinearMetadata(node.description ?? "", node.branchName ?? node.identifier.toLowerCase());
+    return {
+      id: node.identifier,
+      provider: "linear",
+      providerId: node.id,
+      title: node.title,
+      description: node.description ?? "",
+      state: normalizeTaskState(this.config, node.state.name),
+      providerState: node.state.name,
+      priority: linearPriorityToNormalized(node.priorityLabel),
+      labels: node.labels.nodes.map((label) => label.name),
+      assignee: node.assignee?.name ?? null,
+      targets: metadata.targets,
+      targetDependencies: metadata.targetDependencies,
+      dependencies: metadata.dependencies,
+      pullRequests: await this.resolvePullRequests(node.attachments.nodes, metadata.targets),
+      updatedAt: node.updatedAt,
+      url: node.url,
+    };
   }
 
   private async getViewer(): Promise<LinearViewer> {
@@ -512,23 +589,26 @@ export class LinearTaskSystem implements TaskSystem {
       },
     );
 
-    const tasks = data.issues.nodes.flatMap((node) => {
-      try {
-        return [linearIssueToTask(this.config, node)];
-      } catch (error) {
-        if (!isUnknownProviderStateError(error)) {
-          throw error;
-        }
+    const mappedTasks = await Promise.all(
+      data.issues.nodes.map(async (node) => {
+        try {
+          return await this.linearIssueToTask(node);
+        } catch (error) {
+          if (!isUnknownProviderStateError(error)) {
+            throw error;
+          }
 
-        this.logger.info("skipping Linear candidate with unmapped provider state", {
-          provider: "linear",
-          taskId: node.identifier,
-          providerId: node.id,
-          providerState: node.state.name,
-        });
-        return [];
-      }
-    });
+          this.logger.info("skipping Linear candidate with unmapped provider state", {
+            provider: "linear",
+            taskId: node.identifier,
+            providerId: node.id,
+            providerState: node.state.name,
+          });
+          return null;
+        }
+      }),
+    );
+    const tasks = mappedTasks.flatMap((task) => (task ? [task] : []));
 
     this.logger.debug("listed Linear candidate issues", {
       count: data.issues.nodes.length,
@@ -590,7 +670,7 @@ export class LinearTaskSystem implements TaskSystem {
     }
 
     this.logger.debug("fetched Linear issue", { taskId, providerId: issue.id, state: issue.state.name });
-    return linearIssueToTask(this.config, issue);
+    return this.linearIssueToTask(issue);
   }
 
   async listComments(taskId: string): Promise<TaskComment[]> {
@@ -671,11 +751,12 @@ export class LinearTaskSystem implements TaskSystem {
     this.logger.info("transitioned Linear issue", { taskId: input.taskId, providerId: task.providerId, stateId: target.id, providerState });
   }
 
-  async addArtifact(input: { taskId: string; artifact: TaskArtifact }): Promise<void> {
-    this.logger.info("skipping Linear attachment mutation for pull request artifact", {
+  async upsertPullRequest(input: { taskId: string; pullRequest: TaskPullRequest }): Promise<void> {
+    this.logger.info("skipping Linear attachment mutation for pull request", {
       taskId: input.taskId,
-      artifactType: input.artifact.type,
-      artifactUrl: input.artifact.url,
+      repoKey: input.pullRequest.repoKey,
+      pullRequestUrl: input.pullRequest.url,
+      source: input.pullRequest.source,
     });
   }
 
