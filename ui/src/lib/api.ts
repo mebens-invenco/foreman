@@ -3,6 +3,7 @@ export type TaskState = "ready" | "in_progress" | "in_review" | "done" | "cancel
 export type AttemptStatus = "running" | "completed" | "failed" | "blocked" | "canceled" | "timed_out";
 export type WorkerStatus = "idle" | "leased" | "running" | "stopping" | "offline";
 export type ActionType = "execution" | "review" | "retry" | "consolidation";
+export type SchedulerAction = "start" | "pause" | "stop";
 export type TaskTargetStatus = TaskState | "blocked";
 
 export type TaskTargetView = {
@@ -244,6 +245,17 @@ export const api = {
     requestJson<{ history: HistoryRecord[] }>(`/api/history${buildSearch(params)}`).then((payload) => payload.history),
   listLearnings: (params: { search?: string; repo?: string; limit?: number; offset?: number }) =>
     requestJson<{ learnings: LearningRecord[] }>(`/api/learnings${buildSearch(params)}`).then((payload) => payload.learnings),
-  postSchedulerAction: (action: "start" | "pause" | "stop") => requestJson(`/api/scheduler/${action}`, { method: "POST" }),
+  postSchedulerAction: (action: SchedulerAction) => requestJson(`/api/scheduler/${action}`, { method: "POST" }),
   runScout: () => requestJson("/api/scout/run", { method: "POST" }),
+};
+
+export const queryKeys = {
+  status: ["status"] as const,
+  workers: ["workers"] as const,
+  queue: ["queue"] as const,
+  tasks: (params: { state?: TaskState; search?: string; limit?: number }) => ["tasks", params] as const,
+  attempts: (params: { status?: AttemptStatus; jobId?: string; limit?: number; offset?: number }) => ["attempts", params] as const,
+  attempt: (attemptId: string | null) => ["attempt", attemptId] as const,
+  history: (params: { stage?: string; repo?: string; search?: string; limit?: number; offset?: number }) => ["history", params] as const,
+  learnings: (params: { search?: string; repo?: string; limit?: number; offset?: number }) => ["learnings", params] as const,
 };

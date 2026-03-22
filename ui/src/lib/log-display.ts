@@ -190,7 +190,7 @@ const mergeRenderedSegments = (segments: RenderedLogSegment[]): RenderedLogSegme
 
 const setNamedColor = (state: AnsiStyleState, target: "foreground" | "background", value: number, bright: boolean): void => {
   const colors = bright ? BRIGHT_COLORS : BASIC_COLORS;
-  state[target] = { type: "named", value: colors[value] };
+  state[target] = { type: "named", value: colors[value] ?? (bright ? "bright-black" : "black") };
 };
 
 const applyExtendedColor = (state: AnsiStyleState, target: "foreground" | "background", codes: number[], index: number): number => {

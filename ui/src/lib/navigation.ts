@@ -1,26 +1,51 @@
-export const pagePaths = ["/overview", "/attempts", "/history", "/learnings"] as const;
+import type { LucideIcon } from "lucide-react";
+import { ActivitySquareIcon, BrainCircuitIcon, Clock3Icon, LayoutDashboardIcon } from "lucide-react";
 
-export type PagePath = (typeof pagePaths)[number];
-
-export type PageDefinition = {
-  path: PagePath;
+export type AppPage = {
+  path: "/" | "/attempts" | "/history" | "/learnings";
   label: string;
   title: string;
+  description: string;
+  icon: LucideIcon;
 };
 
-export const pages: PageDefinition[] = [
-  { path: "/overview", label: "Overview", title: "Overview" },
-  { path: "/attempts", label: "Attempts", title: "Attempts" },
-  { path: "/history", label: "History", title: "History" },
-  { path: "/learnings", label: "Learnings", title: "Learnings" },
+export const appPages: AppPage[] = [
+  {
+    path: "/",
+    label: "Overview",
+    title: "Operational overview",
+    description: "Monitor workers, queue pressure, review-ready work, and recent repo history.",
+    icon: LayoutDashboardIcon,
+  },
+  {
+    path: "/attempts",
+    label: "Attempts",
+    title: "Attempt ledger",
+    description: "Filter execution attempts, inspect events, and stream logs without leaving the page.",
+    icon: ActivitySquareIcon,
+  },
+  {
+    path: "/history",
+    label: "History",
+    title: "Execution history",
+    description: "Search durable task history and inspect repo transitions captured at each stage.",
+    icon: Clock3Icon,
+  },
+  {
+    path: "/learnings",
+    label: "Learnings",
+    title: "Shared learnings",
+    description: "Search reusable repo knowledge and drill into the content that guided recent work.",
+    icon: BrainCircuitIcon,
+  },
 ];
 
-export const normalizePath = (pathname: string): PagePath => {
-  if (pathname === "/") {
-    return "/overview";
+export const fallbackPage = appPages[0]!;
+
+export function pageForPath(pathname: string): AppPage {
+  if (pathname === "/overview") {
+    return fallbackPage;
   }
 
-  return pagePaths.includes(pathname as PagePath) ? (pathname as PagePath) : "/overview";
-};
-
-export const titleForPath = (pathname: PagePath): string => pages.find((page) => page.path === pathname)?.title ?? "Overview";
+  return appPages.find((page) => page.path === pathname) ?? fallbackPage;
+}
