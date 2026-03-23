@@ -48,10 +48,7 @@ const learningMutationSchema = z.discriminatedUnion("type", [
   }),
 ]);
 
-const blockerSchema = z.object({
-  code: z.string().min(1),
-  message: z.string().min(1),
-});
+const blockerSchema = z.string().min(1);
 
 export const workerResultSchema = z.object({
   schemaVersion: z.literal(1),

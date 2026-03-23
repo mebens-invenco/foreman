@@ -67,6 +67,16 @@ Allowed learning mutation types:
 - `add`
 - `update`
 
+Blocker requirements:
+
+- each blocker must be a non-empty string message
+
+Example blocker:
+
+```json
+"A stable 46.x release of @invenco/common-interface must be published before this branch can be made merge-safe."
+```
+
 Allowed signals:
 
 - `code_changed`

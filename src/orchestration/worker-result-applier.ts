@@ -65,9 +65,9 @@ export class WorkerResultApplier {
       for (const blocker of workerResult.blockers) {
         await this.deps.taskSystem.addComment({
           taskId: input.task.id,
-          body: `${this.deps.config.workspace.agentPrefix}${blocker.code}: ${blocker.message}`,
+          body: `${this.deps.config.workspace.agentPrefix}${blocker}`,
         });
-        logger.warn("posted blocker comment", { blockerCode: blocker.code });
+        logger.warn("posted blocker comment", { blocker });
       }
       return pullRequestUrl;
     }

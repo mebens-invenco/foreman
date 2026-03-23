@@ -901,10 +901,7 @@ type LearningMutation =
 ### Blockers
 
 ```ts
-type Blocker = {
-  code: string
-  message: string
-}
+type Blocker = string
 ```
 
 ### Outcome Semantics

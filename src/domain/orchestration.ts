@@ -80,10 +80,7 @@ export type LearningMutation =
       markApplied?: boolean;
     };
 
-export type Blocker = {
-  code: string;
-  message: string;
-};
+export type Blocker = string;
 
 export type Signal = "code_changed" | "review_checkpoint_eligible";
 
