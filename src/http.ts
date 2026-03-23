@@ -168,7 +168,7 @@ const deriveTaskTargetStatus = (input: {
 
 export const createHttpServer = (deps: HttpServerDeps) => {
   const server = Fastify({ logger: false });
-  const uiRoot = path.join(deps.paths.projectRoot, "dist", "ui");
+  const uiRoot = path.join(deps.paths.projectRoot, "ui", "dist");
   const hasUiBuild = existsSync(uiRoot);
   const getAllMirroredTasks = (): Task[] => deps.repos.taskMirror.getTasks();
 
