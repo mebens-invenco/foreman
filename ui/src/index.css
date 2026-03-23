@@ -120,11 +120,20 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
-  body {
-    @apply bg-background text-foreground;
-    }
+  }
   html {
     @apply font-mono;
-    }
+  }
+  body {
+    @apply min-h-svh bg-background text-foreground antialiased;
+    background-image:
+      radial-gradient(circle at top left, color-mix(in srgb, var(--color-primary) 10%, transparent), transparent 32%),
+      linear-gradient(180deg, color-mix(in srgb, var(--color-muted) 42%, transparent), transparent 24rem);
+  }
+  #root {
+    @apply min-h-svh;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-primary) 28%, transparent);
+  }
 }

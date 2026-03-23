@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
 
-type Theme = "dark" | "light" | "system"
+export type Theme = "dark" | "light" | "system"
 type ResolvedTheme = "dark" | "light"
 
 type ThemeProviderProps = {
@@ -13,6 +13,7 @@ type ThemeProviderProps = {
 
 type ThemeProviderState = {
   theme: Theme
+  resolvedTheme: ResolvedTheme
   setTheme: (theme: Theme) => void
 }
 
@@ -80,9 +81,8 @@ function isEditableTarget(target: EventTarget | null) {
 export function ThemeProvider({
   children,
   defaultTheme = "system",
-  storageKey = "theme",
+  storageKey = "foreman/theme",
   disableTransitionOnChange = true,
-  ...props
 }: ThemeProviderProps) {
   const [theme, setThemeState] = React.useState<Theme>(() => {
     const storedTheme = localStorage.getItem(storageKey)
@@ -92,6 +92,9 @@ export function ThemeProvider({
 
     return defaultTheme
   })
+  const [resolvedTheme, setResolvedTheme] = React.useState<ResolvedTheme>(() =>
+    getSystemTheme()
+  )
 
   const setTheme = React.useCallback(
     (nextTheme: Theme) => {
@@ -104,14 +107,15 @@ export function ThemeProvider({
   const applyTheme = React.useCallback(
     (nextTheme: Theme) => {
       const root = document.documentElement
-      const resolvedTheme =
+      const nextResolvedTheme =
         nextTheme === "system" ? getSystemTheme() : nextTheme
       const restoreTransitions = disableTransitionOnChange
         ? disableTransitionsTemporarily()
         : null
 
       root.classList.remove("light", "dark")
-      root.classList.add(resolvedTheme)
+      root.classList.add(nextResolvedTheme)
+      setResolvedTheme(nextResolvedTheme)
 
       if (restoreTransitions) {
         restoreTransitions()
@@ -207,13 +211,14 @@ export function ThemeProvider({
   const value = React.useMemo(
     () => ({
       theme,
+      resolvedTheme,
       setTheme,
     }),
-    [theme, setTheme]
+    [theme, resolvedTheme, setTheme]
   )
 
   return (
-    <ThemeProviderContext.Provider {...props} value={value}>
+    <ThemeProviderContext.Provider value={value}>
       {children}
     </ThemeProviderContext.Provider>
   )

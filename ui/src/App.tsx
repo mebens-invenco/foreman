@@ -1,21 +1,38 @@
-import { Button } from "@/components/ui/button"
+import * as React from "react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { NuqsAdapter } from "nuqs/adapters/react-router/v7"
+import { BrowserRouter } from "react-router"
 
-export function App() {
+import { AppRoutes } from "@/app/routes"
+import { ThemeProvider } from "@/components/theme-provider"
+import { Toaster } from "@/components/ui/sonner"
+import { TooltipProvider } from "@/components/ui/tooltip"
+
+export default function App() {
+  const [queryClient] = React.useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            refetchOnWindowFocus: false,
+            retry: 1,
+          },
+        },
+      })
+  )
+
   return (
-    <div className="flex min-h-svh p-6">
-      <div className="flex max-w-md min-w-0 flex-col gap-4 text-sm leading-loose">
-        <div>
-          <h1 className="font-medium">Project ready!</h1>
-          <p>You may now add components and start building.</p>
-          <p>We&apos;ve already added the button component for you.</p>
-          <Button className="mt-2">Button</Button>
-        </div>
-        <div className="font-mono text-xs text-muted-foreground">
-          (Press <kbd>d</kbd> to toggle dark mode)
-        </div>
-      </div>
-    </div>
+    <QueryClientProvider client={queryClient}>
+      <BrowserRouter>
+        <NuqsAdapter>
+          <ThemeProvider>
+            <TooltipProvider>
+              <AppRoutes />
+              <Toaster position="bottom-right" richColors closeButton />
+            </TooltipProvider>
+          </ThemeProvider>
+        </NuqsAdapter>
+      </BrowserRouter>
+    </QueryClientProvider>
   )
 }
-
-export default App
