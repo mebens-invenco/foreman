@@ -2,6 +2,8 @@ import { useEffect, useState } from "react"
 
 import { useWorkersQuery } from "@/hooks/use-workers-query"
 import { Skeleton } from "@/components/ui/skeleton"
+import { HistoryTable } from "@/pages/overview/history-table"
+import { ReviewTable } from "@/pages/overview/review-table"
 import { WorkerCard } from "@/pages/overview/worker-card"
 
 function useRelativeNow(intervalMs = 60_000) {
@@ -65,9 +67,12 @@ export function OverviewPage() {
 
         {workers.length === 0 ? (
           <div className="border border-dashed border-border/70 bg-card/65 px-6 py-10 text-center">
-            <p className="text-lg tracking-tight text-foreground">No workers available.</p>
+            <p className="text-lg tracking-tight text-foreground">
+              No workers available.
+            </p>
             <p className="mt-3 text-sm leading-7 text-muted-foreground">
-              Worker cards will appear here once Foreman provisions active slots.
+              Worker cards will appear here once Foreman provisions active
+              slots.
             </p>
           </div>
         ) : (
@@ -78,6 +83,9 @@ export function OverviewPage() {
           </div>
         )}
       </div>
+
+      <ReviewTable now={now} />
+      <HistoryTable now={now} />
     </>
   )
 }

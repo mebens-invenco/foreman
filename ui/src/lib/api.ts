@@ -8,6 +8,19 @@ export type AttemptStatus =
   | "timed_out"
 export type WorkerStatus = "idle" | "leased" | "running" | "stopping" | "offline"
 export type ActionType = "execution" | "review" | "retry" | "consolidation"
+export type TaskState =
+  | "ready"
+  | "in_progress"
+  | "in_review"
+  | "done"
+  | "canceled"
+export type TargetProgressState =
+  | "pending"
+  | "active"
+  | "in_review"
+  | "merged"
+  | "completed"
+  | "retryable"
 
 export type StatusResponse = {
   workspace: {
@@ -67,6 +80,57 @@ export type Worker = {
   } | null
 }
 
+export type TaskPullRequest = {
+  repoKey: string
+  url: string
+  title?: string
+  source: "local" | "provider" | "provider_inferred" | "branch_inferred"
+}
+
+export type TaskTargetReview = {
+  pullRequestUrl: string
+  pullRequestNumber: number
+  state: "open" | "closed" | "merged"
+  isDraft: boolean
+  baseBranch: string
+  headBranch: string
+}
+
+export type TaskTargetSummary = {
+  id: string
+  taskId: string
+  repoKey: string
+  branchName: string
+  status: TaskState | "blocked"
+  progressState: TargetProgressState
+  review: TaskTargetReview | null
+}
+
+export type TaskListItem = {
+  id: string
+  title: string
+  state: TaskState
+  updatedAt: string
+  pullRequests: TaskPullRequest[]
+  targets: TaskTargetSummary[]
+}
+
+export type HistoryRepoRecord = {
+  path: string
+  beforeSha: string
+  afterSha: string
+  position: number
+}
+
+export type HistoryRecord = {
+  stepId: string
+  createdAt: string
+  stage: string
+  issue: string
+  summary: string
+  repos: HistoryRepoRecord[]
+}
+
 type ErrorPayload = {
   error?: {
     message?: string
@@ -124,6 +188,22 @@ async function requestText(input: string, init?: RequestInit) {
   return response.text()
 }
 
+function buildSearch(
+  params: Record<string, string | number | undefined>
+) {
+  const search = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === "") {
+      continue
+    }
+    search.set(key, String(value))
+  }
+
+  const built = search.toString()
+  return built ? `?${built}` : ""
+}
+
 export function getStatus() {
   return requestJson<StatusResponse>("/api/status")
 }
@@ -136,6 +216,28 @@ export function listWorkers() {
 
 export function getAttemptLogs(attemptId: string) {
   return requestText(`/api/attempts/${attemptId}/logs`)
+}
+
+export function listTasks(params: {
+  state?: TaskState
+  search?: string
+  limit?: number
+}) {
+  return requestJson<{ tasks: TaskListItem[] }>(
+    `/api/tasks${buildSearch(params)}`
+  ).then((payload) => payload.tasks)
+}
+
+export function listHistory(params: {
+  stage?: string
+  repo?: string
+  search?: string
+  limit?: number
+  offset?: number
+}) {
+  return requestJson<{ history: HistoryRecord[] }>(
+    `/api/history${buildSearch(params)}`
+  ).then((payload) => payload.history)
 }
 
 export function startScheduler() {
