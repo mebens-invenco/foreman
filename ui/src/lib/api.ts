@@ -1,4 +1,13 @@
 export type SchedulerStatus = "running" | "paused" | "stopping" | "stopped"
+export type AttemptStatus =
+  | "running"
+  | "completed"
+  | "failed"
+  | "blocked"
+  | "canceled"
+  | "timed_out"
+export type WorkerStatus = "idle" | "leased" | "running" | "stopping" | "offline"
+export type ActionType = "execution" | "review" | "retry" | "consolidation"
 
 export type StatusResponse = {
   workspace: {
@@ -34,6 +43,28 @@ type ScoutMutationResponse = {
     status: string
     trigger: string
   }
+}
+
+export type Worker = {
+  id: string
+  slot: number
+  status: WorkerStatus
+  currentAttemptId: string | null
+  lastHeartbeatAt: string
+  currentAttempt: {
+    id: string
+    jobId: string
+    status: AttemptStatus
+    startedAt: string
+  } | null
+  currentJob: {
+    id: string
+    taskId: string
+    taskTargetId: string
+    action: ActionType
+    repoKey: string
+    status: string
+  } | null
 }
 
 type ErrorPayload = {
@@ -77,8 +108,34 @@ async function requestJson<T>(input: string, init?: RequestInit) {
   return (await response.json()) as T
 }
 
+async function requestText(input: string, init?: RequestInit) {
+  const response = await fetch(input, {
+    ...init,
+    headers: {
+      Accept: "text/plain",
+      ...(init?.headers ?? {}),
+    },
+  })
+
+  if (!response.ok) {
+    throw new ApiError(`${response.status} ${response.statusText}`, response.status)
+  }
+
+  return response.text()
+}
+
 export function getStatus() {
   return requestJson<StatusResponse>("/api/status")
+}
+
+export function listWorkers() {
+  return requestJson<{ workers: Worker[] }>("/api/workers").then(
+    (payload) => payload.workers
+  )
+}
+
+export function getAttemptLogs(attemptId: string) {
+  return requestText(`/api/attempts/${attemptId}/logs`)
 }
 
 export function startScheduler() {
