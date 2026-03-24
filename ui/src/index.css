@@ -81,6 +81,24 @@
     --sidebar-accent-foreground: oklch(0.216 0.006 56.043);
     --sidebar-border: oklch(0.923 0.003 48.717);
     --sidebar-ring: oklch(0.709 0.01 56.259);
+    --ansi-default-background: oklch(1 0 0);
+    --ansi-default-foreground: oklch(0.147 0.004 49.25);
+    --ansi-black: rgb(17 24 39);
+    --ansi-red: rgb(220 38 38);
+    --ansi-green: rgb(22 163 74);
+    --ansi-yellow: rgb(202 138 4);
+    --ansi-blue: rgb(37 99 235);
+    --ansi-magenta: rgb(192 38 211);
+    --ansi-cyan: rgb(8 145 178);
+    --ansi-white: rgb(226 232 240);
+    --ansi-bright-black: rgb(100 116 139);
+    --ansi-bright-red: rgb(248 113 113);
+    --ansi-bright-green: rgb(74 222 128);
+    --ansi-bright-yellow: rgb(250 204 21);
+    --ansi-bright-blue: rgb(96 165 250);
+    --ansi-bright-magenta: rgb(232 121 249);
+    --ansi-bright-cyan: rgb(34 211 238);
+    --ansi-bright-white: rgb(248 250 252);
 }
 
 .dark {
@@ -115,6 +133,24 @@
     --sidebar-accent-foreground: oklch(0.985 0.001 106.423);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.553 0.013 58.071);
+    --ansi-default-background: oklch(0.147 0.004 49.25);
+    --ansi-default-foreground: oklch(0.985 0.001 106.423);
+    --ansi-black: rgb(15 23 42);
+    --ansi-red: rgb(248 113 113);
+    --ansi-green: rgb(74 222 128);
+    --ansi-yellow: rgb(250 204 21);
+    --ansi-blue: rgb(96 165 250);
+    --ansi-magenta: rgb(232 121 249);
+    --ansi-cyan: rgb(34 211 238);
+    --ansi-white: rgb(226 232 240);
+    --ansi-bright-black: rgb(148 163 184);
+    --ansi-bright-red: rgb(252 165 165);
+    --ansi-bright-green: rgb(134 239 172);
+    --ansi-bright-yellow: rgb(253 224 71);
+    --ansi-bright-blue: rgb(147 197 253);
+    --ansi-bright-magenta: rgb(240 171 252);
+    --ansi-bright-cyan: rgb(103 232 249);
+    --ansi-bright-white: rgb(255 255 255);
 }
 
 @layer base {

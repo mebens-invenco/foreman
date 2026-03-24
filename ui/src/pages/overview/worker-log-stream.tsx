@@ -1,40 +1,29 @@
-import { useEffect, useRef, useState } from "react"
+import type { CSSProperties } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { getAttemptLogs, type Worker } from "@/lib/api"
+import {
+  appendLogChunk,
+  appendSyntheticLogLine,
+  createLogBuffer,
+  getDisplayLines,
+} from "@/lib/log-display"
 import { cn } from "@/lib/utils"
-
-const MAX_LOG_CHARS = 120_000
-
-function trimLogOutput(value: string) {
-  if (value.length <= MAX_LOG_CHARS) {
-    return value
-  }
-
-  return value.slice(value.length - MAX_LOG_CHARS)
-}
-
-function appendChunk(current: string, chunk: string) {
-  return trimLogOutput(current + chunk)
-}
-
-function appendMarker(current: string, marker: string) {
-  const prefix = current.length > 0 && !current.endsWith("\n") ? "\n" : ""
-  return trimLogOutput(`${current}${prefix}${marker}\n`)
-}
 
 type WorkerLogStreamProps = {
   worker: Worker | null
 }
 
 export function WorkerLogStream({ worker }: WorkerLogStreamProps) {
-  const [logs, setLogs] = useState("")
+  const [buffer, setBuffer] = useState(() => createLogBuffer())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement | null>(null)
+  const lines = useMemo(() => getDisplayLines(buffer), [buffer])
 
   useEffect(() => {
     if (!worker) {
-      setLogs("")
+      setBuffer(createLogBuffer())
       setLoading(false)
       setError(null)
       return
@@ -43,7 +32,7 @@ export function WorkerLogStream({ worker }: WorkerLogStreamProps) {
     let isActive = true
     let source: EventSource | null = null
 
-    setLogs("")
+    setBuffer(createLogBuffer())
     setLoading(true)
     setError(null)
 
@@ -57,7 +46,7 @@ export function WorkerLogStream({ worker }: WorkerLogStreamProps) {
         if (!isActive) {
           return
         }
-        setLogs(trimLogOutput(initialLogs))
+        setBuffer(appendLogChunk(createLogBuffer(), initialLogs))
       } catch {
         // Ignore missing attempt logs and continue with the live stream.
       }
@@ -75,7 +64,7 @@ export function WorkerLogStream({ worker }: WorkerLogStreamProps) {
           return
         }
 
-        setLogs((current) => appendChunk(current, event.data))
+        setBuffer((current) => appendLogChunk(current, `${event.data}\n`))
         setLoading(false)
       })
 
@@ -89,9 +78,9 @@ export function WorkerLogStream({ worker }: WorkerLogStreamProps) {
           const marker = payload.attemptId
             ? `[worker switched to ${payload.attemptId}]`
             : "[worker is idle]"
-          setLogs((current) => appendMarker(current, marker))
+          setBuffer((current) => appendSyntheticLogLine(current, marker))
         } catch {
-          setLogs((current) => appendMarker(current, "[worker state changed]"))
+          setBuffer((current) => appendSyntheticLogLine(current, "[worker state changed]"))
         }
 
         setLoading(false)
@@ -133,7 +122,7 @@ export function WorkerLogStream({ worker }: WorkerLogStreamProps) {
     }
 
     element.scrollTop = element.scrollHeight
-  }, [logs])
+  }, [lines])
 
   return (
     <div className="border border-border/70 bg-background/75">
@@ -146,16 +135,34 @@ export function WorkerLogStream({ worker }: WorkerLogStreamProps) {
       <div
         ref={scrollRef}
         className={cn(
-          "max-h-[26rem] min-h-[22rem] overflow-auto p-4 font-mono text-xs leading-6 text-foreground",
-          logs.length === 0 && "flex items-center justify-center"
+          "max-h-[52rem] min-h-[44rem] overflow-auto p-4 font-mono text-xs leading-6 text-foreground",
+          lines.length === 0 && "flex items-center justify-center"
         )}
       >
-        {loading && logs.length === 0 ? (
+        {loading && lines.length === 0 ? (
           <p className="text-sm text-muted-foreground">Attaching to worker log stream...</p>
-        ) : logs.length === 0 ? (
+        ) : lines.length === 0 ? (
           <p className="text-sm text-muted-foreground">Worker has not produced logs yet.</p>
         ) : (
-          <pre className="m-0 whitespace-pre-wrap break-words">{logs}</pre>
+          <div className="m-0 whitespace-pre-wrap break-words">
+            {lines.map((line, index) => (
+              <div key={`log-line-${index}`}>
+                {line.segments.length === 0 ? (
+                  <span>&nbsp;</span>
+                ) : (
+                  line.segments.map((segment, segmentIndex) => (
+                    <span
+                      key={`log-segment-${index}-${segmentIndex}`}
+                      className={cn(segment.classes)}
+                      style={segment.style as CSSProperties}
+                    >
+                      {segment.text}
+                    </span>
+                  ))
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
