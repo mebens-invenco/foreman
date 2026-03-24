@@ -34,7 +34,8 @@ export function WorkerCard({ worker, now }: WorkerCardProps) {
             "group flex flex-col border bg-card/85 p-5 text-left transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:bg-card hover:shadow-[0_18px_40px_rgba(15,23,42,0.08)] focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/30 focus-visible:outline-none",
             open
               ? "border-primary/55 bg-card shadow-[0_18px_40px_rgba(15,23,42,0.08)]"
-              : "border-border/70"
+              : "border-border/70",
+            !isActive && !open && "opacity-70 hover:opacity-100"
           )}
         >
           <div className="flex items-start justify-between gap-4">

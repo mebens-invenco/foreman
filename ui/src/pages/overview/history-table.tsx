@@ -65,7 +65,14 @@ export function HistoryTable({ now }: { now: number }) {
           No recent history steps recorded yet.
         </div>
       ) : (
-        <Table>
+        <Table className="w-full table-fixed">
+          <colgroup>
+            <col className="w-28" />
+            <col className="w-36" />
+            <col className="w-32" />
+            <col />
+            <col className="w-24" />
+          </colgroup>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="px-4">Task</TableHead>
@@ -87,8 +94,8 @@ export function HistoryTable({ now }: { now: number }) {
                 <TableCell className="text-sm text-foreground">
                   {record.stage}
                 </TableCell>
-                <TableCell className="max-w-0">
-                  <p className="truncate text-sm text-muted-foreground">
+                <TableCell>
+                  <p className="block max-w-full truncate text-sm text-muted-foreground">
                     {record.summary}
                   </p>
                 </TableCell>

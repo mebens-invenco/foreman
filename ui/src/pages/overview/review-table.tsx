@@ -85,7 +85,13 @@ export function ReviewTable({ now }: { now: number }) {
           No pull requests need review right now.
         </div>
       ) : (
-        <Table>
+        <Table className="w-full table-fixed">
+          <colgroup>
+            <col className="w-28" />
+            <col className="w-36" />
+            <col />
+            <col className="w-24" />
+          </colgroup>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
               <TableHead className="px-4">Task</TableHead>
@@ -103,12 +109,12 @@ export function ReviewTable({ now }: { now: number }) {
                 <TableCell className="text-sm text-foreground">
                   {row.target}
                 </TableCell>
-                <TableCell className="max-w-0">
+                <TableCell>
                   <a
                     href={row.pullRequestUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className="block truncate text-sm text-foreground underline-offset-4 hover:text-primary hover:underline"
+                    className="block max-w-full truncate text-sm text-foreground underline-offset-4 hover:text-primary hover:underline"
                   >
                     {row.pullRequestLabel}
                   </a>

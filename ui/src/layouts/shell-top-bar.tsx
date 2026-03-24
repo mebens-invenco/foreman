@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react"
+
 import {
   MoonStarIcon,
   PlayIcon,
@@ -15,6 +17,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { SidebarTrigger } from "@/components/ui/sidebar"
+import { useScoutRunsQuery } from "@/hooks/use-scout-runs-query"
 import { useRunScoutMutation, useSchedulerActionMutation } from "@/hooks/use-scheduler-actions"
 import { useStatusQuery } from "@/hooks/use-status-query"
 import { cn } from "@/lib/utils"
@@ -71,19 +74,72 @@ function ControlButton({
   )
 }
 
+function formatCountdown(targetAt: string, now: number) {
+  const target = new Date(targetAt).getTime()
+  if (Number.isNaN(target)) {
+    return null
+  }
+
+  const seconds = Math.max(0, Math.ceil((target - now) / 1000))
+  if (seconds <= 0) {
+    return "Next poll imminent"
+  }
+  if (seconds < 60) {
+    return `Next poll in ${seconds}s`
+  }
+
+  const minutes = Math.floor(seconds / 60)
+  const remainderSeconds = seconds % 60
+  if (minutes < 60) {
+    return remainderSeconds > 0
+      ? `Next poll in ${minutes}m ${remainderSeconds}s`
+      : `Next poll in ${minutes}m`
+  }
+
+  const hours = Math.floor(minutes / 60)
+  const remainderMinutes = minutes % 60
+  return remainderMinutes > 0
+    ? `Next poll in ${hours}h ${remainderMinutes}m`
+    : `Next poll in ${hours}h`
+}
+
 export function ShellTopBar() {
   const { data: status } = useStatusQuery()
+  const { data: scoutRuns = [] } = useScoutRunsQuery()
+  const [now, setNow] = useState(() => Date.now())
   const startScheduler = useSchedulerActionMutation("start")
   const pauseScheduler = useSchedulerActionMutation("pause")
   const stopScheduler = useSchedulerActionMutation("stop")
   const runScout = useRunScoutMutation()
 
   const schedulerStatus = status?.scheduler.status ?? "stopped"
+  const schedulerRunning = schedulerStatus === "running"
+  const latestScoutRun = scoutRuns[0] ?? null
+  const scoutRunning = runScout.isPending || latestScoutRun?.status === "running"
+  const scoutTooltip = scoutRunning
+    ? "Scout run in progress"
+    : schedulerStatus === "running" && status?.scheduler.nextScoutPollAt
+      ? formatCountdown(status.scheduler.nextScoutPollAt, now) ?? "Next poll scheduled"
+      : schedulerStatus === "paused"
+        ? "No poll scheduled while paused"
+        : schedulerStatus === "stopping"
+          ? "Scheduler is stopping"
+          : "Scheduler stopped"
   const anyPending =
     startScheduler.isPending ||
     pauseScheduler.isPending ||
     stopScheduler.isPending ||
     runScout.isPending
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setNow(Date.now())
+    }, 1000)
+
+    return () => {
+      window.clearInterval(interval)
+    }
+  }, [])
 
   return (
     <header className="sticky top-0 z-20 border-b border-border/70 bg-background/80 backdrop-blur-xl">
@@ -101,34 +157,44 @@ export function ShellTopBar() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => runScout.mutate()}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => runScout.mutate()}
+                  disabled={anyPending || schedulerStatus === "stopping" || scoutRunning}
+                >
+                  <RadarIcon className={cn("size-3.5", scoutRunning && "animate-spin")} />
+                  Scout
+                </Button>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{scoutTooltip}</TooltipContent>
+          </Tooltip>
+          <ControlButton
+            label={schedulerRunning ? "Pause scheduler" : "Start scheduler"}
+            size="icon-sm"
+            variant="default"
+            onClick={() => {
+              if (schedulerRunning) {
+                pauseScheduler.mutate()
+                return
+              }
+
+              startScheduler.mutate()
+            }}
             disabled={anyPending || schedulerStatus === "stopping"}
           >
-            <RadarIcon className="size-3.5" />
-            Scout
-          </Button>
-          <ControlButton
-            label="Start scheduler"
-            size="icon-sm"
-            variant={schedulerStatus === "running" ? "outline" : "default"}
-            onClick={() => startScheduler.mutate()}
-            disabled={anyPending || schedulerStatus === "running"}
-          >
-            <PlayIcon className="size-3.5" />
-            <span className="sr-only">Start scheduler</span>
-          </ControlButton>
-          <ControlButton
-            label="Pause scheduler"
-            size="icon-sm"
-            variant={schedulerStatus === "running" ? "default" : "outline"}
-            onClick={() => pauseScheduler.mutate()}
-            disabled={anyPending || schedulerStatus !== "running"}
-          >
-            <PauseIcon className="size-3.5" />
-            <span className="sr-only">Pause scheduler</span>
+            {schedulerRunning ? (
+              <PauseIcon className="size-3.5" />
+            ) : (
+              <PlayIcon className="size-3.5" />
+            )}
+            <span className="sr-only">
+              {schedulerRunning ? "Pause scheduler" : "Start scheduler"}
+            </span>
           </ControlButton>
           <ControlButton
             label="Stop scheduler"

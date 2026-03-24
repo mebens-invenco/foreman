@@ -131,6 +131,19 @@ export type HistoryRecord = {
   repos: HistoryRepoRecord[]
 }
 
+export type ScoutRun = {
+  id: string
+  triggerType: "startup" | "poll" | "worker_finished" | "task_mutation" | "lease_change" | "manual"
+  status: "running" | "completed" | "failed"
+  startedAt: string
+  finishedAt: string | null
+  selectedAction: ActionType | null
+  selectedTaskId: string | null
+  candidateCount: number
+  activeCount: number
+  terminalCount: number
+}
+
 type ErrorPayload = {
   error?: {
     message?: string
@@ -238,6 +251,12 @@ export function listHistory(params: {
   return requestJson<{ history: HistoryRecord[] }>(
     `/api/history${buildSearch(params)}`
   ).then((payload) => payload.history)
+}
+
+export function listScoutRuns() {
+  return requestJson<{ runs: ScoutRun[] }>("/api/scout/runs").then(
+    (payload) => payload.runs
+  )
 }
 
 export function startScheduler() {
