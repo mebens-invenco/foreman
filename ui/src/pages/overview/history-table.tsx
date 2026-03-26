@@ -36,7 +36,7 @@ function TableSectionShell({
   return (
     <section className="border border-border/70 bg-card/75">
       <div className="border-b border-border/70 px-4 py-3">
-        <p className="text-[10px] tracking-[0.32em] text-muted-foreground uppercase">
+        <p className="text-xxs tracking-[0.32em] text-muted-foreground uppercase">
           {title}
         </p>
       </div>
@@ -99,7 +99,7 @@ export function HistoryTable({ now }: { now: number }) {
                     {record.summary}
                   </p>
                 </TableCell>
-                <TableCell className="px-4 text-right text-[11px] text-muted-foreground">
+                <TableCell className="px-4 text-right text-xs text-muted-foreground">
                   {formatRelativeTime(record.createdAt, now)}
                 </TableCell>
               </TableRow>

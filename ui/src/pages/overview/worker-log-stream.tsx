@@ -127,7 +127,7 @@ export function WorkerLogStream({ worker }: WorkerLogStreamProps) {
   return (
     <div className="border border-border/70 bg-background/75">
       {error ? (
-        <div className="border-b border-border/70 px-4 py-2 text-[11px] uppercase tracking-[0.22em] text-amber-700 dark:text-amber-300">
+        <div className="border-b border-border/70 px-4 py-2 text-xs uppercase tracking-[0.22em] text-amber-700 dark:text-amber-300">
           {error}
         </div>
       ) : null}

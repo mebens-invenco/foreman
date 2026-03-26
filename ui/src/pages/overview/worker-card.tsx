@@ -39,7 +39,7 @@ export function WorkerCard({ worker, now }: WorkerCardProps) {
           )}
         >
           <div className="flex items-start justify-between gap-4">
-            <p className="text-[10px] tracking-[0.32em] text-muted-foreground uppercase">
+            <p className="text-xxs tracking-[0.32em] text-muted-foreground uppercase">
               Worker {worker.slot}
             </p>
             <WorkerStatusBadge status={worker.status} />
@@ -56,7 +56,7 @@ export function WorkerCard({ worker, now }: WorkerCardProps) {
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
-                    <p className="text-[10px] tracking-[0.28em] text-muted-foreground uppercase">
+                    <p className="text-xxs tracking-[0.28em] text-muted-foreground uppercase">
                       Task
                     </p>
                     <p className="mt-2 font-mono text-sm leading-6 break-all text-foreground">
@@ -64,7 +64,7 @@ export function WorkerCard({ worker, now }: WorkerCardProps) {
                     </p>
                   </div>
                   <div>
-                    <p className="text-[10px] tracking-[0.28em] text-muted-foreground uppercase">
+                    <p className="text-xxs tracking-[0.28em] text-muted-foreground uppercase">
                       Repo
                     </p>
                     <p className="mt-2 text-sm leading-6 break-all text-foreground">

@@ -5,6 +5,11 @@
 
 @custom-variant dark (&:is(.dark *));
 
+@theme {
+    --text-xxs: 0.625rem;
+    --text-xxs--line-height: calc(0.875 / 0.625);
+}
+
 @theme inline {
     --font-heading: var(--font-mono);
     --font-mono: 'Geist Mono Variable', monospace;

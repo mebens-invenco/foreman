@@ -13,7 +13,7 @@ import { WorkerStatusBadge } from "@/pages/overview/worker-status-badge"
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="border border-border/70 bg-background/70 px-4 py-3">
-      <p className="text-[10px] tracking-[0.28em] text-muted-foreground uppercase">
+      <p className="text-xxs tracking-[0.28em] text-muted-foreground uppercase">
         {label}
       </p>
       <p className="mt-2 text-sm leading-6 break-all text-foreground">
@@ -42,7 +42,7 @@ export function WorkerDetailSheet({ worker, now }: WorkerDetailSheetProps) {
         <div className="flex items-start justify-between gap-4">
           <div>
             <SheetTitle>{`Worker ${worker.slot}`}</SheetTitle>
-            <SheetDescription className="mt-2 font-mono text-[11px] text-muted-foreground">
+            <SheetDescription className="mt-2 font-mono text-xs text-muted-foreground">
               {worker.id}
             </SheetDescription>
           </div>
@@ -73,7 +73,7 @@ export function WorkerDetailSheet({ worker, now }: WorkerDetailSheetProps) {
         </section>
 
         <section className="space-y-3">
-          <p className="text-[10px] tracking-[0.32em] text-muted-foreground uppercase">
+          <p className="text-xxs tracking-[0.32em] text-muted-foreground uppercase">
             Logs
           </p>
           <WorkerLogStream worker={worker} />

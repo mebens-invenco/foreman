@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 export function NotFoundPage() {
   return (
     <section className="border border-border/70 bg-card/75 p-6 md:p-8">
-      <p className="text-[10px] uppercase tracking-[0.32em] text-muted-foreground">
+      <p className="text-xxs uppercase tracking-[0.32em] text-muted-foreground">
         Not found
       </p>
       <h2 className="mt-4 text-3xl tracking-tight text-foreground">That route is outside Foreman&apos;s current shell.</h2>

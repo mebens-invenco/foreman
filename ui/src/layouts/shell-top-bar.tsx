@@ -148,7 +148,7 @@ export function ShellTopBar() {
           <SidebarTrigger className="shrink-0" />
           <span
             className={cn(
-              "inline-flex items-center rounded-none border px-2 py-1 text-[10px] font-medium uppercase tracking-[0.24em]",
+              "inline-flex items-center rounded-none border px-2 py-1 text-xxs font-medium uppercase tracking-[0.24em]",
               statusTone(schedulerStatus)
             )}
           >

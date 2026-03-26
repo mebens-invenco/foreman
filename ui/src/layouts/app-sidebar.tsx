@@ -32,7 +32,7 @@ export function AppSidebar() {
             <OrbitIcon className="size-4" />
           </div>
           <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-            <p className="text-[10px] uppercase tracking-[0.3em] text-sidebar-foreground/55">
+            <p className="text-xxs uppercase tracking-[0.3em] text-sidebar-foreground/55">
               Foreman
             </p>
             {isLoading ? (
@@ -73,7 +73,7 @@ export function AppSidebar() {
 
       <SidebarFooter className="gap-4 px-3 py-4">
         <SidebarSeparator />
-        <div className="space-y-2 px-2 text-[11px] leading-5 text-sidebar-foreground/65 group-data-[collapsible=icon]:hidden">
+        <div className="space-y-2 px-2 text-xs leading-5 text-sidebar-foreground/65 group-data-[collapsible=icon]:hidden">
           <p>
             {status ? `${status.repos.count} repos mirrored` : "Inspecting workspace..."}
           </p>
