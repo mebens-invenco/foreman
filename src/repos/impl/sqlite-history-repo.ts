@@ -54,8 +54,18 @@ export class SqliteHistoryRepo implements HistoryRepo {
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
-    const limit = filters.limit ?? 50;
-    const offset = filters.offset ?? 0;
+    const paginationClause =
+      filters.limit === undefined
+        ? filters.offset === undefined
+          ? ""
+          : " LIMIT -1 OFFSET ?"
+        : " LIMIT ? OFFSET ?";
+    const paginationParams =
+      filters.limit === undefined
+        ? filters.offset === undefined
+          ? []
+          : [filters.offset]
+        : [filters.limit, filters.offset ?? 0];
 
     return this.sqlite
       .prepare(
@@ -66,11 +76,11 @@ export class SqliteHistoryRepo implements HistoryRepo {
            FROM history_step h
        LEFT JOIN history_step_repo r ON r.step_id = h.step_id
            ${where}
-        GROUP BY h.step_id
-        ORDER BY h.created_at DESC
-        LIMIT ? OFFSET ?`,
+         GROUP BY h.step_id
+         ORDER BY h.created_at DESC
+         ${paginationClause}`,
       )
-      .all(...params, limit, offset)
+      .all(...params, ...paginationParams)
       .map((row: unknown) => {
         const mapped = row as SqliteRow;
         return {

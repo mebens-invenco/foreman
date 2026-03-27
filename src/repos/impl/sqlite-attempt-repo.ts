@@ -10,6 +10,9 @@ import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 const mapAttempt = (row: SqliteRow): AttemptRecord => ({
   id: String(row.id),
   jobId: String(row.job_id),
+  taskId: (row.task_id as string | null) ?? null,
+  target: (row.target as string | null) ?? null,
+  stage: (row.stage as string | null) ?? null,
   workerId: (row.worker_id as string | null) ?? null,
   attemptNumber: Number(row.attempt_number),
   runnerName: row.runner_name as "opencode",
@@ -43,6 +46,9 @@ export class SqliteAttemptRepo implements AttemptRepo {
     return {
       id: newId(),
       jobId: input.jobId,
+      taskId: null,
+      target: null,
+      stage: null,
       workerId: input.workerId,
       attemptNumber: this.nextAttemptNumber(input.jobId),
       runnerName: "opencode",
@@ -171,35 +177,52 @@ export class SqliteAttemptRepo implements AttemptRepo {
     const params: unknown[] = [];
 
     if (filters.status) {
-      conditions.push("status = ?");
+      conditions.push("ea.status = ?");
       params.push(filters.status);
     }
 
     if (filters.jobId) {
-      conditions.push("job_id = ?");
+      conditions.push("ea.job_id = ?");
       params.push(filters.jobId);
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-    const limit = filters.limit ?? 100;
-    const offset = filters.offset ?? 0;
+    const paginationClause =
+      filters.limit === undefined
+        ? filters.offset === undefined
+          ? ""
+          : " LIMIT -1 OFFSET ?"
+        : " LIMIT ? OFFSET ?";
+    const paginationParams =
+      filters.limit === undefined
+        ? filters.offset === undefined
+          ? []
+          : [filters.offset]
+        : [filters.limit, filters.offset ?? 0];
 
     return this.sqlite
       .prepare(
-        `SELECT id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, status, started_at,
-                 finished_at, exit_code, signal, summary, error_message
-           FROM execution_attempt ${where} ORDER BY started_at DESC LIMIT ? OFFSET ?`,
+        `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
+                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.status, ea.started_at,
+                ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
+           FROM execution_attempt ea
+      LEFT JOIN job ON job.id = ea.job_id
+                ${where}
+       ORDER BY ea.started_at DESC${paginationClause}`,
       )
-      .all(...params, limit, offset)
+      .all(...params, ...paginationParams)
       .map((row: unknown) => mapAttempt(row as SqliteRow));
   }
 
   getAttempt(attemptId: string): AttemptRecord {
     const row = this.sqlite
       .prepare(
-        `SELECT id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, status, started_at,
-                finished_at, exit_code, signal, summary, error_message
-           FROM execution_attempt WHERE id = ?`,
+        `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
+                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.status, ea.started_at,
+                ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
+           FROM execution_attempt ea
+      LEFT JOIN job ON job.id = ea.job_id
+          WHERE ea.id = ?`,
       )
       .get(attemptId) as SqliteRow | undefined;
 
@@ -213,9 +236,13 @@ export class SqliteAttemptRepo implements AttemptRepo {
   latestAttemptForJob(jobId: string): AttemptRecord | null {
     const row = this.sqlite
       .prepare(
-        `SELECT id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, status, started_at,
-                 finished_at, exit_code, signal, summary, error_message
-           FROM execution_attempt WHERE job_id = ? ORDER BY started_at DESC, attempt_number DESC LIMIT 1`,
+        `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
+                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.status, ea.started_at,
+                ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
+           FROM execution_attempt ea
+      LEFT JOIN job ON job.id = ea.job_id
+          WHERE ea.job_id = ?
+       ORDER BY ea.started_at DESC, ea.attempt_number DESC LIMIT 1`,
       )
       .get(jobId) as SqliteRow | undefined;
 
@@ -227,6 +254,9 @@ export class SqliteAttemptRepo implements AttemptRepo {
       .prepare(
         `SELECT execution_attempt.id,
                 execution_attempt.job_id,
+                job.task_id,
+                job.repo_key AS target,
+                job.action AS stage,
                 execution_attempt.worker_id,
                 execution_attempt.attempt_number,
                 execution_attempt.runner_name,
@@ -240,7 +270,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
                 execution_attempt.summary,
                 execution_attempt.error_message
            FROM execution_attempt
-          JOIN job ON job.id = execution_attempt.job_id
+           JOIN job ON job.id = execution_attempt.job_id
           WHERE job.task_target_id = ?
           ORDER BY execution_attempt.started_at DESC, execution_attempt.attempt_number DESC
           LIMIT 1`,

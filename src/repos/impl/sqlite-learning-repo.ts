@@ -233,15 +233,27 @@ export class SqliteLearningRepo implements LearningRepo {
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const paginationClause =
+      filters.limit === undefined
+        ? filters.offset === undefined
+          ? ""
+          : " LIMIT -1 OFFSET ?"
+        : " LIMIT ? OFFSET ?";
+    const paginationParams =
+      filters.limit === undefined
+        ? filters.offset === undefined
+          ? []
+          : [filters.offset]
+        : [filters.limit, filters.offset ?? 0];
 
     return this.sqlite
       .prepare(
         `SELECT ${LEARNING_COLUMNS}
            FROM learning ${where}
            ORDER BY updated_at DESC, id ASC
-           LIMIT ? OFFSET ?`,
+           ${paginationClause}`,
       )
-      .all(...params, filters.limit ?? 50, filters.offset ?? 0)
+      .all(...params, ...paginationParams)
       .map(mapLearningRecord);
   }
 }

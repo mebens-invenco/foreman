@@ -8,6 +8,7 @@ export type AttemptStatus =
   | "timed_out"
 export type WorkerStatus = "idle" | "leased" | "running" | "stopping" | "offline"
 export type ActionType = "execution" | "review" | "retry" | "consolidation"
+export type LearningConfidence = "emerging" | "established" | "proven"
 export type TaskState =
   | "ready"
   | "in_progress"
@@ -80,6 +81,26 @@ export type Worker = {
   } | null
 }
 
+export type AttemptRecord = {
+  id: string
+  jobId: string
+  taskId: string | null
+  target: string | null
+  stage: ActionType | null
+  workerId: string | null
+  attemptNumber: number
+  runnerName: "opencode"
+  runnerModel: string
+  runnerVariant: string
+  status: AttemptStatus
+  startedAt: string
+  finishedAt: string | null
+  exitCode: number | null
+  signal: string | null
+  summary: string
+  errorMessage: string | null
+}
+
 export type TaskPullRequest = {
   repoKey: string
   url: string
@@ -129,6 +150,19 @@ export type HistoryRecord = {
   issue: string
   summary: string
   repos: HistoryRepoRecord[]
+}
+
+export type LearningRecord = {
+  id: string
+  title: string
+  repo: string
+  tags: string[]
+  confidence: LearningConfidence
+  content: string
+  appliedCount: number
+  readCount: number
+  createdAt: string
+  updatedAt: string
 }
 
 export type ScoutRun = {
@@ -231,6 +265,17 @@ export function getAttemptLogs(attemptId: string) {
   return requestText(`/api/attempts/${attemptId}/logs`)
 }
 
+export function listAttempts(params: {
+  status?: AttemptStatus
+  jobId?: string
+  limit?: number
+  offset?: number
+}) {
+  return requestJson<{ attempts: AttemptRecord[] }>(
+    `/api/attempts${buildSearch(params)}`
+  ).then((payload) => payload.attempts)
+}
+
 export function listTasks(params: {
   state?: TaskState
   search?: string
@@ -251,6 +296,17 @@ export function listHistory(params: {
   return requestJson<{ history: HistoryRecord[] }>(
     `/api/history${buildSearch(params)}`
   ).then((payload) => payload.history)
+}
+
+export function listLearnings(params: {
+  search?: string
+  repo?: string
+  limit?: number
+  offset?: number
+}) {
+  return requestJson<{ learnings: LearningRecord[] }>(
+    `/api/learnings${buildSearch(params)}`
+  ).then((payload) => payload.learnings)
 }
 
 export function listScoutRuns() {

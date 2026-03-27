@@ -25,31 +25,35 @@ export function AppSidebar() {
   const { data: status, isLoading } = useStatusQuery()
 
   return (
-    <Sidebar variant="inset" collapsible="icon" className="border-r border-sidebar-border/80">
-      <SidebarHeader className="gap-4 px-3 py-4">
-        <div className="flex items-center gap-3 px-2 group-data-[collapsible=icon]:px-0">
-          <div className="flex size-9 items-center justify-center rounded-none border border-sidebar-border bg-sidebar-primary text-sidebar-primary-foreground shadow-sm">
-            <OrbitIcon className="size-4" />
-          </div>
-          <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-            <p className="text-xxs uppercase tracking-[0.3em] text-sidebar-foreground/55">
-              Foreman
-            </p>
-            {isLoading ? (
-              <Skeleton className="mt-2 h-4 w-32 rounded-none bg-sidebar-accent" />
-            ) : (
-              <p className="truncate text-sm text-sidebar-foreground">
-                {status?.workspace.name ?? "Workspace"}
+    <Sidebar
+      variant="inset"
+      collapsible="icon"
+      className="border-r border-sidebar-border/80"
+    >
+      <SidebarHeader>
+        <SidebarGroup className="gap-4">
+          <div className="flex items-center gap-3 group-data-[collapsible=icon]:px-0">
+            <div className="flex size-9 items-center justify-center rounded-none border border-sidebar-border bg-sidebar-primary text-sidebar-primary-foreground shadow-sm">
+              <OrbitIcon className="size-4" />
+            </div>
+            <div className="min-w-0 group-data-[collapsible=icon]:hidden">
+              <p className="text-xxs tracking-[0.3em] text-sidebar-foreground/55 uppercase">
+                Foreman
               </p>
-            )}
+              {isLoading ? (
+                <Skeleton className="mt-2 h-4 w-32 rounded-none bg-sidebar-accent" />
+              ) : (
+                <p className="truncate text-sm text-sidebar-foreground">
+                  {status?.workspace.name ?? "Workspace"}
+                </p>
+              )}
+            </div>
           </div>
-        </div>
-        <SidebarSeparator />
+        </SidebarGroup>
       </SidebarHeader>
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {navigationItems.map((item) => {
@@ -57,7 +61,11 @@ export function AppSidebar() {
 
                 return (
                   <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton asChild isActive={isActive} tooltip={item.title}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={isActive}
+                      tooltip={item.title}
+                    >
                       <Link to={item.href}>
                         <item.icon />
                         <span>{item.title}</span>
@@ -75,7 +83,7 @@ export function AppSidebar() {
         <SidebarSeparator />
         <div className="space-y-2 px-2 text-xs leading-5 text-sidebar-foreground/65 group-data-[collapsible=icon]:hidden">
           <p>
-            {status ? `${status.repos.count} repos mirrored` : "Inspecting workspace..."}
+            {status ? `${status.repos.count} repos` : "Inspecting workspace..."}
           </p>
           {status ? <p className="truncate">{status.workspace.root}</p> : null}
         </div>

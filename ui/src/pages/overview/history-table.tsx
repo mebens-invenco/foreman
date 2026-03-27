@@ -46,7 +46,7 @@ function TableSectionShell({
 }
 
 export function HistoryTable({ now }: { now: number }) {
-  const { data: records = [], isLoading, isError, error } = useHistoryQuery()
+  const { data: records = [], isLoading, isError, error } = useHistoryQuery(12)
 
   return (
     <TableSectionShell title="Recent History">

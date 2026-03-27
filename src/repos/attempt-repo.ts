@@ -4,6 +4,9 @@ import type { LeaseResourceType } from "./lease-repo.js";
 export type AttemptRecord = {
   id: string;
   jobId: string;
+  taskId: string | null;
+  target: string | null;
+  stage: string | null;
   workerId: string | null;
   attemptNumber: number;
   runnerName: "opencode";
