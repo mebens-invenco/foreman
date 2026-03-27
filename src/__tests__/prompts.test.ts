@@ -1,4 +1,3 @@
-import path from "node:path";
 import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test } from "vitest";
@@ -141,8 +140,6 @@ describe("prompt rendering", () => {
     cleanupDirs.push(workspaceRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
     const paths = createWorkspacePaths(projectRoot, workspaceRoot);
-    await fs.mkdir(workspaceRoot, { recursive: true });
-    await fs.writeFile(path.join(workspaceRoot, "AGENTS.md"), "Follow repo instructions carefully.\n", "utf8");
 
     const result = await renderWorkerPrompt({
       action: "execution",
@@ -159,7 +156,6 @@ describe("prompt rendering", () => {
     expect(result).toContain("## Common Worker Rules");
     expect(result).toContain("## GitHub Review Rules");
     expect(result).toContain("## Selected Task");
-    expect(result).toContain("Follow repo instructions carefully.");
     expect(result).toContain("## Required Output");
     expect(result).toContain("If execution completes with code changes, return a PR review mutation");
     expect(result).not.toContain("upsert_artifact");

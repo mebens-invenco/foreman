@@ -32,8 +32,6 @@ Priority order inside this action:
 
 {{context:repo}}
 
-{{context:repo-instructions}}
-
 {{context:review}}
 
 ## Review Rules

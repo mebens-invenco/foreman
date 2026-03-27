@@ -30,8 +30,6 @@ Complete the selected task in the provided worktree.
 
 {{context:repo}}
 
-{{context:repo-instructions}}
-
 {{context:review}}
 
 ## Execution Rules

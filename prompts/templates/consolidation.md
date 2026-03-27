@@ -30,8 +30,6 @@ Do not make repository code changes unless the provided context explicitly requi
 
 {{context:repo}}
 
-{{context:repo-instructions}}
-
 {{context:review}}
 
 ## Consolidation Rules

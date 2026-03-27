@@ -1,6 +1,3 @@
-import { promises as fs } from "node:fs";
-import path from "node:path";
-
 import {
   actionableConversationComments,
   actionableReviewSummaries,
@@ -20,18 +17,6 @@ import {
 } from "../prompts/template-renderer.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
-
-const readRepoInstructionFile = async (worktreePath: string): Promise<string> => {
-  for (const fileName of ["AGENTS.md", "CLAUDE.md"]) {
-    try {
-      return await fs.readFile(path.join(worktreePath, fileName), "utf8");
-    } catch {
-      // continue
-    }
-  }
-
-  return "";
-};
 
 const yesNo = (value: boolean): string => (value ? "yes" : "no");
 
@@ -180,7 +165,6 @@ export const renderWorkerPrompt = async (input: {
   baseBranch: string;
   reviewContext?: ReviewContext;
 }): Promise<string> => {
-  const repoInstructions = await readRepoInstructionFile(input.worktreePath);
   const repoContext = {
     repo: input.repo,
     worktreePath: input.worktreePath,
@@ -194,7 +178,6 @@ export const renderWorkerPrompt = async (input: {
       "selected-task": jsonSection("Selected Task", input.task),
       "task-comments": textSection("Task Comments", input.comments),
       repo: jsonSection("Repository Context", repoContext),
-      "repo-instructions": textSection("Repo Root Instructions", repoInstructions || "(none provided)"),
       review: renderReviewContext(input.action, input.reviewContext),
     },
   });

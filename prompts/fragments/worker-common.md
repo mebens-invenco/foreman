@@ -4,7 +4,7 @@
 - Do not scout, reprioritize, or select other work.
 - Trust the provided task, repo, worktree, and review context.
 - Keep changes scoped to the selected task.
-- Obey the embedded repo-root instruction file if one is provided.
+- Follow repo instructions available from the worktree context.
 - Treat the provided task, comments, artifacts, and metadata as the authoritative task-system context.
 - Do not mutate the task system directly; use task mutations.
 - Do not mutate the review system directly; use review mutations.

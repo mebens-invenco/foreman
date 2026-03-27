@@ -24,8 +24,6 @@ Reattempt the task cleanly from fresh branch state while reusing only the prior 
 
 {{context:repo}}
 
-{{context:repo-instructions}}
-
 {{context:review}}
 
 ## Retry Rules

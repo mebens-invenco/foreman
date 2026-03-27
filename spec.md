@@ -754,13 +754,7 @@ Worker prompts use one shared runtime fragment for all task systems. Task-system
 - templates contain real content of their own
 - fragments are inserted where reuse or provider variability exists
 - prompts are rendered from live provider data and workspace config
-- repo-root `AGENTS.md` or `CLAUDE.md` content is embedded directly in the rendered worker prompt
-
-Repo instruction resolution rules:
-
-- search only in the worktree root directory
-- if both `AGENTS.md` and `CLAUDE.md` exist in the worktree root, prefer `AGENTS.md`
-- if neither file is found in the worktree root, embed no repo-local instruction file
+- worker prompts rely on execution from the resolved worktree so the runner can load repo-local instructions from that context
 
 ### Planning Prompt
 
@@ -789,7 +783,7 @@ Worker prompts are rendered from:
 - repo context
 - worktree path
 - resolved base branch
-- embedded repo-local instructions
+- repo-local instructions discovered from the worktree context by the runner
 - review context when relevant
 - exact output schema instructions
 
