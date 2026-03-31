@@ -69,7 +69,14 @@ export const isActionableReviewSummary = (summary: ReviewSummary): boolean => su
 
 export const isActionableConversationComment = (comment: ConversationComment): boolean => comment.isAfterCurrentHead && !comment.authoredByAgent;
 
-export const isActionableReviewThread = (thread: ReviewThread): boolean => !thread.isResolved;
+export const isActionableReviewThread = (thread: ReviewThread): boolean => {
+  if (thread.isResolved) {
+    return false;
+  }
+
+  const latestComment = thread.comments.at(-1);
+  return latestComment ? !latestComment.authoredByAgent : true;
+};
 
 export const actionableReviewSummaries = (context: ReviewContext): ReviewSummary[] =>
   context.reviewSummaries.filter(isActionableReviewSummary);

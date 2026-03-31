@@ -672,7 +672,7 @@ Review filtering rules:
 
 - actionable review summaries are top-level review summaries whose `commitId` equals the current PR `headSha`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
 - actionable conversation comments are top-level PR conversation comments created after `headIntroducedAt`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
-- unresolved threads are file/line review threads where `isResolved == false`, enriched with their nested thread comments
+- actionable unresolved threads are file/line review threads where `isResolved == false` and the latest nested thread comment is not agent-authored, enriched with their nested thread comments
 - checks fingerprinting only considers failing and pending checks
 
 ## Agent Runner

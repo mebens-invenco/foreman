@@ -520,6 +520,79 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test("does not reselect review work for an unresolved thread whose latest comment was authored by the agent", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0005",
+      title: "Waiting on reviewer",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/5", source: "provider" } satisfies TaskPullRequest],
+    });
+
+    const reviewContext: ReviewContext = {
+      provider: "github",
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/5",
+      pullRequestNumber: 5,
+      state: "open",
+      isDraft: false,
+      headSha: "jkl",
+      headBranch: "task-0005",
+      baseBranch: "main",
+      headIntroducedAt: "2026-03-14T12:00:00Z",
+      mergeState: "clean",
+      reviewSummaries: [],
+      conversationComments: [],
+      reviewThreads: [
+        {
+          id: "thread-1",
+          path: "src/example.ts",
+          line: 20,
+          isResolved: false,
+          comments: [
+            {
+              id: "thread-comment-1",
+              body: "Please revisit this",
+              authorName: "reviewer",
+              authoredByAgent: false,
+              createdAt: "2026-03-14T12:01:00Z",
+            },
+            {
+              id: "thread-comment-2",
+              body: "[agent] I think this is already correct because it preserves the prior behavior.",
+              authorName: "foreman-bot",
+              authoredByAgent: true,
+              createdAt: "2026-03-14T12:02:00Z",
+            },
+          ],
+        },
+      ],
+      failingChecks: [],
+      pendingChecks: [],
+    };
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({ [reviewTask.id]: reviewContext }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
   test("blocks dependent chains until upstream tasks are in review with an open pull request or merged", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);
