@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 
-import type { ActionType, RepoRef, Task, TaskTarget, WorkerResult } from "../domain/index.js";
+import type { ActionType, RepoRef, ReviewContext, Task, TaskTarget, WorkerResult } from "../domain/index.js";
 import type { AgentRunner } from "../execution/index.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
@@ -458,6 +458,7 @@ export class SchedulerService extends EventEmitter {
     target: TaskTarget;
     repo: RepoRef;
     worktreePath: string;
+    reviewContext?: ReviewContext;
     workerResult: WorkerResult;
   }): Promise<string | null> {
     return this.workerResultApplier.apply(input);

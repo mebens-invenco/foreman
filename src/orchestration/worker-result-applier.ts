@@ -1,4 +1,4 @@
-import type { RepoRef, Task, TaskPullRequest, TaskTarget, WorkerResult } from "../domain/index.js";
+import type { RepoRef, ReviewContext, Task, TaskPullRequest, TaskTarget, WorkerResult } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord } from "../repos/index.js";
@@ -39,6 +39,7 @@ type ApplyWorkerResultInput = {
   target: TaskTarget;
   repo: RepoRef;
   worktreePath: string;
+  reviewContext?: ReviewContext;
   workerResult: WorkerResult;
 };
 
@@ -226,12 +227,14 @@ export class WorkerResultApplier {
       workerResult.signals.includes("review_checkpoint_eligible") &&
       pullRequestUrl
     ) {
-      const reviewContext = await this.deps.reviewService.getContext(
-        input.task,
-        this.deps.config.workspace.agentPrefix,
-        input.repo,
-        input.target,
-      );
+      const reviewContext =
+        input.reviewContext ??
+        (await this.deps.reviewService.getContext(
+          input.task,
+          this.deps.config.workspace.agentPrefix,
+          input.repo,
+          input.target,
+        ));
       if (reviewContext) {
         try {
           this.deps.foremanRepos.reviewCheckpoints.upsertReviewCheckpoint({

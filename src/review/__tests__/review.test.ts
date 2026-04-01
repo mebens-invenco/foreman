@@ -782,9 +782,91 @@ describe("GitHubReviewService.getContext", () => {
     ]);
     expect(global.fetch).toHaveBeenCalledTimes(7);
   });
+
+  test("treats legacy review-summary fallback comments as agent-authored", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(pullRequestSummaryResponse)
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                url: "https://github.com/acme/repo/pull/946",
+                number: 946,
+                state: "OPEN",
+                isDraft: false,
+                merged: false,
+                headRefOid: "abc123",
+                headRefName: "eng-4737",
+                baseRefName: "master",
+                mergeStateStatus: "CLEAN",
+                mergeable: "MERGEABLE",
+                commits: { nodes: [{ commit: { committedDate: "2026-03-16T03:00:00Z" } }] },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(emptyReviewSummariesResponse)
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            id: 102,
+            body: "In reply to review review-1:\n\n[agent] Addressed in latest head",
+            created_at: "2026-03-16T03:30:00Z",
+            html_url: "https://github.com/acme/repo/pull/946#issuecomment-102",
+            user: { login: "foreman-bot" },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ check_runs: [] }))
+      .mockResolvedValueOnce(jsonResponse({ statuses: [] })) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const context = await service.getContext(sampleTask(), "[agent]");
+
+    expect(context?.conversationComments).toEqual([
+      {
+        id: "102",
+        body: "In reply to review review-1:\n\n[agent] Addressed in latest head",
+        authorName: "foreman-bot",
+        authoredByAgent: true,
+        createdAt: "2026-03-16T03:30:00Z",
+        isAfterCurrentHead: true,
+        url: "https://github.com/acme/repo/pull/946#issuecomment-102",
+      },
+    ]);
+  });
 });
 
 describe("GitHubReviewService reply mutations", () => {
+  test("posts review-summary replies as prefixed top-level comments", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 1 }, 201)) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await service.replyToReviewSummary("https://github.com/acme/repo/pull/946", "review-1", "[agent] Thanks");
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments");
+    const init = vi.mocked(global.fetch).mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({ body: "[agent] Thanks\n\nIn reply to review review-1." });
+  });
+
   test("replies to review threads via GitHub GraphQL", async () => {
     global.fetch = vi
       .fn()

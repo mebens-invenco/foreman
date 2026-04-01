@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { deriveAttemptStatus, type RepoRef, type Task, type TaskTarget, type WorkerResult } from "../domain/index.js";
+import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskTarget, type WorkerResult } from "../domain/index.js";
 import type { AgentRunner } from "../execution/index.js";
 import { renderWorkerPrompt } from "../execution/render-worker-prompt.js";
 import { parseWorkerResult, validateWorkerResult } from "../execution/index.js";
@@ -34,6 +34,7 @@ type AttemptExecutorDeps = {
       target: TaskTarget;
       repo: RepoRef;
       worktreePath: string;
+      reviewContext?: ReviewContext;
       workerResult: WorkerResult;
   }) => Promise<string | null>;
   onWorkerUpdated: (input: { workerId: string; status: string; attemptId?: string | null }) => void;
@@ -251,6 +252,7 @@ export class AttemptExecutor {
           target,
           repo,
           worktreePath,
+          ...(reviewContext ? { reviewContext } : {}),
           workerResult,
         });
         attemptLogger.info("applied worker result", { currentPrUrl });

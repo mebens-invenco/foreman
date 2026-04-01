@@ -273,7 +273,13 @@ export class GitHubReviewService implements ReviewService {
   }
 
   private isAuthoredByAgent(body: string, agentPrefix: string): boolean {
-    return body.startsWith(agentPrefix);
+    if (body.startsWith(agentPrefix)) {
+      return true;
+    }
+
+    const reviewReplyPrefix = /^In reply to review [^:]+:\n\n/;
+    const nestedAgentBody = body.replace(reviewReplyPrefix, "");
+    return nestedAgentBody.startsWith(agentPrefix);
   }
 
   private isSubmittedReview(review: GitHubPullRequestReviewRef): boolean {
@@ -917,25 +923,12 @@ export class GitHubReviewService implements ReviewService {
   }
 
   async replyToReviewSummary(prUrl: string, reviewId: string, body: string): Promise<void> {
-    const { owner, repo } = parseGitHubUrl(prUrl);
+    const { owner, repo, number } = parseGitHubUrl(prUrl);
     this.logger.info("replying to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl, bodyLength: body.length });
-    await this.rest(`/repos/${owner}/${repo}/pulls/${reviewId}/comments`, {
+    await this.rest(`/repos/${owner}/${repo}/issues/${number}/comments`, {
       method: "POST",
-      body: JSON.stringify({ body }),
+      body: JSON.stringify({ body: `${body}\n\nIn reply to review ${reviewId}.` }),
       headers: { "content-type": "application/json" },
-    }).catch(async () => {
-      const issue = parseGitHubUrl(prUrl);
-      this.logger.warn("falling back to issue comment while replying to GitHub review summary", {
-        owner,
-        repo,
-        reviewId,
-        pullRequestNumber: issue.number,
-      });
-      await this.rest(`/repos/${owner}/${repo}/issues/${issue.number}/comments`, {
-        method: "POST",
-        body: JSON.stringify({ body: `In reply to review ${reviewId}:\n\n${body}` }),
-        headers: { "content-type": "application/json" },
-      });
     });
     this.logger.info("replied to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl });
   }

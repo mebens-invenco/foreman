@@ -299,6 +299,74 @@ describe("SchedulerService applyWorkerResult", () => {
     );
   });
 
+  test("uses the worker review snapshot when saving a checkpoint", async () => {
+    const upsertReviewCheckpoint = vi.fn();
+    const getContext = vi.fn(async () => ({
+      ...reviewContext,
+      headSha: "different-head",
+    }));
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({
+        reviewCheckpoints: { upsertReviewCheckpoint },
+      }),
+        taskSystem: {
+          addComment: vi.fn(async () => undefined),
+          upsertPullRequest: vi.fn(async () => undefined),
+          transition: vi.fn(async () => undefined),
+          updateLabels: vi.fn(async () => undefined),
+        } as any,
+      reviewService: {
+        getContext,
+        resolvePullRequest: vi.fn(resolvePullRequestFromTask),
+      } as any,
+      runner: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-2b" },
+        job: { action: "review", taskTargetId: sampleTarget.id },
+        task: sampleTask({ pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }] }),
+        target: sampleTarget,
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        reviewContext,
+        workerResult: baseWorkerResult({
+          outcome: "no_action_needed",
+          signals: ["review_checkpoint_eligible"],
+        }),
+      }),
+    ).resolves.toBe(reviewContext.pullRequestUrl);
+
+    expect(getContext).not.toHaveBeenCalled();
+    expect(upsertReviewCheckpoint).toHaveBeenCalledWith({
+      taskId: "TASK-0001",
+      taskTargetId: sampleTarget.id,
+      prUrl: reviewContext.pullRequestUrl,
+      reviewContext,
+      sourceAttemptId: "attempt-2b",
+    });
+  });
+
   test("rejects execution results with code changes when no pull request mutation or artifact is present", async () => {
     const scheduler = new SchedulerService({
       config: createDefaultWorkspaceConfig("foo", "file"),
