@@ -6,6 +6,8 @@ import { afterEach, describe, expect, test } from "vitest";
 import { actionableReviewThreadFingerprint, priorityToRank } from "../../domain/index.js";
 import { addSeconds } from "../../lib/time.js";
 import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
+import { createRepos } from "../index.js";
+import { openSqliteDatabase } from "../impl/sqlite-database.js";
 
 const cleanupDirs: string[] = [];
 const projectRoot = testProjectRoot;
@@ -23,12 +25,12 @@ const syncSingleTargetTask = (db: Awaited<ReturnType<typeof createMigratedDb>>, 
       priority: "normal",
       labels: ["Agent"],
       assignee: null,
-       targets: [{ repoKey: input.repoKey, branchName: input.branchName ?? input.taskId.toLowerCase(), position: 0 }],
-       targetDependencies: [],
-       dependencies: { taskIds: [], baseTaskId: null },
-       pullRequests: [],
-       updatedAt: "2026-03-14T12:00:00Z",
-       url: null,
+      targets: [{ repoKey: input.repoKey, branchName: input.branchName ?? input.taskId.toLowerCase(), position: 0 }],
+      targetDependencies: [],
+      dependencies: { taskIds: [], baseTaskId: null },
+      pullRequests: [],
+      updatedAt: "2026-03-14T12:00:00Z",
+      url: null,
     },
   ]);
 
@@ -68,6 +70,7 @@ describe("persistence repos", () => {
       const attempt = db.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId: worker!.id,
+        runnerName: "opencode",
         runnerModel: "openai/gpt-5.4",
         runnerVariant: "high",
         expiresAt: addSeconds(new Date(), 120),
@@ -108,6 +111,80 @@ describe("persistence repos", () => {
     }
   });
 
+  test("migrates existing attempts and persists runner providers", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+
+    const partialProjectRoot = path.join(tempDir, "partial-project");
+    const partialMigrationsDir = path.join(partialProjectRoot, "migrations");
+    await fs.mkdir(partialMigrationsDir, { recursive: true });
+
+    const migrationFiles = (await fs.readdir(path.join(projectRoot, "migrations")))
+      .filter((fileName) => fileName.endsWith(".sql") && fileName < "0011_")
+      .sort();
+    await Promise.all(
+      migrationFiles.map((fileName) =>
+        fs.copyFile(path.join(projectRoot, "migrations", fileName), path.join(partialMigrationsDir, fileName)),
+      ),
+    );
+
+    const database = await openSqliteDatabase(path.join(tempDir, "foreman.db"));
+    const db = createRepos(database) as Awaited<ReturnType<typeof createMigratedDb>>;
+
+    try {
+      await db.migrationRunner.runMigrations(partialProjectRoot);
+
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0];
+      expect(worker).toBeDefined();
+      const taskTarget = syncSingleTargetTask(db, { taskId: "TASK-0001", repoKey: "repo-a", branchName: "task-0001" });
+
+      const job = db.jobs.createJob({
+        taskId: "TASK-0001",
+        taskTargetId: taskTarget.id,
+        taskProvider: "file",
+        action: "execution",
+        priorityRank: priorityToRank("high"),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: "TASK-0001:execution",
+        selectionReason: "test",
+      });
+
+      const legacyAttempt = db.attempts.createAttempt({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerName: "opencode",
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+      });
+
+      await db.migrationRunner.runMigrations(projectRoot);
+
+      expect(db.attempts.getAttempt(legacyAttempt.id)).toMatchObject({
+        id: legacyAttempt.id,
+        runnerName: "opencode",
+      });
+
+      const claudeAttempt = db.attempts.createAttempt({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerName: "claude",
+        runnerModel: "claude-opus-4-6",
+        runnerVariant: "high",
+      });
+
+      expect(db.attempts.getAttempt(claudeAttempt.id)).toMatchObject({
+        id: claudeAttempt.id,
+        runnerName: "claude",
+        runnerModel: "claude-opus-4-6",
+        runnerVariant: "high",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("recovers orphaned running attempts without active leases", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
@@ -133,6 +210,7 @@ describe("persistence repos", () => {
       const attempt = db.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId: worker!.id,
+        runnerName: "opencode",
         runnerModel: "openai/gpt-5.4",
         runnerVariant: "high",
         expiresAt: addSeconds(new Date(), 120),
@@ -227,6 +305,7 @@ describe("persistence repos", () => {
       const attemptOne = db.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId: worker!.id,
+        runnerName: "opencode",
         runnerModel: "openai/gpt-5.4",
         runnerVariant: "high",
         expiresAt: addSeconds(new Date(), 120),
@@ -235,7 +314,8 @@ describe("persistence repos", () => {
       const attemptTwo = db.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId: worker!.id,
-        runnerModel: "openai/gpt-5.4",
+        runnerName: "claude",
+        runnerModel: "claude-opus-4-6",
         runnerVariant: "high",
         expiresAt: addSeconds(new Date(), 240),
         leases: [],

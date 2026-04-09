@@ -241,10 +241,17 @@ reviewSystem:
   type: github
 
 runner:
-  type: opencode
-  model: openai/gpt-5.4
-  variant: high
-  timeoutMs: 3600000
+  execution:
+    type: opencode
+    model: openai/gpt-5.4
+    variant: high
+    timeoutMs: 3600000
+
+  reviewer:
+    type: claude
+    model: claude-opus-4-6
+    effort: high
+    timeoutMs: 3600000
 
 scheduler:
   workerConcurrency: 4
@@ -266,7 +273,7 @@ http:
 - exactly one task system per workspace
 - `taskSystem.type` must match the configured task system block
 - `reviewSystem.type` must be `github` in v1
-- `runner.type` must be `opencode` in v1
+- `runner.execution.type` and `runner.reviewer.type` must each be `opencode` or `claude`
 - `repos.explicit` entries must resolve to git repos
 - `repos.roots` entries must exist
 - `workspace.agentPrefix` must be non-empty
@@ -1230,7 +1237,7 @@ id TEXT PRIMARY KEY,
 job_id TEXT NOT NULL REFERENCES job(id) ON DELETE CASCADE,
 worker_id TEXT REFERENCES worker(id) ON DELETE SET NULL,
 attempt_number INTEGER NOT NULL CHECK (attempt_number >= 1),
-runner_name TEXT NOT NULL CHECK (runner_name IN ('opencode')),
+runner_name TEXT NOT NULL CHECK (runner_name IN ('opencode', 'claude')),
 runner_model TEXT NOT NULL,
 runner_variant TEXT NOT NULL,
 status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'blocked', 'canceled', 'timed_out')),
@@ -1434,7 +1441,10 @@ Returns:
   "integrations": {
     "taskSystem": {"type": "linear", "status": "ok"},
     "reviewSystem": {"type": "github", "status": "ok"},
-    "runner": {"type": "opencode", "status": "ok"}
+    "runners": {
+      "execution": {"type": "opencode", "model": "openai/gpt-5.4", "status": "ok"},
+      "reviewer": {"type": "claude", "model": "claude-opus-4-6", "status": "ok"}
+    }
   },
   "repos": {
     "count": 3,

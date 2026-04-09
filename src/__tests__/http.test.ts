@@ -284,6 +284,60 @@ describe("HTTP query validation", () => {
       db.close();
     }
   });
+
+  test("reports execution and reviewer runners separately in status", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const server = createHttpServer({
+      config,
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [sampleTask]),
+        getTask: vi.fn(async () => sampleTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({ method: "GET", url: "/api/status" });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        integrations: {
+          runners: {
+            execution: {
+              type: "opencode",
+              model: "openai/gpt-5.4",
+              status: "ok",
+            },
+            reviewer: {
+              type: "claude",
+              model: "claude-opus-4-6",
+              status: "ok",
+            },
+          },
+        },
+      });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
 });
 
 describe("HTTP scheduler control", () => {

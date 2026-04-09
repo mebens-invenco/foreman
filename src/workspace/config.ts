@@ -1,6 +1,8 @@
 import YAML from "yaml";
 import { z } from "zod";
 
+import type { ActionType } from "../domain/index.js";
+
 export const schedulerSchema = z.object({
   workerConcurrency: z.number().int().positive().default(4),
   scoutPollIntervalSeconds: z.number().int().positive().default(60),
@@ -42,12 +44,51 @@ export const reviewSystemSchema = z.object({
   type: z.literal("github").default("github"),
 });
 
-export const runnerSchema = z.object({
+export const opencodeRunnerSchema = z.object({
   type: z.literal("opencode").default("opencode"),
   model: z.string().min(1).default("openai/gpt-5.4"),
   variant: z.string().min(1).default("high"),
   timeoutMs: z.number().int().positive().default(3_600_000),
 });
+
+export const claudeRunnerSchema = z.object({
+  type: z.literal("claude"),
+  model: z.string().min(1).default("claude-opus-4-6"),
+  effort: z.string().min(1).default("high"),
+  timeoutMs: z.number().int().positive().default(3_600_000),
+});
+
+export const runnerProviderSchema = z.discriminatedUnion("type", [opencodeRunnerSchema, claudeRunnerSchema]);
+
+const defaultExecutionRunner = {
+  type: "opencode",
+  model: "openai/gpt-5.4",
+  variant: "high",
+  timeoutMs: 3_600_000,
+} as const;
+
+const defaultReviewerRunner = {
+  type: "claude",
+  model: "claude-opus-4-6",
+  effort: "high",
+  timeoutMs: 3_600_000,
+} as const;
+
+export const runnerSchema = z.preprocess(
+  (input) => {
+    if (input && typeof input === "object" && !Array.isArray(input) && "type" in input) {
+      return { execution: input, reviewer: input };
+    }
+
+    return input;
+  },
+  z
+    .object({
+      execution: runnerProviderSchema.default(defaultExecutionRunner),
+      reviewer: runnerProviderSchema.default(defaultReviewerRunner),
+    })
+    .default({ execution: defaultExecutionRunner, reviewer: defaultReviewerRunner }),
+);
 
 export const workspaceConfigSchema = z
   .object({
@@ -67,7 +108,7 @@ export const workspaceConfigSchema = z
       file: fileTaskSchema.optional(),
     }),
     reviewSystem: reviewSystemSchema.default({ type: "github" }),
-    runner: runnerSchema.default({ type: "opencode", model: "openai/gpt-5.4", variant: "high", timeoutMs: 3_600_000 }),
+    runner: runnerSchema,
     scheduler: schedulerSchema.default({
       workerConcurrency: 4,
       scoutPollIntervalSeconds: 60,
@@ -94,6 +135,7 @@ export const workspaceConfigSchema = z
   });
 
 export type WorkspaceConfig = z.infer<typeof workspaceConfigSchema>;
+export type WorkspaceRunnerConfig = z.infer<typeof runnerProviderSchema>;
 
 export const createDefaultWorkspaceConfig = (
   workspaceName: string,
@@ -145,10 +187,8 @@ export const createDefaultWorkspaceConfig = (
     type: "github",
   },
   runner: {
-    type: "opencode",
-    model: "openai/gpt-5.4",
-    variant: "high",
-    timeoutMs: 3_600_000,
+    execution: { ...defaultExecutionRunner },
+    reviewer: { ...defaultReviewerRunner },
   },
   scheduler: {
     workerConcurrency: 4,
@@ -172,3 +212,12 @@ export const parseWorkspaceConfig = (raw: string): WorkspaceConfig => {
 };
 
 export const stringifyWorkspaceConfig = (config: WorkspaceConfig): string => YAML.stringify(config);
+
+export const runnerRoleForAction = (action: ActionType): "execution" | "reviewer" =>
+  action === "review" ? "reviewer" : "execution";
+
+export const runnerForAction = (config: WorkspaceConfig, action: ActionType): WorkspaceRunnerConfig =>
+  config.runner[runnerRoleForAction(action)];
+
+export const runnerTuningValue = (runner: WorkspaceRunnerConfig): string =>
+  runner.type === "opencode" ? runner.variant : runner.effort;

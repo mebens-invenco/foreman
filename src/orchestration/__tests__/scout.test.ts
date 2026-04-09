@@ -486,6 +486,7 @@ describe("runScoutSelection", () => {
     const attempt = db.attempts.createAttemptWithLeases({
       jobId: reviewJob.id,
       workerId: worker!.id,
+      runnerName: "opencode",
       runnerModel: "openai/gpt-5.4",
       runnerVariant: "high",
       expiresAt: "2026-03-14T12:05:00Z",
@@ -1049,6 +1050,7 @@ describe("runScoutSelection", () => {
       const attempt = db.attempts.createAttemptWithLeases({
         jobId: repoAJob.id,
         workerId: worker!.id,
+        runnerName: "opencode",
         runnerModel: "openai/gpt-5.4",
         runnerVariant: "high",
         expiresAt: "2026-03-14T12:20:00Z",

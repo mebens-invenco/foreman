@@ -340,7 +340,18 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     integrations: {
       taskSystem: { type: deps.config.taskSystem.type, status: "ok" },
       reviewSystem: { type: deps.config.reviewSystem.type, status: "ok" },
-      runner: { type: deps.config.runner.type, status: "ok" },
+      runners: {
+        execution: {
+          type: deps.config.runner.execution.type,
+          model: deps.config.runner.execution.model,
+          status: "ok",
+        },
+        reviewer: {
+          type: deps.config.runner.reviewer.type,
+          model: deps.config.runner.reviewer.model,
+          status: "ok",
+        },
+      },
     },
     repos: {
       count: deps.repoRefs.length,

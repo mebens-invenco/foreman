@@ -12,7 +12,7 @@ import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
-import type { WorkspaceConfig } from "../workspace/config.js";
+import { runnerForAction, runnerTuningValue, type WorkspaceConfig } from "../workspace/config.js";
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { assertTaskActionableTarget, leaseResourceKeysForAction } from "./scout-selection.js";
@@ -81,6 +81,7 @@ export class AttemptExecutor {
       const actionableTarget = assertTaskActionableTarget(task, this.deps.repos, persistedTarget);
       const target: TaskTarget = actionableTarget.target;
       repo = actionableTarget.repo;
+      const runnerConfig = runnerForAction(this.deps.config, job.action);
       jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
       jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
@@ -88,11 +89,12 @@ export class AttemptExecutor {
       attempt = this.deps.foremanRepos.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId,
-        runnerModel: this.deps.config.runner.model,
-          runnerVariant: this.deps.config.runner.variant,
-          expiresAt: leaseExpiresAt,
-          leases: leaseResourceKeysForAction(task, job.action, target),
-        });
+        runnerName: runnerConfig.type,
+        runnerModel: runnerConfig.model,
+        runnerVariant: runnerTuningValue(runnerConfig),
+        expiresAt: leaseExpiresAt,
+        leases: leaseResourceKeysForAction(task, job.action, target),
+      });
       if (!attempt) {
         this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id);
         jobLogger.warn("returned leased job to queue because required execution leases could not be acquired");
@@ -184,10 +186,11 @@ export class AttemptExecutor {
 
         const runResult = await this.deps.runner.invoke({
           attemptId: attempt.id,
+          action: job.action,
           cwd: worktreePath,
           env: this.deps.env,
           prompt,
-          timeoutMs: this.deps.config.runner.timeoutMs,
+          timeoutMs: runnerConfig.timeoutMs,
           abortSignal: controller.signal,
           onStdoutLine: (line: string) => {
             attemptLogger.runnerLine(line);

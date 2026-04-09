@@ -2,7 +2,7 @@ import { ForemanError } from "../../lib/errors.js";
 import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
-import type { AttemptStatus } from "../../domain/index.js";
+import type { AttemptStatus, RunnerProvider } from "../../domain/index.js";
 import type { AttemptEventRecord, AttemptRecord, AttemptRepo, RecoveredAttemptRecord } from "../attempt-repo.js";
 import type { LeaseResourceType } from "../lease-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
@@ -15,7 +15,7 @@ const mapAttempt = (row: SqliteRow): AttemptRecord => ({
   stage: (row.stage as string | null) ?? null,
   workerId: (row.worker_id as string | null) ?? null,
   attemptNumber: Number(row.attempt_number),
-  runnerName: row.runner_name as "opencode",
+  runnerName: row.runner_name as RunnerProvider,
   runnerModel: String(row.runner_model),
   runnerVariant: String(row.runner_variant),
   status: row.status as AttemptStatus,
@@ -40,6 +40,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
   private buildAttemptRecord(input: {
     jobId: string;
     workerId: string;
+    runnerName: RunnerProvider;
     runnerModel: string;
     runnerVariant: string;
   }): AttemptRecord {
@@ -51,7 +52,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
       stage: null,
       workerId: input.workerId,
       attemptNumber: this.nextAttemptNumber(input.jobId),
-      runnerName: "opencode",
+      runnerName: input.runnerName,
       runnerModel: input.runnerModel,
       runnerVariant: input.runnerVariant,
       status: "running",
@@ -93,6 +94,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
   createAttempt(input: {
     jobId: string;
     workerId: string;
+    runnerName: RunnerProvider;
     runnerModel: string;
     runnerVariant: string;
   }): AttemptRecord {
@@ -104,6 +106,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
   createAttemptWithLeases(input: {
     jobId: string;
     workerId: string;
+    runnerName: RunnerProvider;
     runnerModel: string;
     runnerVariant: string;
     expiresAt: string;

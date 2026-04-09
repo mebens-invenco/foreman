@@ -38,7 +38,10 @@ export type StatusResponse = {
   integrations: {
     taskSystem: { type: string; status: string }
     reviewSystem: { type: string; status: string }
-    runner: { type: string; status: string }
+    runners: {
+      execution: { type: string; model: string; status: string }
+      reviewer: { type: string; model: string; status: string }
+    }
   }
   repos: {
     count: number
@@ -89,7 +92,7 @@ export type AttemptRecord = {
   stage: ActionType | null
   workerId: string | null
   attemptNumber: number
-  runnerName: "opencode"
+  runnerName: "opencode" | "claude"
   runnerModel: string
   runnerVariant: string
   status: AttemptStatus
