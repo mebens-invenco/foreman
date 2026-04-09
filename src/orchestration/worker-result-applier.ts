@@ -23,6 +23,9 @@ const consolidationLabels = (config: WorkspaceConfig): { remove: string[]; add: 
 const ensureAgentPrefix = (body: string, agentPrefix: string): string =>
   body.startsWith(agentPrefix) ? body : `${agentPrefix}${body}`;
 
+const ensureReviewCommentPrefix = (body: string, prefix: string): string =>
+  body.startsWith(prefix) ? body : `${prefix}${body}`;
+
 type WorkerResultApplierDeps = {
   config: WorkspaceConfig;
   foremanRepos: ForemanRepos;
@@ -187,6 +190,17 @@ export class WorkerResultApplier {
         );
         logger.info("replied to pull request comment", { commentId: mutation.commentId });
       }
+      if (mutation.type === "submit_pull_request_review") {
+        await this.deps.reviewService.submitPullRequestReview(pullRequestUrl, {
+          body: ensureReviewCommentPrefix(mutation.body, this.deps.config.reviewer.agentPrefix),
+          event: mutation.event,
+          comments: mutation.comments.map((comment) => ({
+            ...comment,
+            body: ensureReviewCommentPrefix(comment.body, this.deps.config.reviewer.agentPrefix),
+          })),
+        });
+        logger.info("submitted pull request review", { commentCount: mutation.comments.length, event: mutation.event });
+      }
       if (mutation.type === "resolve_threads") {
         await this.deps.reviewService.resolveThreads(pullRequestUrl, mutation.threadIds);
         logger.info("resolved review threads", { threadCount: mutation.threadIds.length });
@@ -252,6 +266,41 @@ export class WorkerResultApplier {
             error instanceof Error ? error.message : String(error),
           );
           logger.warn("failed to save review checkpoint", { error: error instanceof Error ? error.message : String(error) });
+        }
+      }
+    }
+
+    if (
+      input.job.action === "reviewer" &&
+      workerResult.outcome === "no_action_needed" &&
+      workerResult.signals.includes("reviewer_checkpoint_eligible") &&
+      pullRequestUrl
+    ) {
+      const reviewContext =
+        input.reviewContext ??
+        (await this.deps.reviewService.getContext(
+          input.task,
+          this.deps.config.workspace.agentPrefix,
+          input.repo,
+          input.target,
+        ));
+      if (reviewContext) {
+        try {
+          this.deps.foremanRepos.reviewerCheckpoints.upsertReviewerCheckpoint({
+            taskId: input.task.id,
+            taskTargetId: input.target.id,
+            prUrl: pullRequestUrl,
+            reviewContext,
+            sourceAttemptId: input.attempt.id,
+          });
+          logger.info("saved reviewer checkpoint", { pullRequestUrl });
+        } catch (error) {
+          this.deps.foremanRepos.attempts.addAttemptEvent(
+            input.attempt.id,
+            "reviewer_checkpoint_warning",
+            error instanceof Error ? error.message : String(error),
+          );
+          logger.warn("failed to save reviewer checkpoint", { error: error instanceof Error ? error.message : String(error) });
         }
       }
     }

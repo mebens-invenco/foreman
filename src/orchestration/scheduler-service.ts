@@ -1,7 +1,6 @@
 import { EventEmitter } from "node:events";
 
 import type { ActionType, RepoRef, ReviewContext, Task, TaskTarget, WorkerResult } from "../domain/index.js";
-import type { AgentRunner } from "../execution/index.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../repos/index.js";
@@ -22,7 +21,6 @@ type SchedulerDeps = {
   foremanRepos: ForemanRepos;
   taskSystem: TaskSystem;
   reviewService: ReviewService;
-  runner: AgentRunner;
   repos: RepoRef[];
   env: Record<string, string>;
   logger: LoggerService;
@@ -64,7 +62,6 @@ export class SchedulerService extends EventEmitter {
       foremanRepos: deps.foremanRepos,
       taskSystem: deps.taskSystem,
       reviewService: deps.reviewService,
-      runner: deps.runner,
       repos: deps.repos,
       env: deps.env,
       logger: this.logger,

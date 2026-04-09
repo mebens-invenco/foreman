@@ -8,6 +8,7 @@ import { SqliteLearningRepo } from "./impl/sqlite-learning-repo.js";
 import { SqliteLeaseRepo } from "./impl/sqlite-lease-repo.js";
 import { SqliteMigrationRunner } from "./impl/sqlite-migration-runner.js";
 import { SqliteReviewCheckpointRepo } from "./impl/sqlite-review-checkpoint-repo.js";
+import { SqliteReviewerCheckpointRepo } from "./impl/sqlite-reviewer-checkpoint-repo.js";
 import { SqliteScoutRunRepo } from "./impl/sqlite-scout-run-repo.js";
 import { SqliteTaskMirrorRepo } from "./impl/sqlite-task-mirror-repo.js";
 import { SqliteWorkerRepo } from "./impl/sqlite-worker-repo.js";
@@ -25,6 +26,7 @@ export const createRepos = (database: SqliteForemanDatabase): ForemanRepos => {
     taskMirror: new SqliteTaskMirrorRepo(sqlite),
     artifacts: new SqliteArtifactRepo(sqlite),
     reviewCheckpoints: new SqliteReviewCheckpointRepo(sqlite),
+    reviewerCheckpoints: new SqliteReviewerCheckpointRepo(sqlite),
     learnings: new SqliteLearningRepo(sqlite),
     history: new SqliteHistoryRepo(sqlite),
     close(): void {

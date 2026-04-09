@@ -24,6 +24,19 @@ const reviewMutationSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("reply_to_review_summary"), reviewId: z.string().min(1), body: z.string().min(1) }),
   z.object({ type: z.literal("reply_to_thread_comment"), threadId: z.string().min(1), body: z.string().min(1) }),
   z.object({ type: z.literal("reply_to_pr_comment"), commentId: z.string().min(1), body: z.string().min(1) }),
+  z.object({
+    type: z.literal("submit_pull_request_review"),
+    body: z.string().min(1),
+    event: z.literal("COMMENT"),
+    comments: z.array(
+      z.object({
+        path: z.string().min(1),
+        line: z.number().int().positive(),
+        side: z.enum(["LEFT", "RIGHT"]).optional(),
+        body: z.string().min(1),
+      }),
+    ),
+  }),
   z.object({ type: z.literal("resolve_threads"), threadIds: z.array(z.string().min(1)).min(1) }),
 ]);
 
@@ -52,14 +65,14 @@ const blockerSchema = z.string().min(1);
 
 export const workerResultSchema = z.object({
   schemaVersion: z.literal(1),
-  action: z.enum(["execution", "review", "retry", "consolidation"]),
+  action: z.enum(["execution", "review", "reviewer", "retry", "consolidation"]),
   outcome: z.enum(["completed", "no_action_needed", "blocked", "failed"]),
   summary: z.string().min(1),
   taskMutations: z.array(taskMutationSchema),
   reviewMutations: z.array(reviewMutationSchema),
   learningMutations: z.array(learningMutationSchema),
   blockers: z.array(blockerSchema),
-  signals: z.array(z.enum(["code_changed", "review_checkpoint_eligible"])),
+  signals: z.array(z.enum(["code_changed", "review_checkpoint_eligible", "reviewer_checkpoint_eligible"])),
 });
 
 export const parseWorkerResult = (stdout: string): unknown => {

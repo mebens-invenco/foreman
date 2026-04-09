@@ -369,6 +369,118 @@ describe("persistence repos", () => {
     }
   });
 
+  test("upserts reviewer checkpoints without changing row identity", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      const taskId = "TASK-0004R";
+      const prUrl = "https://github.com/acme/repo/pull/124";
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0];
+      expect(worker).toBeDefined();
+      const taskTarget = syncSingleTargetTask(db, { taskId, repoKey: "repo-a", branchName: "task-0004r" });
+
+      const job = db.jobs.createJob({
+        taskId,
+        taskTargetId: taskTarget.id,
+        taskProvider: "file",
+        action: "reviewer",
+        priorityRank: priorityToRank("high"),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: `${taskId}:reviewer`,
+        selectionReason: "test",
+      });
+
+      const attemptOne = db.attempts.createAttemptWithLeases({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerModel: "gpt-5.3-codex",
+        runnerVariant: "high",
+        expiresAt: addSeconds(new Date(), 120),
+        leases: [],
+      });
+      const attemptTwo = db.attempts.createAttemptWithLeases({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerModel: "gpt-5.3-codex",
+        runnerVariant: "high",
+        expiresAt: addSeconds(new Date(), 240),
+        leases: [],
+      });
+
+      expect(attemptOne).not.toBeNull();
+      expect(attemptTwo).not.toBeNull();
+
+      db.reviewerCheckpoints.upsertReviewerCheckpoint({
+        taskId,
+        taskTargetId: taskTarget.id,
+        prUrl,
+        sourceAttemptId: attemptOne!.id,
+        reviewContext: {
+          provider: "github",
+          pullRequestUrl: prUrl,
+          pullRequestNumber: 124,
+          state: "open",
+          isDraft: true,
+          headSha: "sha-r1",
+          headBranch: "feature/task-0004r",
+          baseBranch: "main",
+          headIntroducedAt: "2026-03-16T00:00:00Z",
+          mergeState: "clean",
+          reviewSummaries: [],
+          conversationComments: [],
+          reviewThreads: [],
+          failingChecks: [],
+          pendingChecks: [],
+        },
+      });
+
+      const firstCheckpoint = db.reviewerCheckpoints.getReviewerCheckpoint(taskTarget.id);
+      expect(firstCheckpoint).not.toBeNull();
+      expect(firstCheckpoint?.headSha).toBe("sha-r1");
+      expect(firstCheckpoint?.sourceAttemptId).toBe(attemptOne!.id);
+
+      db.reviewerCheckpoints.upsertReviewerCheckpoint({
+        taskId,
+        taskTargetId: taskTarget.id,
+        prUrl,
+        sourceAttemptId: attemptTwo!.id,
+        reviewContext: {
+          provider: "github",
+          pullRequestUrl: prUrl,
+          pullRequestNumber: 124,
+          state: "open",
+          isDraft: true,
+          headSha: "sha-r2",
+          headBranch: "feature/task-0004r",
+          baseBranch: "main",
+          headIntroducedAt: "2026-03-16T00:05:00Z",
+          mergeState: "clean",
+          reviewSummaries: [],
+          conversationComments: [],
+          reviewThreads: [],
+          failingChecks: [],
+          pendingChecks: [],
+        },
+      });
+
+      const secondCheckpoint = db.reviewerCheckpoints.getReviewerCheckpoint(taskTarget.id);
+      expect(secondCheckpoint?.id).toBe(firstCheckpoint?.id);
+      expect(secondCheckpoint?.headSha).toBe("sha-r2");
+      expect(secondCheckpoint?.sourceAttemptId).toBe(attemptTwo!.id);
+
+      const rowCount = db.database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM reviewer_checkpoint WHERE task_id = ? AND pr_url = ?")
+        .get(taskId, prUrl) as { count: number };
+      expect(rowCount.count).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
   test("searches learnings across multiple queries and repo scopes with deterministic ordering", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);

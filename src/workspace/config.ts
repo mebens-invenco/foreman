@@ -49,6 +49,11 @@ export const runnerSchema = z.object({
   timeoutMs: z.number().int().positive().default(3_600_000),
 });
 
+export const reviewerSchema = z.object({
+  agentPrefix: z.string().min(1).default("[review agent] "),
+  runner: runnerSchema.default({ type: "opencode", model: "gpt-5.3-codex", variant: "high", timeoutMs: 3_600_000 }),
+});
+
 export const workspaceConfigSchema = z
   .object({
     version: z.literal(1).default(1),
@@ -68,6 +73,10 @@ export const workspaceConfigSchema = z
     }),
     reviewSystem: reviewSystemSchema.default({ type: "github" }),
     runner: runnerSchema.default({ type: "opencode", model: "openai/gpt-5.4", variant: "high", timeoutMs: 3_600_000 }),
+    reviewer: reviewerSchema.default({
+      agentPrefix: "[review agent] ",
+      runner: { type: "opencode", model: "gpt-5.3-codex", variant: "high", timeoutMs: 3_600_000 },
+    }),
     scheduler: schedulerSchema.default({
       workerConcurrency: 4,
       scoutPollIntervalSeconds: 60,
@@ -149,6 +158,15 @@ export const createDefaultWorkspaceConfig = (
     model: "openai/gpt-5.4",
     variant: "high",
     timeoutMs: 3_600_000,
+  },
+  reviewer: {
+    agentPrefix: "[review agent] ",
+    runner: {
+      type: "opencode",
+      model: "gpt-5.3-codex",
+      variant: "high",
+      timeoutMs: 3_600_000,
+    },
   },
   scheduler: {
     workerConcurrency: 4,

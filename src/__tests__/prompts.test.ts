@@ -193,6 +193,18 @@ describe("prompt rendering", () => {
       reviewContext: sampleReviewContext,
     });
 
+    const reviewerPrompt = await renderWorkerPrompt({
+      action: "reviewer",
+      config,
+      paths,
+      task: { ...sampleTask, state: "in_review", providerState: "in_review" },
+      comments: "(none)",
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+    });
+
     expect(reviewPrompt).toContain("### Actionable Now");
     expect(reviewPrompt).toContain("### Remaining Historical Context");
     expect(reviewPrompt).toContain("Review Summary `review-1`");
@@ -206,5 +218,9 @@ describe("prompt rendering", () => {
     expect(consolidationPrompt).toContain("### Review Summaries");
     expect(consolidationPrompt).toContain("### Review Threads");
     expect(consolidationPrompt).not.toContain("### Actionable Now");
+    expect(reviewerPrompt).toContain("# Reviewer Prompt");
+    expect(reviewerPrompt).toContain("submit_pull_request_review");
+    expect(reviewerPrompt).toContain("reviewer_checkpoint_eligible");
+    expect(reviewerPrompt).not.toContain("### Actionable Now");
   });
 });

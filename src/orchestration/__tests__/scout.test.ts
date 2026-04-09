@@ -98,6 +98,10 @@ class FakeReviewService implements ReviewService {
     throw new Error("not used");
   }
 
+  async submitPullRequestReview(_prUrl: string, _input: { body: string; event: "COMMENT"; comments: Array<{ path: string; line: number; side?: "LEFT" | "RIGHT"; body: string }> }): Promise<void> {
+    throw new Error("not used");
+  }
+
   async replyToReviewSummary(_prUrl: string, _reviewId: string, _body: string): Promise<void> {
     throw new Error("not used");
   }
@@ -195,7 +199,7 @@ describe("runScoutSelection", () => {
         conversationComments: [],
         reviewThreads: [],
         failingChecks: [],
-        pendingChecks: [],
+        pendingChecks: [{ name: "ci", state: "pending" }],
       },
     });
 
@@ -312,7 +316,7 @@ describe("runScoutSelection", () => {
         ],
         reviewThreads: [],
         failingChecks: [],
-        pendingChecks: [],
+        pendingChecks: [{ name: "ci", state: "pending" }],
       },
     });
 
@@ -369,7 +373,7 @@ describe("runScoutSelection", () => {
         conversationComments: [],
         reviewThreads: [],
         failingChecks: [],
-        pendingChecks: [],
+        pendingChecks: [{ name: "ci", state: "pending" }],
       },
     });
 
@@ -520,7 +524,7 @@ describe("runScoutSelection", () => {
     }
   });
 
-  test("does not reselect review work for an unresolved thread whose latest comment was authored by the agent", async () => {
+  test("schedules reviewer work when unresolved review threads are waiting on reviewer confirmation", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
@@ -587,7 +591,203 @@ describe("runScoutSelection", () => {
         triggerType: "manual",
       });
 
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("reviewer");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("selects reviewer work for in-review pull requests with no pending checks or actionable review work", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0005R",
+      title: "Reviewer eligible task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/50", source: "provider" } satisfies TaskPullRequest],
+    });
+
+    const reviewContext: ReviewContext = {
+      provider: "github",
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/50",
+      pullRequestNumber: 50,
+      state: "open",
+      isDraft: true,
+      headSha: "rev-50",
+      headBranch: "task-0005r",
+      baseBranch: "main",
+      headIntroducedAt: "2026-03-14T12:00:00Z",
+      mergeState: "clean",
+      reviewSummaries: [],
+      conversationComments: [],
+      reviewThreads: [],
+      failingChecks: [],
+      pendingChecks: [],
+    };
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({ [reviewTask.id]: reviewContext }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("reviewer");
+      expect(result.jobs[0]?.task.id).toBe("TASK-0005R");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not select reviewer work while pending checks exist", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0005P",
+      title: "Reviewer waiting on checks",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/51", source: "provider" } satisfies TaskPullRequest],
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({
+          [reviewTask.id]: {
+            provider: "github",
+            pullRequestUrl: "https://github.com/acme/repo-a/pull/51",
+            pullRequestNumber: 51,
+            state: "open",
+            isDraft: true,
+            headSha: "rev-51",
+            headBranch: "task-0005p",
+            baseBranch: "main",
+            headIntroducedAt: "2026-03-14T12:00:00Z",
+            mergeState: "clean",
+            reviewSummaries: [],
+            conversationComments: [],
+            reviewThreads: [],
+            failingChecks: [],
+            pendingChecks: [{ name: "ci", state: "pending" }],
+          },
+        }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
       expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("prunes stale reviewer checkpoints and reselects reviewer work when PR state changes", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0005C",
+      title: "Reviewer checkpoint task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/52", source: "provider" } satisfies TaskPullRequest],
+    });
+
+    const priorContext: ReviewContext = {
+      provider: "github",
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/52",
+      pullRequestNumber: 52,
+      state: "open",
+      isDraft: true,
+      headSha: "rev-52a",
+      headBranch: "task-0005c",
+      baseBranch: "main",
+      headIntroducedAt: "2026-03-14T12:00:00Z",
+      mergeState: "clean",
+      reviewSummaries: [],
+      conversationComments: [],
+      reviewThreads: [],
+      failingChecks: [],
+      pendingChecks: [],
+    };
+    const currentContext: ReviewContext = {
+      ...priorContext,
+      headSha: "rev-52b",
+    };
+
+    db.workers.ensureWorkerSlots(1);
+    const worker = db.workers.listWorkers()[0];
+    expect(worker).toBeDefined();
+    db.taskMirror.saveTasks([reviewTask]);
+    const reviewTarget = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
+    expect(reviewTarget).not.toBeNull();
+
+    const reviewerJob = db.jobs.createJob({
+      taskId: reviewTask.id,
+      taskTargetId: reviewTarget!.id,
+      taskProvider: reviewTask.provider,
+      action: "reviewer",
+      priorityRank: priorityToRank(reviewTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${reviewTask.id}:reviewer`,
+      selectionReason: "test",
+    });
+    db.jobs.updateJobStatus(reviewerJob.id, "completed", { finishedAt: "2026-03-14T12:04:00Z" });
+    const attempt = db.attempts.createAttemptWithLeases({
+      jobId: reviewerJob.id,
+      workerId: worker!.id,
+      runnerModel: "gpt-5.3-codex",
+      runnerVariant: "high",
+      expiresAt: "2026-03-14T12:05:00Z",
+      leases: [],
+    });
+
+    expect(attempt).not.toBeNull();
+    db.reviewerCheckpoints.upsertReviewerCheckpoint({
+      taskId: reviewTask.id,
+      taskTargetId: reviewTarget!.id,
+      prUrl: priorContext.pullRequestUrl,
+      reviewContext: priorContext,
+      sourceAttemptId: attempt!.id,
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({ [reviewTask.id]: currentContext }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("reviewer");
+      expect(db.reviewerCheckpoints.getReviewerCheckpoint(reviewTarget!.id)).toBeNull();
     } finally {
       db.close();
     }
@@ -717,7 +917,7 @@ describe("runScoutSelection", () => {
         conversationComments: [],
         reviewThreads: [],
         failingChecks: [],
-        pendingChecks: [],
+        pendingChecks: [{ name: "ci", state: "pending" }],
       },
     });
 
@@ -783,7 +983,7 @@ describe("runScoutSelection", () => {
         conversationComments: [],
         reviewThreads: [],
         failingChecks: [],
-        pendingChecks: [],
+        pendingChecks: [{ name: "ci", state: "pending" }],
       },
     });
 
@@ -861,7 +1061,7 @@ describe("runScoutSelection", () => {
         conversationComments: [],
         reviewThreads: [],
         failingChecks: [],
-        pendingChecks: [],
+        pendingChecks: [{ name: "ci", state: "pending" }],
       },
       [nonBaseTask.id]: {
         provider: "github",
@@ -878,7 +1078,7 @@ describe("runScoutSelection", () => {
         conversationComments: [],
         reviewThreads: [],
         failingChecks: [],
-        pendingChecks: [],
+        pendingChecks: [{ name: "ci", state: "pending" }],
       },
     });
 

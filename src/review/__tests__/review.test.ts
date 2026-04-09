@@ -855,6 +855,39 @@ describe("GitHubReviewService.getContext", () => {
 });
 
 describe("GitHubReviewService reply mutations", () => {
+  test("submits comment reviews with inline comments via GitHub REST", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 1 }, 200)) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await service.submitPullRequestReview("https://github.com/acme/repo/pull/946", {
+      body: "[review agent] Please tighten this validation.",
+      event: "COMMENT",
+      comments: [
+        {
+          path: "src/example.ts",
+          line: 42,
+          body: "[review agent] This branch is missing a null check.",
+        },
+      ],
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews");
+    const init = vi.mocked(global.fetch).mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(String(init.body))).toEqual({
+      body: "[review agent] Please tighten this validation.",
+      event: "COMMENT",
+      comments: [
+        {
+          path: "src/example.ts",
+          line: 42,
+          side: "RIGHT",
+          body: "[review agent] This branch is missing a null check.",
+        },
+      ],
+    });
+  });
+
   test("posts review-summary replies as prefixed top-level comments", async () => {
     global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 1 }, 201)) as typeof fetch;
 

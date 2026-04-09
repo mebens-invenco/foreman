@@ -16,7 +16,7 @@ The JSON must match this shape:
 ```json
 {
   "schemaVersion": 1,
-  "action": "execution | review | retry | consolidation",
+  "action": "execution | review | reviewer | retry | consolidation",
   "outcome": "completed | no_action_needed | blocked | failed",
   "summary": "one concise human-readable summary",
   "taskMutations": [],
@@ -38,6 +38,7 @@ Allowed review mutation types:
 - `reply_to_review_summary`
 - `reply_to_thread_comment`
 - `reply_to_pr_comment`
+- `submit_pull_request_review`
 - `resolve_threads`
 
 Review mutation field requirements:
@@ -47,6 +48,7 @@ Review mutation field requirements:
 - `reply_to_review_summary` requires `reviewId` and `body`
 - `reply_to_thread_comment` requires `threadId` and `body`
 - `reply_to_pr_comment` requires `commentId` and `body`
+- `submit_pull_request_review` requires `body`, `event`, and a `comments` array; each comment requires `path`, `line`, and `body`; `side` is optional and defaults to the changed side when omitted
 - `resolve_threads` requires a non-empty `threadIds` array
 
 Example `create_pull_request` mutation:
@@ -81,10 +83,12 @@ Allowed signals:
 
 - `code_changed`
 - `review_checkpoint_eligible`
+- `reviewer_checkpoint_eligible`
 
 Rules:
 
 - use `review_checkpoint_eligible` only for `review` actions returning `no_action_needed`
+- use `reviewer_checkpoint_eligible` only for `reviewer` actions returning `no_action_needed`
 - include blockers only when `outcome` is `blocked`
 - keep mutation arrays ordered exactly as you want Foreman to apply them
 - before returning, verify that every mutation includes all fields required by its type; a missing required field causes the entire attempt to fail schema validation

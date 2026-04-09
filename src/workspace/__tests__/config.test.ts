@@ -9,6 +9,8 @@ describe("workspace config", () => {
 
     expect(parsed.workspace.name).toBe("foo");
     expect(parsed.taskSystem.type).toBe("file");
+    expect(parsed.reviewer.agentPrefix).toBe("[review agent] ");
+    expect(parsed.reviewer.runner.model).toBe("gpt-5.3-codex");
     expect(parsed.scheduler.workerConcurrency).toBe(4);
     expect(parsed.http.port).toBe(8765);
   });

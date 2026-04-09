@@ -66,6 +66,28 @@ const reviewPriorityReason = (context: ReviewContext): string | null => {
   return null;
 };
 
+const checkpointMatchesReviewState = (
+  checkpoint:
+    | {
+        headSha: string;
+        latestReviewSummaryId: string | null;
+        latestConversationCommentId: string | null;
+        reviewThreadsFingerprint: string;
+        checksFingerprint: string;
+        mergeState: ReviewContext["mergeState"];
+      }
+    | null,
+  context: ReviewContext,
+): boolean =>
+  checkpoint
+    ? checkpoint.headSha === context.headSha &&
+      checkpoint.latestReviewSummaryId === latestActionableReviewSummaryId(context) &&
+      checkpoint.latestConversationCommentId === latestActionableConversationCommentId(context) &&
+      checkpoint.reviewThreadsFingerprint === actionableReviewThreadFingerprint(context) &&
+      checkpoint.checksFingerprint === stableStringify({ failing: context.failingChecks, pending: context.pendingChecks }) &&
+      checkpoint.mergeState === context.mergeState
+    : false;
+
 const isTerminal = (task: Task): boolean => task.state === "done" || task.state === "canceled";
 
 const isNoiseComment = (body: string, agentPrefix: string): boolean => !body.trim() || body.startsWith(agentPrefix);
@@ -419,6 +441,12 @@ export const runScoutSelection = async (input: {
   const availableCapacity = Math.max(0, input.config.scheduler.workerConcurrency - input.foremanRepos.jobs.activeJobCount());
   const jobs: Selection[] = [];
   const blockedReasons = new Set<string>();
+  const activeJobsByTarget = new Map<string, JobRecord[]>();
+  for (const job of input.foremanRepos.jobs.listJobsByStatus(["queued", "leased", "running"])) {
+    const existing = activeJobsByTarget.get(job.taskTargetId) ?? [];
+    existing.push(job);
+    activeJobsByTarget.set(job.taskTargetId, existing);
+  }
   logger?.info("loaded scout candidates", {
     scoutRunId,
     candidateCount: allTasks.length,
@@ -495,14 +523,7 @@ export const runScoutSelection = async (input: {
         }
 
         const checkpoint = input.foremanRepos.reviewCheckpoints.getReviewCheckpoint(target.id);
-        const checkpointMatches = checkpoint
-          ? checkpoint.headSha === context.headSha &&
-            checkpoint.latestReviewSummaryId === latestActionableReviewSummaryId(context) &&
-            checkpoint.latestConversationCommentId === latestActionableConversationCommentId(context) &&
-            checkpoint.reviewThreadsFingerprint === actionableReviewThreadFingerprint(context) &&
-            checkpoint.checksFingerprint === stableStringify({ failing: context.failingChecks, pending: context.pendingChecks }) &&
-            checkpoint.mergeState === context.mergeState
-          : false;
+        const checkpointMatches = checkpointMatchesReviewState(checkpoint, context);
 
         if (checkpoint && !checkpointMatches) {
           input.foremanRepos.reviewCheckpoints.deleteReviewCheckpoint(target.id);
@@ -593,6 +614,58 @@ export const runScoutSelection = async (input: {
             priorityRank: priorityToRank(task.priority),
             selectionReason: "closed unmerged pull request eligible for retry",
             selectionContext: {},
+          };
+          break;
+        }
+
+        if (chosen) {
+          break;
+        }
+      }
+    }
+
+    if (!chosen) {
+      for (const task of activeCandidates.filter((candidate) => candidate.state === "in_review")) {
+        for (const target of resolvePersistedTaskTargets(task, input.foremanRepos)) {
+          if (!canSchedule(task, target, "reviewer")) {
+            continue;
+          }
+
+          if ((activeJobsByTarget.get(target.id) ?? []).some((job) => job.action !== "reviewer")) {
+            continue;
+          }
+
+          const repo = reposByKey.get(target.repoKey);
+          if (!repo) {
+            await recordBlocker(task.id, `Reviewer blocked because repo ${target.repoKey} was not discovered.`);
+            continue;
+          }
+
+          const reviewContext = await getReviewContext(task, target, repo);
+          if (!reviewContext || reviewContext.state !== "open" || reviewContext.pendingChecks.length > 0) {
+            continue;
+          }
+
+          const checkpoint = input.foremanRepos.reviewerCheckpoints.getReviewerCheckpoint(target.id);
+          const checkpointMatches = checkpointMatchesReviewState(checkpoint, reviewContext);
+
+          if (checkpoint && !checkpointMatches) {
+            input.foremanRepos.reviewerCheckpoints.deleteReviewerCheckpoint(target.id);
+          }
+
+          if (checkpointMatches) {
+            continue;
+          }
+
+          chosen = {
+            task,
+            target,
+            action: "reviewer",
+            repo,
+            baseBranch: reviewContext.baseBranch,
+            priorityRank: priorityToRank(task.priority),
+            selectionReason: reviewContext.isDraft ? "draft pull request eligible for reviewer pass" : "open pull request eligible for reviewer pass",
+            selectionContext: { reviewContext },
           };
           break;
         }

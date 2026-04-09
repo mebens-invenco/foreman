@@ -2,9 +2,8 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskTarget, type WorkerResult } from "../domain/index.js";
-import type { AgentRunner } from "../execution/index.js";
+import { createAgentRunner, parseWorkerResult, resolveRunnerConfigForAction, validateWorkerResult } from "../execution/index.js";
 import { renderWorkerPrompt } from "../execution/render-worker-prompt.js";
-import { parseWorkerResult, validateWorkerResult } from "../execution/index.js";
 import { ForemanError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
 import { addSeconds, isoNow } from "../lib/time.js";
@@ -23,7 +22,6 @@ type AttemptExecutorDeps = {
   foremanRepos: ForemanRepos;
   taskSystem: TaskSystem;
   reviewService: ReviewService;
-  runner: AgentRunner;
   repos: RepoRef[];
   env: Record<string, string>;
   logger: LoggerService;
@@ -84,15 +82,17 @@ export class AttemptExecutor {
       jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
       jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
+      const runnerConfig = resolveRunnerConfigForAction(this.deps.config, job.action);
+      const runner = createAgentRunner({ config: this.deps.config, action: job.action });
 
       attempt = this.deps.foremanRepos.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId,
-        runnerModel: this.deps.config.runner.model,
-          runnerVariant: this.deps.config.runner.variant,
-          expiresAt: leaseExpiresAt,
-          leases: leaseResourceKeysForAction(task, job.action, target),
-        });
+        runnerModel: runnerConfig.model,
+        runnerVariant: runnerConfig.variant,
+        expiresAt: leaseExpiresAt,
+        leases: leaseResourceKeysForAction(task, job.action, target),
+      });
       if (!attempt) {
         this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id);
         jobLogger.warn("returned leased job to queue because required execution leases could not be acquired");
@@ -151,7 +151,7 @@ export class AttemptExecutor {
 
         const comments = await this.deps.taskSystem.listComments(task.id);
         const reviewContext =
-          job.action === "review" || job.action === "retry" || job.action === "consolidation"
+          job.action === "review" || job.action === "reviewer" || job.action === "retry" || job.action === "consolidation"
             ? (await this.deps.reviewService.getContext(task, this.deps.config.workspace.agentPrefix, repo, target)) ?? undefined
             : undefined;
         const prompt = await renderWorkerPrompt({
@@ -182,12 +182,12 @@ export class AttemptExecutor {
         });
         attemptLogger.info("wrote rendered prompt artifact", { promptPath: promptAbsolutePath, sizeBytes: promptStat.size });
 
-        const runResult = await this.deps.runner.invoke({
+        const runResult = await runner.invoke({
           attemptId: attempt.id,
           cwd: worktreePath,
           env: this.deps.env,
           prompt,
-          timeoutMs: this.deps.config.runner.timeoutMs,
+          timeoutMs: runnerConfig.timeoutMs,
           abortSignal: controller.signal,
           onStdoutLine: (line: string) => {
             attemptLogger.runnerLine(line);
