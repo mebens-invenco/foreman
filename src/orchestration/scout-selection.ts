@@ -88,6 +88,11 @@ const checkpointMatchesReviewState = (
       checkpoint.mergeState === context.mergeState
     : false;
 
+const reviewerCheckpointMatchesCommit = (
+  checkpoint: { headSha: string } | null,
+  context: ReviewContext,
+): boolean => (checkpoint ? checkpoint.headSha === context.headSha : false);
+
 const isTerminal = (task: Task): boolean => task.state === "done" || task.state === "canceled";
 
 const isNoiseComment = (body: string, agentPrefix: string): boolean => !body.trim() || body.startsWith(agentPrefix);
@@ -642,12 +647,12 @@ export const runScoutSelection = async (input: {
           }
 
           const reviewContext = await getReviewContext(task, target, repo);
-          if (!reviewContext || reviewContext.state !== "open" || reviewContext.pendingChecks.length > 0) {
+          if (!reviewContext || reviewContext.state !== "open" || reviewContext.failingChecks.length > 0) {
             continue;
           }
 
           const checkpoint = input.foremanRepos.reviewerCheckpoints.getReviewerCheckpoint(target.id);
-          const checkpointMatches = checkpointMatchesReviewState(checkpoint, reviewContext);
+          const checkpointMatches = reviewerCheckpointMatchesCommit(checkpoint, reviewContext);
 
           if (checkpoint && !checkpointMatches) {
             input.foremanRepos.reviewerCheckpoints.deleteReviewerCheckpoint(target.id);
