@@ -124,8 +124,16 @@ const defaultReviewerRunner = {
 
 export const runnerSchema = z.preprocess(
   (input) => {
-    if (!isObjectRecord(input) || "execution" in input) {
+    if (!isObjectRecord(input)) {
       return input;
+    }
+
+    if ("execution" in input) {
+      return {
+        ...input,
+        execution: normalizeLegacyRunnerProvider(input.execution),
+        reviewer: normalizeLegacyRunnerProvider(input.reviewer),
+      };
     }
 
     const { reviewer, ...legacyExecutionRunner } = input;
