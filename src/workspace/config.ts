@@ -60,6 +60,46 @@ export const claudeRunnerSchema = z.object({
 
 export const runnerProviderSchema = z.discriminatedUnion("type", [opencodeRunnerSchema, claudeRunnerSchema]);
 
+const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const stripLegacyReviewerRunner = (value: unknown): unknown => {
+  if (!isObjectRecord(value) || !("runner" in value)) {
+    return value;
+  }
+
+  const { runner: _runner, ...reviewerConfig } = value;
+  return reviewerConfig;
+};
+
+const normalizeLegacyWorkspaceRunnerConfig = (input: unknown): unknown => {
+  if (!isObjectRecord(input)) {
+    return input;
+  }
+
+  const legacyReviewerRunner = isObjectRecord(input.reviewer) ? input.reviewer.runner : undefined;
+  if (legacyReviewerRunner === undefined) {
+    return input;
+  }
+
+  const runnerInput = input.runner;
+  let runner = runnerInput;
+
+  if (isObjectRecord(runnerInput) && "type" in runnerInput) {
+    runner = { execution: runnerInput, reviewer: legacyReviewerRunner };
+  } else if (isObjectRecord(runnerInput) && !("reviewer" in runnerInput)) {
+    runner = { ...runnerInput, reviewer: legacyReviewerRunner };
+  } else if (!isObjectRecord(runnerInput)) {
+    runner = { reviewer: legacyReviewerRunner };
+  }
+
+  return {
+    ...input,
+    runner,
+    reviewer: stripLegacyReviewerRunner(input.reviewer),
+  };
+};
+
 const defaultExecutionRunner = {
   type: "opencode",
   model: "openai/gpt-5.4",
@@ -93,50 +133,53 @@ export const runnerSchema = z.preprocess(
 export const reviewerSchema = z.object({
   agentPrefix: z.string().min(1).default("[review agent] "),
 });
-export const workspaceConfigSchema = z
-  .object({
-    version: z.literal(1).default(1),
-    workspace: z.object({
-      name: z.string().min(1),
-      agentPrefix: z.string().min(1).default("[agent] "),
-    }),
-    repos: z.object({
-      explicit: z.array(z.string()).default([]),
-      roots: z.array(z.string()).default([]),
-      ignore: z.array(z.string()).default(["**/node_modules/**", "**/.git/**"]),
-    }),
-    taskSystem: z.object({
-      type: z.enum(["linear", "file"]),
-      linear: linearSchema.optional(),
-      file: fileTaskSchema.optional(),
-    }),
-    reviewSystem: reviewSystemSchema.default({ type: "github" }),
-    runner: runnerSchema,
-    reviewer: reviewerSchema.default({ agentPrefix: "[review agent] " }),
-    scheduler: schedulerSchema.default({
-      workerConcurrency: 4,
-      scoutPollIntervalSeconds: 60,
-      scoutRerunDebounceMs: 1000,
-      leaseTtlSeconds: 120,
-      workerHeartbeatSeconds: 15,
-      staleLeaseReapIntervalSeconds: 15,
-      schedulerLoopIntervalMs: 1000,
-      shutdownGracePeriodSeconds: 10,
-    }),
-    http: z.object({
-      host: z.string().min(1).default("127.0.0.1"),
-      port: z.number().int().positive().default(8765),
-    }),
-  })
-  .superRefine((value, ctx) => {
-    if (value.taskSystem.type === "linear" && !value.taskSystem.linear) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "taskSystem.linear must be configured when type=linear", path: ["taskSystem", "linear"] });
-    }
+export const workspaceConfigSchema = z.preprocess(
+  normalizeLegacyWorkspaceRunnerConfig,
+  z
+    .object({
+      version: z.literal(1).default(1),
+      workspace: z.object({
+        name: z.string().min(1),
+        agentPrefix: z.string().min(1).default("[agent] "),
+      }),
+      repos: z.object({
+        explicit: z.array(z.string()).default([]),
+        roots: z.array(z.string()).default([]),
+        ignore: z.array(z.string()).default(["**/node_modules/**", "**/.git/**"]),
+      }),
+      taskSystem: z.object({
+        type: z.enum(["linear", "file"]),
+        linear: linearSchema.optional(),
+        file: fileTaskSchema.optional(),
+      }),
+      reviewSystem: reviewSystemSchema.default({ type: "github" }),
+      runner: runnerSchema,
+      reviewer: reviewerSchema.default({ agentPrefix: "[review agent] " }),
+      scheduler: schedulerSchema.default({
+        workerConcurrency: 4,
+        scoutPollIntervalSeconds: 60,
+        scoutRerunDebounceMs: 1000,
+        leaseTtlSeconds: 120,
+        workerHeartbeatSeconds: 15,
+        staleLeaseReapIntervalSeconds: 15,
+        schedulerLoopIntervalMs: 1000,
+        shutdownGracePeriodSeconds: 10,
+      }),
+      http: z.object({
+        host: z.string().min(1).default("127.0.0.1"),
+        port: z.number().int().positive().default(8765),
+      }),
+    })
+    .superRefine((value, ctx) => {
+      if (value.taskSystem.type === "linear" && !value.taskSystem.linear) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "taskSystem.linear must be configured when type=linear", path: ["taskSystem", "linear"] });
+      }
 
-    if (value.taskSystem.type === "file" && !value.taskSystem.file) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "taskSystem.file must be configured when type=file", path: ["taskSystem", "file"] });
-    }
-  });
+      if (value.taskSystem.type === "file" && !value.taskSystem.file) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: "taskSystem.file must be configured when type=file", path: ["taskSystem", "file"] });
+      }
+    }),
+);
 
 export type WorkspaceConfig = z.infer<typeof workspaceConfigSchema>;
 export type WorkspaceRunnerConfig = z.infer<typeof runnerProviderSchema>;
