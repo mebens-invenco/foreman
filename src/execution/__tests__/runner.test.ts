@@ -60,12 +60,16 @@ describe("provider runners", () => {
     const scriptPath = path.join(tempDir, scriptName);
     await writeExecutableScript(
       scriptPath,
-      "#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nprocess.stdin.resume();\nprocess.stdin.on('end', () => { setInterval(() => {}, 1000); });\n",
+      "#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nprocess.stdout.write('ready\\n');\nprocess.stdin.resume();\nprocess.stdin.on('end', () => { setInterval(() => {}, 1000); });\n",
     );
     setBin(scriptPath);
 
     const abortController = new AbortController();
     const runner = createRunner();
+    let resolveReady: (() => void) | undefined;
+    const readyPromise = new Promise<void>((resolve) => {
+      resolveReady = resolve;
+    });
     const runPromise = runner.invoke({
       attemptId: "attempt-1",
       action: "execution",
@@ -74,11 +78,16 @@ describe("provider runners", () => {
       prompt: "test prompt",
       timeoutMs: 60_000,
       abortSignal: abortController.signal,
+      onStdoutLine(line) {
+        if (line === "ready") {
+          resolveReady?.();
+          resolveReady = undefined;
+        }
+      },
     });
 
-    setTimeout(() => {
-      abortController.abort();
-    }, 20);
+    await readyPromise;
+    abortController.abort();
 
     const result = await runPromise;
     expect(result.signal).toBe("SIGKILL");
