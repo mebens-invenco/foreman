@@ -145,6 +145,114 @@ http:
     expect(parsed.reviewer.agentPrefix).toBe("[review agent] ");
   });
 
+  test("accepts legacy flat opencode runner config without explicit type", () => {
+    const parsed = parseWorkspaceConfig(`
+version: 1
+workspace:
+  name: foo
+repos:
+  explicit: []
+  roots: []
+  ignore: []
+taskSystem:
+  type: file
+  file:
+    tasksDir: tasks
+    idPrefix: TASK
+    states:
+      ready: [ready]
+      inProgress: [in_progress]
+      inReview: [in_review]
+      done: [done]
+      canceled: [canceled]
+reviewSystem:
+  type: github
+runner:
+  model: openai/gpt-5.4
+  variant: low
+  timeoutMs: 120000
+scheduler:
+  workerConcurrency: 4
+  scoutPollIntervalSeconds: 60
+  scoutRerunDebounceMs: 1000
+  leaseTtlSeconds: 120
+  workerHeartbeatSeconds: 15
+  staleLeaseReapIntervalSeconds: 15
+  schedulerLoopIntervalMs: 1000
+  shutdownGracePeriodSeconds: 10
+http:
+  host: 127.0.0.1
+  port: 8765
+`);
+
+    expect(parsed.runner.execution).toEqual({
+      type: "opencode",
+      model: "openai/gpt-5.4",
+      variant: "low",
+      timeoutMs: 120_000,
+    });
+    expect(parsed.runner.reviewer).toEqual(parsed.runner.execution);
+  });
+
+  test("accepts legacy reviewer runner override when flat runner omits type", () => {
+    const parsed = parseWorkspaceConfig(`
+version: 1
+workspace:
+  name: foo
+repos:
+  explicit: []
+  roots: []
+  ignore: []
+taskSystem:
+  type: file
+  file:
+    tasksDir: tasks
+    idPrefix: TASK
+    states:
+      ready: [ready]
+      inProgress: [in_progress]
+      inReview: [in_review]
+      done: [done]
+      canceled: [canceled]
+reviewSystem:
+  type: github
+runner:
+  model: openai/gpt-5.4
+  variant: low
+  timeoutMs: 120000
+reviewer:
+  runner:
+    model: openai/gpt-5.4
+    variant: medium
+    timeoutMs: 240000
+scheduler:
+  workerConcurrency: 4
+  scoutPollIntervalSeconds: 60
+  scoutRerunDebounceMs: 1000
+  leaseTtlSeconds: 120
+  workerHeartbeatSeconds: 15
+  staleLeaseReapIntervalSeconds: 15
+  schedulerLoopIntervalMs: 1000
+  shutdownGracePeriodSeconds: 10
+http:
+  host: 127.0.0.1
+  port: 8765
+`);
+
+    expect(parsed.runner.execution).toEqual({
+      type: "opencode",
+      model: "openai/gpt-5.4",
+      variant: "low",
+      timeoutMs: 120_000,
+    });
+    expect(parsed.runner.reviewer).toEqual({
+      type: "opencode",
+      model: "openai/gpt-5.4",
+      variant: "medium",
+      timeoutMs: 240_000,
+    });
+  });
+
   test("rejects mismatched task system blocks", () => {
     expect(() =>
       parseWorkspaceConfig(`

@@ -72,6 +72,14 @@ const stripLegacyReviewerRunner = (value: unknown): unknown => {
   return reviewerConfig;
 };
 
+const normalizeLegacyRunnerProvider = (value: unknown): unknown => {
+  if (!isObjectRecord(value) || "type" in value) {
+    return value;
+  }
+
+  return { type: "opencode", ...value };
+};
+
 const normalizeLegacyWorkspaceRunnerConfig = (input: unknown): unknown => {
   if (!isObjectRecord(input)) {
     return input;
@@ -116,8 +124,23 @@ const defaultReviewerRunner = {
 
 export const runnerSchema = z.preprocess(
   (input) => {
-    if (input && typeof input === "object" && !Array.isArray(input) && "type" in input) {
-      return { execution: input, reviewer: input };
+    if (!isObjectRecord(input) || "execution" in input) {
+      return input;
+    }
+
+    const { reviewer, ...legacyExecutionRunner } = input;
+    const normalizedReviewer = normalizeLegacyRunnerProvider(reviewer);
+
+    if (Object.keys(legacyExecutionRunner).length > 0) {
+      const execution = normalizeLegacyRunnerProvider(legacyExecutionRunner);
+      return {
+        execution,
+        reviewer: normalizedReviewer ?? execution,
+      };
+    }
+
+    if (normalizedReviewer !== undefined) {
+      return { reviewer: normalizedReviewer };
     }
 
     return input;
