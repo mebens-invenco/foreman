@@ -90,6 +90,9 @@ export const runnerSchema = z.preprocess(
     .default({ execution: defaultExecutionRunner, reviewer: defaultReviewerRunner }),
 );
 
+export const reviewerSchema = z.object({
+  agentPrefix: z.string().min(1).default("[review agent] "),
+});
 export const workspaceConfigSchema = z
   .object({
     version: z.literal(1).default(1),
@@ -109,6 +112,7 @@ export const workspaceConfigSchema = z
     }),
     reviewSystem: reviewSystemSchema.default({ type: "github" }),
     runner: runnerSchema,
+    reviewer: reviewerSchema.default({ agentPrefix: "[review agent] " }),
     scheduler: schedulerSchema.default({
       workerConcurrency: 4,
       scoutPollIntervalSeconds: 60,
@@ -190,6 +194,9 @@ export const createDefaultWorkspaceConfig = (
     execution: { ...defaultExecutionRunner },
     reviewer: { ...defaultReviewerRunner },
   },
+  reviewer: {
+    agentPrefix: "[review agent] ",
+  },
   scheduler: {
     workerConcurrency: 4,
     scoutPollIntervalSeconds: 60,
@@ -214,7 +221,7 @@ export const parseWorkspaceConfig = (raw: string): WorkspaceConfig => {
 export const stringifyWorkspaceConfig = (config: WorkspaceConfig): string => YAML.stringify(config);
 
 export const runnerRoleForAction = (action: ActionType): "execution" | "reviewer" =>
-  action === "review" ? "reviewer" : "execution";
+  action === "review" || action === "reviewer" ? "reviewer" : "execution";
 
 export const runnerForAction = (config: WorkspaceConfig, action: ActionType): WorkspaceRunnerConfig =>
   config.runner[runnerRoleForAction(action)];

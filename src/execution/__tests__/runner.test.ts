@@ -166,8 +166,11 @@ describe("provider runners", () => {
     process.env.FOREMAN_OPENCODE_BIN = opencodeScriptPath;
     process.env.FOREMAN_CLAUDE_BIN = claudeScriptPath;
 
-    const runner = createAgentRunner({ config: createDefaultWorkspaceConfig("foo", "file") });
-    const executionResult = await runner.invoke({
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const executionRunner = createAgentRunner({ config, action: "execution" });
+    const reviewRunner = createAgentRunner({ config, action: "review" });
+    const reviewerRunner = createAgentRunner({ config, action: "reviewer" });
+    const executionResult = await executionRunner.invoke({
       attemptId: "attempt-execution",
       action: "execution",
       cwd: tempDir,
@@ -175,12 +178,20 @@ describe("provider runners", () => {
       prompt: "execution prompt",
       timeoutMs: 5_000,
     });
-    const reviewResult = await runner.invoke({
+    const reviewResult = await reviewRunner.invoke({
       attemptId: "attempt-review",
       action: "review",
       cwd: tempDir,
       env: {},
       prompt: "review prompt",
+      timeoutMs: 5_000,
+    });
+    const reviewerResult = await reviewerRunner.invoke({
+      attemptId: "attempt-reviewer",
+      action: "reviewer",
+      cwd: tempDir,
+      env: {},
+      prompt: "reviewer prompt",
       timeoutMs: 5_000,
     });
 
@@ -193,6 +204,11 @@ describe("provider runners", () => {
       provider: "claude",
       argv: ["-p", "--dangerously-skip-permissions", "--model", "claude-opus-4-6", "--effort", "high"],
       stdin: "review prompt",
+    });
+    expect(JSON.parse(reviewerResult.stdout)).toEqual({
+      provider: "claude",
+      argv: ["-p", "--dangerously-skip-permissions", "--model", "claude-opus-4-6", "--effort", "high"],
+      stdin: "reviewer prompt",
     });
   });
 });

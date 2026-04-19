@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { createDefaultWorkspaceConfig, parseWorkspaceConfig, stringifyWorkspaceConfig } from "../config.js";
+import { createDefaultWorkspaceConfig, parseWorkspaceConfig, runnerForAction, stringifyWorkspaceConfig } from "../config.js";
 
 describe("workspace config", () => {
   test("round-trips default file task config", () => {
@@ -21,8 +21,16 @@ describe("workspace config", () => {
       effort: "high",
       timeoutMs: 3_600_000,
     });
+    expect(parsed.reviewer.agentPrefix).toBe("[review agent] ");
     expect(parsed.scheduler.workerConcurrency).toBe(4);
     expect(parsed.http.port).toBe(8765);
+  });
+
+  test("routes review and reviewer actions to the reviewer runner", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    expect(runnerForAction(config, "review")).toEqual(config.runner.reviewer);
+    expect(runnerForAction(config, "reviewer")).toEqual(config.runner.reviewer);
   });
 
   test("accepts legacy flat claude runner config", () => {

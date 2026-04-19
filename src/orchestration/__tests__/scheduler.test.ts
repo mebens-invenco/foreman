@@ -164,6 +164,12 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     deleteReviewCheckpoint: vi.fn(),
     ...((overrides.reviewCheckpoints as object | undefined) ?? {}),
   },
+  reviewerCheckpoints: {
+    getReviewerCheckpoint: vi.fn(() => null),
+    upsertReviewerCheckpoint: vi.fn(),
+    deleteReviewerCheckpoint: vi.fn(),
+    ...((overrides.reviewerCheckpoints as object | undefined) ?? {}),
+  },
   learnings: {
     addLearning: vi.fn(),
     updateLearning: vi.fn(),
@@ -209,7 +215,6 @@ describe("SchedulerService applyWorkerResult", () => {
         getContext: vi.fn(async () => reviewContext),
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
-      runner: {} as any,
       repos: [],
       env: {},
       logger: fakeLogger as any,
@@ -269,7 +274,6 @@ describe("SchedulerService applyWorkerResult", () => {
         getContext: vi.fn(async () => reviewContext),
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
-      runner: {} as any,
       repos: [],
       env: {},
       logger: fakeLogger as any,
@@ -333,7 +337,6 @@ describe("SchedulerService applyWorkerResult", () => {
         getContext,
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
-      runner: {} as any,
       repos: [],
       env: {},
       logger: fakeLogger as any,
@@ -367,6 +370,138 @@ describe("SchedulerService applyWorkerResult", () => {
     });
   });
 
+  test("submits reviewer comment reviews with the reviewer prefix", async () => {
+    const submitPullRequestReview = vi.fn(async () => undefined);
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos(),
+      taskSystem: {
+        addComment: vi.fn(async () => undefined),
+        upsertPullRequest: vi.fn(async () => undefined),
+        transition: vi.fn(async () => undefined),
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(resolvePullRequestFromTask),
+        submitPullRequestReview,
+      } as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-2c" },
+        job: { action: "reviewer", taskTargetId: sampleTarget.id },
+        task: sampleTask({ pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }] }),
+        target: sampleTarget,
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        workerResult: baseWorkerResult({
+          action: "reviewer",
+          reviewMutations: [
+            {
+              type: "submit_pull_request_review",
+              body: "Please add coverage for this branch.",
+              event: "COMMENT",
+              comments: [{ path: "src/example.ts", line: 12, body: "Guard this branch." }],
+            },
+          ],
+        }),
+      }),
+    ).resolves.toBe(reviewContext.pullRequestUrl);
+
+    expect(submitPullRequestReview).toHaveBeenCalledWith(reviewContext.pullRequestUrl, {
+      body: "[review agent] Please add coverage for this branch.",
+      event: "COMMENT",
+      comments: [{ path: "src/example.ts", line: 12, body: "[review agent] Guard this branch." }],
+    });
+  });
+
+  test("uses the worker review snapshot when saving a reviewer checkpoint", async () => {
+    const upsertReviewerCheckpoint = vi.fn();
+    const getContext = vi.fn(async () => ({
+      ...reviewContext,
+      headSha: "different-head",
+    }));
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({
+        reviewerCheckpoints: { upsertReviewerCheckpoint },
+      }),
+      taskSystem: {
+        addComment: vi.fn(async () => undefined),
+        upsertPullRequest: vi.fn(async () => undefined),
+        transition: vi.fn(async () => undefined),
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        getContext,
+        resolvePullRequest: vi.fn(resolvePullRequestFromTask),
+      } as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-2d" },
+        job: { action: "reviewer", taskTargetId: sampleTarget.id },
+        task: sampleTask({ pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }] }),
+        target: sampleTarget,
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        reviewContext,
+        workerResult: baseWorkerResult({
+          action: "reviewer",
+          outcome: "no_action_needed",
+          signals: ["reviewer_checkpoint_eligible"],
+        }),
+      }),
+    ).resolves.toBe(reviewContext.pullRequestUrl);
+
+    expect(getContext).not.toHaveBeenCalled();
+    expect(upsertReviewerCheckpoint).toHaveBeenCalledWith({
+      taskId: "TASK-0001",
+      taskTargetId: sampleTarget.id,
+      prUrl: reviewContext.pullRequestUrl,
+      reviewContext,
+      sourceAttemptId: "attempt-2d",
+    });
+  });
+
   test("rejects execution results with code changes when no pull request mutation or artifact is present", async () => {
     const scheduler = new SchedulerService({
       config: createDefaultWorkspaceConfig("foo", "file"),
@@ -394,7 +529,6 @@ describe("SchedulerService applyWorkerResult", () => {
         getContext: vi.fn(async () => reviewContext),
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
       } as any,
-      runner: {} as any,
       repos: [],
       env: {},
       logger: fakeLogger as any,
@@ -448,7 +582,6 @@ describe("SchedulerService applyWorkerResult", () => {
         getContext: vi.fn(async () => reviewContext),
         resolvePullRequest,
       } as any,
-      runner: {} as any,
       repos: [],
       env: {},
       logger: fakeLogger as any,
@@ -514,7 +647,6 @@ describe("SchedulerService applyWorkerResult", () => {
         replyToPrComment,
         resolveThreads,
       } as any,
-      runner: {} as any,
       repos: [],
       env: {},
       logger: fakeLogger as any,
@@ -579,7 +711,6 @@ describe("SchedulerService applyWorkerResult", () => {
         replyToThreadComment,
         resolveThreads,
       } as any,
-      runner: {} as any,
       repos: [],
       env: {},
       logger: fakeLogger as any,
@@ -646,7 +777,6 @@ describe("SchedulerService applyWorkerResult", () => {
       }),
       taskSystem: {} as any,
       reviewService: {} as any,
-      runner: {} as any,
       repos: [],
       env: {},
       logger: fakeLogger as any,
@@ -716,7 +846,6 @@ describe("SchedulerService applyWorkerResult", () => {
       }),
       taskSystem: {} as any,
       reviewService: {} as any,
-      runner: {} as any,
       repos: [],
       env: {},
       logger: fakeLogger as any,
@@ -771,7 +900,6 @@ describe("SchedulerService applyWorkerResult", () => {
         getTask: vi.fn(async () => sampleTask({ state: "in_progress", providerState: "in_progress" })),
       } as any,
       reviewService: {} as any,
-      runner: {} as any,
       repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
       env: {},
       logger: fakeLogger as any,
@@ -842,7 +970,6 @@ describe("SchedulerService applyWorkerResult", () => {
         transition,
       } as any,
       reviewService: {} as any,
-      runner: {} as any,
       repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
       env: {},
       logger: fakeLogger as any,

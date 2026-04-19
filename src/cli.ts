@@ -3,7 +3,6 @@
 import { Command, InvalidArgumentError } from "commander";
 
 import { importLegacyMemory } from "./importing/import-legacy-memory.js";
-import { createAgentRunner } from "./execution/index.js";
 import { createHttpServer } from "./http.js";
 import { LoggerService } from "./logger.js";
 import { SchedulerService } from "./orchestration/index.js";
@@ -104,7 +103,6 @@ program
       foremanRepos: repos,
       taskSystem,
       reviewService,
-      runner: createAgentRunner({ config }),
       repos: repoRefs,
       env: resolvedEnv,
       logger: logger.child({ component: "scheduler" }),

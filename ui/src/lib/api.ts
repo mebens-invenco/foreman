@@ -7,7 +7,7 @@ export type AttemptStatus =
   | "canceled"
   | "timed_out"
 export type WorkerStatus = "idle" | "leased" | "running" | "stopping" | "offline"
-export type ActionType = "execution" | "review" | "retry" | "consolidation"
+export type ActionType = "execution" | "review" | "reviewer" | "retry" | "consolidation"
 export type LearningConfidence = "emerging" | "established" | "proven"
 export type TaskState =
   | "ready"

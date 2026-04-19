@@ -9,6 +9,7 @@ export * from "./learning-repo.js";
 export * from "./lease-repo.js";
 export * from "./migration-runner.js";
 export * from "./review-checkpoint-repo.js";
+export * from "./reviewer-checkpoint-repo.js";
 export * from "./scout-run-repo.js";
 export * from "./task-mirror-repo.js";
 export * from "./worker-repo.js";

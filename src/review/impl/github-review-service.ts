@@ -922,6 +922,45 @@ export class GitHubReviewService implements ReviewService {
     return { url: pr.html_url, number: pr.number };
   }
 
+  async submitPullRequestReview(
+    prUrl: string,
+    input: {
+      body: string;
+      event: "COMMENT";
+      comments: Array<{
+        path: string;
+        line: number;
+        side?: "LEFT" | "RIGHT";
+        body: string;
+      }>;
+    },
+  ): Promise<void> {
+    const { owner, repo, number } = parseGitHubUrl(prUrl);
+    this.logger.info("submitting GitHub pull request review", {
+      owner,
+      repo,
+      pullRequestNumber: number,
+      event: input.event,
+      bodyLength: input.body.length,
+      commentCount: input.comments.length,
+    });
+    await this.rest(`/repos/${owner}/${repo}/pulls/${number}/reviews`, {
+      method: "POST",
+      body: JSON.stringify({
+        body: input.body,
+        event: input.event,
+        comments: input.comments.map((comment) => ({
+          path: comment.path,
+          line: comment.line,
+          side: comment.side ?? "RIGHT",
+          body: comment.body,
+        })),
+      }),
+      headers: { "content-type": "application/json" },
+    });
+    this.logger.info("submitted GitHub pull request review", { owner, repo, pullRequestNumber: number, commentCount: input.comments.length });
+  }
+
   async replyToReviewSummary(prUrl: string, reviewId: string, body: string): Promise<void> {
     const { owner, repo, number } = parseGitHubUrl(prUrl);
     this.logger.info("replying to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl, bodyLength: body.length });

@@ -193,6 +193,18 @@ describe("prompt rendering", () => {
       reviewContext: sampleReviewContext,
     });
 
+    const reviewerPrompt = await renderWorkerPrompt({
+      action: "reviewer",
+      config,
+      paths,
+      task: { ...sampleTask, state: "in_review", providerState: "in_review" },
+      comments: "(none)",
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+    });
+
     expect(reviewPrompt).toContain("### Actionable Now");
     expect(reviewPrompt).toContain("### Remaining Historical Context");
     expect(reviewPrompt).toContain("Review Summary `review-1`");
@@ -203,8 +215,14 @@ describe("prompt rendering", () => {
     expect(reviewPrompt).toContain("Do not reply again to an unresolved review thread when its latest comment was authored by the agent");
     expect(reviewPrompt).toContain("inspect the relevant commit messages and diffs on both the task branch and the base branch");
     expect(reviewPrompt).toContain("Reconcile both branches' intent instead of defaulting to either side.");
+    expect(reviewPrompt).toContain("treat the later maintainer decision as authoritative");
+    expect(reviewPrompt).toContain("older feedback was superseded instead of changing code");
     expect(consolidationPrompt).toContain("### Review Summaries");
     expect(consolidationPrompt).toContain("### Review Threads");
     expect(consolidationPrompt).not.toContain("### Actionable Now");
+    expect(reviewerPrompt).toContain("# Reviewer Prompt");
+    expect(reviewerPrompt).toContain("submit_pull_request_review");
+    expect(reviewerPrompt).toContain("reviewer_checkpoint_eligible");
+    expect(reviewerPrompt).not.toContain("### Actionable Now");
   });
 });

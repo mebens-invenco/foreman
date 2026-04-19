@@ -20,6 +20,19 @@ export interface ReviewService {
     title?: string;
     body?: string;
   }): Promise<{ url: string; number: number }>;
+  submitPullRequestReview(
+    prUrl: string,
+    input: {
+      body: string;
+      event: "COMMENT";
+      comments: Array<{
+        path: string;
+        line: number;
+        side?: "LEFT" | "RIGHT";
+        body: string;
+      }>;
+    },
+  ): Promise<void>;
   replyToReviewSummary(prUrl: string, reviewId: string, body: string): Promise<void>;
   replyToThreadComment(prUrl: string, threadId: string, body: string): Promise<void>;
   replyToPrComment(prUrl: string, commentId: string, body: string): Promise<void>;

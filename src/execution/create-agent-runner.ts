@@ -1,6 +1,7 @@
+import type { ActionType } from "../domain/index.js";
 import type { WorkspaceConfig, WorkspaceRunnerConfig } from "../workspace/config.js";
+import { runnerForAction } from "../workspace/config.js";
 import type { AgentRunner } from "./agent-runner.js";
-import { runnerRoleForAction } from "../workspace/config.js";
 import { ClaudeRunner } from "./impl/claude-runner.js";
 import { OpenCodeRunner } from "./impl/opencode-runner.js";
 
@@ -16,15 +17,9 @@ const createProviderRunner = (config: WorkspaceRunnerConfig): AgentRunner => {
   throw new Error(`Unsupported runner type: ${String((config as { type?: unknown }).type)}`);
 };
 
-export const createAgentRunner = (input: { config: WorkspaceConfig }): AgentRunner => {
-  const runners = {
-    execution: createProviderRunner(input.config.runner.execution),
-    reviewer: createProviderRunner(input.config.runner.reviewer),
-  } satisfies Record<"execution" | "reviewer", AgentRunner>;
+export const resolveRunnerConfigForAction = (config: WorkspaceConfig, action: ActionType): WorkspaceRunnerConfig =>
+  runnerForAction(config, action);
 
-  return {
-    invoke(request) {
-      return runners[runnerRoleForAction(request.action)].invoke(request);
-    },
-  };
+export const createAgentRunner = (input: { config: WorkspaceConfig; action: ActionType }): AgentRunner => {
+  return createProviderRunner(resolveRunnerConfigForAction(input.config, input.action));
 };

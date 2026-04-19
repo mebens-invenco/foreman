@@ -1,7 +1,10 @@
-ALTER TABLE execution_attempt RENAME TO execution_attempt_old;
+PRAGMA foreign_keys=OFF;
+
 ALTER TABLE execution_attempt_event RENAME TO execution_attempt_event_old;
 ALTER TABLE lease RENAME TO lease_old;
 ALTER TABLE review_checkpoint RENAME TO review_checkpoint_old;
+ALTER TABLE reviewer_checkpoint RENAME TO reviewer_checkpoint_old;
+ALTER TABLE execution_attempt RENAME TO execution_attempt_old;
 
 CREATE TABLE execution_attempt (
   id TEXT PRIMARY KEY,
@@ -58,6 +61,21 @@ CREATE TABLE review_checkpoint (
   task_target_id TEXT REFERENCES task_target(id) ON DELETE CASCADE
 );
 
+CREATE TABLE reviewer_checkpoint (
+  id TEXT PRIMARY KEY,
+  task_id TEXT NOT NULL,
+  task_target_id TEXT NOT NULL REFERENCES task_target(id) ON DELETE CASCADE,
+  pr_url TEXT NOT NULL,
+  head_sha TEXT NOT NULL,
+  latest_review_summary_id TEXT,
+  latest_conversation_comment_id TEXT,
+  review_threads_fingerprint TEXT NOT NULL DEFAULT '[]',
+  checks_fingerprint TEXT NOT NULL DEFAULT '',
+  merge_state TEXT NOT NULL DEFAULT '',
+  recorded_at TEXT NOT NULL,
+  source_attempt_id TEXT REFERENCES execution_attempt(id) ON DELETE SET NULL
+);
+
 INSERT INTO execution_attempt(
   id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, status, started_at,
   finished_at, exit_code, signal, summary, error_message
@@ -82,6 +100,15 @@ SELECT id, task_id, pr_url, head_sha, latest_review_summary_id, latest_conversat
        merge_state, recorded_at, source_attempt_id, review_threads_fingerprint, task_target_id
   FROM review_checkpoint_old;
 
+INSERT INTO reviewer_checkpoint(
+  id, task_id, task_target_id, pr_url, head_sha, latest_review_summary_id, latest_conversation_comment_id,
+  review_threads_fingerprint, checks_fingerprint, merge_state, recorded_at, source_attempt_id
+)
+SELECT id, task_id, task_target_id, pr_url, head_sha, latest_review_summary_id, latest_conversation_comment_id,
+       review_threads_fingerprint, checks_fingerprint, merge_state, recorded_at, source_attempt_id
+  FROM reviewer_checkpoint_old;
+
+DROP TABLE reviewer_checkpoint_old;
 DROP TABLE review_checkpoint_old;
 DROP TABLE lease_old;
 DROP TABLE execution_attempt_event_old;
@@ -110,3 +137,14 @@ CREATE UNIQUE INDEX idx_review_checkpoint_task_target
   ON review_checkpoint(task_target_id);
 CREATE INDEX idx_review_checkpoint_task_target_recorded_at_desc
   ON review_checkpoint(task_target_id, recorded_at DESC);
+
+CREATE UNIQUE INDEX idx_reviewer_checkpoint_task_target
+  ON reviewer_checkpoint(task_target_id);
+CREATE UNIQUE INDEX idx_reviewer_checkpoint_task_pr
+  ON reviewer_checkpoint(task_id, pr_url);
+CREATE INDEX idx_reviewer_checkpoint_recorded_at_desc
+  ON reviewer_checkpoint(recorded_at DESC);
+CREATE INDEX idx_reviewer_checkpoint_task_target_recorded_at_desc
+  ON reviewer_checkpoint(task_target_id, recorded_at DESC);
+
+PRAGMA foreign_keys=ON;

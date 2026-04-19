@@ -147,11 +147,11 @@ const deriveTaskTargetStatus = (input: {
 
   if (!input.dependenciesSatisfied) {
     return "blocked";
-  }
+    }
 
-  switch (input.progressState) {
-    case "active":
-      return input.latestJob?.action === "review" ? "in_review" : "in_progress";
+    switch (input.progressState) {
+      case "active":
+        return input.latestJob?.action === "review" || input.latestJob?.action === "reviewer" ? "in_review" : "in_progress";
     case "in_review":
       return "in_review";
     case "merged":

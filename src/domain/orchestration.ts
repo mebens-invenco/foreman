@@ -1,6 +1,6 @@
 export type RunnerProvider = "opencode" | "claude";
 
-export type ActionType = "execution" | "review" | "retry" | "consolidation";
+export type ActionType = "execution" | "review" | "reviewer" | "retry" | "consolidation";
 
 export type JobStatus =
   | "queued"
@@ -58,6 +58,17 @@ export type ReviewMutation =
   | { type: "reply_to_review_summary"; reviewId: string; body: string }
   | { type: "reply_to_thread_comment"; threadId: string; body: string }
   | { type: "reply_to_pr_comment"; commentId: string; body: string }
+  | {
+      type: "submit_pull_request_review";
+      body: string;
+      event: "COMMENT";
+      comments: Array<{
+        path: string;
+        line: number;
+        side?: "LEFT" | "RIGHT";
+        body: string;
+      }>;
+    }
   | { type: "resolve_threads"; threadIds: string[] };
 
 export type LearningMutation =
@@ -82,7 +93,7 @@ export type LearningMutation =
 
 export type Blocker = string;
 
-export type Signal = "code_changed" | "review_checkpoint_eligible";
+export type Signal = "code_changed" | "review_checkpoint_eligible" | "reviewer_checkpoint_eligible";
 
 export type WorkerResult = {
   schemaVersion: 1;

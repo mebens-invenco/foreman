@@ -3,13 +3,14 @@ import path from "node:path";
 
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 
-export type PromptTemplateName = "plan" | "execution" | "review" | "retry" | "consolidation";
+export type PromptTemplateName = "plan" | "execution" | "review" | "reviewer" | "retry" | "consolidation";
 export type WorkerPromptTemplateName = Exclude<PromptTemplateName, "plan">;
 
 const TEMPLATE_PATHS: Record<PromptTemplateName, string> = {
   plan: "prompts/templates/plan.md",
   execution: "prompts/templates/execution.md",
   review: "prompts/templates/review.md",
+  reviewer: "prompts/templates/reviewer.md",
   retry: "prompts/templates/retry.md",
   consolidation: "prompts/templates/consolidation.md",
 };
