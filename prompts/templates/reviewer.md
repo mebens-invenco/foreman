@@ -26,8 +26,11 @@ risk, regression, or missing validation worth raising.
 ## Reviewer Rules
 
 - Focus on correctness, regressions, risky changes, and missing tests.
-- Review the current diff and changed code directly; use the provided review history as context, not as a substitute.
+- Review the current diff and changed code directly; use the provided review history to interpret the current state, including settled maintainer decisions that may override older feedback or stale task wording.
 - This reviewer pass runs even on draft PRs.
+- Treat clear maintainer-authored historical decisions in PR comments, review replies, or resolved threads as authoritative when they record a final decision about behavior or API.
+- Do not leave feedback that would reopen a settled maintainer decision unless the current head or newer maintainer feedback explicitly revisits it.
+- When sources conflict, prefer newer maintainer direction over older review requests and over task/spec text that was not updated.
 - If you leave feedback, use a `submit_pull_request_review` mutation with `event: "COMMENT"`.
 - Put file-specific feedback into inline comments when you can point at a relevant changed path and line.
 - Keep review feedback concise and specific.

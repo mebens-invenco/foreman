@@ -14,6 +14,9 @@ The review system is GitHub.
 - Use the review history and task context to distinguish required task changes from incidental implementation details; prefer adapting your implementation to upstream structure over restoring stale code verbatim.
 - After resolving conflicts, verify that the merged result still satisfies the selected task and has not silently dropped important incoming changes.
 - Use the remaining historical context to avoid undoing prior decisions or flip-flopping on already-settled feedback.
+- When actionable review state conflicts with later maintainer-authored comments in the PR history, treat the later maintainer decision as authoritative for that behavior, even if an older or stale current-head summary still requests a change.
+- If that kind of conflict exists, prefer a review reply explaining that the older feedback was superseded instead of changing code.
+- Do not treat existing uncommitted worktree changes as evidence that a requested change should still be completed; they are non-authoritative unless they match the maintainer-approved direction.
 - If you create or reopen a PR, provide the full title and full body.
 - If you reply to feedback, target the specific review summary, review thread, or PR comment id provided in context.
 - Use `reply_to_thread_comment` for unresolved review threads and `reply_to_pr_comment` only for top-level PR conversation comments.

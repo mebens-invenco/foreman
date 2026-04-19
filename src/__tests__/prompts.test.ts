@@ -215,6 +215,8 @@ describe("prompt rendering", () => {
     expect(reviewPrompt).toContain("Do not reply again to an unresolved review thread when its latest comment was authored by the agent");
     expect(reviewPrompt).toContain("inspect the relevant commit messages and diffs on both the task branch and the base branch");
     expect(reviewPrompt).toContain("Reconcile both branches' intent instead of defaulting to either side.");
+    expect(reviewPrompt).toContain("treat the later maintainer decision as authoritative");
+    expect(reviewPrompt).toContain("older feedback was superseded instead of changing code");
     expect(consolidationPrompt).toContain("### Review Summaries");
     expect(consolidationPrompt).toContain("### Review Threads");
     expect(consolidationPrompt).not.toContain("### Actionable Now");
