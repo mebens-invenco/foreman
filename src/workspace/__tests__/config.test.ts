@@ -26,10 +26,10 @@ describe("workspace config", () => {
     expect(parsed.http.port).toBe(8765);
   });
 
-  test("routes review and reviewer actions to the reviewer runner", () => {
+  test("routes review to execution and reviewer to reviewer runner", () => {
     const config = createDefaultWorkspaceConfig("foo", "file");
 
-    expect(runnerForAction(config, "review")).toEqual(config.runner.reviewer);
+    expect(runnerForAction(config, "review")).toEqual(config.runner.execution);
     expect(runnerForAction(config, "reviewer")).toEqual(config.runner.reviewer);
   });
 

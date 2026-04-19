@@ -201,8 +201,8 @@ describe("provider runners", () => {
       stdin: "execution prompt",
     });
     expect(JSON.parse(reviewResult.stdout)).toEqual({
-      provider: "claude",
-      argv: ["-p", "--dangerously-skip-permissions", "--model", "claude-opus-4-6", "--effort", "high"],
+      provider: "opencode",
+      argv: ["run", "--model", "openai/gpt-5.4", "--variant", "high"],
       stdin: "review prompt",
     });
     expect(JSON.parse(reviewerResult.stdout)).toEqual({

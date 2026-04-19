@@ -221,7 +221,7 @@ export const parseWorkspaceConfig = (raw: string): WorkspaceConfig => {
 export const stringifyWorkspaceConfig = (config: WorkspaceConfig): string => YAML.stringify(config);
 
 export const runnerRoleForAction = (action: ActionType): "execution" | "reviewer" =>
-  action === "review" || action === "reviewer" ? "reviewer" : "execution";
+  action === "reviewer" ? "reviewer" : "execution";
 
 export const runnerForAction = (config: WorkspaceConfig, action: ActionType): WorkspaceRunnerConfig =>
   config.runner[runnerRoleForAction(action)];
