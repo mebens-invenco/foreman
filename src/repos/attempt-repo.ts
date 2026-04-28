@@ -1,4 +1,4 @@
-import type { AttemptStatus } from "../domain/index.js";
+import type { AttemptStatus, RunnerProvider } from "../domain/index.js";
 import type { LeaseResourceType } from "./lease-repo.js";
 
 export type AttemptRecord = {
@@ -9,7 +9,7 @@ export type AttemptRecord = {
   stage: string | null;
   workerId: string | null;
   attemptNumber: number;
-  runnerName: "opencode";
+  runnerName: RunnerProvider;
   runnerModel: string;
   runnerVariant: string;
   status: AttemptStatus;
@@ -39,12 +39,14 @@ export interface AttemptRepo {
   createAttempt(input: {
     jobId: string;
     workerId: string;
+    runnerName: RunnerProvider;
     runnerModel: string;
     runnerVariant: string;
   }): AttemptRecord;
   createAttemptWithLeases(input: {
     jobId: string;
     workerId: string;
+    runnerName: RunnerProvider;
     runnerModel: string;
     runnerVariant: string;
     expiresAt: string;

@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskTarget, type WorkerResult } from "../domain/index.js";
-import { createAgentRunner, parseWorkerResult, resolveRunnerConfigForAction, validateWorkerResult } from "../execution/index.js";
+import { createAgentRunner, parseWorkerResult, validateWorkerResult } from "../execution/index.js";
 import { renderWorkerPrompt } from "../execution/render-worker-prompt.js";
 import { ForemanError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
@@ -11,7 +11,7 @@ import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
-import type { WorkspaceConfig } from "../workspace/config.js";
+import { runnerForAction, runnerTuningValue, type WorkspaceConfig } from "../workspace/config.js";
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { assertTaskActionableTarget, leaseResourceKeysForAction } from "./scout-selection.js";
@@ -79,17 +79,18 @@ export class AttemptExecutor {
       const actionableTarget = assertTaskActionableTarget(task, this.deps.repos, persistedTarget);
       const target: TaskTarget = actionableTarget.target;
       repo = actionableTarget.repo;
+      const runnerConfig = runnerForAction(this.deps.config, job.action);
       jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
       jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
-      const runnerConfig = resolveRunnerConfigForAction(this.deps.config, job.action);
       const runner = createAgentRunner({ config: this.deps.config, action: job.action });
 
       attempt = this.deps.foremanRepos.attempts.createAttemptWithLeases({
         jobId: job.id,
         workerId,
+        runnerName: runnerConfig.type,
         runnerModel: runnerConfig.model,
-        runnerVariant: runnerConfig.variant,
+        runnerVariant: runnerTuningValue(runnerConfig),
         expiresAt: leaseExpiresAt,
         leases: leaseResourceKeysForAction(task, job.action, target),
       });
@@ -184,6 +185,7 @@ export class AttemptExecutor {
 
         const runResult = await runner.invoke({
           attemptId: attempt.id,
+          action: job.action,
           cwd: worktreePath,
           env: this.deps.env,
           prompt,

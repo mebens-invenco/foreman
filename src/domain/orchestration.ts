@@ -1,4 +1,4 @@
-export type RunnerProvider = "opencode";
+export type RunnerProvider = "opencode" | "claude";
 
 export type ActionType = "execution" | "review" | "reviewer" | "retry" | "consolidation";
 

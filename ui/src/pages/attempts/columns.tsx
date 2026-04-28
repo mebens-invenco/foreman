@@ -54,6 +54,7 @@ function buildAttemptSearchText(attempt: AttemptRecord) {
     attempt.workerId ?? "",
     attempt.attemptNumber,
     attempt.status,
+    attempt.runnerName,
     attempt.runnerModel,
     attempt.runnerVariant,
     attempt.summary,
@@ -126,6 +127,16 @@ export const attemptColumns: ColumnDef<AttemptRecord>[] = [
     enableGlobalFilter: false,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Stage" />
+    ),
+  },
+  {
+    accessorKey: "runnerName",
+    cell: ({ row }) => (
+      <span className="text-xs uppercase text-foreground">{row.original.runnerName}</span>
+    ),
+    enableGlobalFilter: false,
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Runner" />
     ),
   },
   {
