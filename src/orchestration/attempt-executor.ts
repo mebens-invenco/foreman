@@ -11,7 +11,7 @@ import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
-import { runnerForAction, runnerTuningValue, type WorkspaceConfig } from "../workspace/config.js";
+import { runnerForAction, runnerSessionRoleForAction, runnerTuningValue, type WorkspaceConfig } from "../workspace/config.js";
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { assertTaskActionableTarget, leaseResourceKeysForAction } from "./scout-selection.js";
@@ -80,6 +80,13 @@ export class AttemptExecutor {
       const target: TaskTarget = actionableTarget.target;
       repo = actionableTarget.repo;
       const runnerConfig = runnerForAction(this.deps.config, job.action);
+      const runnerSessionSelector = {
+        taskTargetId: job.taskTargetId,
+        role: runnerSessionRoleForAction(job.action),
+        runnerName: runnerConfig.type,
+        runnerModel: runnerConfig.model,
+        runnerVariant: runnerTuningValue(runnerConfig),
+      };
       jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
       jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
@@ -155,6 +162,28 @@ export class AttemptExecutor {
           job.action === "review" || job.action === "reviewer" || job.action === "retry" || job.action === "consolidation"
             ? (await this.deps.reviewService.getContext(task, this.deps.config.workspace.agentPrefix, repo, target)) ?? undefined
             : undefined;
+        const usesRunnerSession = job.action !== "consolidation";
+        const activeRunnerSession =
+          usesRunnerSession && job.action !== "retry"
+            ? this.deps.foremanRepos.runnerSessions.getActiveSession(runnerSessionSelector)
+            : null;
+        const runnerSession = usesRunnerSession
+          ? (activeRunnerSession ?? this.deps.foremanRepos.runnerSessions.createSession({ ...runnerSessionSelector, isActive: false }))
+          : null;
+        if (runnerSession) {
+          this.deps.foremanRepos.attempts.linkRunnerSession(attempt.id, runnerSession.id);
+          this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
+            lastAttemptId: attempt.id,
+            lastReviewHeadSha: reviewContext?.headSha ?? null,
+          });
+        }
+        const isContinuation = Boolean(activeRunnerSession?.nativeSessionId);
+        attemptLogger.info("resolved runner session", {
+          runnerSessionId: runnerSession?.id ?? null,
+          nativeSessionId: activeRunnerSession?.nativeSessionId ?? null,
+          continuation: isContinuation,
+        });
+
         const prompt = await renderWorkerPrompt({
           action: job.action,
           config: this.deps.config,
@@ -164,6 +193,13 @@ export class AttemptExecutor {
           repo,
           worktreePath,
           baseBranch: job.baseBranch ?? repo.defaultBranch,
+          gitState: {
+            worktreeHeadSha: beforeSha,
+            reviewHeadSha: reviewContext?.headSha ?? null,
+            baseBranch: job.baseBranch ?? repo.defaultBranch,
+            previousSessionHeadSha: activeRunnerSession?.lastWorktreeHeadSha ?? null,
+          },
+          continuation: isContinuation,
           ...(reviewContext ? { reviewContext } : {}),
         });
         attemptLogger.info("rendered worker prompt", { commentCount: comments.length, hasReviewContext: Boolean(reviewContext) });
@@ -190,6 +226,7 @@ export class AttemptExecutor {
           env: this.deps.env,
           prompt,
           timeoutMs: runnerConfig.timeoutMs,
+          ...(activeRunnerSession?.nativeSessionId ? { nativeSessionId: activeRunnerSession.nativeSessionId } : {}),
           abortSignal: controller.signal,
           onStdoutLine: (line: string) => {
             attemptLogger.runnerLine(line);
@@ -201,9 +238,17 @@ export class AttemptExecutor {
         attemptLogger.info("runner invocation completed", {
           exitCode: runResult.exitCode,
           signal: runResult.signal,
+          nativeSessionId: runResult.nativeSessionId ?? null,
           stdoutBytes: runResult.stdoutBytes,
           stderrBytes: runResult.stderrBytes,
         });
+        if (runnerSession) {
+          this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
+            nativeSessionId: runResult.nativeSessionId ?? null,
+            lastAttemptId: attempt.id,
+            lastReviewHeadSha: reviewContext?.headSha ?? null,
+          });
+        }
 
         const logRelativePath = path.join("logs", "attempts", `${attempt.id}.log`);
         const logAbsolutePath = path.join(this.deps.paths.workspaceRoot, logRelativePath);
@@ -262,6 +307,14 @@ export class AttemptExecutor {
         const attemptStatus = deriveAttemptStatus(workerResult);
         const jobStatus = attemptStatus === "timed_out" ? "failed" : attemptStatus;
         const afterSha = await this.gitHead(worktreePath).catch(() => null);
+        if (runnerSession) {
+          this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
+            lastAttemptId: attempt.id,
+            lastWorktreeHeadSha: afterSha,
+            lastReviewHeadSha: reviewContext?.headSha ?? null,
+            ...(attemptStatus === "completed" ? { isActive: true } : {}),
+          });
+        }
         this.deps.foremanRepos.attempts.finalizeAttempt(attempt.id, attemptStatus, {
           finishedAt: runResult.finishedAt,
           exitCode: runResult.exitCode,

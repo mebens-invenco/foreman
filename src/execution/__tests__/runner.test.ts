@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { ClaudeRunner, OpenCodeRunner, createAgentRunner } from "../index.js";
+import { normalizeClaudeJsonOutput, normalizeOpenCodeJsonOutput } from "../impl/json-output.js";
 import { createTempDir } from "../../test-support/helpers.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 
@@ -206,18 +207,173 @@ describe("provider runners", () => {
 
     expect(JSON.parse(executionResult.stdout)).toEqual({
       provider: "opencode",
-      argv: ["run", "--model", "openai/gpt-5.4", "--variant", "high"],
+      argv: ["run", "--model", "openai/gpt-5.4", "--variant", "high", "--format", "json"],
       stdin: "execution prompt",
     });
     expect(JSON.parse(reviewResult.stdout)).toEqual({
       provider: "opencode",
-      argv: ["run", "--model", "openai/gpt-5.4", "--variant", "high"],
+      argv: ["run", "--model", "openai/gpt-5.4", "--variant", "high", "--format", "json"],
       stdin: "review prompt",
     });
-    expect(JSON.parse(reviewerResult.stdout)).toEqual({
+    const reviewerInvocation = JSON.parse(reviewerResult.stdout) as { provider: string; argv: string[]; stdin: string };
+    expect(reviewerInvocation).toMatchObject({
       provider: "claude",
-      argv: ["-p", "--dangerously-skip-permissions", "--model", "claude-opus-4-6", "--effort", "high"],
       stdin: "reviewer prompt",
     });
+    expect(reviewerInvocation.argv.slice(0, 10)).toEqual([
+      "-p",
+      "--dangerously-skip-permissions",
+      "--model",
+      "claude-opus-4-6",
+      "--effort",
+      "high",
+      "--output-format",
+      "json",
+      "--session-id",
+      reviewerInvocation.argv[9],
+    ]);
+    expect(reviewerResult.nativeSessionId).toBe(reviewerInvocation.argv[9]);
+  });
+
+  test("resumes native provider sessions and normalizes JSON-mode output", async () => {
+    const tempDir = await createTempDir("foreman-runner-test-");
+    cleanupDirs.push(tempDir);
+
+    const opencodeScriptPath = path.join(tempDir, "fake-opencode.js");
+    await writeExecutableScript(
+      opencodeScriptPath,
+      [
+        "#!/usr/bin/env node",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => {",
+        "  process.stdout.write(JSON.stringify({ sessionID: 'opencode-session', type: 'text', text: '<agent-result>' }) + '\\n');",
+        "  process.stdout.write(JSON.stringify({ type: 'text', text: '{\\\"schemaVersion\\\":1}' }) + '\\n');",
+        "  process.stdout.write(JSON.stringify({ type: 'final', text: '<agent-result>{\\\"schemaVersion\\\":1}</agent-result>' }) + '\\n');",
+        "});",
+      ].join("\n"),
+    );
+    process.env.FOREMAN_OPENCODE_BIN = opencodeScriptPath;
+
+    const opencodeResult = await new OpenCodeRunner("openai/gpt-5.4", "high").invoke({
+      attemptId: "attempt-opencode-json",
+      action: "review",
+      cwd: tempDir,
+      env: {},
+      prompt: "continue",
+      timeoutMs: 5_000,
+      nativeSessionId: "opencode-session",
+    });
+    expect(opencodeResult.stdout).toBe('<agent-result>{"schemaVersion":1}</agent-result>');
+    expect(opencodeResult.nativeSessionId).toBe("opencode-session");
+
+    const claudeScriptPath = path.join(tempDir, "fake-claude.js");
+    await writeExecutableScript(
+      claudeScriptPath,
+      [
+        "#!/usr/bin/env node",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => {",
+        "  process.stdout.write(JSON.stringify({ session_id: 'claude-session', result: '<agent-result>{\\\"schemaVersion\\\":1}</agent-result>' }));",
+        "});",
+      ].join("\n"),
+    );
+    process.env.FOREMAN_CLAUDE_BIN = claudeScriptPath;
+
+    const claudeResult = await new ClaudeRunner("claude-opus-4-6", "high").invoke({
+      attemptId: "attempt-claude-json",
+      action: "reviewer",
+      cwd: tempDir,
+      env: {},
+      prompt: "continue",
+      timeoutMs: 5_000,
+      nativeSessionId: "claude-session",
+    });
+    expect(claudeResult.stdout).toBe('<agent-result>{"schemaVersion":1}</agent-result>');
+    expect(claudeResult.nativeSessionId).toBe("claude-session");
+  });
+
+  test.each([
+    {
+      label: "OpenCodeRunner",
+      scriptName: "fake-opencode.js",
+      setBin(scriptPath: string) {
+        process.env.FOREMAN_OPENCODE_BIN = scriptPath;
+      },
+      createRunner() {
+        return new OpenCodeRunner("openai/gpt-5.4", "high");
+      },
+      script: [
+        "#!/usr/bin/env node",
+        "const argv = process.argv.slice(2);",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => {",
+        "  if (argv.includes('--session')) { process.stderr.write('resume failed\\n'); process.exit(1); }",
+        "  process.stdout.write(JSON.stringify({ sessionID: 'fresh-opencode-session', type: 'final', text: '<agent-result>{\\\"schemaVersion\\\":1}</agent-result>' }));",
+        "});",
+      ].join("\n"),
+    },
+    {
+      label: "ClaudeRunner",
+      scriptName: "fake-claude.js",
+      setBin(scriptPath: string) {
+        process.env.FOREMAN_CLAUDE_BIN = scriptPath;
+      },
+      createRunner() {
+        return new ClaudeRunner("claude-opus-4-6", "high");
+      },
+      script: [
+        "#!/usr/bin/env node",
+        "const argv = process.argv.slice(2);",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => {",
+        "  if (argv.includes('--resume')) { process.stderr.write('resume failed\\n'); process.exit(1); }",
+        "  const sessionId = argv[argv.indexOf('--session-id') + 1];",
+        "  process.stdout.write(JSON.stringify({ session_id: sessionId, type: 'result', result: '<agent-result>{\\\"schemaVersion\\\":1}</agent-result>' }));",
+        "});",
+      ].join("\n"),
+    },
+  ])("does not start a fresh native session when $label resume exits non-zero", async ({ scriptName, setBin, createRunner, script }) => {
+    const tempDir = await createTempDir("foreman-runner-test-");
+    cleanupDirs.push(tempDir);
+
+    const scriptPath = path.join(tempDir, scriptName);
+    await writeExecutableScript(scriptPath, script);
+    setBin(scriptPath);
+
+    const stderrLines: string[] = [];
+    const result = await createRunner().invoke({
+      attemptId: "attempt-resume-failure",
+      action: "review",
+      cwd: tempDir,
+      env: {},
+      prompt: "continue",
+      timeoutMs: 5_000,
+      nativeSessionId: "stale-session",
+      onStderrLine(line) {
+        stderrLines.push(line);
+      },
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(stderrLines).toContain("resume failed");
+    expect(stderrLines.some((line) => line.includes("starting a fresh session"))).toBe(false);
+  });
+
+  test("reports JSON normalization warnings and only extracts Claude result records", () => {
+    expect(normalizeOpenCodeJsonOutput("{bad json")).toMatchObject({
+      stdout: "{bad json",
+      warning: expect.stringContaining("Failed to parse OpenCode JSON output"),
+    });
+    expect(normalizeClaudeJsonOutput("{bad json")).toMatchObject({
+      stdout: "{bad json",
+      warning: expect.stringContaining("Failed to parse Claude JSON output"),
+    });
+
+    const claudeOutput = [
+      JSON.stringify({ type: "assistant", text: "intermediate" }),
+      JSON.stringify({ type: "result", result: "final" }),
+    ].join("\n");
+    expect(normalizeClaudeJsonOutput(claudeOutput).stdout).toBe("final");
   });
 });

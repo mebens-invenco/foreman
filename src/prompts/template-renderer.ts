@@ -3,8 +3,16 @@ import path from "node:path";
 
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 
-export type PromptTemplateName = "plan" | "execution" | "review" | "reviewer" | "retry" | "consolidation";
-export type WorkerPromptTemplateName = Exclude<PromptTemplateName, "plan">;
+export type PromptTemplateName =
+  | "plan"
+  | "execution"
+  | "review"
+  | "reviewer"
+  | "retry"
+  | "consolidation"
+  | "review-continuation"
+  | "reviewer-continuation";
+export type WorkerPromptTemplateName = Exclude<PromptTemplateName, "plan" | "review-continuation" | "reviewer-continuation">;
 
 const TEMPLATE_PATHS: Record<PromptTemplateName, string> = {
   plan: "prompts/templates/plan.md",
@@ -13,6 +21,8 @@ const TEMPLATE_PATHS: Record<PromptTemplateName, string> = {
   reviewer: "prompts/templates/reviewer.md",
   retry: "prompts/templates/retry.md",
   consolidation: "prompts/templates/consolidation.md",
+  "review-continuation": "prompts/templates/review-continuation.md",
+  "reviewer-continuation": "prompts/templates/reviewer-continuation.md",
 };
 
 const FRAGMENTS_DIR = path.join("prompts", "fragments");

@@ -84,6 +84,14 @@ const sampleReviewContext: ReviewContext = {
       isResolved: false,
       comments: [
         {
+          id: "thread-comment-0",
+          body: "Earlier discussion that should stay historical.",
+          authorName: "reviewer",
+          authoredByAgent: false,
+          createdAt: "2026-03-14T12:04:00Z",
+          url: "https://github.com/acme/repo/pull/1#discussion_r0",
+        },
+        {
           id: "thread-comment-1",
           body: "This needs another pass.",
           authorName: "reviewer",
@@ -156,6 +164,7 @@ describe("prompt rendering", () => {
     expect(result).toContain("## Common Worker Rules");
     expect(result).toContain("## GitHub Review Rules");
     expect(result).toContain("## Selected Task");
+    expect(result).toContain("## Current Git State");
     expect(result).toContain("## Required Output");
     expect(result).toContain("If execution completes with code changes, return a PR review mutation");
     expect(result).not.toContain("upsert_artifact");
@@ -224,5 +233,62 @@ describe("prompt rendering", () => {
     expect(reviewerPrompt).toContain("submit_pull_request_review");
     expect(reviewerPrompt).toContain("reviewer_checkpoint_eligible");
     expect(reviewerPrompt).not.toContain("### Actionable Now");
+
+    const continuationPrompt = await renderWorkerPrompt({
+      action: "review",
+      config,
+      paths,
+      task: { ...sampleTask, state: "in_review", providerState: "in_review" },
+      comments: "(none)",
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+      gitState: {
+        worktreeHeadSha: "current-head",
+        reviewHeadSha: "review-head",
+        baseBranch: "main",
+        previousSessionHeadSha: "previous-head",
+      },
+      continuation: true,
+    });
+    expect(continuationPrompt).toContain("# Review Continuation");
+    expect(continuationPrompt).toContain("previousSessionHeadSha");
+    expect(continuationPrompt).toContain("previous-head");
+    expect(continuationPrompt).toContain("## Latest Review Activity");
+    expect(continuationPrompt).toContain("Latest Thread Comment");
+    expect(continuationPrompt).toContain("Please tighten this up.");
+    expect(continuationPrompt).not.toContain("Earlier discussion that should stay historical.");
+    expect(continuationPrompt).not.toContain("## Common Worker Rules");
+    expect(continuationPrompt).not.toContain("## Selected Task");
+    expect(continuationPrompt).not.toContain("## Repository Context");
+    expect(continuationPrompt).not.toContain("## Required Output");
+    expect(continuationPrompt).not.toContain("### Remaining Historical Context");
+    expect(continuationPrompt).not.toContain("[agent] Fixed in follow-up.");
+
+    const reviewerContinuationPrompt = await renderWorkerPrompt({
+      action: "reviewer",
+      config,
+      paths,
+      task: { ...sampleTask, state: "in_review", providerState: "in_review" },
+      comments: "(none)",
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+      gitState: {
+        worktreeHeadSha: "current-head",
+        reviewHeadSha: "review-head",
+        baseBranch: "main",
+        previousSessionHeadSha: "previous-reviewer-head",
+      },
+      continuation: true,
+    });
+    expect(reviewerContinuationPrompt).toContain("# Reviewer Continuation");
+    expect(reviewerContinuationPrompt).toContain("previous-reviewer-head");
+    expect(reviewerContinuationPrompt).toContain("## Latest Review Activity");
+    expect(reviewerContinuationPrompt).not.toContain("## Common Worker Rules");
+    expect(reviewerContinuationPrompt).not.toContain("## Selected Task");
+    expect(reviewerContinuationPrompt).not.toContain("## Required Output");
   });
 });

@@ -18,6 +18,7 @@ const mapAttempt = (row: SqliteRow): AttemptRecord => ({
   runnerName: row.runner_name as RunnerProvider,
   runnerModel: String(row.runner_model),
   runnerVariant: String(row.runner_variant),
+  runnerSessionId: (row.runner_session_id as string | null) ?? null,
   status: row.status as AttemptStatus,
   startedAt: String(row.started_at),
   finishedAt: (row.finished_at as string | null) ?? null,
@@ -55,6 +56,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
       runnerName: input.runnerName,
       runnerModel: input.runnerModel,
       runnerVariant: input.runnerVariant,
+      runnerSessionId: null,
       status: "running",
       startedAt: isoNow(),
       finishedAt: null,
@@ -69,9 +71,9 @@ export class SqliteAttemptRepo implements AttemptRepo {
     this.sqlite
       .prepare(
         `INSERT INTO execution_attempt(
-          id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, status, started_at,
+          id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, runner_session_id, status, started_at,
           finished_at, exit_code, signal, summary, error_message
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
@@ -81,6 +83,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
         record.runnerName,
         record.runnerModel,
         record.runnerVariant,
+        record.runnerSessionId,
         record.status,
         record.startedAt,
         null,
@@ -140,6 +143,10 @@ export class SqliteAttemptRepo implements AttemptRepo {
     } catch {
       return null;
     }
+  }
+
+  linkRunnerSession(attemptId: string, runnerSessionId: string): void {
+    this.sqlite.prepare("UPDATE execution_attempt SET runner_session_id = ? WHERE id = ?").run(runnerSessionId, attemptId);
   }
 
   finalizeAttempt(
@@ -206,7 +213,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
     return this.sqlite
       .prepare(
         `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
-                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.status, ea.started_at,
+                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id, ea.status, ea.started_at,
                 ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
            FROM execution_attempt ea
       LEFT JOIN job ON job.id = ea.job_id
@@ -221,7 +228,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
     const row = this.sqlite
       .prepare(
         `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
-                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.status, ea.started_at,
+                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id, ea.status, ea.started_at,
                 ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
            FROM execution_attempt ea
       LEFT JOIN job ON job.id = ea.job_id
@@ -240,7 +247,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
     const row = this.sqlite
       .prepare(
         `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
-                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.status, ea.started_at,
+                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id, ea.status, ea.started_at,
                 ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
            FROM execution_attempt ea
       LEFT JOIN job ON job.id = ea.job_id
@@ -265,6 +272,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
                 execution_attempt.runner_name,
                 execution_attempt.runner_model,
                 execution_attempt.runner_variant,
+                execution_attempt.runner_session_id,
                 execution_attempt.status,
                 execution_attempt.started_at,
                 execution_attempt.finished_at,

@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 
 import { isoNow } from "../../lib/time.js";
 import type { AgentRunnerInvokeRequest, CapturedAgentRunResult } from "../agent-runner.js";
+import type { NormalizedJsonOutput } from "./json-output.js";
 
 const forceKillAfterMs = 1_000;
 const useProcessGroups = process.platform !== "win32";
@@ -10,6 +11,7 @@ export const runAgentProcess = async (input: {
   command: string;
   args: string[];
   request: AgentRunnerInvokeRequest;
+  normalizeStdout?: (stdout: string) => NormalizedJsonOutput;
 }): Promise<CapturedAgentRunResult> => {
   const startedAt = isoNow();
 
@@ -131,14 +133,20 @@ export const runAgentProcess = async (input: {
     }
   });
 
+  const normalized = input.normalizeStdout?.(stdout);
+  if (normalized?.warning) {
+    input.request.onStderrLine?.(`[foreman] ${normalized.warning}`);
+  }
+
   return {
     exitCode: timedOut ? null : exitCode,
     signal,
     startedAt,
     finishedAt: isoNow(),
-    stdoutBytes: Buffer.byteLength(stdout),
+    stdoutBytes: Buffer.byteLength(normalized?.stdout ?? stdout),
     stderrBytes: Buffer.byteLength(stderr),
-    stdout,
+    stdout: normalized?.stdout ?? stdout,
     stderr,
+    ...(normalized?.nativeSessionId ? { nativeSessionId: normalized.nativeSessionId } : {}),
   };
 };

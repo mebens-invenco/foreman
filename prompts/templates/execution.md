@@ -30,6 +30,8 @@ Complete the selected task in the provided worktree.
 
 {{context:repo}}
 
+{{context:git-state}}
+
 {{context:review}}
 
 ## Execution Rules

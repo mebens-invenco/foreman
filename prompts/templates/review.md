@@ -32,6 +32,8 @@ Priority order inside this action:
 
 {{context:repo}}
 
+{{context:git-state}}
+
 {{context:review}}
 
 ## Review Rules

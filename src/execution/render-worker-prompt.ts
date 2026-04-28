@@ -57,6 +57,19 @@ const renderReviewThread = (thread: ReviewThread): string =>
     .join("\n")
     .trimEnd();
 
+const renderLatestReviewThread = (thread: ReviewThread): string => {
+  const latestComment = thread.comments.at(-1);
+
+  return [
+    `#### Review Thread \`${thread.id}\``,
+    `- Status: ${thread.isResolved ? "resolved" : "unresolved"}`,
+    `- Path: ${thread.path ?? "(unknown)"}`,
+    `- Line: ${thread.line ?? "(unknown)"}`,
+    "",
+    latestComment ? renderReviewComment("Latest Thread Comment", latestComment) : "(no comments)",
+  ].join("\n");
+};
+
 const renderCheckList = (title: string, checks: Array<{ name: string; state: "pending" | "failure" }>): string =>
   [`### ${title}`, ...(checks.length > 0 ? checks.map((check) => `- ${check.name} (${check.state})`) : ["(none)"])].join("\n");
 
@@ -127,6 +140,32 @@ const renderFullReviewHistory = (context: ReviewContext): string =>
     renderCheckList("Pending Checks", context.pendingChecks),
   ].join("\n");
 
+const renderLatestReviewActivity = (reviewContext?: ReviewContext): string => {
+  if (!reviewContext) {
+    return textSection("Latest Review Activity", "null");
+  }
+
+  return textSection(
+    "Latest Review Activity",
+    [
+      renderCollection("Unresolved Review Threads", actionableReviewThreads(reviewContext), renderLatestReviewThread),
+      "",
+      renderCollection("Current-Head Review Summaries", actionableReviewSummaries(reviewContext), renderReviewSummary),
+      "",
+      renderCollection("Post-Head PR Conversation Comments", actionableConversationComments(reviewContext), (comment) =>
+        renderReviewComment("PR Comment", comment),
+      ),
+      "",
+      renderCheckList("Failing Checks", reviewContext.failingChecks),
+      "",
+      renderCheckList("Pending Checks", reviewContext.pendingChecks),
+      "",
+      "### Merge Status",
+      `- Merge state: ${reviewContext.mergeState}`,
+    ].join("\n"),
+  );
+};
+
 const renderReviewContext = (action: WorkerPromptTemplateName, reviewContext?: ReviewContext): string => {
   if (!reviewContext) {
     return textSection("Review Context", "null");
@@ -164,6 +203,13 @@ export const renderWorkerPrompt = async (input: {
   worktreePath: string;
   baseBranch: string;
   reviewContext?: ReviewContext;
+  gitState?: {
+    worktreeHeadSha: string | null;
+    reviewHeadSha: string | null;
+    baseBranch: string;
+    previousSessionHeadSha: string | null;
+  };
+  continuation?: boolean;
 }): Promise<string> => {
   const repoContext = {
     repo: input.repo,
@@ -171,14 +217,31 @@ export const renderWorkerPrompt = async (input: {
     baseBranch: input.baseBranch,
   };
 
+  const template = input.continuation
+    ? input.action === "reviewer"
+      ? "reviewer-continuation"
+      : "review-continuation"
+    : input.action;
+
+  const reviewActivity = renderLatestReviewActivity(input.reviewContext);
+  const review = input.continuation ? reviewActivity : renderReviewContext(input.action, input.reviewContext);
+
   return renderPromptTemplate({
     paths: input.paths,
-    template: input.action,
+    template,
     context: {
       "selected-task": jsonSection("Selected Task", input.task),
       "task-comments": textSection("Task Comments", input.comments),
       repo: jsonSection("Repository Context", repoContext),
-      review: renderReviewContext(input.action, input.reviewContext),
+      "git-state": jsonSection("Current Git State", {
+        currentWorktreeHeadSha: input.gitState?.worktreeHeadSha ?? null,
+        currentPrHeadSha: input.gitState?.reviewHeadSha ?? null,
+        baseBranch: input.gitState?.baseBranch ?? input.baseBranch,
+        previousSessionHeadSha: input.gitState?.previousSessionHeadSha ?? null,
+      }),
+      review,
+      "review-activity": reviewActivity,
     },
+    properties: { session: { action: input.action } },
   });
 };

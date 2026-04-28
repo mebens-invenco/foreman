@@ -2,6 +2,8 @@ export type RunnerProvider = "opencode" | "claude";
 
 export type ActionType = "execution" | "review" | "reviewer" | "retry" | "consolidation";
 
+export type RunnerSessionRole = "implementation" | "reviewer";
+
 export type JobStatus =
   | "queued"
   | "leased"
@@ -25,6 +27,7 @@ export type AgentRunRequest = {
   env: Record<string, string>;
   prompt: string;
   timeoutMs: number;
+  nativeSessionId?: string;
 };
 
 export type AgentRunResult = {
@@ -34,6 +37,7 @@ export type AgentRunResult = {
   finishedAt: string;
   stdoutBytes: number;
   stderrBytes: number;
+  nativeSessionId?: string;
 };
 
 export type TaskMutation = { type: "add_comment"; body: string };

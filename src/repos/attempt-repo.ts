@@ -12,6 +12,7 @@ export type AttemptRecord = {
   runnerName: RunnerProvider;
   runnerModel: string;
   runnerVariant: string;
+  runnerSessionId: string | null;
   status: AttemptStatus;
   startedAt: string;
   finishedAt: string | null;
@@ -52,6 +53,7 @@ export interface AttemptRepo {
     expiresAt: string;
     leases: Array<{ resourceType: LeaseResourceType; resourceKey: string }>;
   }): AttemptRecord | null;
+  linkRunnerSession(attemptId: string, runnerSessionId: string): void;
   finalizeAttempt(
     attemptId: string,
     status: AttemptStatus,

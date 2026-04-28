@@ -151,18 +151,31 @@ describe("persistence repos", () => {
         selectionReason: "test",
       });
 
-      const legacyAttempt = db.attempts.createAttempt({
-        jobId: job.id,
-        workerId: worker!.id,
-        runnerName: "opencode",
-        runnerModel: "openai/gpt-5.4",
-        runnerVariant: "high",
-      });
+      const legacyAttemptId = "legacy-attempt-1";
+      db.database.sqlite
+        .prepare(
+          `INSERT INTO execution_attempt(
+            id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, status, started_at,
+            finished_at, exit_code, signal, summary, error_message
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, NULL)`,
+        )
+        .run(
+          legacyAttemptId,
+          job.id,
+          worker!.id,
+          1,
+          "opencode",
+          "openai/gpt-5.4",
+          "high",
+          "running",
+          "2026-03-14T12:00:00.000Z",
+          "",
+        );
 
       await db.migrationRunner.runMigrations(projectRoot);
 
-      expect(db.attempts.getAttempt(legacyAttempt.id)).toMatchObject({
-        id: legacyAttempt.id,
+      expect(db.attempts.getAttempt(legacyAttemptId)).toMatchObject({
+        id: legacyAttemptId,
         runnerName: "opencode",
       });
 
@@ -180,6 +193,92 @@ describe("persistence repos", () => {
         runnerModel: "claude-opus-4-6",
         runnerVariant: "high",
       });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("persists runner sessions by role and runner config", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0];
+      expect(worker).toBeDefined();
+      const taskTarget = syncSingleTargetTask(db, { taskId: "TASK-SESSIONS", repoKey: "repo-a", branchName: "task-sessions" });
+      const job = db.jobs.createJob({
+        taskId: "TASK-SESSIONS",
+        taskTargetId: taskTarget.id,
+        taskProvider: "file",
+        action: "execution",
+        priorityRank: priorityToRank("high"),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: "TASK-SESSIONS:execution",
+        selectionReason: "test",
+      });
+      const attempt = db.attempts.createAttempt({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerName: "opencode",
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+      });
+
+      const selector = {
+        taskTargetId: taskTarget.id,
+        role: "implementation" as const,
+        runnerName: "opencode" as const,
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+      };
+      const implementation = db.runnerSessions.createSession({ ...selector, isActive: false, nativeSessionId: "impl-1" });
+      db.attempts.linkRunnerSession(attempt.id, implementation.id);
+      db.runnerSessions.updateSession(implementation.id, {
+        isActive: true,
+        lastAttemptId: attempt.id,
+        lastWorktreeHeadSha: "head-1",
+        lastReviewHeadSha: "pr-head-1",
+      });
+
+      expect(db.attempts.getAttempt(attempt.id).runnerSessionId).toBe(implementation.id);
+      expect(db.runnerSessions.getActiveSession(selector)).toMatchObject({
+        id: implementation.id,
+        nativeSessionId: "impl-1",
+        lastWorktreeHeadSha: "head-1",
+        lastReviewHeadSha: "pr-head-1",
+      });
+      db.runnerSessions.updateSession(implementation.id, { lastReviewHeadSha: null });
+      expect(db.runnerSessions.getActiveSession(selector)).toMatchObject({
+        id: implementation.id,
+        lastReviewHeadSha: null,
+      });
+      expect(db.runnerSessions.getActiveSession({ ...selector, runnerModel: "other-model" })).toBeNull();
+
+      const reviewer = db.runnerSessions.createSession({
+        ...selector,
+        role: "reviewer",
+        runnerName: "claude",
+        runnerModel: "claude-opus-4-6",
+        nativeSessionId: "reviewer-1",
+        isActive: true,
+      });
+      expect(
+        db.runnerSessions.getActiveSession({
+          ...selector,
+          role: "reviewer",
+          runnerName: "claude",
+          runnerModel: "claude-opus-4-6",
+        })?.id,
+      ).toBe(reviewer.id);
+      expect(db.runnerSessions.getActiveSession({ ...selector, role: "reviewer" })).toBeNull();
+
+      const retrySession = db.runnerSessions.createSession({ ...selector, isActive: false, nativeSessionId: "impl-2" });
+      expect(db.runnerSessions.getActiveSession(selector)?.id).toBe(implementation.id);
+      db.runnerSessions.updateSession(retrySession.id, { isActive: true, lastAttemptId: attempt.id, lastWorktreeHeadSha: "head-2" });
+      expect(db.runnerSessions.getActiveSession(selector)).toMatchObject({ id: retrySession.id, nativeSessionId: "impl-2" });
     } finally {
       db.close();
     }

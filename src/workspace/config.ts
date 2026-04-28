@@ -1,7 +1,7 @@
 import YAML from "yaml";
 import { z } from "zod";
 
-import type { ActionType } from "../domain/index.js";
+import type { ActionType, RunnerSessionRole } from "../domain/index.js";
 
 export const schedulerSchema = z.object({
   workerConcurrency: z.number().int().positive().default(4),
@@ -296,6 +296,9 @@ export const stringifyWorkspaceConfig = (config: WorkspaceConfig): string => YAM
 
 export const runnerRoleForAction = (action: ActionType): "execution" | "reviewer" =>
   action === "reviewer" ? "reviewer" : "execution";
+
+export const runnerSessionRoleForAction = (action: ActionType): RunnerSessionRole =>
+  action === "reviewer" ? "reviewer" : "implementation";
 
 export const runnerForAction = (config: WorkspaceConfig, action: ActionType): WorkspaceRunnerConfig =>
   config.runner[runnerRoleForAction(action)];
