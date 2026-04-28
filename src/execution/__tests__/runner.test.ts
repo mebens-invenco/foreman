@@ -311,7 +311,6 @@ describe("provider runners", () => {
         "  process.stdout.write(JSON.stringify({ sessionID: 'fresh-opencode-session', type: 'final', text: '<agent-result>{\\\"schemaVersion\\\":1}</agent-result>' }));",
         "});",
       ].join("\n"),
-      expectedNativeSessionId: "fresh-opencode-session",
     },
     {
       label: "ClaudeRunner",
@@ -332,9 +331,8 @@ describe("provider runners", () => {
         "  process.stdout.write(JSON.stringify({ session_id: sessionId, type: 'result', result: '<agent-result>{\\\"schemaVersion\\\":1}</agent-result>' }));",
         "});",
       ].join("\n"),
-      expectedNativeSessionId: undefined,
     },
-  ])("starts a fresh native session when $label resume fails", async ({ scriptName, setBin, createRunner, script, expectedNativeSessionId }) => {
+  ])("does not start a fresh native session when $label resume exits non-zero", async ({ scriptName, setBin, createRunner, script }) => {
     const tempDir = await createTempDir("foreman-runner-test-");
     cleanupDirs.push(tempDir);
 
@@ -344,7 +342,7 @@ describe("provider runners", () => {
 
     const stderrLines: string[] = [];
     const result = await createRunner().invoke({
-      attemptId: "attempt-resume-fallback",
+      attemptId: "attempt-resume-failure",
       action: "review",
       cwd: tempDir,
       env: {},
@@ -356,15 +354,10 @@ describe("provider runners", () => {
       },
     });
 
-    expect(result.exitCode).toBe(0);
-    expect(result.stdout).toBe('<agent-result>{"schemaVersion":1}</agent-result>');
-    expect(result.nativeSessionId).not.toBe("stale-session");
-    if (expectedNativeSessionId) {
-      expect(result.nativeSessionId).toBe(expectedNativeSessionId);
-    } else {
-      expect(result.nativeSessionId).toBeDefined();
-    }
-    expect(stderrLines.some((line) => line.includes("starting a fresh session"))).toBe(true);
+    expect(result.exitCode).toBe(1);
+    expect(result.stdout).toBe("");
+    expect(stderrLines).toContain("resume failed");
+    expect(stderrLines.some((line) => line.includes("starting a fresh session"))).toBe(false);
   });
 
   test("reports JSON normalization warnings and only extracts Claude result records", () => {

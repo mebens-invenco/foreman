@@ -10,13 +10,7 @@ export class OpenCodeRunner implements AgentRunner {
 
   async invoke(request: AgentRunnerInvokeRequest): Promise<CapturedAgentRunResult> {
     if (request.nativeSessionId) {
-      const resumed = await this.run(request, request.nativeSessionId);
-      if (this.shouldStartFreshAfterResumeFailure(request, resumed)) {
-        request.onStderrLine?.(`[foreman] OpenCode session ${request.nativeSessionId} could not be resumed; starting a fresh session.`);
-        return this.run(request);
-      }
-
-      return resumed;
+      return this.run(request, request.nativeSessionId);
     }
 
     return this.run(request);
@@ -38,9 +32,5 @@ export class OpenCodeRunner implements AgentRunner {
       request,
       normalizeStdout: normalizeOpenCodeJsonOutput,
     });
-  }
-
-  private shouldStartFreshAfterResumeFailure(request: AgentRunnerInvokeRequest, result: CapturedAgentRunResult): boolean {
-    return !request.abortSignal?.aborted && result.signal === null && result.exitCode !== null && result.exitCode !== 0;
   }
 }

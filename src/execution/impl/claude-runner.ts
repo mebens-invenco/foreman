@@ -12,13 +12,7 @@ export class ClaudeRunner implements AgentRunner {
 
   async invoke(request: AgentRunnerInvokeRequest): Promise<CapturedAgentRunResult> {
     if (request.nativeSessionId) {
-      const resumed = await this.run(request, request.nativeSessionId, true);
-      if (this.shouldStartFreshAfterResumeFailure(request, resumed)) {
-        request.onStderrLine?.(`[foreman] Claude session ${request.nativeSessionId} could not be resumed; starting a fresh session.`);
-        return this.run(request, randomUUID(), false);
-      }
-
-      return resumed;
+      return this.run(request, request.nativeSessionId, true);
     }
 
     return this.run(request, randomUUID(), false);
@@ -44,9 +38,5 @@ export class ClaudeRunner implements AgentRunner {
         return { stdout: normalized.stdout, nativeSessionId: normalized.nativeSessionId ?? nativeSessionId };
       },
     });
-  }
-
-  private shouldStartFreshAfterResumeFailure(request: AgentRunnerInvokeRequest, result: CapturedAgentRunResult): boolean {
-    return !request.abortSignal?.aborted && result.signal === null && result.exitCode !== null && result.exitCode !== 0;
   }
 }
