@@ -156,6 +156,7 @@ describe("prompt rendering", () => {
     expect(result).toContain("## Common Worker Rules");
     expect(result).toContain("## GitHub Review Rules");
     expect(result).toContain("## Selected Task");
+    expect(result).toContain("## Current Git State");
     expect(result).toContain("## Required Output");
     expect(result).toContain("If execution completes with code changes, return a PR review mutation");
     expect(result).not.toContain("upsert_artifact");
@@ -224,5 +225,27 @@ describe("prompt rendering", () => {
     expect(reviewerPrompt).toContain("submit_pull_request_review");
     expect(reviewerPrompt).toContain("reviewer_checkpoint_eligible");
     expect(reviewerPrompt).not.toContain("### Actionable Now");
+
+    const continuationPrompt = await renderWorkerPrompt({
+      action: "review",
+      config,
+      paths,
+      task: { ...sampleTask, state: "in_review", providerState: "in_review" },
+      comments: "(none)",
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+      gitState: {
+        worktreeHeadSha: "current-head",
+        reviewHeadSha: "review-head",
+        baseBranch: "main",
+        previousSessionHeadSha: "previous-head",
+      },
+      continuation: true,
+    });
+    expect(continuationPrompt).toContain("# Implementation Session Continuation");
+    expect(continuationPrompt).toContain("previousSessionHeadSha");
+    expect(continuationPrompt).toContain("previous-head");
   });
 });

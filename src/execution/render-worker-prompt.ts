@@ -164,6 +164,13 @@ export const renderWorkerPrompt = async (input: {
   worktreePath: string;
   baseBranch: string;
   reviewContext?: ReviewContext;
+  gitState?: {
+    worktreeHeadSha: string | null;
+    reviewHeadSha: string | null;
+    baseBranch: string;
+    previousSessionHeadSha: string | null;
+  };
+  continuation?: boolean;
 }): Promise<string> => {
   const repoContext = {
     repo: input.repo,
@@ -171,14 +178,27 @@ export const renderWorkerPrompt = async (input: {
     baseBranch: input.baseBranch,
   };
 
+  const template = input.continuation
+    ? input.action === "reviewer"
+      ? "reviewer-continuation"
+      : "implementation-continuation"
+    : input.action;
+
   return renderPromptTemplate({
     paths: input.paths,
-    template: input.action,
+    template,
     context: {
       "selected-task": jsonSection("Selected Task", input.task),
       "task-comments": textSection("Task Comments", input.comments),
       repo: jsonSection("Repository Context", repoContext),
+      "git-state": jsonSection("Current Git State", {
+        currentWorktreeHeadSha: input.gitState?.worktreeHeadSha ?? null,
+        currentPrHeadSha: input.gitState?.reviewHeadSha ?? null,
+        baseBranch: input.gitState?.baseBranch ?? input.baseBranch,
+        previousSessionHeadSha: input.gitState?.previousSessionHeadSha ?? null,
+      }),
       review: renderReviewContext(input.action, input.reviewContext),
     },
+    properties: { session: { action: input.action } },
   });
 };

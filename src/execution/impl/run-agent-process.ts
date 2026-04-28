@@ -10,6 +10,7 @@ export const runAgentProcess = async (input: {
   command: string;
   args: string[];
   request: AgentRunnerInvokeRequest;
+  normalizeStdout?: (stdout: string) => { stdout: string; nativeSessionId?: string };
 }): Promise<CapturedAgentRunResult> => {
   const startedAt = isoNow();
 
@@ -131,14 +132,17 @@ export const runAgentProcess = async (input: {
     }
   });
 
+  const normalized = input.normalizeStdout?.(stdout);
+
   return {
     exitCode: timedOut ? null : exitCode,
     signal,
     startedAt,
     finishedAt: isoNow(),
-    stdoutBytes: Buffer.byteLength(stdout),
+    stdoutBytes: Buffer.byteLength(normalized?.stdout ?? stdout),
     stderrBytes: Buffer.byteLength(stderr),
-    stdout,
+    stdout: normalized?.stdout ?? stdout,
     stderr,
+    ...(normalized?.nativeSessionId ? { nativeSessionId: normalized.nativeSessionId } : {}),
   };
 };
