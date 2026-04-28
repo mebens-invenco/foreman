@@ -98,6 +98,31 @@ export class SqliteRunnerSessionRepo implements RunnerSessionRepo {
     },
   ): void {
     const now = isoNow();
+    const setClauses: string[] = [];
+    const values: unknown[] = [];
+
+    const addSet = (column: string, value: unknown): void => {
+      setClauses.push(`${column} = ?`);
+      values.push(value);
+    };
+
+    if (patch.nativeSessionId !== undefined) {
+      addSet("native_session_id", patch.nativeSessionId ?? null);
+    }
+    if (patch.lastAttemptId !== undefined) {
+      addSet("last_attempt_id", patch.lastAttemptId ?? null);
+    }
+    if (patch.lastWorktreeHeadSha !== undefined) {
+      addSet("last_worktree_head_sha", patch.lastWorktreeHeadSha ?? null);
+    }
+    if (patch.lastReviewHeadSha !== undefined) {
+      addSet("last_review_head_sha", patch.lastReviewHeadSha ?? null);
+    }
+    if (patch.isActive !== undefined) {
+      addSet("is_active", patch.isActive ? 1 : 0);
+    }
+    addSet("updated_at", now);
+
     this.sqlite.transaction(() => {
       const existing = this.sqlite
         .prepare("SELECT task_target_id, role, runner_name, runner_model, runner_variant FROM runner_session WHERE id = ?")
@@ -127,26 +152,7 @@ export class SqliteRunnerSessionRepo implements RunnerSessionRepo {
           );
       }
 
-      this.sqlite
-        .prepare(
-          `UPDATE runner_session
-              SET native_session_id = COALESCE(?, native_session_id),
-                  last_attempt_id = COALESCE(?, last_attempt_id),
-                  last_worktree_head_sha = COALESCE(?, last_worktree_head_sha),
-                  last_review_head_sha = COALESCE(?, last_review_head_sha),
-                  is_active = COALESCE(?, is_active),
-                  updated_at = ?
-            WHERE id = ?`,
-        )
-        .run(
-          patch.nativeSessionId ?? null,
-          patch.lastAttemptId ?? null,
-          patch.lastWorktreeHeadSha ?? null,
-          patch.lastReviewHeadSha ?? null,
-          patch.isActive === undefined ? null : patch.isActive ? 1 : 0,
-          now,
-          sessionId,
-        );
+      this.sqlite.prepare(`UPDATE runner_session SET ${setClauses.join(", ")} WHERE id = ?`).run(...values, sessionId);
     })();
   }
 }

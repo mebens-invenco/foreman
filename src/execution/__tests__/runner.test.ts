@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { ClaudeRunner, OpenCodeRunner, createAgentRunner } from "../index.js";
+import { normalizeClaudeJsonOutput, normalizeOpenCodeJsonOutput } from "../impl/json-output.js";
 import { createTempDir } from "../../test-support/helpers.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 
@@ -289,5 +290,97 @@ describe("provider runners", () => {
     });
     expect(claudeResult.stdout).toBe('<agent-result>{"schemaVersion":1}</agent-result>');
     expect(claudeResult.nativeSessionId).toBe("claude-session");
+  });
+
+  test.each([
+    {
+      label: "OpenCodeRunner",
+      scriptName: "fake-opencode.js",
+      setBin(scriptPath: string) {
+        process.env.FOREMAN_OPENCODE_BIN = scriptPath;
+      },
+      createRunner() {
+        return new OpenCodeRunner("openai/gpt-5.4", "high");
+      },
+      script: [
+        "#!/usr/bin/env node",
+        "const argv = process.argv.slice(2);",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => {",
+        "  if (argv.includes('--session')) { process.stderr.write('resume failed\\n'); process.exit(1); }",
+        "  process.stdout.write(JSON.stringify({ sessionID: 'fresh-opencode-session', type: 'final', text: '<agent-result>{\\\"schemaVersion\\\":1}</agent-result>' }));",
+        "});",
+      ].join("\n"),
+      expectedNativeSessionId: "fresh-opencode-session",
+    },
+    {
+      label: "ClaudeRunner",
+      scriptName: "fake-claude.js",
+      setBin(scriptPath: string) {
+        process.env.FOREMAN_CLAUDE_BIN = scriptPath;
+      },
+      createRunner() {
+        return new ClaudeRunner("claude-opus-4-6", "high");
+      },
+      script: [
+        "#!/usr/bin/env node",
+        "const argv = process.argv.slice(2);",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => {",
+        "  if (argv.includes('--resume')) { process.stderr.write('resume failed\\n'); process.exit(1); }",
+        "  const sessionId = argv[argv.indexOf('--session-id') + 1];",
+        "  process.stdout.write(JSON.stringify({ session_id: sessionId, type: 'result', result: '<agent-result>{\\\"schemaVersion\\\":1}</agent-result>' }));",
+        "});",
+      ].join("\n"),
+      expectedNativeSessionId: undefined,
+    },
+  ])("starts a fresh native session when $label resume fails", async ({ scriptName, setBin, createRunner, script, expectedNativeSessionId }) => {
+    const tempDir = await createTempDir("foreman-runner-test-");
+    cleanupDirs.push(tempDir);
+
+    const scriptPath = path.join(tempDir, scriptName);
+    await writeExecutableScript(scriptPath, script);
+    setBin(scriptPath);
+
+    const stderrLines: string[] = [];
+    const result = await createRunner().invoke({
+      attemptId: "attempt-resume-fallback",
+      action: "review",
+      cwd: tempDir,
+      env: {},
+      prompt: "continue",
+      timeoutMs: 5_000,
+      nativeSessionId: "stale-session",
+      onStderrLine(line) {
+        stderrLines.push(line);
+      },
+    });
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toBe('<agent-result>{"schemaVersion":1}</agent-result>');
+    expect(result.nativeSessionId).not.toBe("stale-session");
+    if (expectedNativeSessionId) {
+      expect(result.nativeSessionId).toBe(expectedNativeSessionId);
+    } else {
+      expect(result.nativeSessionId).toBeDefined();
+    }
+    expect(stderrLines.some((line) => line.includes("starting a fresh session"))).toBe(true);
+  });
+
+  test("reports JSON normalization warnings and only extracts Claude result records", () => {
+    expect(normalizeOpenCodeJsonOutput("{bad json")).toMatchObject({
+      stdout: "{bad json",
+      warning: expect.stringContaining("Failed to parse OpenCode JSON output"),
+    });
+    expect(normalizeClaudeJsonOutput("{bad json")).toMatchObject({
+      stdout: "{bad json",
+      warning: expect.stringContaining("Failed to parse Claude JSON output"),
+    });
+
+    const claudeOutput = [
+      JSON.stringify({ type: "assistant", text: "intermediate" }),
+      JSON.stringify({ type: "result", result: "final" }),
+    ].join("\n");
+    expect(normalizeClaudeJsonOutput(claudeOutput).stdout).toBe("final");
   });
 });

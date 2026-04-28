@@ -1,5 +1,11 @@
 type JsonRecord = Record<string, unknown>;
 
+export type NormalizedJsonOutput = {
+  stdout: string;
+  nativeSessionId?: string;
+  warning?: string;
+};
+
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -31,15 +37,18 @@ const stringField = (record: JsonRecord, names: string[]): string | null => {
   return null;
 };
 
-export const normalizeClaudeJsonOutput = (stdout: string): { stdout: string; nativeSessionId?: string } => {
+export const normalizeClaudeJsonOutput = (stdout: string): NormalizedJsonOutput => {
   let values: unknown[];
   try {
     values = parseJsonValues(stdout);
-  } catch {
-    return { stdout };
+  } catch (error) {
+    return {
+      stdout,
+      warning: `Failed to parse Claude JSON output; using raw stdout: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
   const records = values.filter(isRecord);
-  const resultRecord = records.find((record) => typeof record.result === "string") ?? records.at(-1);
+  const resultRecord = records.find((record) => record.type === "result") ?? records.find((record) => typeof record.result === "string");
   const normalized = resultRecord ? stringField(resultRecord, ["result", "text", "output", "message"]) : null;
   const nativeSessionId = records.map((record) => stringField(record, ["session_id", "sessionId", "sessionID"])).find(Boolean) ?? undefined;
 
@@ -49,12 +58,15 @@ export const normalizeClaudeJsonOutput = (stdout: string): { stdout: string; nat
   };
 };
 
-export const normalizeOpenCodeJsonOutput = (stdout: string): { stdout: string; nativeSessionId?: string } => {
+export const normalizeOpenCodeJsonOutput = (stdout: string): NormalizedJsonOutput => {
   let values: unknown[];
   try {
     values = parseJsonValues(stdout);
-  } catch {
-    return { stdout };
+  } catch (error) {
+    return {
+      stdout,
+      warning: `Failed to parse OpenCode JSON output; using raw stdout: ${error instanceof Error ? error.message : String(error)}`,
+    };
   }
   const records = values.filter(isRecord);
   const nativeSessionId = records.map((record) => stringField(record, ["sessionID", "sessionId", "session_id"])).find(Boolean) ?? undefined;

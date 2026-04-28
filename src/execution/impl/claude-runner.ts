@@ -11,7 +11,20 @@ export class ClaudeRunner implements AgentRunner {
   ) {}
 
   async invoke(request: AgentRunnerInvokeRequest): Promise<CapturedAgentRunResult> {
-    const nativeSessionId = request.nativeSessionId ?? randomUUID();
+    if (request.nativeSessionId) {
+      const resumed = await this.run(request, request.nativeSessionId, true);
+      if (this.shouldStartFreshAfterResumeFailure(request, resumed)) {
+        request.onStderrLine?.(`[foreman] Claude session ${request.nativeSessionId} could not be resumed; starting a fresh session.`);
+        return this.run(request, randomUUID(), false);
+      }
+
+      return resumed;
+    }
+
+    return this.run(request, randomUUID(), false);
+  }
+
+  private run(request: AgentRunnerInvokeRequest, nativeSessionId: string, resume: boolean): Promise<CapturedAgentRunResult> {
     return runAgentProcess({
       command: process.env.FOREMAN_CLAUDE_BIN ?? "claude",
       args: [
@@ -23,7 +36,7 @@ export class ClaudeRunner implements AgentRunner {
         this.effort,
         "--output-format",
         "json",
-        ...(request.nativeSessionId ? ["--resume", nativeSessionId] : ["--session-id", nativeSessionId]),
+        ...(resume ? ["--resume", nativeSessionId] : ["--session-id", nativeSessionId]),
       ],
       request: { ...request, nativeSessionId },
       normalizeStdout: (stdout) => {
@@ -31,5 +44,9 @@ export class ClaudeRunner implements AgentRunner {
         return { stdout: normalized.stdout, nativeSessionId: normalized.nativeSessionId ?? nativeSessionId };
       },
     });
+  }
+
+  private shouldStartFreshAfterResumeFailure(request: AgentRunnerInvokeRequest, result: CapturedAgentRunResult): boolean {
+    return !request.abortSignal?.aborted && result.signal === null && result.exitCode !== null && result.exitCode !== 0;
   }
 }

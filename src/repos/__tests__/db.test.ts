@@ -250,6 +250,11 @@ describe("persistence repos", () => {
         lastWorktreeHeadSha: "head-1",
         lastReviewHeadSha: "pr-head-1",
       });
+      db.runnerSessions.updateSession(implementation.id, { lastReviewHeadSha: null });
+      expect(db.runnerSessions.getActiveSession(selector)).toMatchObject({
+        id: implementation.id,
+        lastReviewHeadSha: null,
+      });
       expect(db.runnerSessions.getActiveSession({ ...selector, runnerModel: "other-model" })).toBeNull();
 
       const reviewer = db.runnerSessions.createSession({
