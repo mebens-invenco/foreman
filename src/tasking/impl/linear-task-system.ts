@@ -273,6 +273,8 @@ const parseGitRemote = (remoteUrl: string): RepoDescriptor => {
 const isUnknownProviderStateError = (error: unknown): error is ForemanError =>
   isForemanError(error) && error.code === "unknown_provider_state";
 
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
 export class LinearTaskSystem implements TaskSystem {
   private readonly client: LinearClient;
   private readonly logger: LoggerService;
@@ -389,6 +391,59 @@ export class LinearTaskSystem implements TaskSystem {
       updatedAt: node.updatedAt,
       url: node.url,
     };
+  }
+
+  private async fetchIssueNode(taskId: string): Promise<LinearIssueNode> {
+    const identifier = parseLinearIssueIdentifier(taskId);
+
+    const data = await this.client.request<{ issues: { nodes: LinearIssueNode[] } }>(
+      identifier
+        ? `query ForemanIssue($teamKey: String!, $number: Float!) {
+        issues(filter: { team: { key: { eq: $teamKey } }, number: { eq: $number } }, first: 1) {
+          nodes {
+            id
+            identifier
+            title
+            description
+            branchName
+            updatedAt
+            url
+            priorityLabel
+            state { id name }
+            assignee { name }
+            labels { nodes { id name } }
+            attachments { nodes { id title url } }
+          }
+        }
+      }`
+        : `query ForemanIssue($id: ID!) {
+        issues(filter: { id: { eq: $id } }, first: 1) {
+          nodes {
+            id
+            identifier
+            title
+            description
+            branchName
+            updatedAt
+            url
+            priorityLabel
+            state { id name }
+            assignee { name }
+            labels { nodes { id name } }
+            attachments { nodes { id title url } }
+          }
+        }
+      }`,
+      identifier ? { teamKey: identifier.teamKey, number: identifier.number } : { id: taskId },
+    );
+
+    const issue = data.issues.nodes[0];
+    if (!issue) {
+      this.logger.error("Linear issue was not found", { taskId });
+      throw new ForemanError("task_not_found", `Linear task not found: ${taskId}`, 404);
+    }
+
+    return issue;
   }
 
   private async getViewer(): Promise<LinearViewer> {
@@ -620,55 +675,7 @@ export class LinearTaskSystem implements TaskSystem {
 
   async getTask(taskId: string): Promise<Task> {
     this.logger.debug("fetching Linear issue", { taskId });
-    const identifier = parseLinearIssueIdentifier(taskId);
-
-    const data = await this.client.request<{ issues: { nodes: LinearIssueNode[] } }>(
-      identifier
-        ? `query ForemanIssue($teamKey: String!, $number: Float!) {
-        issues(filter: { team: { key: { eq: $teamKey } }, number: { eq: $number } }, first: 1) {
-          nodes {
-            id
-            identifier
-            title
-            description
-            branchName
-            updatedAt
-            url
-            priorityLabel
-            state { id name }
-            assignee { name }
-            labels { nodes { id name } }
-            attachments { nodes { id title url } }
-          }
-        }
-      }`
-        : `query ForemanIssue($id: ID!) {
-        issues(filter: { id: { eq: $id } }, first: 1) {
-          nodes {
-            id
-            identifier
-            title
-            description
-            branchName
-            updatedAt
-            url
-            priorityLabel
-            state { id name }
-            assignee { name }
-            labels { nodes { id name } }
-            attachments { nodes { id title url } }
-          }
-        }
-      }`,
-      identifier ? { teamKey: identifier.teamKey, number: identifier.number } : { id: taskId },
-    );
-
-    const issue = data.issues.nodes[0];
-    if (!issue) {
-      this.logger.error("Linear issue was not found", { taskId });
-      throw new ForemanError("task_not_found", `Linear task not found: ${taskId}`, 404);
-    }
-
+    const issue = await this.fetchIssueNode(taskId);
     this.logger.debug("fetched Linear issue", { taskId, providerId: issue.id, state: issue.state.name });
     return this.linearIssueToTask(issue);
   }
@@ -752,12 +759,57 @@ export class LinearTaskSystem implements TaskSystem {
   }
 
   async upsertPullRequest(input: { taskId: string; pullRequest: TaskPullRequest }): Promise<void> {
-    this.logger.info("skipping Linear attachment mutation for pull request", {
-      taskId: input.taskId,
-      repoKey: input.pullRequest.repoKey,
-      pullRequestUrl: input.pullRequest.url,
-      source: input.pullRequest.source,
-    });
+    const { pullRequest } = input;
+    if (!isGithubPullRequestUrl(pullRequest.url)) {
+      this.logger.info("skipping non-GitHub pull request attachment for Linear issue", {
+        taskId: input.taskId,
+        repoKey: pullRequest.repoKey,
+        pullRequestUrl: pullRequest.url,
+        source: pullRequest.source,
+      });
+      return;
+    }
+
+    const issue = await this.fetchIssueNode(input.taskId);
+    if (issue.attachments.nodes.some((attachment) => attachment.url === pullRequest.url)) {
+      this.logger.info("skipping duplicate Linear pull request attachment", {
+        taskId: input.taskId,
+        providerId: issue.id,
+        repoKey: pullRequest.repoKey,
+        pullRequestUrl: pullRequest.url,
+        source: pullRequest.source,
+      });
+      return;
+    }
+
+    try {
+      await this.client.request(
+        `mutation ForemanPullRequestAttachmentCreate($issueId: String!, $title: String!, $url: String!) {
+          attachmentCreate(input: { issueId: $issueId, title: $title, url: $url }) { success }
+        }`,
+        {
+          issueId: issue.id,
+          title: pullRequest.title ?? pullRequest.url,
+          url: pullRequest.url,
+        },
+      );
+      this.logger.info("created Linear pull request attachment", {
+        taskId: input.taskId,
+        providerId: issue.id,
+        repoKey: pullRequest.repoKey,
+        pullRequestUrl: pullRequest.url,
+        source: pullRequest.source,
+      });
+    } catch (error) {
+      this.logger.warn("failed to create Linear pull request attachment", {
+        taskId: input.taskId,
+        providerId: issue.id,
+        repoKey: pullRequest.repoKey,
+        pullRequestUrl: pullRequest.url,
+        source: pullRequest.source,
+        error: errorMessage(error),
+      });
+    }
   }
 
   async updateLabels(input: { taskId: string; add: string[]; remove: string[] }): Promise<void> {
