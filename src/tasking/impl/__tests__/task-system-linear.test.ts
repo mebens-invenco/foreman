@@ -434,11 +434,26 @@ describe("LinearTaskSystem.transition", () => {
 });
 
 describe("LinearTaskSystem.upsertPullRequest", () => {
-  test("skips pull request updates because Linear auto-links them", async () => {
+  test("creates a Linear attachment for GitHub pull request URLs", async () => {
     const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
     global.fetch = vi.fn(async (_url, init) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
       requests.push(body);
+
+      if (body.query.includes("query ForemanIssue")) {
+        return new Response(JSON.stringify({ data: linearIssue([]) }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (body.query.includes("mutation ForemanPullRequestAttachmentCreate")) {
+        return new Response(JSON.stringify({ data: { attachmentCreate: { success: true } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
       throw new Error(`Unexpected query: ${body.query}`);
     }) as typeof fetch;
 
@@ -453,7 +468,48 @@ describe("LinearTaskSystem.upsertPullRequest", () => {
       },
     });
 
-    expect(requests).toHaveLength(0);
+    expect(requests).toHaveLength(2);
+    expect(requests[0]?.query).toContain("query ForemanIssue");
+    expect(requests[1]?.query).toContain("mutation ForemanPullRequestAttachmentCreate");
+    expect(requests[1]?.variables).toEqual({
+      issueId: "issue-1",
+      title: "PR 1",
+      url: "https://github.com/acme/repo-a/pull/1",
+    });
+  });
+
+  test("skips duplicate Linear attachments with the same pull request URL", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanIssue")) {
+        return new Response(
+          JSON.stringify({ data: linearIssue([{ id: "att-pr", title: "PR 1", url: "https://github.com/acme/repo-a/pull/1" }]) }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    await taskSystem.upsertPullRequest({
+      taskId: "ENG-123",
+      pullRequest: {
+        repoKey: "repo-a",
+        url: "https://github.com/acme/repo-a/pull/1",
+        title: "PR 1",
+        source: "local",
+      },
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.query).toContain("query ForemanIssue");
   });
 
   test("does not create Linear attachments for non-GitHub pull request URLs", async () => {
@@ -476,5 +532,110 @@ describe("LinearTaskSystem.upsertPullRequest", () => {
     });
 
     expect(requests).toHaveLength(0);
+  });
+
+  test("creates an additional attachment when Linear has a different GitHub pull request", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanIssue")) {
+        return new Response(
+          JSON.stringify({ data: linearIssue([{ id: "att-pr-2", title: "PR 2", url: "https://github.com/acme/repo-a/pull/2" }]) }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          },
+        );
+      }
+
+      if (body.query.includes("mutation ForemanPullRequestAttachmentCreate")) {
+        return new Response(JSON.stringify({ data: { attachmentCreate: { success: true } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    await taskSystem.upsertPullRequest({
+      taskId: "ENG-123",
+      pullRequest: {
+        repoKey: "repo-a",
+        url: "https://github.com/acme/repo-a/pull/1",
+        title: "PR 1",
+        source: "local",
+      },
+    });
+
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.query).toContain("mutation ForemanPullRequestAttachmentCreate");
+    expect(requests[1]?.variables).toEqual({
+      issueId: "issue-1",
+      title: "PR 1",
+      url: "https://github.com/acme/repo-a/pull/1",
+    });
+  });
+
+  test("logs a warning and continues when Linear attachment creation fails", async () => {
+    const logger = {
+      child() {
+        return this;
+      },
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      line: vi.fn(),
+      runnerLine: vi.fn(),
+      flush: async () => undefined,
+    };
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanIssue")) {
+        return new Response(JSON.stringify({ data: linearIssue([]) }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (body.query.includes("mutation ForemanPullRequestAttachmentCreate")) {
+        return new Response(JSON.stringify({ errors: [{ message: "attachment rejected" }] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], logger as any);
+    await expect(
+      taskSystem.upsertPullRequest({
+        taskId: "ENG-123",
+        pullRequest: {
+          repoKey: "repo-a",
+          url: "https://github.com/acme/repo-a/pull/1",
+          title: "PR 1",
+          source: "local",
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(requests).toHaveLength(2);
+    expect(logger.warn).toHaveBeenCalledWith("failed to create Linear pull request attachment", {
+      taskId: "ENG-123",
+      providerId: "issue-1",
+      repoKey: "repo-a",
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/1",
+      source: "local",
+      error: "Linear request failed: attachment rejected",
+    });
   });
 });

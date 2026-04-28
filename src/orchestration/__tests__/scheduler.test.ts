@@ -553,8 +553,158 @@ describe("SchedulerService applyWorkerResult", () => {
     ).rejects.toThrow("Execution results with code changes must include a create_pull_request or reopen_pull_request mutation");
   });
 
+  test("records created pull requests through the task system and task mirror", async () => {
+    const upsertPullRequest = vi.fn(async () => undefined);
+    const upsertTaskPullRequest = vi.fn();
+    const createPullRequest = vi.fn(async () => ({ url: "https://github.com/acme/repo-a/pull/2", number: 2 }));
+    const transition = vi.fn(async () => undefined);
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({ taskMirror: { upsertTaskPullRequest } }),
+      taskSystem: {
+        addComment: vi.fn(async () => undefined),
+        upsertPullRequest,
+        transition,
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        createPullRequest,
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-3a" },
+        job: { action: "execution", taskTargetId: sampleTarget.id },
+        task: sampleTask({ state: "in_progress", providerState: "in_progress", pullRequests: [] }),
+        target: sampleTarget,
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        workerResult: baseWorkerResult({
+          action: "execution",
+          outcome: "completed",
+          signals: ["code_changed"],
+          reviewMutations: [
+            {
+              type: "create_pull_request",
+              title: "TASK-0001: Sample task",
+              body: "## Summary\n- Adds the implementation.",
+              draft: true,
+              baseBranch: "main",
+              headBranch: "task-0001",
+            },
+          ],
+        }),
+      }),
+    ).resolves.toBe("https://github.com/acme/repo-a/pull/2");
+
+    const pullRequest = {
+      repoKey: "repo-a",
+      url: "https://github.com/acme/repo-a/pull/2",
+      title: "TASK-0001: Sample task",
+      source: "local",
+    };
+    expect(upsertPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
+    expect(upsertTaskPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
+    expect(transition).toHaveBeenCalledWith({ taskId: "TASK-0001", toState: "in_review" });
+  });
+
+  test("records reopened pull requests through the task system and task mirror", async () => {
+    const upsertPullRequest = vi.fn(async () => undefined);
+    const upsertTaskPullRequest = vi.fn();
+    const reopenPullRequest = vi.fn(async () => ({ url: "https://github.com/acme/repo-a/pull/3", number: 3 }));
+    const transition = vi.fn(async () => undefined);
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({ taskMirror: { upsertTaskPullRequest } }),
+      taskSystem: {
+        addComment: vi.fn(async () => undefined),
+        upsertPullRequest,
+        transition,
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        reopenPullRequest,
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-3d" },
+        job: { action: "execution", taskTargetId: sampleTarget.id },
+        task: sampleTask({ state: "in_progress", providerState: "in_progress", pullRequests: [] }),
+        target: sampleTarget,
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        workerResult: baseWorkerResult({
+          action: "execution",
+          outcome: "completed",
+          signals: ["code_changed"],
+          reviewMutations: [
+            {
+              type: "reopen_pull_request",
+              pullRequestNumber: 3,
+              title: "TASK-0001: Sample task",
+              draft: true,
+            },
+          ],
+        }),
+      }),
+    ).resolves.toBe("https://github.com/acme/repo-a/pull/3");
+
+    const pullRequest = {
+      repoKey: "repo-a",
+      url: "https://github.com/acme/repo-a/pull/3",
+      title: "TASK-0001: Sample task",
+      source: "local",
+    };
+    expect(upsertPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
+    expect(upsertTaskPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
+    expect(transition).toHaveBeenCalledWith({ taskId: "TASK-0001", toState: "in_review" });
+  });
+
   test("returns execution no-op tasks to in_review when an open pull request already exists", async () => {
     const transition = vi.fn(async () => undefined);
+    const upsertPullRequest = vi.fn(async () => undefined);
+    const upsertTaskPullRequest = vi.fn();
     const resolvePullRequest = vi.fn(async () => ({ ...resolvedPullRequest, state: "open" as const }));
     const scheduler = new SchedulerService({
       config: createDefaultWorkspaceConfig("foo", "file"),
@@ -571,10 +721,10 @@ describe("SchedulerService applyWorkerResult", () => {
         tasksDir: "/tmp/workspace/tasks",
         planPath: "/tmp/workspace/plan.md",
       },
-      foremanRepos: createMockRepos(),
+      foremanRepos: createMockRepos({ taskMirror: { upsertTaskPullRequest } }),
         taskSystem: {
           addComment: vi.fn(async () => undefined),
-          upsertPullRequest: vi.fn(async () => undefined),
+          upsertPullRequest,
           transition,
           updateLabels: vi.fn(async () => undefined),
         } as any,
@@ -609,6 +759,13 @@ describe("SchedulerService applyWorkerResult", () => {
     ).resolves.toBe(reviewContext.pullRequestUrl);
 
     expect(resolvePullRequest).toHaveBeenCalled();
+    const pullRequest = {
+      repoKey: "repo-a",
+      url: reviewContext.pullRequestUrl,
+      source: "branch_inferred",
+    };
+    expect(upsertPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
+    expect(upsertTaskPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
     expect(transition).toHaveBeenCalledWith({ taskId: "TASK-0001", toState: "in_review" });
   });
 
