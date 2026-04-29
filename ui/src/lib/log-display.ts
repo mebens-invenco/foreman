@@ -1,3 +1,5 @@
+import { renderAgentJsonLogLine } from "./agent-json-log-display"
+
 type NamedAnsiColor =
   | "black"
   | "red"
@@ -422,11 +424,17 @@ export const appendLogChunk = (buffer: LogBuffer, chunk: string): LogBuffer => {
   const combined = buffer.pendingRawLine + normalizeLogChunk(chunk)
   const { lines, remainder } = splitCompleteLines(combined)
   let nextState = cloneAnsiStyleState(buffer.pendingLineStartState)
-  const renderedLines = lines.map((line) => {
-    const rendered = parseAnsiLine(line, nextState)
+  const renderedLines: RenderedLogLine[] = []
+  for (const line of lines) {
+    const displayLine = renderAgentJsonLogLine(line)
+    if (displayLine === null) {
+      continue
+    }
+
+    const rendered = parseAnsiLine(displayLine, nextState)
     nextState = rendered.state
-    return { segments: rendered.segments }
-  })
+    renderedLines.push({ segments: rendered.segments })
+  }
 
   const pendingLineStartState = cloneAnsiStyleState(nextState)
   const pendingLine =

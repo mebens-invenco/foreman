@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { ensureDir } from "./lib/fs.js";
+import { renderAgentJsonLogLine } from "./lib/agent-json-log-display.js";
 import { isoNow } from "./lib/time.js";
 import type { WorkspacePaths } from "./workspace/workspace-paths.js";
 
@@ -226,7 +227,12 @@ export class LoggerService {
     const attemptId = typeof merged.attemptId === "string" && merged.attemptId ? merged.attemptId : null;
     const fileLine = `${message}\n`;
     const badgeLabel = formatRunnerBadgeLabel(merged);
-    const stdoutLine = badgeLabel ? `${formatBadge(badgeLabel, this.state.colorEnabled)} ${message}\n` : `${message}\n`;
+    const displayMessage = renderAgentJsonLogLine(message);
+    const stdoutLine = displayMessage
+      ? badgeLabel
+        ? `${formatBadge(badgeLabel, this.state.colorEnabled)} ${displayMessage}\n`
+        : `${displayMessage}\n`
+      : null;
 
     const appendAttempt = async (): Promise<void> => {
       if (!attemptId || !this.state.paths) {
@@ -240,7 +246,9 @@ export class LoggerService {
 
     const next = this.state.queue.catch(() => undefined).then(async () => {
       try {
-        this.state.stdout.write(stdoutLine);
+        if (stdoutLine) {
+          this.state.stdout.write(stdoutLine);
+        }
       } catch {
         // ignore stdout write failures
       }
