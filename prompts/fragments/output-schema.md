@@ -69,6 +69,27 @@ Allowed learning mutation types:
 - `add`
 - `update`
 
+Learning mutation field requirements:
+
+- `add` requires `title`, `repo`, `confidence`, `content`, and `tags`
+- `repo` must be `shared` or the current repository key
+- `confidence` must be one of `emerging`, `established`, or `proven`
+- `tags` must be an array of strings; use `[]` when no compact tags apply
+- `update` requires `id`; `title`, `repo`, `confidence`, `content`, `tags`, and `markApplied` are optional
+
+Example `add` learning mutation:
+
+```json
+{
+  "type": "add",
+  "title": "Continuation prompts need bootstrap context after failed resume",
+  "repo": "foreman",
+  "confidence": "emerging",
+  "content": "When a persisted native runner resume fails, rerender a bootstrap prompt before starting a fresh native session because continuation prompts assume prior context.",
+  "tags": ["runner-sessions", "prompts"]
+}
+```
+
 Blocker requirements:
 
 - each blocker must be a non-empty string message

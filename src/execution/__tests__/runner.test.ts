@@ -375,5 +375,18 @@ describe("provider runners", () => {
       JSON.stringify({ type: "result", result: "final" }),
     ].join("\n");
     expect(normalizeClaudeJsonOutput(claudeOutput).stdout).toBe("final");
+
+    const opencodeOutput = JSON.stringify({
+      type: "text",
+      sessionID: "opencode-session",
+      part: {
+        type: "text",
+        text: '<agent-result>{"schemaVersion":1}</agent-result>',
+      },
+    });
+    expect(normalizeOpenCodeJsonOutput(opencodeOutput)).toMatchObject({
+      stdout: '<agent-result>{"schemaVersion":1}</agent-result>',
+      nativeSessionId: "opencode-session",
+    });
   });
 });

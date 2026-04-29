@@ -1,9 +1,13 @@
+import path from "node:path";
+import { promises as fs } from "node:fs";
+
 import { describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../../domain/index.js";
 import { SchedulerService } from "../index.js";
 import * as worktrees from "../../workspace/git-worktrees.js";
+import { createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
 
 const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   id: "TASK-0001",
@@ -117,6 +121,7 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     getAttempt: vi.fn(),
     latestAttemptForJob: vi.fn(() => null),
     latestAttemptForTaskTarget: vi.fn(() => null),
+    linkRunnerSession: vi.fn(),
     addAttemptEvent: vi.fn(),
     listAttemptEvents: vi.fn(() => []),
     recoverOrphanedRunningAttempts: vi.fn(() => []),
@@ -177,6 +182,13 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     getLearningsByIds: vi.fn(() => []),
     listLearnings: vi.fn(() => []),
     ...((overrides.learnings as object | undefined) ?? {}),
+  },
+  runnerSessions: {
+    getActiveSession: vi.fn(() => null),
+    createSession: vi.fn(() => ({ id: "runner-session-1", nativeSessionId: null })),
+    updateSession: vi.fn(),
+    linkRunnerSession: vi.fn(),
+    ...((overrides.runnerSessions as object | undefined) ?? {}),
   },
   history: {
     addHistoryStep: vi.fn(),
@@ -1164,5 +1176,128 @@ describe("SchedulerService applyWorkerResult", () => {
     );
     expect(releaseLeasesForAttempt).toHaveBeenCalledWith("attempt-5", "completed");
     expect(updateWorkerStatus).toHaveBeenLastCalledWith("worker-1", "idle", null);
+  });
+
+  test("reports non-zero runner output instead of schema parse noise", async () => {
+    const tempDir = await createTempDir("foreman-runner-failure-test-");
+    const paths = createWorkspacePaths(testProjectRoot, tempDir);
+    const worktreePath = path.join(tempDir, "worktree");
+    const fakeRunnerPath = path.join(tempDir, "fake-opencode.js");
+    const originalOpencodeBin = process.env.FOREMAN_OPENCODE_BIN;
+    const ensureTaskWorktree = vi.spyOn(worktrees, "ensureTaskWorktree").mockResolvedValue(worktreePath);
+
+    try {
+      await fs.mkdir(worktreePath, { recursive: true });
+      await fs.writeFile(
+        fakeRunnerPath,
+        [
+          "#!/usr/bin/env node",
+          "process.stdin.resume();",
+          "process.stdin.on('end', () => {",
+          "  process.stdout.write('There is an issue with the selected model. Run --model to pick a different model.');",
+          "  process.exit(1);",
+          "});",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      process.env.FOREMAN_OPENCODE_BIN = fakeRunnerPath;
+
+      const addAttemptEvent = vi.fn();
+      const finalizeAttempt = vi.fn();
+      const updateJobStatus = vi.fn();
+      const releaseLeasesForAttempt = vi.fn();
+      const updateWorkerStatus = vi.fn();
+      const logger = {
+        ...fakeLogger,
+        flush: async () => {
+          await fs.mkdir(paths.attemptsLogDir, { recursive: true });
+          await fs.writeFile(path.join(paths.attemptsLogDir, "attempt-runner-failure.log"), "runner log\n");
+        },
+      };
+      const scheduler = new SchedulerService({
+        config: createDefaultWorkspaceConfig("foo", "file"),
+        paths,
+        foremanRepos: createMockRepos({
+          attempts: {
+            createAttemptWithLeases: vi.fn(() => ({
+              id: "attempt-runner-failure",
+              attemptNumber: 1,
+              startedAt: "2026-03-16T00:00:00Z",
+            })),
+            addAttemptEvent,
+            finalizeAttempt,
+          },
+          workers: { updateWorkerStatus },
+          jobs: { updateJobStatus },
+          leases: { releaseLeasesForAttempt },
+        }),
+        taskSystem: {
+          getTask: vi.fn(async () => sampleTask({ state: "ready", providerState: "ready" })),
+          transition: vi.fn(async () => undefined),
+          listComments: vi.fn(async () => []),
+        } as any,
+        reviewService: {} as any,
+        repos: [{ key: "repo-a", rootPath: worktreePath, defaultBranch: "main" }],
+        env: {},
+        logger: logger as any,
+      });
+
+      await (scheduler as any).runJob(
+        {
+          id: "worker-1",
+          slot: 1,
+          status: "leased",
+          currentAttemptId: null,
+          lastHeartbeatAt: "2026-03-16T00:00:00Z",
+        },
+        {
+          id: "job-1",
+          taskId: "TASK-0001",
+          taskTargetId: "target-1",
+          action: "execution",
+          repoKey: "repo-a",
+          baseBranch: "main",
+        },
+      );
+
+      expect(addAttemptEvent).toHaveBeenCalledWith(
+        "attempt-runner-failure",
+        "attempt_failed",
+        expect.stringContaining("Runner exited with exit code 1"),
+      );
+      expect(addAttemptEvent).toHaveBeenCalledWith(
+        "attempt-runner-failure",
+        "attempt_failed",
+        expect.stringContaining("selected model"),
+      );
+      expect(addAttemptEvent).not.toHaveBeenCalledWith(
+        "attempt-runner-failure",
+        "attempt_failed",
+        expect.stringContaining("<agent-result>"),
+      );
+      expect(finalizeAttempt).toHaveBeenCalledWith(
+        "attempt-runner-failure",
+        "failed",
+        expect.objectContaining({
+          summary: expect.stringContaining("Runner exited with exit code 1"),
+          errorMessage: expect.stringContaining("selected model"),
+        }),
+      );
+      expect(updateJobStatus).toHaveBeenLastCalledWith(
+        "job-1",
+        "failed",
+        expect.objectContaining({ errorMessage: expect.stringContaining("selected model") }),
+      );
+      expect(releaseLeasesForAttempt).toHaveBeenCalledWith("attempt-runner-failure", "completed");
+      expect(updateWorkerStatus).toHaveBeenLastCalledWith("worker-1", "idle", null);
+    } finally {
+      ensureTaskWorktree.mockRestore();
+      if (originalOpencodeBin === undefined) {
+        delete process.env.FOREMAN_OPENCODE_BIN;
+      } else {
+        process.env.FOREMAN_OPENCODE_BIN = originalOpencodeBin;
+      }
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
   });
 });

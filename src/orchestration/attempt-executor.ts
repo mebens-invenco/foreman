@@ -16,6 +16,34 @@ import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktr
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { assertTaskActionableTarget, leaseResourceKeysForAction } from "./scout-selection.js";
 
+const runnerOutputLimit = 4_000;
+
+const truncateRunnerOutput = (output: string): string =>
+  output.length > runnerOutputLimit ? `${output.slice(0, runnerOutputLimit)}\n... truncated ...` : output;
+
+const formatRunnerFailure = (runResult: { exitCode: number | null; signal: string | null; stdout: string; stderr: string }): string => {
+  const status = runResult.signal
+    ? `signal ${runResult.signal}`
+    : runResult.exitCode === null
+      ? "without an exit code"
+      : `exit code ${runResult.exitCode}`;
+  const details = [`Runner exited with ${status}`];
+  const stderr = runResult.stderr.trim();
+  const stdout = runResult.stdout.trim();
+
+  if (stderr) {
+    details.push(`stderr:\n${truncateRunnerOutput(stderr)}`);
+  }
+  if (stdout) {
+    details.push(`stdout:\n${truncateRunnerOutput(stdout)}`);
+  }
+  if (!stderr && !stdout) {
+    details.push("No runner output was captured.");
+  }
+
+  return details.join("\n");
+};
+
 type AttemptExecutorDeps = {
   config: WorkspaceConfig;
   paths: WorkspacePaths;
@@ -270,6 +298,10 @@ export class AttemptExecutor {
         try {
           workerResult = validateWorkerResult(parseWorkerResult(runResult.stdout));
         } catch (error) {
+          if (runResult.exitCode !== 0 || runResult.signal) {
+            throw new ForemanError("runner_failed", formatRunnerFailure(runResult), 500);
+          }
+
           throw new ForemanError("worker_result_invalid", error instanceof Error ? error.message : String(error), 500);
         }
         attemptLogger.info("parsed worker result", { outcome: workerResult.outcome });

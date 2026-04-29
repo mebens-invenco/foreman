@@ -34,6 +34,16 @@ const stringField = (record: JsonRecord, names: string[]): string | null => {
     }
   }
 
+  const part = record.part;
+  if (isRecord(part)) {
+    for (const name of names) {
+      const value = part[name];
+      if (typeof value === "string" && value.length > 0) {
+        return value;
+      }
+    }
+  }
+
   return null;
 };
 
