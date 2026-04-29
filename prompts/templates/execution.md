@@ -54,4 +54,4 @@ Complete the selected task in the provided worktree.
 - If you are blocked, return `blocked` with explicit blocker codes and messages.
 - If a PR should be created, provide the full `create_pull_request` object in the review mutations.
 
-{{fragment:output-schema}}
+{{fragment:output-validator}}

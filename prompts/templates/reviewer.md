@@ -67,4 +67,4 @@ Does it implement the required changes? Note these may have diverged since by wa
 - Do not reply to existing review threads or PR comments from this action; that belongs to the normal `review` action.
 - If the current PR state does not need reviewer feedback, return `no_action_needed`; Foreman records the reviewer checkpoint automatically.
 
-{{fragment:output-schema}}
+{{fragment:output-validator}}

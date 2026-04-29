@@ -2,6 +2,21 @@ import { z } from "zod";
 
 import type { WorkerResult } from "../domain/index.js";
 
+export const workerResultActionValues = ["execution", "review", "reviewer", "retry", "consolidation"] as const satisfies readonly WorkerResult["action"][];
+export type WorkerResultAction = (typeof workerResultActionValues)[number];
+
+export const workerResultExample = {
+  schemaVersion: 1,
+  action: "execution",
+  outcome: "completed",
+  summary: "Validated output.",
+  taskMutations: [],
+  reviewMutations: [],
+  learningMutations: [],
+  blockers: [],
+  signals: [],
+} satisfies WorkerResult;
+
 const taskMutationSchema = z.object({ type: z.literal("add_comment"), body: z.string().min(1) });
 
 const reviewMutationSchema = z.discriminatedUnion("type", [
@@ -57,7 +72,7 @@ const blockerSchema = z.string().min(1);
 
 export const workerResultSchema = z.object({
   schemaVersion: z.literal(1),
-  action: z.enum(["execution", "review", "reviewer", "retry", "consolidation"]),
+  action: z.enum(workerResultActionValues),
   outcome: z.enum(["completed", "no_action_needed", "blocked", "failed"]),
   summary: z.string().min(1),
   taskMutations: z.array(taskMutationSchema),
@@ -66,6 +81,14 @@ export const workerResultSchema = z.object({
   blockers: z.array(blockerSchema),
   signals: z.array(z.enum(["code_changed", "review_checkpoint_eligible", "reviewer_checkpoint_eligible"])),
 });
+
+export const formatWorkerResultValidationError = (error: z.ZodError): string =>
+  error.issues
+    .map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.map(String).join(".") : "<root>";
+      return `- ${path}: ${issue.message}`;
+    })
+    .join("\n");
 
 export const parseWorkerResult = (stdout: string): unknown => {
   const trimmed = stdout.trim();
@@ -86,3 +109,6 @@ export const parseWorkerResult = (stdout: string): unknown => {
 };
 
 export const validateWorkerResult = (value: unknown): WorkerResult => workerResultSchema.parse(value) as WorkerResult;
+
+export const validateWorkerResultForAction = (value: unknown, action: WorkerResultAction): WorkerResult =>
+  workerResultSchema.extend({ action: z.literal(action) }).parse(value) as WorkerResult;

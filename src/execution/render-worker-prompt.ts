@@ -266,6 +266,6 @@ export const renderWorkerPrompt = async (input: {
     fragmentAliases: {
       "task-system-worker": input.config.taskSystem.type === "linear" ? "task-system-linear-worker" : "task-system-file-worker",
     },
-    properties: { session: { action: input.action } },
+    properties: { foreman: { cliPath: path.join(input.paths.projectRoot, "dist/cli.js") }, session: { action: input.action } },
   });
 };

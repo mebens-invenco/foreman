@@ -62,4 +62,4 @@ Priority order inside this action:
 - Resolve threads only when your code or reply truly addresses them; leave them unresolved when you are
   only clarifying and reviewer confirmation is still needed.
 
-{{fragment:output-schema}}
+{{fragment:output-validator}}

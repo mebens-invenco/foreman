@@ -23,4 +23,4 @@ Use prior native session context for settled reviewer decisions, but review the 
 
 {{context:continuation-context}}
 
-{{fragment:output-schema-continuation}}
+{{fragment:output-validator}}

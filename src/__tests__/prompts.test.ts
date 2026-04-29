@@ -177,6 +177,47 @@ describe("prompt rendering", () => {
     expect(result).not.toContain("{{context:");
   });
 
+  test("renders action-specific agent result validator commands", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-validator-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const repo = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
+
+    for (const action of ["execution", "review", "reviewer", "retry", "consolidation"] as const) {
+      const result = await renderWorkerPrompt({
+        action,
+        config,
+        paths,
+        task: sampleTask,
+        repo,
+        worktreePath: workspaceRoot,
+        baseBranch: "main",
+      });
+
+      expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action} --help`);
+      expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action}`);
+      expect(result).toContain("validate the complete final result block on stdin");
+    }
+
+    for (const action of ["review", "reviewer"] as const) {
+      const result = await renderWorkerPrompt({
+        action,
+        config,
+        paths,
+        task: sampleTask,
+        repo,
+        worktreePath: workspaceRoot,
+        baseBranch: "main",
+        continuation: true,
+      });
+
+      expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action} --help`);
+      expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action}`);
+      expect(result).not.toContain("output-schema-continuation");
+    }
+  });
+
   test("renders Linear provider access for Linear worker prompts", async () => {
     const workspaceRoot = await createTempDir("foreman-prompts-linear-worker-");
     cleanupDirs.push(workspaceRoot);
@@ -268,7 +309,6 @@ describe("prompt rendering", () => {
     expect(consolidationPrompt).not.toContain("### Actionable Now");
     expect(reviewerPrompt).toContain("# Reviewer Prompt");
     expect(reviewerPrompt).toContain("submit_pull_request_review");
-    expect(reviewerPrompt).toContain("reviewer_checkpoint_eligible");
     expect(reviewerPrompt).not.toContain("### Actionable Now");
 
     const continuationPrompt = await renderWorkerPrompt({
@@ -297,7 +337,7 @@ describe("prompt rendering", () => {
     expect(continuationPrompt).toContain("## Continuation Context");
     expect(continuationPrompt).toContain("## Required Output");
     expect(continuationPrompt).toContain("Do not assume every actionable review item requires a code change.");
-    expect(continuationPrompt).toContain("\"action\": \"review\"");
+    expect(continuationPrompt).toContain("agent-result validate --action review");
     expect(continuationPrompt).not.toContain("## Common Worker Rules");
     expect(continuationPrompt).not.toContain("## Selected Task");
     expect(continuationPrompt).not.toContain("## Task Provider Context");
@@ -334,7 +374,7 @@ describe("prompt rendering", () => {
     expect(reviewerContinuationPrompt).toContain("## Reviewer Continuation Rules");
     expect(reviewerContinuationPrompt).toContain("## Continuation Context");
     expect(reviewerContinuationPrompt).toContain("## Required Output");
-    expect(reviewerContinuationPrompt).toContain("\"action\": \"reviewer\"");
+    expect(reviewerContinuationPrompt).toContain("agent-result validate --action reviewer");
     expect(reviewerContinuationPrompt).toContain("submit_pull_request_review");
     expect(reviewerContinuationPrompt).not.toContain("## Common Worker Rules");
     expect(reviewerContinuationPrompt).not.toContain("## Selected Task");

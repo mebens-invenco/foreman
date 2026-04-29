@@ -28,4 +28,4 @@ Address only the current actionable review activity for the selected pull reques
 
 {{context:continuation-context}}
 
-{{fragment:output-schema-continuation}}
+{{fragment:output-validator}}

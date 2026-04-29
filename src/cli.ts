@@ -1,7 +1,17 @@
 #!/usr/bin/env node
 
 import { Command, InvalidArgumentError } from "commander";
+import { z } from "zod";
 
+import {
+  formatWorkerResultValidationError,
+  parseWorkerResult,
+  validateWorkerResultForAction,
+  workerResultActionValues,
+  workerResultExample,
+  workerResultSchema,
+  type WorkerResultAction,
+} from "./execution/worker-result.js";
 import { importLegacyMemory } from "./importing/import-legacy-memory.js";
 import { createHttpServer } from "./http.js";
 import { LoggerService } from "./logger.js";
@@ -27,6 +37,66 @@ const parsePositiveInteger = (value: string): number => {
   }
 
   return parsed;
+};
+
+const parseWorkerResultAction = (value: string): WorkerResultAction => {
+  if (!workerResultActionValues.includes(value as WorkerResultAction)) {
+    throw new InvalidArgumentError(`Action must be one of: ${workerResultActionValues.join(", ")}`);
+  }
+
+  return value as WorkerResultAction;
+};
+
+const readStdin = async (): Promise<string> => {
+  process.stdin.setEncoding("utf8");
+  let input = "";
+  for await (const chunk of process.stdin) {
+    input += chunk;
+  }
+
+  return input;
+};
+
+const resolveHelpAction = (): WorkerResultAction | undefined => {
+  const actionArgIndex = process.argv.findIndex((arg) => arg === "--action" || arg.startsWith("--action="));
+  const value = process.argv[actionArgIndex]?.startsWith("--action=")
+    ? process.argv[actionArgIndex]!.slice("--action=".length)
+    : process.argv[actionArgIndex + 1];
+
+  return workerResultActionValues.includes(value as WorkerResultAction) ? (value as WorkerResultAction) : undefined;
+};
+
+const renderAgentResultValidateHelp = (): string => {
+  const action = resolveHelpAction();
+  const actionLiteral = action ?? `<${workerResultActionValues.join("|")}>`;
+  const schema = action ? workerResultSchema.extend({ action: z.literal(action) }) : workerResultSchema;
+  const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, 2);
+  const exampleJson = JSON.stringify({ ...workerResultExample, action: actionLiteral });
+
+  return `
+Action-specific accepted output shape
+
+- Required action literal: \"${actionLiteral}\".
+- Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block containing JSON.
+- The final answer returned to Foreman must contain exactly one <agent-result> block and no prose after it.
+- The worker result JSON schema below is generated from Foreman's Zod worker result schema.
+
+Worker result JSON schema:
+
+\`\`\`json
+${jsonSchema}
+\`\`\`
+
+Minimal raw JSON example:
+
+${exampleJson}
+
+Wrapped final answer example:
+
+<agent-result>
+${exampleJson}
+</agent-result>
+`;
 };
 
 const writeJson = (value: unknown): void => {
@@ -209,6 +279,25 @@ learnings
         missingIds: options.id.filter((id) => !foundIds.has(id)),
       });
     });
+  });
+
+const agentResult = program.command("agent-result").description("Validate agent result output");
+
+agentResult
+  .command("validate")
+  .description("Validate raw JSON or a complete <agent-result> block from stdin")
+  .requiredOption("--action <action>", "Expected worker action", parseWorkerResultAction)
+  .addHelpText("after", renderAgentResultValidateHelp)
+  .action(async (options: { action: WorkerResultAction }) => {
+    try {
+      const value = parseWorkerResult(await readStdin());
+      validateWorkerResultForAction(value, options.action);
+      process.stdout.write(`Agent result is valid for action \"${options.action}\".\n`);
+    } catch (error) {
+      const message = error instanceof z.ZodError ? formatWorkerResultValidationError(error) : error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Agent result is invalid for action \"${options.action}\":\n${message}\n`);
+      process.exitCode = 1;
+    }
   });
 
 const scheduler = program.command("scheduler");
