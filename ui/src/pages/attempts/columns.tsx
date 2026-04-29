@@ -246,8 +246,6 @@ export const createAttemptColumns = (
   },
 ]
 
-export const attemptColumns = createAttemptColumns(() => undefined)
-
 export const attemptStatusFilterValues = [
   "all",
   ...attemptStatusValues,
