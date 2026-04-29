@@ -39,7 +39,7 @@ Complete the selected task in the provided worktree.
 ## Execution Rules
 
 - Treat the resolved repo, worktree, and base branch as authoritative.
-- Discover the full task details from the task provider before implementing.
+- Discover the full task details from the task provider, including fetching and inspecting any images attached to the initial task, before implementing.
 - Do not perform task-system orchestration directly.
 - Do not perform review-system orchestration directly except through structured review mutations.
 - If you make code changes, commit and push the task branch before returning `completed`.

@@ -1176,6 +1176,160 @@ describe("SchedulerService applyWorkerResult", () => {
     expect(updateWorkerStatus).toHaveBeenLastCalledWith("worker-1", "idle", null);
   });
 
+  test("uses continuation sessions for review but fresh sessions for reviewer and retry", async () => {
+    const tempDir = await createTempDir("foreman-session-routing-test-");
+    const paths = createWorkspacePaths(testProjectRoot, tempDir);
+    const worktreePath = path.join(tempDir, "worktree");
+    const fakeRunnerPath = path.join(tempDir, "fake-opencode.js");
+    const promptOut = path.join(tempDir, "prompt.md");
+    const argvOut = path.join(tempDir, "argv.json");
+    const originalOpencodeBin = process.env.FOREMAN_OPENCODE_BIN;
+    const ensureTaskWorktree = vi.spyOn(worktrees, "ensureTaskWorktree").mockResolvedValue(worktreePath);
+
+    try {
+      await fs.mkdir(worktreePath, { recursive: true });
+      await fs.writeFile(
+        fakeRunnerPath,
+        [
+          "#!/usr/bin/env node",
+          "const fs = require('node:fs');",
+          "let prompt = '';",
+          "process.stdin.on('data', (chunk) => { prompt += chunk; });",
+          "process.stdin.on('end', () => {",
+          "  fs.writeFileSync(process.env.FOREMAN_TEST_PROMPT_OUT, prompt);",
+          "  fs.writeFileSync(process.env.FOREMAN_TEST_ARGV_OUT, JSON.stringify(process.argv.slice(2)));",
+          "  const action = prompt.includes('# Reviewer Prompt') ? 'reviewer' : prompt.includes('# Retry Prompt') ? 'retry' : 'review';",
+          "  const result = '<agent-result>' + JSON.stringify({ schemaVersion: 1, action, outcome: 'no_action_needed', summary: 'done', taskMutations: [], reviewMutations: [], learningMutations: [], blockers: [], signals: [] }) + '</agent-result>';",
+          "  process.stdout.write(JSON.stringify({ type: 'text', sessionID: 'new-native-session', part: { type: 'text', text: result } }));",
+          "});",
+        ].join("\n"),
+        { mode: 0o755 },
+      );
+      process.env.FOREMAN_OPENCODE_BIN = fakeRunnerPath;
+
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      config.runner.reviewer = { ...config.runner.execution };
+      const getActiveSession = vi.fn((selector: { role: string }) =>
+        selector.role === "implementation"
+          ? {
+              id: "implementation-session",
+              taskTargetId: sampleTarget.id,
+              role: "implementation",
+              runnerName: "opencode",
+              runnerModel: config.runner.execution.model,
+              runnerVariant: "high",
+              nativeSessionId: "implementation-native-session",
+              isActive: true,
+              lastAttemptId: "attempt-execution",
+              lastWorktreeHeadSha: "execution-head",
+              lastReviewHeadSha: null,
+              createdAt: "2026-03-16T00:00:00Z",
+              updatedAt: "2026-03-16T00:00:00Z",
+            }
+          : null,
+      );
+      const createSession = vi.fn((input: { role: string }) => ({
+        id: `${input.role}-new-session`,
+        nativeSessionId: null,
+      }));
+      const logger = {
+        ...fakeLogger,
+        flush: async () => {
+          await fs.mkdir(paths.attemptsLogDir, { recursive: true });
+          await fs.writeFile(path.join(paths.attemptsLogDir, "attempt-session.log"), "runner log\n");
+        },
+      };
+      const scheduler = new SchedulerService({
+        config,
+        paths,
+        foremanRepos: createMockRepos({
+          attempts: {
+            createAttemptWithLeases: vi.fn(() => ({
+              id: "attempt-session",
+              attemptNumber: 1,
+              startedAt: "2026-03-16T00:00:00Z",
+            })),
+          },
+          runnerSessions: {
+            getActiveSession,
+            createSession,
+          },
+        }),
+        taskSystem: {
+          getTask: vi.fn(async () => sampleTask({ pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }] })),
+          transition: vi.fn(async () => undefined),
+          upsertPullRequest: vi.fn(async () => undefined),
+          addComment: vi.fn(async () => undefined),
+        } as any,
+        reviewService: {
+          resolvePullRequest: vi.fn(resolvePullRequestFromTask),
+          getContext: vi.fn(async () => reviewContext),
+        } as any,
+        repos: [{ key: "repo-a", rootPath: worktreePath, defaultBranch: "main" }],
+        env: {
+          FOREMAN_TEST_PROMPT_OUT: promptOut,
+          FOREMAN_TEST_ARGV_OUT: argvOut,
+        },
+        logger: logger as any,
+      });
+      const worker = {
+        id: "worker-1",
+        slot: 1,
+        status: "leased",
+        currentAttemptId: null,
+        lastHeartbeatAt: "2026-03-16T00:00:00Z",
+      };
+
+      await (scheduler as any).runJob(worker, {
+        id: "job-review",
+        taskId: "TASK-0001",
+        taskTargetId: sampleTarget.id,
+        action: "review",
+        repoKey: "repo-a",
+        baseBranch: "main",
+        selectionContext: { reviewContext },
+      });
+
+      expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).toContain("implementation-native-session");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("# Review Continuation");
+
+      await (scheduler as any).runJob(worker, {
+        id: "job-reviewer",
+        taskId: "TASK-0001",
+        taskTargetId: sampleTarget.id,
+        action: "reviewer",
+        repoKey: "repo-a",
+        baseBranch: "main",
+        selectionContext: { reviewContext },
+      });
+
+      expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).not.toContain("implementation-native-session");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("# Reviewer Prompt");
+
+      getActiveSession.mockClear();
+      await (scheduler as any).runJob(worker, {
+        id: "job-retry",
+        taskId: "TASK-0001",
+        taskTargetId: sampleTarget.id,
+        action: "retry",
+        repoKey: "repo-a",
+        baseBranch: "main",
+      });
+
+      expect(getActiveSession).not.toHaveBeenCalled();
+      expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).not.toContain("implementation-native-session");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("# Retry Prompt");
+    } finally {
+      ensureTaskWorktree.mockRestore();
+      if (originalOpencodeBin === undefined) {
+        delete process.env.FOREMAN_OPENCODE_BIN;
+      } else {
+        process.env.FOREMAN_OPENCODE_BIN = originalOpencodeBin;
+      }
+      await fs.rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
   test("reports non-zero runner output instead of schema parse noise", async () => {
     const tempDir = await createTempDir("foreman-runner-failure-test-");
     const paths = createWorkspacePaths(testProjectRoot, tempDir);

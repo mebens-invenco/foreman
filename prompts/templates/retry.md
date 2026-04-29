@@ -33,7 +33,7 @@ Reattempt the task cleanly from fresh branch state while reusing only the prior 
 ## Retry Rules
 
 - Treat previous patch content as discarded.
-- Use provider reads for the task description, task comments, PR body, review context, and check context to guide the reimplementation.
+- Use provider reads for the task description, task comments, initial-task attachments, PR body, review context, and check context; fetch and inspect any attached images before reimplementing.
 - Discover current and historical GitHub review context before reimplementing so valid prior decisions are preserved.
 - Do not assume prior code changes are still present or should be preserved.
 - Reset the task branch to a fresh state from the resolved base branch before reimplementing.

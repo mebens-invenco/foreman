@@ -168,7 +168,7 @@ describe("prompt rendering", () => {
     expect(result).toContain("## Current Git State");
     expect(result).toContain("## Pull Request Reference");
     expect(result).toContain("## Required Output");
-    expect(result).toContain("Discover the full task details from the task provider before implementing.");
+    expect(result).toContain("including fetching and inspecting any images attached to the initial task");
     expect(result).toContain("If execution completes with code changes, return a PR review mutation");
     expect(result).not.toContain("Task Comments");
     expect(result).not.toContain("please keep this minimal");
@@ -200,6 +200,7 @@ describe("prompt rendering", () => {
 
     expect(result).toContain("## Linear Provider Access");
     expect(result).toContain("LINEAR_API_KEY");
+    expect(result).toContain("attachments { nodes { id title url } }");
     expect(result).toContain("linear-issue-id");
     expect(result).not.toContain("## File Task Access");
     expect(result).not.toContain("## Provider Access");
@@ -288,10 +289,19 @@ describe("prompt rendering", () => {
     expect(continuationPrompt).toContain("# Review Continuation");
     expect(continuationPrompt).toContain("previousSessionHeadSha");
     expect(continuationPrompt).toContain("previous-head");
-    expect(continuationPrompt).toContain("## Common Worker Rules");
-    expect(continuationPrompt).toContain("## Selected Task");
+    expect(continuationPrompt).toContain("## Continuation Worker Rules");
+    expect(continuationPrompt).toContain("## GitHub Continuation Access");
+    expect(continuationPrompt).toContain("## Review Continuation Rules");
+    expect(continuationPrompt).toContain("## Continuation Context");
     expect(continuationPrompt).toContain("## Required Output");
-    expect(continuationPrompt).toContain("Use provider reads to rediscover current GitHub state before acting.");
+    expect(continuationPrompt).toContain("Do not assume every actionable review item requires a code change.");
+    expect(continuationPrompt).toContain("\"action\": \"review\"");
+    expect(continuationPrompt).not.toContain("## Common Worker Rules");
+    expect(continuationPrompt).not.toContain("## Selected Task");
+    expect(continuationPrompt).not.toContain("## Task Provider Context");
+    expect(continuationPrompt).not.toContain("## GitHub Provider Access");
+    expect(continuationPrompt).not.toContain("create_pull_request");
+    expect(continuationPrompt).not.toContain("Allowed learning mutation types");
     expect(continuationPrompt).not.toContain("## Latest Review Activity");
     expect(continuationPrompt).not.toContain("Please tighten this up.");
     expect(continuationPrompt).not.toContain("Earlier discussion that should stay historical.");
@@ -317,10 +327,29 @@ describe("prompt rendering", () => {
     });
     expect(reviewerContinuationPrompt).toContain("# Reviewer Continuation");
     expect(reviewerContinuationPrompt).toContain("previous-reviewer-head");
-    expect(reviewerContinuationPrompt).toContain("Use provider reads to rediscover current GitHub state");
-    expect(reviewerContinuationPrompt).toContain("## Common Worker Rules");
-    expect(reviewerContinuationPrompt).toContain("## Selected Task");
+    expect(reviewerContinuationPrompt).toContain("## Continuation Worker Rules");
+    expect(reviewerContinuationPrompt).toContain("## GitHub Continuation Access");
+    expect(reviewerContinuationPrompt).toContain("## Reviewer Continuation Rules");
+    expect(reviewerContinuationPrompt).toContain("## Continuation Context");
     expect(reviewerContinuationPrompt).toContain("## Required Output");
+    expect(reviewerContinuationPrompt).toContain("\"action\": \"reviewer\"");
+    expect(reviewerContinuationPrompt).toContain("submit_pull_request_review");
+    expect(reviewerContinuationPrompt).not.toContain("## Common Worker Rules");
+    expect(reviewerContinuationPrompt).not.toContain("## Selected Task");
+    expect(reviewerContinuationPrompt).not.toContain("## GitHub Provider Access");
     expect(reviewerContinuationPrompt).not.toContain("## Latest Review Activity");
+
+    const retryPrompt = await renderWorkerPrompt({
+      action: "retry",
+      config,
+      paths,
+      task: { ...sampleTask, state: "in_review", providerState: "in_review" },
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      continuation: true,
+    });
+    expect(retryPrompt).toContain("# Retry Prompt");
+    expect(retryPrompt).not.toContain("# Review Continuation");
   });
 });

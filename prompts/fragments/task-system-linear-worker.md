@@ -11,7 +11,7 @@ The task system is Linear.
 curl -sS https://api.linear.app/graphql \
   -H "Authorization: $LINEAR_API_KEY" \
   -H "Content-Type: application/json" \
-  --data '{"query":"query ForemanIssue($id: String!) { issue(id: $id) { id identifier title description url state { name } comments { nodes { id body createdAt user { name } } } } }","variables":{"id":"<Task Provider Context.issueId>"}}'
+  --data '{"query":"query ForemanIssue($id: String!) { issue(id: $id) { id identifier title description url state { name } comments { nodes { id body createdAt user { name } } } attachments { nodes { id title url } } } }","variables":{"id":"<Task Provider Context.issueId>"}}'
 ```
 
 - Let tools read `LINEAR_API_KEY` from the environment; do not print the token.
