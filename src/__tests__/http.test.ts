@@ -394,3 +394,115 @@ describe("HTTP scheduler control", () => {
     }
   });
 });
+
+describe("HTTP artifact content", () => {
+  const createArtifactServer = async () => {
+    const workspaceRoot = await createTempDir("foreman-http-artifact-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [sampleTask]),
+        getTask: vi.fn(async () => sampleTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    return { db, paths, server };
+  };
+
+  test("serves artifact content by artifact id", async () => {
+    const { db, paths, server } = await createArtifactServer();
+
+    try {
+      await fs.mkdir(paths.artifactsDir, { recursive: true });
+      await fs.writeFile(path.join(paths.artifactsDir, "attempt-result.json"), '{"ok":true}', "utf8");
+      db.artifacts.createArtifact({
+        ownerType: "execution_attempt",
+        ownerId: "attempt-1",
+        artifactType: "parsed_result",
+        relativePath: "artifacts/attempt-result.json",
+        mediaType: "application/json",
+        sizeBytes: 11,
+      });
+      const artifact = db.artifacts.listArtifacts("execution_attempt", "attempt-1")[0];
+      expect(artifact).toBeDefined();
+
+      const response = await server.inject({ method: "GET", url: `/api/artifacts/${artifact!.id}/content` });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe('{"ok":true}');
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("returns not found for missing artifacts and missing files", async () => {
+    const { db, server } = await createArtifactServer();
+
+    try {
+      const missingArtifactResponse = await server.inject({ method: "GET", url: "/api/artifacts/missing/content" });
+      expect(missingArtifactResponse.statusCode).toBe(404);
+      expect(missingArtifactResponse.json().error.code).toBe("artifact_not_found");
+
+      db.artifacts.createArtifact({
+        ownerType: "execution_attempt",
+        ownerId: "attempt-1",
+        artifactType: "rendered_prompt",
+        relativePath: "artifacts/missing-prompt.md",
+        mediaType: "text/markdown",
+        sizeBytes: 42,
+      });
+      const artifact = db.artifacts.listArtifacts("execution_attempt", "attempt-1")[0];
+      expect(artifact).toBeDefined();
+
+      const missingFileResponse = await server.inject({ method: "GET", url: `/api/artifacts/${artifact!.id}/content` });
+      expect(missingFileResponse.statusCode).toBe(404);
+      expect(missingFileResponse.json().error.code).toBe("artifact_file_not_found");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("rejects artifact paths outside the workspace root", async () => {
+    const { db, server } = await createArtifactServer();
+
+    try {
+      db.artifacts.createArtifact({
+        ownerType: "execution_attempt",
+        ownerId: "attempt-1",
+        artifactType: "rendered_prompt",
+        relativePath: "../outside.md",
+        mediaType: "text/markdown",
+        sizeBytes: 1,
+      });
+      const artifact = db.artifacts.listArtifacts("execution_attempt", "attempt-1")[0];
+      expect(artifact).toBeDefined();
+
+      const response = await server.inject({ method: "GET", url: `/api/artifacts/${artifact!.id}/content` });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("invalid_artifact_path");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+});

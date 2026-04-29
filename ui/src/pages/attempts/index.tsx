@@ -1,3 +1,5 @@
+import { useState } from "react"
+
 import {
   DataTable,
   DataTableFilterSelect,
@@ -6,19 +8,22 @@ import {
   DataTableToolbar,
   useDataTable,
 } from "@/components/data-table"
+import { Sheet } from "@/components/ui/sheet"
 import { useAttemptsQuery } from "@/hooks/use-attempts-query"
 import {
-  attemptColumns,
   attemptFilterOptions,
   attemptsGlobalFilter,
+  createAttemptColumns,
 } from "@/pages/attempts/columns"
+import { AttemptDetailSheet } from "@/pages/attempts/attempt-detail-sheet"
 import { useAttemptsTableState } from "@/pages/attempts/use-attempts-table-state"
 
 export function AttemptsPage() {
+  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null)
   const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery()
   const tableState = useAttemptsTableState()
   const table = useDataTable({
-    columns: attemptColumns,
+    columns: createAttemptColumns(setSelectedAttemptId),
     columnFilters: tableState.columnFilters,
     data: attempts,
     getRowId: (row) => row.id,
@@ -32,42 +37,55 @@ export function AttemptsPage() {
   })
 
   return (
-    <div className="space-y-4">
-      <header>
-        <h2 className="text-3xl tracking-tight text-foreground">Execution attempts</h2>
-      </header>
+    <>
+      <div className="space-y-4">
+        <header>
+          <h2 className="text-3xl tracking-tight text-foreground">Execution attempts</h2>
+        </header>
 
-      <DataTableShell>
-        <DataTableToolbar
-          hasActiveFilters={tableState.hasActiveFilters}
-          onReset={tableState.resetFilters}
-          onSearchChange={tableState.setGlobalFilter}
-          searchPlaceholder="Search attempts, tasks, targets, stages, and summaries"
-          searchValue={tableState.globalFilter}
-        >
-          <DataTableFilterSelect
-            allLabel="All statuses"
-            label="Status"
-            onValueChange={tableState.setStatus}
-            options={attemptFilterOptions}
-            value={tableState.status}
+        <DataTableShell>
+          <DataTableToolbar
+            hasActiveFilters={tableState.hasActiveFilters}
+            onReset={tableState.resetFilters}
+            onSearchChange={tableState.setGlobalFilter}
+            searchPlaceholder="Search attempts, tasks, targets, stages, and summaries"
+            searchValue={tableState.globalFilter}
+          >
+            <DataTableFilterSelect
+              allLabel="All statuses"
+              label="Status"
+              onValueChange={tableState.setStatus}
+              options={attemptFilterOptions}
+              value={tableState.status}
+            />
+          </DataTableToolbar>
+
+          <DataTable
+            emptyMessage={
+              attempts.length === 0
+                ? "No execution attempts recorded yet."
+                : "No attempts match the current filters."
+            }
+            error={error}
+            isError={isError}
+            isLoading={isLoading}
+            table={table}
           />
-        </DataTableToolbar>
 
-        <DataTable
-          emptyMessage={
-            attempts.length === 0
-              ? "No execution attempts recorded yet."
-              : "No attempts match the current filters."
+          <DataTablePagination table={table} />
+        </DataTableShell>
+      </div>
+
+      <Sheet
+        open={selectedAttemptId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedAttemptId(null)
           }
-          error={error}
-          isError={isError}
-          isLoading={isLoading}
-          table={table}
-        />
-
-        <DataTablePagination table={table} />
-      </DataTableShell>
-    </div>
+        }}
+      >
+        <AttemptDetailSheet attemptId={selectedAttemptId} />
+      </Sheet>
+    </>
   )
 }

@@ -104,6 +104,39 @@ export type AttemptRecord = {
   errorMessage: string | null
 }
 
+export type AttemptEventRecord = {
+  id: string
+  eventType: string
+  message: string
+  payload: Record<string, unknown>
+  createdAt: string
+}
+
+export type ArtifactType =
+  | "log"
+  | "rendered_prompt"
+  | "parsed_result"
+  | "plan_prompt"
+  | "plan_context"
+
+export type ArtifactRecord = {
+  id: string
+  ownerType: "workspace" | "job" | "execution_attempt" | "scout_run"
+  ownerId: string
+  artifactType: ArtifactType
+  relativePath: string
+  mediaType: string
+  sizeBytes: number
+  sha256: string | null
+  createdAt: string
+}
+
+export type AttemptDetail = {
+  attempt: AttemptRecord
+  events: AttemptEventRecord[]
+  artifacts: ArtifactRecord[]
+}
+
 export type TaskPullRequest = {
   repoKey: string
   url: string
@@ -266,6 +299,14 @@ export function listWorkers() {
 
 export function getAttemptLogs(attemptId: string) {
   return requestText(`/api/attempts/${attemptId}/logs`)
+}
+
+export function getAttempt(attemptId: string) {
+  return requestJson<AttemptDetail>(`/api/attempts/${attemptId}`)
+}
+
+export function getArtifactContent(artifactId: string) {
+  return requestText(`/api/artifacts/${artifactId}/content`)
 }
 
 export function listAttempts(params: {

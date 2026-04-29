@@ -160,6 +160,7 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
   },
   artifacts: {
     createArtifact: vi.fn(),
+    getArtifact: vi.fn(),
     listArtifacts: vi.fn(() => []),
     ...((overrides.artifacts as object | undefined) ?? {}),
   },
