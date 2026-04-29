@@ -161,6 +161,52 @@ describe("GitHubReviewService.getContext", () => {
     );
   });
 
+  test("prefers the latest open branch pull request over a stale linked pull request", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse([
+        {
+          html_url: "https://github.com/acme/repo/pull/987",
+          number: 987,
+          state: "closed",
+          draft: false,
+          merged_at: null,
+          head: { ref: "eng-4737" },
+          base: { ref: "master" },
+        },
+        {
+          html_url: "https://github.com/acme/repo/pull/988",
+          number: 988,
+          state: "open",
+          draft: true,
+          merged_at: null,
+          head: { ref: "eng-4737" },
+          base: { ref: "master" },
+        },
+      ]),
+    ) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const resolved = await service.resolvePullRequest(
+      sampleTask({ pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo/pull/987", source: "provider" }] }),
+      sampleRepo,
+      { repoKey: "repo-a", branchName: "eng-4737", position: 0 },
+    );
+
+    expect(resolved).toMatchObject({
+      pullRequestUrl: "https://github.com/acme/repo/pull/988",
+      pullRequestNumber: 988,
+      state: "open",
+      isDraft: true,
+      headBranch: "eng-4737",
+      baseBranch: "master",
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe(
+      "https://api.github.com/repos/acme/repo/pulls?state=all&head=acme%3Aeng-4737&per_page=20",
+    );
+  });
+
   test("does not reuse another target's pull request when repo context differs", async () => {
     vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo-b.git\n", stderr: "", exitCode: 0 });
     global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse([])) as typeof fetch;

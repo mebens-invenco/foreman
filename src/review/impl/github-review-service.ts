@@ -692,6 +692,13 @@ export class GitHubReviewService implements ReviewService {
   }
 
   async resolvePullRequest(task: Task, repo?: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null> {
+    if (repo) {
+      const branchPullRequest = await this.resolvePullRequestByBranch(task, repo, target);
+      if (branchPullRequest) {
+        return branchPullRequest;
+      }
+    }
+
     const prUrl = this.pullRequestUrl(task, repo, target);
     if (prUrl) {
       return this.resolvePullRequestFromUrl(prUrl, task.id);
@@ -701,10 +708,9 @@ export class GitHubReviewService implements ReviewService {
       this.logger.debug("skipping GitHub pull request resolution because task has no linked pull request and no repo context", {
         taskId: task.id,
       });
-      return null;
     }
 
-    return this.resolvePullRequestByBranch(task, repo, target);
+    return null;
   }
 
   async getContext(task: Task, agentPrefix: string, repo?: RepoRef, target?: TaskTargetRef): Promise<ReviewContext | null> {
