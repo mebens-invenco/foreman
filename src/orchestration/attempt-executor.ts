@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskTarget, type WorkerResult } from "../domain/index.js";
 import { createAgentRunner, parseWorkerResult, validateWorkerResult } from "../execution/index.js";
-import { renderWorkerPrompt } from "../execution/render-worker-prompt.js";
+import { renderWorkerPrompt, type WorkerPromptPullRequestReference } from "../execution/render-worker-prompt.js";
 import { ForemanError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
 import { addSeconds, isoNow } from "../lib/time.js";
@@ -42,6 +42,46 @@ const formatRunnerFailure = (runResult: { exitCode: number | null; signal: strin
   }
 
   return details.join("\n");
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readPullRequestReference = (selectionContext: Record<string, unknown>): WorkerPromptPullRequestReference | undefined => {
+  const raw = selectionContext.pullRequestReference;
+  if (!isRecord(raw) || raw.provider !== "github" || typeof raw.url !== "string" || typeof raw.number !== "number") {
+    return undefined;
+  }
+
+  const reference: WorkerPromptPullRequestReference = {
+    provider: "github",
+    url: raw.url,
+    number: raw.number,
+  };
+
+  if (raw.state === "open" || raw.state === "closed" || raw.state === "merged") {
+    reference.state = raw.state;
+  }
+  if (typeof raw.isDraft === "boolean") {
+    reference.isDraft = raw.isDraft;
+  }
+  if (typeof raw.headSha === "string") {
+    reference.headSha = raw.headSha;
+  }
+  if (typeof raw.headBranch === "string") {
+    reference.headBranch = raw.headBranch;
+  }
+  if (typeof raw.baseBranch === "string") {
+    reference.baseBranch = raw.baseBranch;
+  }
+  if (typeof raw.headIntroducedAt === "string") {
+    reference.headIntroducedAt = raw.headIntroducedAt;
+  }
+  if (raw.mergeState === "clean" || raw.mergeState === "conflicting" || raw.mergeState === "dirty" || raw.mergeState === "unknown") {
+    reference.mergeState = raw.mergeState;
+  }
+
+  return reference;
 };
 
 type AttemptExecutorDeps = {
@@ -185,11 +225,8 @@ export class AttemptExecutor {
           attemptLogger.warn("falling back to repository root for worktree path", { worktreePath, beforeSha: beforeSha ?? "unknown" });
         }
 
-        const comments = await this.deps.taskSystem.listComments(task.id);
-        const reviewContext =
-          job.action === "review" || job.action === "reviewer" || job.action === "retry" || job.action === "consolidation"
-            ? (await this.deps.reviewService.getContext(task, this.deps.config.workspace.agentPrefix, repo, target)) ?? undefined
-            : undefined;
+        const pullRequestReference = readPullRequestReference(job.selectionContext ?? {});
+        const reviewHeadSha = pullRequestReference?.headSha ?? null;
         const usesRunnerSession = job.action !== "consolidation";
         const activeRunnerSession =
           usesRunnerSession && job.action !== "retry"
@@ -202,7 +239,7 @@ export class AttemptExecutor {
           this.deps.foremanRepos.attempts.linkRunnerSession(attempt.id, runnerSession.id);
           this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
             lastAttemptId: attempt.id,
-            lastReviewHeadSha: reviewContext?.headSha ?? null,
+            lastReviewHeadSha: reviewHeadSha,
           });
         }
         const isContinuation = Boolean(activeRunnerSession?.nativeSessionId);
@@ -217,20 +254,20 @@ export class AttemptExecutor {
           config: this.deps.config,
           paths: this.deps.paths,
           task,
-          comments: comments.map((comment) => `- ${comment.createdAt} ${comment.authorName ?? "unknown"}: ${comment.body}`).join("\n") || "(none)",
           repo,
+          taskTarget: target,
           worktreePath,
           baseBranch: job.baseBranch ?? repo.defaultBranch,
           gitState: {
             worktreeHeadSha: beforeSha,
-            reviewHeadSha: reviewContext?.headSha ?? null,
+            reviewHeadSha,
             baseBranch: job.baseBranch ?? repo.defaultBranch,
             previousSessionHeadSha: activeRunnerSession?.lastWorktreeHeadSha ?? null,
           },
           continuation: isContinuation,
-          ...(reviewContext ? { reviewContext } : {}),
+          ...(pullRequestReference ? { pullRequestReference } : {}),
         });
-        attemptLogger.info("rendered worker prompt", { commentCount: comments.length, hasReviewContext: Boolean(reviewContext) });
+        attemptLogger.info("rendered worker prompt", { hasPullRequestReference: Boolean(pullRequestReference) });
 
         const promptRelativePath = path.join("artifacts", `attempt-${attempt.id}-prompt.md`);
         const promptAbsolutePath = path.join(this.deps.paths.workspaceRoot, promptRelativePath);
@@ -274,7 +311,7 @@ export class AttemptExecutor {
           this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
             nativeSessionId: runResult.nativeSessionId ?? null,
             lastAttemptId: attempt.id,
-            lastReviewHeadSha: reviewContext?.headSha ?? null,
+            lastReviewHeadSha: reviewHeadSha,
           });
         }
 
@@ -331,7 +368,6 @@ export class AttemptExecutor {
           target,
           repo,
           worktreePath,
-          ...(reviewContext ? { reviewContext } : {}),
           workerResult,
         });
         attemptLogger.info("applied worker result", { currentPrUrl });
@@ -343,7 +379,7 @@ export class AttemptExecutor {
           this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
             lastAttemptId: attempt.id,
             lastWorktreeHeadSha: afterSha,
-            lastReviewHeadSha: reviewContext?.headSha ?? null,
+            lastReviewHeadSha: reviewHeadSha,
             ...(attemptStatus === "completed" ? { isActive: true } : {}),
           });
         }

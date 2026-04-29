@@ -1,208 +1,144 @@
-import {
-  actionableConversationComments,
-  actionableReviewSummaries,
-  actionableReviewThreads,
-  type RepoRef,
-  type ReviewComment,
-  type ReviewContext,
-  type ReviewSummary,
-  type ReviewThread,
-  type Task,
-} from "../domain/index.js";
-import {
-  jsonSection,
-  renderPromptTemplate,
-  textSection,
-  type WorkerPromptTemplateName,
-} from "../prompts/template-renderer.js";
+import path from "node:path";
+
+import { resolveTaskPullRequest, resolveTaskTargetRef, type RepoRef, type ReviewContext, type Task, type TaskTargetRef } from "../domain/index.js";
+import { jsonSection, renderPromptTemplate, type WorkerPromptTemplateName } from "../prompts/template-renderer.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 
-const yesNo = (value: boolean): string => (value ? "yes" : "no");
-
-const renderBody = (body: string): string => ["```text", body, "```"].join("\n");
-
-const renderReviewComment = (label: string, comment: ReviewComment): string =>
-  [
-    `#### ${label} \`${comment.id}\``,
-    `- Author: ${comment.authorName ?? "unknown"}`,
-    `- Authored by agent: ${yesNo(comment.authoredByAgent)}`,
-    `- Created: ${comment.createdAt}`,
-    ...(comment.url ? [`- URL: ${comment.url}`] : []),
-    "",
-    renderBody(comment.body),
-  ].join("\n");
-
-const renderReviewSummary = (summary: ReviewSummary): string =>
-  [
-    `#### Review Summary \`${summary.id}\``,
-    `- Author: ${summary.authorName ?? "unknown"}`,
-    `- Authored by agent: ${yesNo(summary.authoredByAgent)}`,
-    `- Created: ${summary.createdAt}`,
-    `- Commit: ${summary.commitId || "(none)"}`,
-    `- Current head: ${yesNo(summary.isCurrentHead)}`,
-    "",
-    renderBody(summary.body),
-  ].join("\n");
-
-const renderReviewThread = (thread: ReviewThread): string =>
-  [
-    `#### Review Thread \`${thread.id}\``,
-    `- Status: ${thread.isResolved ? "resolved" : "unresolved"}`,
-    `- Path: ${thread.path ?? "(unknown)"}`,
-    `- Line: ${thread.line ?? "(unknown)"}`,
-    "",
-    ...thread.comments.flatMap((comment) => [renderReviewComment("Thread Comment", comment), ""]),
-  ]
-    .join("\n")
-    .trimEnd();
-
-const renderLatestReviewThread = (thread: ReviewThread): string => {
-  const latestComment = thread.comments.at(-1);
-
-  return [
-    `#### Review Thread \`${thread.id}\``,
-    `- Status: ${thread.isResolved ? "resolved" : "unresolved"}`,
-    `- Path: ${thread.path ?? "(unknown)"}`,
-    `- Line: ${thread.line ?? "(unknown)"}`,
-    "",
-    latestComment ? renderReviewComment("Latest Thread Comment", latestComment) : "(no comments)",
-  ].join("\n");
-};
-
-const renderCheckList = (title: string, checks: Array<{ name: string; state: "pending" | "failure" }>): string =>
-  [`### ${title}`, ...(checks.length > 0 ? checks.map((check) => `- ${check.name} (${check.state})`) : ["(none)"])].join("\n");
-
-const renderCollection = <T>(title: string, items: T[], renderItem: (item: T) => string): string =>
-  [`### ${title}`, ...(items.length > 0 ? items.flatMap((item) => ["", renderItem(item)]) : ["", "(none)"])].join("\n");
-
-const renderActionableNow = (context: ReviewContext): string => {
-  const actionableThreads = actionableReviewThreads(context);
-  const actionableSummaries = actionableReviewSummaries(context);
-  const actionableComments = actionableConversationComments(context);
-
-  return [
-    "### Actionable Now",
-    "",
-    renderCollection("Unresolved Review Threads", actionableThreads, renderReviewThread),
-    "",
-    renderCollection("Current-Head Review Summaries", actionableSummaries, renderReviewSummary),
-    "",
-    renderCollection("Post-Head PR Conversation Comments", actionableComments, (comment) => renderReviewComment("PR Comment", comment)),
-    "",
-    renderCheckList("Failing Checks", context.failingChecks),
-    "",
-    renderCheckList("Pending Checks", context.pendingChecks),
-    "",
-    "### Merge Status",
-    `- Merge state: ${context.mergeState}`,
-  ].join("\n");
-};
-
-const renderHistoricalContext = (context: ReviewContext): string => {
-  const actionableSummaryIds = new Set(actionableReviewSummaries(context).map((item) => item.id));
-  const actionableCommentIds = new Set(actionableConversationComments(context).map((item) => item.id));
-  const actionableThreadIds = new Set(actionableReviewThreads(context).map((item) => item.id));
-
-  return [
-    "### Remaining Historical Context",
-    "",
-    renderCollection(
-      "Other Review Summaries",
-      context.reviewSummaries.filter((item) => !actionableSummaryIds.has(item.id)),
-      renderReviewSummary,
-    ),
-    "",
-    renderCollection(
-      "Other PR Conversation Comments",
-      context.conversationComments.filter((item) => !actionableCommentIds.has(item.id)),
-      (comment) => renderReviewComment("PR Comment", comment),
-    ),
-    "",
-    renderCollection(
-      "Resolved Review Threads",
-      context.reviewThreads.filter((item) => !actionableThreadIds.has(item.id)),
-      renderReviewThread,
-    ),
-  ].join("\n");
-};
-
-const renderFullReviewHistory = (context: ReviewContext): string =>
-  [
-    renderCollection("Review Summaries", context.reviewSummaries, renderReviewSummary),
-    "",
-    renderCollection("PR Conversation Comments", context.conversationComments, (comment) => renderReviewComment("PR Comment", comment)),
-    "",
-    renderCollection("Review Threads", context.reviewThreads, renderReviewThread),
-    "",
-    renderCheckList("Failing Checks", context.failingChecks),
-    "",
-    renderCheckList("Pending Checks", context.pendingChecks),
-  ].join("\n");
-
-const renderLatestReviewActivity = (reviewContext?: ReviewContext): string => {
-  if (!reviewContext) {
-    return textSection("Latest Review Activity", "null");
+const parsePullRequestNumber = (url: string | null): number | null => {
+  if (!url) {
+    return null;
   }
 
-  return textSection(
-    "Latest Review Activity",
-    [
-      renderCollection("Unresolved Review Threads", actionableReviewThreads(reviewContext), renderLatestReviewThread),
-      "",
-      renderCollection("Current-Head Review Summaries", actionableReviewSummaries(reviewContext), renderReviewSummary),
-      "",
-      renderCollection("Post-Head PR Conversation Comments", actionableConversationComments(reviewContext), (comment) =>
-        renderReviewComment("PR Comment", comment),
-      ),
-      "",
-      renderCheckList("Failing Checks", reviewContext.failingChecks),
-      "",
-      renderCheckList("Pending Checks", reviewContext.pendingChecks),
-      "",
-      "### Merge Status",
-      `- Merge state: ${reviewContext.mergeState}`,
-    ].join("\n"),
-  );
+  const match = url.match(/\/pull\/(\d+)(?:\b|\/|$)/);
+  return match ? Number(match[1]) : null;
 };
 
-const renderReviewContext = (action: WorkerPromptTemplateName, reviewContext?: ReviewContext): string => {
-  if (!reviewContext) {
-    return textSection("Review Context", "null");
+const resolveSelectedTarget = (task: Task, repo: RepoRef, target?: TaskTargetRef): TaskTargetRef | null =>
+  target ?? resolveTaskTargetRef(task, repo.key);
+
+export type WorkerPromptPullRequestReference = {
+  provider: "github";
+  url: string;
+  number: number;
+  state?: "open" | "closed" | "merged";
+  isDraft?: boolean;
+  headSha?: string;
+  headBranch?: string;
+  baseBranch?: string;
+  headIntroducedAt?: string;
+  mergeState?: "clean" | "conflicting" | "dirty" | "unknown";
+};
+
+const renderSelectedTask = (task: Task, selectedTarget: TaskTargetRef | null): string =>
+  jsonSection("Selected Task", {
+    id: task.id,
+    provider: task.provider,
+    providerId: task.providerId,
+    title: task.title,
+    url: task.url,
+    state: task.state,
+    providerState: task.providerState,
+    priority: task.priority,
+    labels: task.labels,
+    assignee: task.assignee,
+    selectedTarget,
+    dependencies: task.dependencies,
+    targetDependencies: task.targetDependencies,
+  });
+
+const renderRepositoryContext = (input: {
+  repo: RepoRef;
+  worktreePath: string;
+  baseBranch: string;
+  selectedTarget: TaskTargetRef | null;
+}): string =>
+  jsonSection("Repository Context", {
+    repo: input.repo,
+    worktreePath: input.worktreePath,
+    baseBranch: input.baseBranch,
+    selectedTarget: input.selectedTarget,
+  });
+
+const renderTaskProviderContext = (input: { config: WorkspaceConfig; paths: WorkspacePaths; task: Task }): string => {
+  if (input.task.provider === "file") {
+    const tasksDir = path.join(input.paths.workspaceRoot, input.config.taskSystem.file?.tasksDir ?? "tasks");
+    const taskFilePath = path.join(tasksDir, `${input.task.id}.md`);
+
+    return jsonSection("Task Provider Context", {
+      provider: "file",
+      taskFilePath,
+      commentsFilePath: taskFilePath.replace(/\.md$/, ".comments.ndjson"),
+    });
   }
 
-  const pullRequestDetails = [
-    "### Pull Request Snapshot",
-    `- Provider: ${reviewContext.provider}`,
-    `- URL: ${reviewContext.pullRequestUrl}`,
-    `- Number: ${reviewContext.pullRequestNumber}`,
-    `- State: ${reviewContext.state}`,
-    `- Draft: ${yesNo(reviewContext.isDraft)}`,
-    `- Head branch: ${reviewContext.headBranch}`,
-    `- Head SHA: ${reviewContext.headSha}`,
-    `- Base branch: ${reviewContext.baseBranch}`,
-    `- Current head introduced at: ${reviewContext.headIntroducedAt}`,
-    `- Merge state: ${reviewContext.mergeState}`,
-  ].join("\n");
-
-  const history =
-    action === "review" || action === "retry"
-      ? [renderActionableNow(reviewContext), "", renderHistoricalContext(reviewContext)].join("\n")
-      : renderFullReviewHistory(reviewContext);
-
-  return textSection("Review Context", [pullRequestDetails, "", history].join("\n"));
+  return jsonSection("Task Provider Context", {
+    provider: "linear",
+    issueIdentifier: input.task.id,
+    issueId: input.task.providerId,
+    issueUrl: input.task.url,
+    credentialNames: ["LINEAR_API_KEY"],
+  });
 };
+
+const reviewContextToPullRequestReference = (context: ReviewContext): WorkerPromptPullRequestReference => ({
+  provider: context.provider,
+  url: context.pullRequestUrl,
+  number: context.pullRequestNumber,
+  state: context.state,
+  isDraft: context.isDraft,
+  headSha: context.headSha,
+  headBranch: context.headBranch,
+  baseBranch: context.baseBranch,
+  headIntroducedAt: context.headIntroducedAt,
+  mergeState: context.mergeState,
+});
+
+const renderPullRequestReference = (input: {
+  task: Task;
+  repo: RepoRef;
+  reviewContext?: ReviewContext;
+  pullRequestReference?: WorkerPromptPullRequestReference;
+}): string => {
+  const reference = input.pullRequestReference ?? (input.reviewContext ? reviewContextToPullRequestReference(input.reviewContext) : null);
+  if (reference) {
+    return jsonSection("Pull Request Reference", {
+      ...reference,
+      credentialNames: ["GH_TOKEN"],
+    });
+  }
+
+  const pullRequest = resolveTaskPullRequest(input.task, input.repo.key);
+  const url = pullRequest?.url ?? null;
+
+  return jsonSection("Pull Request Reference", {
+    provider: url ? "github" : null,
+    url,
+    number: parsePullRequestNumber(url),
+    source: pullRequest?.source ?? null,
+    title: pullRequest?.title ?? null,
+    credentialNames: ["GH_TOKEN"],
+  });
+};
+
+const renderProviderAccess = (config: WorkspaceConfig): string =>
+  jsonSection("Provider Access", {
+    taskSystem: config.taskSystem.type,
+    reviewSystem: config.reviewSystem.type,
+    credentialNames: [config.taskSystem.type === "linear" ? "LINEAR_API_KEY" : null, "GH_TOKEN"].filter(Boolean),
+  });
 
 export const renderWorkerPrompt = async (input: {
   action: WorkerPromptTemplateName;
   config: WorkspaceConfig;
   paths: WorkspacePaths;
   task: Task;
-  comments: string;
   repo: RepoRef;
+  taskTarget?: TaskTargetRef;
   worktreePath: string;
   baseBranch: string;
   reviewContext?: ReviewContext;
+  pullRequestReference?: WorkerPromptPullRequestReference;
   gitState?: {
     worktreeHeadSha: string | null;
     reviewHeadSha: string | null;
@@ -211,36 +147,38 @@ export const renderWorkerPrompt = async (input: {
   };
   continuation?: boolean;
 }): Promise<string> => {
-  const repoContext = {
-    repo: input.repo,
-    worktreePath: input.worktreePath,
-    baseBranch: input.baseBranch,
-  };
-
+  const selectedTarget = resolveSelectedTarget(input.task, input.repo, input.taskTarget);
   const template = input.continuation
     ? input.action === "reviewer"
       ? "reviewer-continuation"
       : "review-continuation"
     : input.action;
-
-  const reviewActivity = renderLatestReviewActivity(input.reviewContext);
-  const review = input.continuation ? reviewActivity : renderReviewContext(input.action, input.reviewContext);
+  const pullRequestReference = renderPullRequestReference(input);
 
   return renderPromptTemplate({
     paths: input.paths,
     template,
     context: {
-      "selected-task": jsonSection("Selected Task", input.task),
-      "task-comments": textSection("Task Comments", input.comments),
-      repo: jsonSection("Repository Context", repoContext),
+      "selected-task": renderSelectedTask(input.task, selectedTarget),
+      "task-provider": renderTaskProviderContext(input),
+      repo: renderRepositoryContext({
+        repo: input.repo,
+        worktreePath: input.worktreePath,
+        baseBranch: input.baseBranch,
+        selectedTarget,
+      }),
       "git-state": jsonSection("Current Git State", {
         currentWorktreeHeadSha: input.gitState?.worktreeHeadSha ?? null,
         currentPrHeadSha: input.gitState?.reviewHeadSha ?? null,
         baseBranch: input.gitState?.baseBranch ?? input.baseBranch,
         previousSessionHeadSha: input.gitState?.previousSessionHeadSha ?? null,
       }),
-      review,
-      "review-activity": reviewActivity,
+      "provider-access": renderProviderAccess(input.config),
+      review: pullRequestReference,
+      "pull-request": pullRequestReference,
+    },
+    fragmentAliases: {
+      "task-system-worker": input.config.taskSystem.type === "linear" ? "task-system-linear-worker" : "task-system-file-worker",
     },
     properties: { session: { action: input.action } },
   });

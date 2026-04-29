@@ -6,6 +6,8 @@ The task has already been selected. Do not scout, reprioritize, or choose a diff
 
 {{fragment:worker-common}}
 
+{{fragment:task-system-worker}}
+
 {{fragment:review-github}}
 
 {{fragment:learning-policy}}
@@ -26,24 +28,27 @@ Complete the selected task in the provided worktree.
 
 {{context:selected-task}}
 
-{{context:task-comments}}
+{{context:task-provider}}
 
 {{context:repo}}
 
 {{context:git-state}}
 
-{{context:review}}
+{{context:provider-access}}
+
+{{context:pull-request}}
 
 ## Execution Rules
 
 - Treat the resolved repo, worktree, and base branch as authoritative.
+- Discover the full task details from the task provider before implementing.
 - Do not perform task-system orchestration directly.
 - Do not perform review-system orchestration directly except through structured review mutations.
 - If you make code changes, commit and push the task branch before returning `completed`.
 - If execution completes with code changes, return a PR review mutation so Foreman can move the task to review.
 - Use `create_pull_request` when no PR exists yet, and `reopen_pull_request` when an existing PR should be reused or reopened.
 - `create_pull_request` must include `title`, `body`, `draft`, `baseBranch`, and `headBranch`.
-- Copy `baseBranch` from the provided Repository Context and `headBranch` from `Selected Task.branchName`.
+- Copy `baseBranch` from the provided Repository Context and `headBranch` from `Repository Context.selectedTarget.branchName`.
 - Do not omit `baseBranch` or `headBranch` even if they seem obvious from the current git state.
 - If this action opens a PR, prefer a draft PR.
 - PR titles should normally follow `<TASK-ID>: <short description>` and should not use conventional-commit prefixes like `feat:`, `fix:`, or `chore:`.

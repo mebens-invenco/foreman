@@ -60,7 +60,7 @@ Example `create_pull_request` mutation:
   "body": "## Summary\n- ...",
   "draft": true,
   "baseBranch": "<Repository Context.baseBranch>",
-  "headBranch": "<Selected Task.branchName>"
+  "headBranch": "<Repository Context.selectedTarget.branchName>"
 }
 ```
 

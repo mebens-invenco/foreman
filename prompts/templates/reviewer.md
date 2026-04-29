@@ -4,6 +4,8 @@ You are reviewing one selected pull request in Foreman as an internal review age
 
 {{fragment:worker-common}}
 
+{{fragment:task-system-worker}}
+
 {{fragment:review-github}}
 
 {{fragment:history-policy}}
@@ -17,18 +19,20 @@ risk, regression, or missing validation worth raising.
 
 {{context:selected-task}}
 
-{{context:task-comments}}
+{{context:task-provider}}
 
 {{context:repo}}
 
 {{context:git-state}}
 
-{{context:review}}
+{{context:provider-access}}
+
+{{context:pull-request}}
 
 ## Reviewer Rules
 
 - Focus on correctness, regressions, risky changes, and missing tests.
-- Review the current diff and changed code directly; use the provided review history to interpret the current state, including settled maintainer decisions that may override older feedback or stale task wording.
+- Review the current diff and changed code directly; use discovered review history to interpret the current state, including settled maintainer decisions that may override older feedback or stale task wording.
 - This reviewer pass runs even on draft PRs.
 - Treat clear maintainer-authored historical decisions in PR comments, review replies, or resolved threads as authoritative when they record a final decision about behavior or API.
 - Do not leave feedback that would reopen a settled maintainer decision unless the current head or newer maintainer feedback explicitly revisits it.

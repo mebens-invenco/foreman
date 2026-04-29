@@ -66,6 +66,21 @@ const reviewPriorityReason = (context: ReviewContext): string | null => {
   return null;
 };
 
+const pullRequestSelectionContext = (context: ReviewContext): Record<string, unknown> => ({
+  pullRequestReference: {
+    provider: context.provider,
+    url: context.pullRequestUrl,
+    number: context.pullRequestNumber,
+    state: context.state,
+    isDraft: context.isDraft,
+    headSha: context.headSha,
+    headBranch: context.headBranch,
+    baseBranch: context.baseBranch,
+    headIntroducedAt: context.headIntroducedAt,
+    mergeState: context.mergeState,
+  },
+});
+
 const checkpointMatchesReviewState = (
   checkpoint:
     | {
@@ -551,7 +566,7 @@ export const runScoutSelection = async (input: {
           baseBranch: context.baseBranch,
           priorityRank: priorityToRank(task.priority),
           selectionReason: reason,
-          selectionContext: { reviewContext: context },
+          selectionContext: pullRequestSelectionContext(context),
         };
         break;
       }
@@ -670,7 +685,7 @@ export const runScoutSelection = async (input: {
             baseBranch: reviewContext.baseBranch,
             priorityRank: priorityToRank(task.priority),
             selectionReason: reviewContext.isDraft ? "draft pull request eligible for reviewer pass" : "open pull request eligible for reviewer pass",
-            selectionContext: { reviewContext },
+            selectionContext: pullRequestSelectionContext(reviewContext),
           };
           break;
         }
