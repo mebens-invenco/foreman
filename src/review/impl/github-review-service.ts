@@ -273,6 +273,11 @@ export class GitHubReviewService implements ReviewService {
   }
 
   private isAuthoredByAgent(body: string, agentPrefix: string): boolean {
+    const trimmedBody = body.trimStart();
+    if (trimmedBody.startsWith("<!-- linear-linkback -->")) {
+      return true;
+    }
+
     if (body.startsWith(agentPrefix)) {
       return true;
     }

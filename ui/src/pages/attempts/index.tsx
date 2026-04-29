@@ -23,7 +23,7 @@ export function AttemptsPage() {
   const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery()
   const tableState = useAttemptsTableState()
   const table = useDataTable({
-    columns: createAttemptColumns(setSelectedAttemptId),
+    columns: createAttemptColumns(),
     columnFilters: tableState.columnFilters,
     data: attempts,
     getRowId: (row) => row.id,
@@ -69,6 +69,7 @@ export function AttemptsPage() {
             error={error}
             isError={isError}
             isLoading={isLoading}
+            onRowClick={(attempt) => setSelectedAttemptId(attempt.id)}
             table={table}
           />
 

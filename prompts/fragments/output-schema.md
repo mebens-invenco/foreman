@@ -108,8 +108,7 @@ Allowed signals:
 
 Rules:
 
-- use `review_checkpoint_eligible` only for `review` actions returning `no_action_needed`
-- use `reviewer_checkpoint_eligible` only for `reviewer` actions returning `no_action_needed`
+- checkpoint signals are accepted for compatibility, but Foreman records no-op review checkpoints automatically
 - include blockers only when `outcome` is `blocked`
 - keep mutation arrays ordered exactly as you want Foreman to apply them
 - before returning, verify that every mutation includes all fields required by its type; a missing required field causes the entire attempt to fail schema validation

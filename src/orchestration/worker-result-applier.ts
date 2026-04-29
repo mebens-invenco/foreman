@@ -238,7 +238,6 @@ export class WorkerResultApplier {
     if (
       input.job.action === "review" &&
       workerResult.outcome === "no_action_needed" &&
-      workerResult.signals.includes("review_checkpoint_eligible") &&
       pullRequestUrl
     ) {
       const reviewContext =
@@ -273,7 +272,6 @@ export class WorkerResultApplier {
     if (
       input.job.action === "reviewer" &&
       workerResult.outcome === "no_action_needed" &&
-      workerResult.signals.includes("reviewer_checkpoint_eligible") &&
       pullRequestUrl
     ) {
       const reviewContext =

@@ -304,7 +304,6 @@ describe("SchedulerService applyWorkerResult", () => {
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
         workerResult: baseWorkerResult({
           outcome: "no_action_needed",
-          signals: ["review_checkpoint_eligible"],
         }),
       }),
     ).resolves.toBe(reviewContext.pullRequestUrl);
@@ -368,7 +367,6 @@ describe("SchedulerService applyWorkerResult", () => {
         reviewContext,
         workerResult: baseWorkerResult({
           outcome: "no_action_needed",
-          signals: ["review_checkpoint_eligible"],
         }),
       }),
     ).resolves.toBe(reviewContext.pullRequestUrl);
@@ -500,7 +498,6 @@ describe("SchedulerService applyWorkerResult", () => {
         workerResult: baseWorkerResult({
           action: "reviewer",
           outcome: "no_action_needed",
-          signals: ["reviewer_checkpoint_eligible"],
         }),
       }),
     ).resolves.toBe(reviewContext.pullRequestUrl);

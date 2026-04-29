@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { RepoRef, Task } from "../../domain/index.js";
+import { actionableConversationComments, type RepoRef, type Task } from "../../domain/index.js";
 import * as processLib from "../../lib/process.js";
 import { GitHubReviewService } from "../index.js";
 
@@ -851,6 +851,74 @@ describe("GitHubReviewService.getContext", () => {
         url: "https://github.com/acme/repo/pull/946#issuecomment-102",
       },
     ]);
+  });
+
+  test("marks Linear linkback comments as non-actionable automation", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(pullRequestSummaryResponse)
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                url: "https://github.com/acme/repo/pull/946",
+                number: 946,
+                state: "OPEN",
+                isDraft: true,
+                merged: false,
+                headRefOid: "abc123",
+                headRefName: "eng-4737",
+                baseRefName: "master",
+                mergeStateStatus: "BLOCKED",
+                mergeable: "MERGEABLE",
+                commits: { nodes: [{ commit: { committedDate: "2026-03-16T03:00:00Z" } }] },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(emptyReviewSummariesResponse)
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            id: 103,
+            body: "<!-- linear-linkback -->\n<details><summary>ENG-4959 Add wizard progress indicator</summary></details>",
+            created_at: "2026-03-16T03:30:00Z",
+            html_url: "https://github.com/acme/repo/pull/946#issuecomment-103",
+            user: { login: "linear[bot]" },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ check_runs: [] }))
+      .mockResolvedValueOnce(jsonResponse({ statuses: [] })) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const context = await service.getContext(sampleTask(), "[agent]");
+
+    expect(context?.conversationComments).toEqual([
+      expect.objectContaining({
+        id: "103",
+        authorName: "linear[bot]",
+        authoredByAgent: true,
+        isAfterCurrentHead: true,
+      }),
+    ]);
+    expect(context ? actionableConversationComments(context) : []).toEqual([]);
   });
 });
 

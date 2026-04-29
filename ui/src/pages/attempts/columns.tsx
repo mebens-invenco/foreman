@@ -5,7 +5,6 @@ import {
   matchesStringFilter,
   type DataTableFilterOption,
 } from "@/components/data-table"
-import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   abbreviateId,
@@ -85,9 +84,7 @@ export const attemptsGlobalFilter: FilterFn<AttemptRecord> = (
   return buildAttemptSearchText(row.original).includes(search)
 }
 
-export const createAttemptColumns = (
-  onSelectAttempt: (attemptId: string) => void
-): ColumnDef<AttemptRecord>[] => [
+export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
   {
     accessorKey: "id",
     cell: ({ row }) => (
@@ -227,22 +224,6 @@ export const createAttemptColumns = (
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Summary" />
     ),
-  },
-  {
-    id: "actions",
-    cell: ({ row }) => (
-      <Button
-        type="button"
-        variant="outline"
-        size="xs"
-        onClick={() => onSelectAttempt(row.original.id)}
-      >
-        Details
-      </Button>
-    ),
-    enableGlobalFilter: false,
-    enableSorting: false,
-    header: () => <span className="sr-only">Actions</span>,
   },
 ]
 

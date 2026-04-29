@@ -10,11 +10,13 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   getArtifactContent,
   getAttempt,
   getAttemptLogs,
   type ArtifactRecord,
+  type AttemptEventRecord,
   type AttemptRecord,
 } from "@/lib/api"
 import { formatActionLabel, formatDuration, formatTimestamp } from "@/lib/format"
@@ -28,6 +30,8 @@ import { cn } from "@/lib/utils"
 type AttemptDetailSheetProps = {
   attemptId: string | null
 }
+
+type AttemptDetailTab = "events" | "logs" | "artifacts"
 
 function formatStatusLabel(status: string) {
   return status.replace(/_/g, " ")
@@ -350,7 +354,46 @@ function ArtifactsPanel({ artifacts }: { artifacts: ArtifactRecord[] }) {
   )
 }
 
+function EventsPanel({ events }: { events: AttemptEventRecord[] }) {
+  if (events.length === 0) {
+    return (
+      <div className="border border-dashed border-border/70 bg-background/65 px-4 py-6 text-sm text-muted-foreground">
+        No events recorded for this attempt.
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {events.map((event) => (
+        <div
+          key={event.id}
+          className="border border-border/70 bg-background/70 px-4 py-3"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs tracking-[0.22em] text-foreground uppercase">
+              {formatArtifactType(event.eventType)}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {formatTimestamp(event.createdAt)}
+            </p>
+          </div>
+          <p className="mt-2 text-sm leading-6 text-foreground">
+            {event.message}
+          </p>
+          {Object.keys(event.payload).length > 0 ? (
+            <pre className="mt-3 overflow-auto bg-muted/35 p-3 font-mono text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
+              {JSON.stringify(event.payload, null, 2)}
+            </pre>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
+  const [detailTab, setDetailTab] = useState<AttemptDetailTab>("events")
   const query = useQuery({
     queryKey: ["foreman", "attempt", attemptId],
     queryFn: () => getAttempt(attemptId!),
@@ -424,56 +467,27 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
               </section>
             ) : null}
 
-            <section className="space-y-3">
-              <p className="text-xxs tracking-[0.32em] text-muted-foreground uppercase">
-                Events
-              </p>
-              {events.length === 0 ? (
-                <div className="border border-dashed border-border/70 bg-background/65 px-4 py-6 text-sm text-muted-foreground">
-                  No events recorded for this attempt.
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {events.map((event) => (
-                    <div
-                      key={event.id}
-                      className="border border-border/70 bg-background/70 px-4 py-3"
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-xs tracking-[0.22em] text-foreground uppercase">
-                          {formatArtifactType(event.eventType)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatTimestamp(event.createdAt)}
-                        </p>
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-foreground">
-                        {event.message}
-                      </p>
-                      {Object.keys(event.payload).length > 0 ? (
-                        <pre className="mt-3 overflow-auto bg-muted/35 p-3 font-mono text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
-                          {JSON.stringify(event.payload, null, 2)}
-                        </pre>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
+            <Tabs
+              value={detailTab}
+              onValueChange={(value) => setDetailTab(value as AttemptDetailTab)}
+              className="min-h-0"
+            >
+              <TabsList className="w-full justify-start" variant="line">
+                <TabsTrigger value="events">Events</TabsTrigger>
+                <TabsTrigger value="logs">Logs</TabsTrigger>
+                <TabsTrigger value="artifacts">Artefacts</TabsTrigger>
+              </TabsList>
 
-            <section className="space-y-3">
-              <p className="text-xxs tracking-[0.32em] text-muted-foreground uppercase">
-                Logs
-              </p>
-              <AttemptLogPanel attempt={attempt} />
-            </section>
-
-            <section className="space-y-3">
-              <p className="text-xxs tracking-[0.32em] text-muted-foreground uppercase">
-                Artifacts
-              </p>
-              <ArtifactsPanel artifacts={artifacts} />
-            </section>
+              <TabsContent value="events" className="mt-4">
+                <EventsPanel events={events} />
+              </TabsContent>
+              <TabsContent value="logs" className="mt-4">
+                <AttemptLogPanel attempt={attempt} />
+              </TabsContent>
+              <TabsContent value="artifacts" className="mt-4">
+                <ArtifactsPanel artifacts={artifacts} />
+              </TabsContent>
+            </Tabs>
           </>
         ) : null}
       </div>

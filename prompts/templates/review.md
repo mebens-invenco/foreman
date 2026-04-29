@@ -56,7 +56,7 @@ Priority order inside this action:
 - A review pass may complete with reply mutations only; make code changes only when the feedback or PR
   state actually requires them.
 - If you make code changes, run the relevant automated checks for the affected scope, then commit and push the task branch before returning `completed`.
-- If nothing needs to be changed or replied to for the current PR state, return `no_action_needed` and include `review_checkpoint_eligible`.
+- If nothing needs to be changed or replied to for the current PR state, return `no_action_needed`; Foreman records the review checkpoint automatically.
 - If you disagree with a suggestion or believe the current code is correct, reply with your reasoning
   instead of forcing a change.
 - Resolve threads only when your code or reply truly addresses them; leave them unresolved when you are

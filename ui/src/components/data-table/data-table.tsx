@@ -19,6 +19,7 @@ type DataTableProps<TData> = {
   isError?: boolean
   isLoading?: boolean
   loadingRowCount?: number
+  onRowClick?: (row: TData) => void
   table: TanStackTable<TData>
 }
 
@@ -28,6 +29,7 @@ export function DataTable<TData>({
   isError = false,
   isLoading = false,
   loadingRowCount = 6,
+  onRowClick,
   table,
 }: DataTableProps<TData>) {
   const columns = table.getVisibleLeafColumns()
@@ -93,7 +95,11 @@ export function DataTable<TData>({
           </TableRow>
         ) : (
           rows.map((row) => (
-            <TableRow key={row.id}>
+            <TableRow
+              className={onRowClick ? "cursor-pointer" : undefined}
+              key={row.id}
+              onClick={onRowClick ? () => onRowClick(row.original) : undefined}
+            >
               {row.getVisibleCells().map((cell, index) => (
                 <TableCell
                   className={[

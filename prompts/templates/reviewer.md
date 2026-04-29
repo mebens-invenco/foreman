@@ -65,6 +65,6 @@ Does it implement the required changes? Note these may have diverged since by wa
 - Keep review feedback concise and specific.
 - Do not request code changes through task mutations.
 - Do not reply to existing review threads or PR comments from this action; that belongs to the normal `review` action.
-- If the current PR state does not need reviewer feedback, return `no_action_needed` and include `reviewer_checkpoint_eligible`.
+- If the current PR state does not need reviewer feedback, return `no_action_needed`; Foreman records the reviewer checkpoint automatically.
 
 {{fragment:output-schema}}
