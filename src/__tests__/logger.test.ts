@@ -76,7 +76,7 @@ describe("LoggerService", () => {
     expect(attemptLog).toContain('message="worker state changed"');
   });
 
-  test("writes raw runner output to the attempt log and shows worker slot plus task id in stdout", async () => {
+  test("writes raw runner output to the attempt log and renders JSON readably in stdout", async () => {
     const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "foreman-runner-line-"));
     const stdout = new PassThrough();
     let captured = "";
@@ -99,14 +99,39 @@ describe("LoggerService", () => {
       workerSlot: 2,
       taskId: "TASK-42",
     });
-    attemptLogger.runnerLine("runner output line");
+    const rawJsonLine = JSON.stringify({ type: "message", sessionID: "opencode-session", part: { text: "runner output line" } });
+    attemptLogger.runnerLine(rawJsonLine);
     await logger.flush();
 
     const attemptLog = await readFile(path.join(workspaceRoot, "logs", "attempts", "attempt-456.log"), "utf8");
     const workspaceLogPath = path.join(workspaceRoot, "logs", "foreman.log");
-    expect(attemptLog).toBe("runner output line\n");
+    expect(attemptLog).toBe(`${rawJsonLine}\n`);
     expect(captured).toBe("[W2 TASK-42] runner output line\n");
     await expect(readFile(workspaceLogPath, "utf8")).rejects.toThrow();
+  });
+
+  test("suppresses noisy JSON runner records from stdout while preserving raw attempt logs", async () => {
+    const workspaceRoot = await mkdtemp(path.join(os.tmpdir(), "foreman-runner-delta-"));
+    const stdout = new PassThrough();
+    let captured = "";
+    stdout.on("data", (chunk) => {
+      captured += String(chunk);
+    });
+
+    const logger = LoggerService.create({
+      paths: workspacePaths(workspaceRoot),
+      stdout,
+      context: { workspace: "test-workspace" },
+      colorMode: "never",
+    });
+
+    const rawJsonLine = JSON.stringify({ type: "token_delta", count: 1 });
+    logger.child({ attemptId: "attempt-789", workerSlot: 1 }).runnerLine(rawJsonLine);
+    await logger.flush();
+
+    const attemptLog = await readFile(path.join(workspaceRoot, "logs", "attempts", "attempt-789.log"), "utf8");
+    expect(attemptLog).toBe(`${rawJsonLine}\n`);
+    expect(captured).toBe("");
   });
 
   test("uses ANSI styling for stdout when color is enabled", async () => {
