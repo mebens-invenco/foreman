@@ -8,6 +8,7 @@ import {
   parseWorkerResult,
   validateWorkerResultForAction,
   workerResultActionValues,
+  workerResultSchema,
   type WorkerResultAction,
 } from "./execution/worker-result.js";
 import { importLegacyMemory } from "./importing/import-legacy-memory.js";
@@ -55,18 +56,20 @@ const readStdin = async (): Promise<string> => {
   return input;
 };
 
-const resolveHelpAction = (): WorkerResultAction | "<action>" => {
+const resolveHelpAction = (): WorkerResultAction | undefined => {
   const actionArgIndex = process.argv.findIndex((arg) => arg === "--action" || arg.startsWith("--action="));
   const value = process.argv[actionArgIndex]?.startsWith("--action=")
     ? process.argv[actionArgIndex]!.slice("--action=".length)
     : process.argv[actionArgIndex + 1];
 
-  return workerResultActionValues.includes(value as WorkerResultAction) ? (value as WorkerResultAction) : "<action>";
+  return workerResultActionValues.includes(value as WorkerResultAction) ? (value as WorkerResultAction) : undefined;
 };
 
 const renderAgentResultValidateHelp = (): string => {
   const action = resolveHelpAction();
-  const actionLiteral = action === "<action>" ? workerResultActionValues.join(" | ") : action;
+  const actionLiteral = action ?? `<${workerResultActionValues.join("|")}>`;
+  const schema = action ? workerResultSchema.extend({ action: z.literal(action) }) : workerResultSchema;
+  const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, 2);
 
   return `
 Action-specific accepted output shape
@@ -74,22 +77,13 @@ Action-specific accepted output shape
 - Required action literal: \"${actionLiteral}\".
 - Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block containing JSON.
 - The final answer returned to Foreman must contain exactly one <agent-result> block and no prose after it.
-- Required top-level fields: schemaVersion, action, outcome, summary, taskMutations, reviewMutations, learningMutations, blockers, signals.
-- schemaVersion must be 1.
-- outcome must be one of: completed, no_action_needed, blocked, failed.
-- taskMutations must be an array. Supported type: add_comment, requiring body.
-- reviewMutations must be an array. Supported types: create_pull_request, reply_to_review_summary, reply_to_thread_comment, reply_to_pr_comment, submit_pull_request_review, resolve_threads.
-- create_pull_request requires title, body, draft, baseBranch, and headBranch.
-- reply_to_review_summary requires reviewId and body.
-- reply_to_thread_comment requires threadId and body.
-- reply_to_pr_comment requires commentId and body.
-- submit_pull_request_review requires body, event, and comments; event must be COMMENT; each comment requires path, line, and body, with optional side LEFT or RIGHT.
-- resolve_threads requires a non-empty threadIds array.
-- learningMutations must be an array. Supported types: add and update.
-- add learning mutations require title, repo, confidence, content, and tags.
-- update learning mutations require id; title, repo, confidence, content, tags, and markApplied are optional.
-- blockers must be an array of non-empty strings.
-- signals must be an array containing only: code_changed, review_checkpoint_eligible, reviewer_checkpoint_eligible.
+- The worker result JSON schema below is generated from Foreman's Zod worker result schema.
+
+Worker result JSON schema:
+
+\`\`\`json
+${jsonSchema}
+\`\`\`
 
 Minimal raw JSON example:
 

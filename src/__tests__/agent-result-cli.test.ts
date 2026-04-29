@@ -80,7 +80,10 @@ describe("agent-result cli", () => {
     expect(result.code).toBe(0);
     expect(result.stdout).toContain('Required action literal: "reviewer".');
     expect(result.stdout).toContain("Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block");
-    expect(result.stdout).toContain("create_pull_request requires title, body, draft, baseBranch, and headBranch");
+    expect(result.stdout).toContain("generated from Foreman's Zod worker result schema");
+    expect(result.stdout).toContain('"const": "reviewer"');
+    expect(result.stdout).toContain('"const": "create_pull_request"');
+    expect(result.stdout).toContain('"required"');
     expect(result.stdout).toContain("Minimal raw JSON example");
   });
 });
