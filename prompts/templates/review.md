@@ -6,6 +6,8 @@ The task and PR have already been selected. Do not scout, reprioritize, or choos
 
 {{fragment:worker-common}}
 
+{{fragment:task-system-worker}}
+
 {{fragment:review-github}}
 
 {{fragment:learning-policy}}
@@ -28,17 +30,17 @@ Priority order inside this action:
 
 {{context:selected-task}}
 
-{{context:task-comments}}
+{{context:task-provider}}
 
 {{context:repo}}
 
 {{context:git-state}}
 
-{{context:review}}
+{{context:pull-request}}
 
 ## Review Rules
 
-- Start with `Actionable Now`, then use the remaining history for context.
+- Discover the current actionable GitHub state before deciding whether code, replies, or thread resolution are needed.
 - Only address review summaries on the current PR head.
 - Only address conversation comments created after the current PR head became current.
 - Do not assume every actionable review item requires a code change.

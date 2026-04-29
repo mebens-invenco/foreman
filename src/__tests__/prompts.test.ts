@@ -154,7 +154,6 @@ describe("prompt rendering", () => {
       config,
       paths,
       task: sampleTask,
-      comments: "- 2026-03-14 human: please keep this minimal",
       repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
       worktreePath: workspaceRoot,
       baseBranch: "main",
@@ -162,17 +161,51 @@ describe("prompt rendering", () => {
 
     expect(result).toContain("# Execution Prompt");
     expect(result).toContain("## Common Worker Rules");
-    expect(result).toContain("## GitHub Review Rules");
+    expect(result).toContain("## File Task Access");
+    expect(result).toContain("## GitHub Provider Access");
     expect(result).toContain("## Selected Task");
+    expect(result).toContain("## Task Provider Context");
     expect(result).toContain("## Current Git State");
+    expect(result).toContain("## Pull Request Reference");
     expect(result).toContain("## Required Output");
+    expect(result).toContain("Discover the full task details from the task provider before implementing.");
     expect(result).toContain("If execution completes with code changes, return a PR review mutation");
+    expect(result).not.toContain("Task Comments");
+    expect(result).not.toContain("please keep this minimal");
     expect(result).not.toContain("upsert_artifact");
     expect(result).not.toContain("{{fragment:");
     expect(result).not.toContain("{{context:");
   });
 
-  test("renders structured review history with actionable items first", async () => {
+  test("renders Linear provider access for Linear worker prompts", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-linear-worker-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+
+    const result = await renderWorkerPrompt({
+      action: "execution",
+      config,
+      paths,
+      task: {
+        ...sampleTask,
+        provider: "linear",
+        providerId: "linear-issue-id",
+        url: "https://linear.app/acme/issue/TASK-0001/add-filtering",
+      },
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+    });
+
+    expect(result).toContain("## Linear Provider Access");
+    expect(result).toContain("LINEAR_API_KEY");
+    expect(result).toContain("linear-issue-id");
+    expect(result).not.toContain("## File Task Access");
+    expect(result).not.toContain("## Provider Access");
+  });
+
+  test("renders compact provider references instead of serialized review history", async () => {
     const workspaceRoot = await createTempDir("foreman-prompts-review-");
     cleanupDirs.push(workspaceRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
@@ -183,7 +216,6 @@ describe("prompt rendering", () => {
       config,
       paths,
       task: { ...sampleTask, state: "in_review", providerState: "in_review" },
-      comments: "(none)",
       repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
       worktreePath: workspaceRoot,
       baseBranch: "main",
@@ -195,7 +227,6 @@ describe("prompt rendering", () => {
       config,
       paths,
       task: { ...sampleTask, state: "done", providerState: "done" },
-      comments: "(none)",
       repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
       worktreePath: workspaceRoot,
       baseBranch: "main",
@@ -207,18 +238,16 @@ describe("prompt rendering", () => {
       config,
       paths,
       task: { ...sampleTask, state: "in_review", providerState: "in_review" },
-      comments: "(none)",
       repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
       worktreePath: workspaceRoot,
       baseBranch: "main",
       reviewContext: sampleReviewContext,
     });
 
-    expect(reviewPrompt).toContain("### Actionable Now");
-    expect(reviewPrompt).toContain("### Remaining Historical Context");
-    expect(reviewPrompt).toContain("Review Summary `review-1`");
-    expect(reviewPrompt).toContain("[agent] Fixed in follow-up.");
-    expect(reviewPrompt).toContain("Can you simplify this flow?");
+    expect(reviewPrompt).toContain("## Pull Request Reference");
+    expect(reviewPrompt).toContain("https://github.com/acme/repo/pull/1");
+    expect(reviewPrompt).toContain("\"headSha\": \"abc123\"");
+    expect(reviewPrompt).toContain("Discover the current actionable GitHub state before deciding whether code, replies, or thread resolution are needed.");
     expect(reviewPrompt).toContain("Do not assume every actionable review item requires a code change.");
     expect(reviewPrompt).toContain("A review pass may complete with reply mutations only");
     expect(reviewPrompt).toContain("Do not reply again to an unresolved review thread when its latest comment was authored by the agent");
@@ -226,8 +255,13 @@ describe("prompt rendering", () => {
     expect(reviewPrompt).toContain("Reconcile both branches' intent instead of defaulting to either side.");
     expect(reviewPrompt).toContain("treat the later maintainer decision as authoritative");
     expect(reviewPrompt).toContain("older feedback was superseded instead of changing code");
-    expect(consolidationPrompt).toContain("### Review Summaries");
-    expect(consolidationPrompt).toContain("### Review Threads");
+    expect(reviewPrompt).not.toContain("Review Summary `review-1`");
+    expect(reviewPrompt).not.toContain("[agent] Fixed in follow-up.");
+    expect(reviewPrompt).not.toContain("Can you simplify this flow?");
+    expect(reviewPrompt).not.toContain("This needs another pass.");
+    expect(consolidationPrompt).toContain("Discover the relevant task and PR history");
+    expect(consolidationPrompt).not.toContain("### Review Summaries");
+    expect(consolidationPrompt).not.toContain("### Review Threads");
     expect(consolidationPrompt).not.toContain("### Actionable Now");
     expect(reviewerPrompt).toContain("# Reviewer Prompt");
     expect(reviewerPrompt).toContain("submit_pull_request_review");
@@ -239,7 +273,6 @@ describe("prompt rendering", () => {
       config,
       paths,
       task: { ...sampleTask, state: "in_review", providerState: "in_review" },
-      comments: "(none)",
       repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
       worktreePath: workspaceRoot,
       baseBranch: "main",
@@ -255,14 +288,13 @@ describe("prompt rendering", () => {
     expect(continuationPrompt).toContain("# Review Continuation");
     expect(continuationPrompt).toContain("previousSessionHeadSha");
     expect(continuationPrompt).toContain("previous-head");
-    expect(continuationPrompt).toContain("## Latest Review Activity");
-    expect(continuationPrompt).toContain("Latest Thread Comment");
-    expect(continuationPrompt).toContain("Please tighten this up.");
+    expect(continuationPrompt).toContain("## Common Worker Rules");
+    expect(continuationPrompt).toContain("## Selected Task");
+    expect(continuationPrompt).toContain("## Required Output");
+    expect(continuationPrompt).toContain("Use provider reads to rediscover current GitHub state before acting.");
+    expect(continuationPrompt).not.toContain("## Latest Review Activity");
+    expect(continuationPrompt).not.toContain("Please tighten this up.");
     expect(continuationPrompt).not.toContain("Earlier discussion that should stay historical.");
-    expect(continuationPrompt).not.toContain("## Common Worker Rules");
-    expect(continuationPrompt).not.toContain("## Selected Task");
-    expect(continuationPrompt).not.toContain("## Repository Context");
-    expect(continuationPrompt).not.toContain("## Required Output");
     expect(continuationPrompt).not.toContain("### Remaining Historical Context");
     expect(continuationPrompt).not.toContain("[agent] Fixed in follow-up.");
 
@@ -271,7 +303,6 @@ describe("prompt rendering", () => {
       config,
       paths,
       task: { ...sampleTask, state: "in_review", providerState: "in_review" },
-      comments: "(none)",
       repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
       worktreePath: workspaceRoot,
       baseBranch: "main",
@@ -286,9 +317,10 @@ describe("prompt rendering", () => {
     });
     expect(reviewerContinuationPrompt).toContain("# Reviewer Continuation");
     expect(reviewerContinuationPrompt).toContain("previous-reviewer-head");
-    expect(reviewerContinuationPrompt).toContain("## Latest Review Activity");
-    expect(reviewerContinuationPrompt).not.toContain("## Common Worker Rules");
-    expect(reviewerContinuationPrompt).not.toContain("## Selected Task");
-    expect(reviewerContinuationPrompt).not.toContain("## Required Output");
+    expect(reviewerContinuationPrompt).toContain("Use provider reads to rediscover current GitHub state");
+    expect(reviewerContinuationPrompt).toContain("## Common Worker Rules");
+    expect(reviewerContinuationPrompt).toContain("## Selected Task");
+    expect(reviewerContinuationPrompt).toContain("## Required Output");
+    expect(reviewerContinuationPrompt).not.toContain("## Latest Review Activity");
   });
 });

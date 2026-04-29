@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskTarget, type WorkerResult } from "../domain/index.js";
 import { createAgentRunner, parseWorkerResult, validateWorkerResult } from "../execution/index.js";
-import { renderWorkerPrompt } from "../execution/render-worker-prompt.js";
+import { parseWorkerPromptPullRequestReference, renderWorkerPrompt } from "../execution/render-worker-prompt.js";
 import { ForemanError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
 import { addSeconds, isoNow } from "../lib/time.js";
@@ -42,6 +42,14 @@ const formatRunnerFailure = (runResult: { exitCode: number | null; signal: strin
   }
 
   return details.join("\n");
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readReviewContext = (selectionContext: Record<string, unknown>): ReviewContext | undefined => {
+  const raw = selectionContext.reviewContext;
+  return isRecord(raw) && raw.provider === "github" ? (raw as ReviewContext) : undefined;
 };
 
 type AttemptExecutorDeps = {
@@ -185,11 +193,10 @@ export class AttemptExecutor {
           attemptLogger.warn("falling back to repository root for worktree path", { worktreePath, beforeSha: beforeSha ?? "unknown" });
         }
 
-        const comments = await this.deps.taskSystem.listComments(task.id);
-        const reviewContext =
-          job.action === "review" || job.action === "reviewer" || job.action === "retry" || job.action === "consolidation"
-            ? (await this.deps.reviewService.getContext(task, this.deps.config.workspace.agentPrefix, repo, target)) ?? undefined
-            : undefined;
+        const selectionContext = job.selectionContext ?? {};
+        const pullRequestReference = parseWorkerPromptPullRequestReference(selectionContext.pullRequestReference);
+        const reviewContext = readReviewContext(selectionContext);
+        const reviewHeadSha = pullRequestReference?.headSha ?? reviewContext?.headSha ?? null;
         const usesRunnerSession = job.action !== "consolidation";
         const activeRunnerSession =
           usesRunnerSession && job.action !== "retry"
@@ -202,7 +209,7 @@ export class AttemptExecutor {
           this.deps.foremanRepos.attempts.linkRunnerSession(attempt.id, runnerSession.id);
           this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
             lastAttemptId: attempt.id,
-            lastReviewHeadSha: reviewContext?.headSha ?? null,
+            lastReviewHeadSha: reviewHeadSha,
           });
         }
         const isContinuation = Boolean(activeRunnerSession?.nativeSessionId);
@@ -217,20 +224,20 @@ export class AttemptExecutor {
           config: this.deps.config,
           paths: this.deps.paths,
           task,
-          comments: comments.map((comment) => `- ${comment.createdAt} ${comment.authorName ?? "unknown"}: ${comment.body}`).join("\n") || "(none)",
           repo,
+          taskTarget: target,
           worktreePath,
           baseBranch: job.baseBranch ?? repo.defaultBranch,
           gitState: {
             worktreeHeadSha: beforeSha,
-            reviewHeadSha: reviewContext?.headSha ?? null,
+            reviewHeadSha,
             baseBranch: job.baseBranch ?? repo.defaultBranch,
             previousSessionHeadSha: activeRunnerSession?.lastWorktreeHeadSha ?? null,
           },
           continuation: isContinuation,
-          ...(reviewContext ? { reviewContext } : {}),
+          ...(pullRequestReference ? { pullRequestReference } : {}),
         });
-        attemptLogger.info("rendered worker prompt", { commentCount: comments.length, hasReviewContext: Boolean(reviewContext) });
+        attemptLogger.info("rendered worker prompt", { hasPullRequestReference: Boolean(pullRequestReference) });
 
         const promptRelativePath = path.join("artifacts", `attempt-${attempt.id}-prompt.md`);
         const promptAbsolutePath = path.join(this.deps.paths.workspaceRoot, promptRelativePath);
@@ -274,7 +281,7 @@ export class AttemptExecutor {
           this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
             nativeSessionId: runResult.nativeSessionId ?? null,
             lastAttemptId: attempt.id,
-            lastReviewHeadSha: reviewContext?.headSha ?? null,
+            lastReviewHeadSha: reviewHeadSha,
           });
         }
 
@@ -343,7 +350,7 @@ export class AttemptExecutor {
           this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
             lastAttemptId: attempt.id,
             lastWorktreeHeadSha: afterSha,
-            lastReviewHeadSha: reviewContext?.headSha ?? null,
+            lastReviewHeadSha: reviewHeadSha,
             ...(attemptStatus === "completed" ? { isActive: true } : {}),
           });
         }
