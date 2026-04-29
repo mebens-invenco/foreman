@@ -66,7 +66,8 @@ const reviewPriorityReason = (context: ReviewContext): string | null => {
   return null;
 };
 
-const pullRequestSelectionContext = (context: ReviewContext): Record<string, unknown> => ({
+const reviewSelectionContext = (context: ReviewContext): Record<string, unknown> => ({
+  reviewContext: context,
   pullRequestReference: {
     provider: context.provider,
     url: context.pullRequestUrl,
@@ -566,7 +567,7 @@ export const runScoutSelection = async (input: {
           baseBranch: context.baseBranch,
           priorityRank: priorityToRank(task.priority),
           selectionReason: reason,
-          selectionContext: pullRequestSelectionContext(context),
+          selectionContext: reviewSelectionContext(context),
         };
         break;
       }
@@ -685,7 +686,7 @@ export const runScoutSelection = async (input: {
             baseBranch: reviewContext.baseBranch,
             priorityRank: priorityToRank(task.priority),
             selectionReason: reviewContext.isDraft ? "draft pull request eligible for reviewer pass" : "open pull request eligible for reviewer pass",
-            selectionContext: pullRequestSelectionContext(reviewContext),
+            selectionContext: reviewSelectionContext(reviewContext),
           };
           break;
         }

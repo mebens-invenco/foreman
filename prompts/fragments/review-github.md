@@ -8,7 +8,7 @@ The review system is GitHub.
 - Discover PR review history, review threads, conversation comments, checks, merge state, and relevant commits yourself before acting.
 - For `review` and `retry`, determine current-head review summaries, unresolved review threads, post-head PR comments, failing checks, and merge conflicts from GitHub directly.
 - Only current-head review summaries are actionable.
-- Only PR conversation comments created after the current head became current are actionable.
+- Only PR conversation comments created after the current head became current are actionable; use `Pull Request Reference.headIntroducedAt` as the cutoff when filtering post-head conversation comments.
 - Failing checks and merge conflicts may require code changes or operational responses.
 - If the PR has merge conflicts, first inspect the relevant commit messages and diffs on both the task branch and the base branch so you understand the intent of each side before editing.
 - Do not default to keeping the task branch version of conflicted code. Preserve the selected task's objective while also preserving valid incoming changes from the base branch unless they are truly incompatible.

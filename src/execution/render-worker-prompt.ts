@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { z } from "zod";
+
 import { resolveTaskPullRequest, resolveTaskTargetRef, type RepoRef, type ReviewContext, type Task, type TaskTargetRef } from "../domain/index.js";
 import { jsonSection, renderPromptTemplate, type WorkerPromptTemplateName } from "../prompts/template-renderer.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
@@ -10,24 +12,31 @@ const parsePullRequestNumber = (url: string | null): number | null => {
     return null;
   }
 
-  const match = url.match(/\/pull\/(\d+)(?:\b|\/|$)/);
+  const match = url.match(/\/pull\/(\d+)/);
   return match ? Number(match[1]) : null;
 };
 
 const resolveSelectedTarget = (task: Task, repo: RepoRef, target?: TaskTargetRef): TaskTargetRef | null =>
   target ?? resolveTaskTargetRef(task, repo.key);
 
-export type WorkerPromptPullRequestReference = {
-  provider: "github";
-  url: string;
-  number: number;
-  state?: "open" | "closed" | "merged";
-  isDraft?: boolean;
-  headSha?: string;
-  headBranch?: string;
-  baseBranch?: string;
-  headIntroducedAt?: string;
-  mergeState?: "clean" | "conflicting" | "dirty" | "unknown";
+const workerPromptPullRequestReferenceSchema = z.object({
+  provider: z.literal("github"),
+  url: z.string(),
+  number: z.number(),
+  state: z.enum(["open", "closed", "merged"]).optional(),
+  isDraft: z.boolean().optional(),
+  headSha: z.string().optional(),
+  headBranch: z.string().optional(),
+  baseBranch: z.string().optional(),
+  headIntroducedAt: z.string().optional(),
+  mergeState: z.enum(["clean", "conflicting", "dirty", "unknown"]).optional(),
+});
+
+export type WorkerPromptPullRequestReference = z.infer<typeof workerPromptPullRequestReferenceSchema>;
+
+export const parseWorkerPromptPullRequestReference = (value: unknown): WorkerPromptPullRequestReference | undefined => {
+  const parsed = workerPromptPullRequestReferenceSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 };
 
 const renderSelectedTask = (task: Task, selectedTarget: TaskTargetRef | null): string =>
@@ -174,7 +183,6 @@ export const renderWorkerPrompt = async (input: {
         previousSessionHeadSha: input.gitState?.previousSessionHeadSha ?? null,
       }),
       "provider-access": renderProviderAccess(input.config),
-      review: pullRequestReference,
       "pull-request": pullRequestReference,
     },
     fragmentAliases: {

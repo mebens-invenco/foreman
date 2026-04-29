@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskTarget, type WorkerResult } from "../domain/index.js";
 import { createAgentRunner, parseWorkerResult, validateWorkerResult } from "../execution/index.js";
-import { renderWorkerPrompt, type WorkerPromptPullRequestReference } from "../execution/render-worker-prompt.js";
+import { parseWorkerPromptPullRequestReference, renderWorkerPrompt } from "../execution/render-worker-prompt.js";
 import { ForemanError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
 import { addSeconds, isoNow } from "../lib/time.js";
@@ -47,41 +47,9 @@ const formatRunnerFailure = (runResult: { exitCode: number | null; signal: strin
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const readPullRequestReference = (selectionContext: Record<string, unknown>): WorkerPromptPullRequestReference | undefined => {
-  const raw = selectionContext.pullRequestReference;
-  if (!isRecord(raw) || raw.provider !== "github" || typeof raw.url !== "string" || typeof raw.number !== "number") {
-    return undefined;
-  }
-
-  const reference: WorkerPromptPullRequestReference = {
-    provider: "github",
-    url: raw.url,
-    number: raw.number,
-  };
-
-  if (raw.state === "open" || raw.state === "closed" || raw.state === "merged") {
-    reference.state = raw.state;
-  }
-  if (typeof raw.isDraft === "boolean") {
-    reference.isDraft = raw.isDraft;
-  }
-  if (typeof raw.headSha === "string") {
-    reference.headSha = raw.headSha;
-  }
-  if (typeof raw.headBranch === "string") {
-    reference.headBranch = raw.headBranch;
-  }
-  if (typeof raw.baseBranch === "string") {
-    reference.baseBranch = raw.baseBranch;
-  }
-  if (typeof raw.headIntroducedAt === "string") {
-    reference.headIntroducedAt = raw.headIntroducedAt;
-  }
-  if (raw.mergeState === "clean" || raw.mergeState === "conflicting" || raw.mergeState === "dirty" || raw.mergeState === "unknown") {
-    reference.mergeState = raw.mergeState;
-  }
-
-  return reference;
+const readReviewContext = (selectionContext: Record<string, unknown>): ReviewContext | undefined => {
+  const raw = selectionContext.reviewContext;
+  return isRecord(raw) && raw.provider === "github" ? (raw as ReviewContext) : undefined;
 };
 
 type AttemptExecutorDeps = {
@@ -225,8 +193,10 @@ export class AttemptExecutor {
           attemptLogger.warn("falling back to repository root for worktree path", { worktreePath, beforeSha: beforeSha ?? "unknown" });
         }
 
-        const pullRequestReference = readPullRequestReference(job.selectionContext ?? {});
-        const reviewHeadSha = pullRequestReference?.headSha ?? null;
+        const selectionContext = job.selectionContext ?? {};
+        const pullRequestReference = parseWorkerPromptPullRequestReference(selectionContext.pullRequestReference);
+        const reviewContext = readReviewContext(selectionContext);
+        const reviewHeadSha = pullRequestReference?.headSha ?? reviewContext?.headSha ?? null;
         const usesRunnerSession = job.action !== "consolidation";
         const activeRunnerSession =
           usesRunnerSession && job.action !== "retry"
@@ -368,6 +338,7 @@ export class AttemptExecutor {
           target,
           repo,
           worktreePath,
+          ...(reviewContext ? { reviewContext } : {}),
           workerResult,
         });
         attemptLogger.info("applied worker result", { currentPrUrl });
