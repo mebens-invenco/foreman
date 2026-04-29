@@ -49,4 +49,4 @@ Reattempt the task cleanly from fresh branch state while reusing only the prior 
 - Copy `baseBranch` from the provided Repository Context and `headBranch` from `Repository Context.selectedTarget.branchName`.
 - Do not omit `baseBranch` or `headBranch` even if they seem obvious from the current git state.
 
-{{fragment:output-schema}}
+{{fragment:output-validator}}

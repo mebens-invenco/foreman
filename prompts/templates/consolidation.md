@@ -48,4 +48,4 @@ Do not make repository code changes unless the provided context explicitly requi
 - Use learning mutations for reusable insights.
 - Prefer `completed` unless there is a real blocker to consolidation.
 
-{{fragment:output-schema}}
+{{fragment:output-validator}}

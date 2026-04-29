@@ -1,7 +1,15 @@
 #!/usr/bin/env node
 
 import { Command, InvalidArgumentError } from "commander";
+import { z } from "zod";
 
+import {
+  formatWorkerResultValidationError,
+  parseWorkerResult,
+  validateWorkerResultForAction,
+  workerResultActionValues,
+  type WorkerResultAction,
+} from "./execution/worker-result.js";
 import { importLegacyMemory } from "./importing/import-legacy-memory.js";
 import { createHttpServer } from "./http.js";
 import { LoggerService } from "./logger.js";
@@ -27,6 +35,72 @@ const parsePositiveInteger = (value: string): number => {
   }
 
   return parsed;
+};
+
+const parseWorkerResultAction = (value: string): WorkerResultAction => {
+  if (!workerResultActionValues.includes(value as WorkerResultAction)) {
+    throw new InvalidArgumentError(`Action must be one of: ${workerResultActionValues.join(", ")}`);
+  }
+
+  return value as WorkerResultAction;
+};
+
+const readStdin = async (): Promise<string> => {
+  process.stdin.setEncoding("utf8");
+  let input = "";
+  for await (const chunk of process.stdin) {
+    input += chunk;
+  }
+
+  return input;
+};
+
+const resolveHelpAction = (): WorkerResultAction | "<action>" => {
+  const actionArgIndex = process.argv.findIndex((arg) => arg === "--action" || arg.startsWith("--action="));
+  const value = process.argv[actionArgIndex]?.startsWith("--action=")
+    ? process.argv[actionArgIndex]!.slice("--action=".length)
+    : process.argv[actionArgIndex + 1];
+
+  return workerResultActionValues.includes(value as WorkerResultAction) ? (value as WorkerResultAction) : "<action>";
+};
+
+const renderAgentResultValidateHelp = (): string => {
+  const action = resolveHelpAction();
+  const actionLiteral = action === "<action>" ? workerResultActionValues.join(" | ") : action;
+
+  return `
+Action-specific accepted output shape
+
+- Required action literal: \"${actionLiteral}\".
+- Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block containing JSON.
+- The final answer returned to Foreman must contain exactly one <agent-result> block and no prose after it.
+- Required top-level fields: schemaVersion, action, outcome, summary, taskMutations, reviewMutations, learningMutations, blockers, signals.
+- schemaVersion must be 1.
+- outcome must be one of: completed, no_action_needed, blocked, failed.
+- taskMutations must be an array. Supported type: add_comment, requiring body.
+- reviewMutations must be an array. Supported types: create_pull_request, reply_to_review_summary, reply_to_thread_comment, reply_to_pr_comment, submit_pull_request_review, resolve_threads.
+- create_pull_request requires title, body, draft, baseBranch, and headBranch.
+- reply_to_review_summary requires reviewId and body.
+- reply_to_thread_comment requires threadId and body.
+- reply_to_pr_comment requires commentId and body.
+- submit_pull_request_review requires body, event, and comments; event must be COMMENT; each comment requires path, line, and body, with optional side LEFT or RIGHT.
+- resolve_threads requires a non-empty threadIds array.
+- learningMutations must be an array. Supported types: add and update.
+- add learning mutations require title, repo, confidence, content, and tags.
+- update learning mutations require id; title, repo, confidence, content, tags, and markApplied are optional.
+- blockers must be an array of non-empty strings.
+- signals must be an array containing only: code_changed, review_checkpoint_eligible, reviewer_checkpoint_eligible.
+
+Minimal raw JSON example:
+
+{"schemaVersion":1,"action":"${actionLiteral}","outcome":"completed","summary":"Validated output.","taskMutations":[],"reviewMutations":[],"learningMutations":[],"blockers":[],"signals":[]}
+
+Wrapped final answer example:
+
+<agent-result>
+{"schemaVersion":1,"action":"${actionLiteral}","outcome":"completed","summary":"Validated output.","taskMutations":[],"reviewMutations":[],"learningMutations":[],"blockers":[],"signals":[]}
+</agent-result>
+`;
 };
 
 const writeJson = (value: unknown): void => {
@@ -209,6 +283,25 @@ learnings
         missingIds: options.id.filter((id) => !foundIds.has(id)),
       });
     });
+  });
+
+const agentResult = program.command("agent-result").description("Validate agent result output");
+
+agentResult
+  .command("validate")
+  .description("Validate raw JSON or a complete <agent-result> block from stdin")
+  .requiredOption("--action <action>", "Expected worker action", parseWorkerResultAction)
+  .addHelpText("after", renderAgentResultValidateHelp)
+  .action(async (options: { action: WorkerResultAction }) => {
+    try {
+      const value = parseWorkerResult(await readStdin());
+      validateWorkerResultForAction(value, options.action);
+      process.stdout.write(`Agent result is valid for action \"${options.action}\".\n`);
+    } catch (error) {
+      const message = error instanceof z.ZodError ? formatWorkerResultValidationError(error) : error instanceof Error ? error.message : String(error);
+      process.stderr.write(`Agent result is invalid for action \"${options.action}\":\n${message}\n`);
+      process.exitCode = 1;
+    }
   });
 
 const scheduler = program.command("scheduler");
