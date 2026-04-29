@@ -8,16 +8,11 @@ The task system is Linear.
 - Recommended Linear read pattern:
 
 ```bash
-node --input-type=module <<'EOF'
-const query = `query ForemanIssue($id: String!) { issue(id: $id) { id identifier title description url state { name } comments { nodes { id body createdAt user { name } } } } }`;
-const response = await fetch("https://api.linear.app/graphql", {
-  method: "POST",
-  headers: { Authorization: process.env.LINEAR_API_KEY ?? "", "Content-Type": "application/json" },
-  body: JSON.stringify({ query, variables: { id: "<Task Provider Context.issueId>" } }),
-});
-console.log(JSON.stringify(await response.json(), null, 2));
-EOF
+curl -sS https://api.linear.app/graphql \
+  -H "Authorization: $LINEAR_API_KEY" \
+  -H "Content-Type: application/json" \
+  --data '{"query":"query ForemanIssue($id: String!) { issue(id: $id) { id identifier title description url state { name } comments { nodes { id body createdAt user { name } } } } }","variables":{"id":"<Task Provider Context.issueId>"}}'
 ```
 
-- Let scripts read `LINEAR_API_KEY` from the environment; do not expand or print the token.
+- Let tools read `LINEAR_API_KEY` from the environment; do not print the token.
 - Return all Linear writes as Foreman task mutations instead of calling write APIs directly.
