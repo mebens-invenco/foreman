@@ -5,6 +5,18 @@ import type { WorkerResult } from "../domain/index.js";
 export const workerResultActionValues = ["execution", "review", "reviewer", "retry", "consolidation"] as const satisfies readonly WorkerResult["action"][];
 export type WorkerResultAction = (typeof workerResultActionValues)[number];
 
+export const workerResultExample = {
+  schemaVersion: 1,
+  action: "execution",
+  outcome: "completed",
+  summary: "Validated output.",
+  taskMutations: [],
+  reviewMutations: [],
+  learningMutations: [],
+  blockers: [],
+  signals: [],
+} satisfies WorkerResult;
+
 const taskMutationSchema = z.object({ type: z.literal("add_comment"), body: z.string().min(1) });
 
 const reviewMutationSchema = z.discriminatedUnion("type", [

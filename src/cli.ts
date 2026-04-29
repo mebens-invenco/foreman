@@ -8,6 +8,7 @@ import {
   parseWorkerResult,
   validateWorkerResultForAction,
   workerResultActionValues,
+  workerResultExample,
   workerResultSchema,
   type WorkerResultAction,
 } from "./execution/worker-result.js";
@@ -70,6 +71,7 @@ const renderAgentResultValidateHelp = (): string => {
   const actionLiteral = action ?? `<${workerResultActionValues.join("|")}>`;
   const schema = action ? workerResultSchema.extend({ action: z.literal(action) }) : workerResultSchema;
   const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, 2);
+  const exampleJson = JSON.stringify({ ...workerResultExample, action: actionLiteral });
 
   return `
 Action-specific accepted output shape
@@ -87,12 +89,12 @@ ${jsonSchema}
 
 Minimal raw JSON example:
 
-{"schemaVersion":1,"action":"${actionLiteral}","outcome":"completed","summary":"Validated output.","taskMutations":[],"reviewMutations":[],"learningMutations":[],"blockers":[],"signals":[]}
+${exampleJson}
 
 Wrapped final answer example:
 
 <agent-result>
-{"schemaVersion":1,"action":"${actionLiteral}","outcome":"completed","summary":"Validated output.","taskMutations":[],"reviewMutations":[],"learningMutations":[],"blockers":[],"signals":[]}
+${exampleJson}
 </agent-result>
 `;
 };

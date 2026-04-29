@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 
 import { describe, expect, test } from "vitest";
 
+import { validateWorkerResultForAction, workerResultExample } from "../execution/worker-result.js";
 import { testProjectRoot } from "../test-support/helpers.js";
 
 type CliResult = {
@@ -12,17 +13,7 @@ type CliResult = {
 
 const projectRoot = testProjectRoot;
 
-const validExecutionResult = {
-  schemaVersion: 1,
-  action: "execution",
-  outcome: "completed",
-  summary: "Validated output.",
-  taskMutations: [],
-  reviewMutations: [],
-  learningMutations: [],
-  blockers: [],
-  signals: [],
-};
+const validExecutionResult = workerResultExample;
 
 const runCli = async (args: string[], input = ""): Promise<CliResult> =>
   new Promise((resolve, reject) => {
@@ -44,6 +35,10 @@ const runCli = async (args: string[], input = ""): Promise<CliResult> =>
   });
 
 describe("agent-result cli", () => {
+  test("keeps the exported example valid against the worker result schema", () => {
+    expect(validateWorkerResultForAction(workerResultExample, "execution")).toEqual(workerResultExample);
+  });
+
   test("accepts valid raw JSON and wrapped agent result blocks", async () => {
     const raw = await runCli(["agent-result", "validate", "--action", "execution"], JSON.stringify(validExecutionResult));
     expect(raw.code).toBe(0);
