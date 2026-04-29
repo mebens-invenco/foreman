@@ -35,6 +35,37 @@ const errorShape = (error: unknown): { error: { code: string; message: string } 
 const attemptLogPath = (paths: WorkspacePaths, attemptId: string): string =>
   path.join(paths.workspaceRoot, "logs", "attempts", `${attemptId}.log`);
 
+const resolveArtifactContentPath = async (paths: WorkspacePaths, relativePath: string): Promise<string> => {
+  const workspaceRoot = path.resolve(paths.workspaceRoot);
+  const resolvedPath = path.resolve(workspaceRoot, relativePath);
+  const isWithinWorkspace = resolvedPath === workspaceRoot || resolvedPath.startsWith(`${workspaceRoot}${path.sep}`);
+  if (!isWithinWorkspace) {
+    throw new ForemanError("invalid_artifact_path", "Artifact path must resolve inside the workspace root.", 400);
+  }
+
+  let realWorkspaceRoot = workspaceRoot;
+  try {
+    realWorkspaceRoot = await fs.realpath(workspaceRoot);
+  } catch {
+    // Fall back to the resolved workspace root for tests or partially-created workspaces.
+  }
+
+  let realResolvedPath: string;
+  try {
+    realResolvedPath = await fs.realpath(resolvedPath);
+  } catch {
+    throw new ForemanError("artifact_file_not_found", "Artifact file not found.", 404);
+  }
+
+  const isRealPathWithinWorkspace =
+    realResolvedPath === realWorkspaceRoot || realResolvedPath.startsWith(`${realWorkspaceRoot}${path.sep}`);
+  if (!isRealPathWithinWorkspace) {
+    throw new ForemanError("invalid_artifact_path", "Artifact path must resolve inside the workspace root.", 400);
+  }
+
+  return realResolvedPath;
+};
+
 const writeSseEvent = (reply: { raw: NodeJS.WritableStream }, event: string, data: string): void => {
   reply.raw.write(`event: ${event}\n`);
   for (const line of data.split(/\r?\n/)) {
@@ -497,6 +528,14 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     request.raw.on("close", () => {
       clearInterval(interval);
     });
+  });
+
+  server.get("/api/artifacts/:artifactId/content", async (request, reply) => {
+    const params = request.params as { artifactId: string };
+    const artifact = deps.repos.artifacts.getArtifact(params.artifactId);
+    const artifactPath = await resolveArtifactContentPath(deps.paths, artifact.relativePath);
+    reply.type(artifact.mediaType || "text/plain");
+    return fs.readFile(artifactPath, "utf8");
   });
 
   server.get("/api/workers", async () => ({

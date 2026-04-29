@@ -1,7 +1,20 @@
 import { isoNow } from "../../lib/time.js";
 import { newId } from "../../lib/ids.js";
+import { ForemanError } from "../../lib/errors.js";
 import type { ArtifactRecord, ArtifactRepo } from "../artifact-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
+
+const mapArtifact = (row: SqliteRow): ArtifactRecord => ({
+  id: String(row.id),
+  ownerType: row.owner_type as ArtifactRecord["ownerType"],
+  ownerId: String(row.owner_id),
+  artifactType: row.artifact_type as ArtifactRecord["artifactType"],
+  relativePath: String(row.relative_path),
+  mediaType: String(row.media_type),
+  sizeBytes: Number(row.size_bytes),
+  sha256: (row.sha256 as string | null) ?? null,
+  createdAt: String(row.created_at),
+});
 
 export class SqliteArtifactRepo implements ArtifactRepo {
   constructor(private readonly sqlite: SqliteDatabase) {}
@@ -37,6 +50,21 @@ export class SqliteArtifactRepo implements ArtifactRepo {
       );
   }
 
+  getArtifact(artifactId: string): ArtifactRecord {
+    const row = this.sqlite
+      .prepare(
+        `SELECT id, owner_type, owner_id, artifact_type, relative_path, media_type, size_bytes, sha256, created_at
+           FROM artifact WHERE id = ?`,
+      )
+      .get(artifactId) as SqliteRow | undefined;
+
+    if (!row) {
+      throw new ForemanError("artifact_not_found", `Artifact not found: ${artifactId}`, 404);
+    }
+
+    return mapArtifact(row);
+  }
+
   listArtifacts(ownerType?: string, ownerId?: string): ArtifactRecord[] {
     const clauses: string[] = [];
     const params: unknown[] = [];
@@ -55,19 +83,6 @@ export class SqliteArtifactRepo implements ArtifactRepo {
            FROM artifact ${where} ORDER BY created_at DESC`,
       )
       .all(...params)
-      .map((row: unknown) => {
-        const mapped = row as SqliteRow;
-        return {
-          id: String(mapped.id),
-          ownerType: mapped.owner_type as ArtifactRecord["ownerType"],
-          ownerId: String(mapped.owner_id),
-          artifactType: mapped.artifact_type as ArtifactRecord["artifactType"],
-          relativePath: String(mapped.relative_path),
-          mediaType: String(mapped.media_type),
-          sizeBytes: Number(mapped.size_bytes),
-          sha256: (mapped.sha256 as string | null) ?? null,
-          createdAt: String(mapped.created_at),
-        };
-      });
+      .map((row: unknown) => mapArtifact(row as SqliteRow));
   }
 }
