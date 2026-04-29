@@ -887,46 +887,6 @@ export class GitHubReviewService implements ReviewService {
     return { url: result.html_url, number: result.number };
   }
 
-  async reopenPullRequest(input: {
-    cwd: string;
-    pullRequestUrl?: string;
-    pullRequestNumber?: number;
-    draft: boolean;
-    title?: string;
-    body?: string;
-  }): Promise<{ url: string; number: number }> {
-    const repo = await this.repoDescriptorFromCwd(input.cwd);
-    const number = input.pullRequestNumber ?? (input.pullRequestUrl ? parseGitHubUrl(input.pullRequestUrl).number : null);
-    if (!number) {
-      this.logger.error("cannot reopen GitHub pull request because no target was provided", { cwd: input.cwd });
-      throw new ForemanError("invalid_pr_target", "Reopen pull request requires a number or URL");
-    }
-
-    this.logger.info("reopening GitHub pull request", {
-      cwd: input.cwd,
-      owner: repo.owner,
-      repo: repo.repo,
-      pullRequestNumber: number,
-      draft: input.draft,
-      titleLength: input.title?.length ?? 0,
-      bodyLength: input.body?.length ?? 0,
-    });
-
-    const pr = await this.rest<{ html_url: string; number: number }>(`/repos/${repo.owner}/${repo.repo}/pulls/${number}`, {
-      method: "PATCH",
-      body: JSON.stringify({ state: "open", title: input.title, body: input.body }),
-      headers: { "content-type": "application/json" },
-    });
-
-    if (input.draft === false) {
-      this.logger.info("reopened GitHub pull request", { owner: repo.owner, repo: repo.repo, pullRequestUrl: pr.html_url, pullRequestNumber: pr.number });
-      return { url: pr.html_url, number: pr.number };
-    }
-
-    this.logger.info("reopened GitHub pull request", { owner: repo.owner, repo: repo.repo, pullRequestUrl: pr.html_url, pullRequestNumber: pr.number });
-    return { url: pr.html_url, number: pr.number };
-  }
-
   async submitPullRequestReview(
     prUrl: string,
     input: {

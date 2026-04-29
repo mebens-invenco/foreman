@@ -42,11 +42,10 @@ Reattempt the task cleanly from fresh branch state while reusing only the prior 
 - If safe reimplementation would require reusing prior patch content, return `blocked`.
 - Run the relevant automated checks for the changed or affected scope.
 - If you make code changes, commit and push the task branch before returning `completed`.
-- If retry reopens or recreates a PR, prefer draft mode.
+- If retry creates a PR, prefer draft mode.
 - PR titles should normally follow `<TASK-ID>: <short description>` and should not use conventional-commit prefixes like `feat:`, `fix:`, or `chore:`.
 - Follow repository PR templates and any repo-root instruction-file requirements when writing the PR body.
-- If the retry should reopen the prior PR, emit a `reopen_pull_request` mutation.
-- If retry should create a fresh PR instead, emit a full `create_pull_request` object with `title`, `body`, `draft`, `baseBranch`, and `headBranch`.
+- If retry completes with code changes, emit a full `create_pull_request` object with `title`, `body`, `draft`, `baseBranch`, and `headBranch`.
 - Copy `baseBranch` from the provided Repository Context and `headBranch` from `Repository Context.selectedTarget.branchName`.
 - Do not omit `baseBranch` or `headBranch` even if they seem obvious from the current git state.
 

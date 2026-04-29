@@ -81,61 +81,37 @@ export class WorkerResultApplier {
       return pullRequestUrl;
     }
 
-    const createOrReopen = workerResult.reviewMutations.filter(
-      (mutation) => mutation.type === "create_pull_request" || mutation.type === "reopen_pull_request",
-    );
+    const createPullRequests = workerResult.reviewMutations.filter((mutation) => mutation.type === "create_pull_request");
     const requiresPullRequest =
-      input.job.action === "execution" &&
+      (input.job.action === "execution" || input.job.action === "retry") &&
       workerResult.outcome === "completed" &&
       workerResult.signals.includes("code_changed");
 
-    for (const mutation of createOrReopen) {
-      if (mutation.type === "create_pull_request") {
-        const created = await this.deps.reviewService.createPullRequest({
-          cwd: input.worktreePath,
-          title: mutation.title,
-          body: mutation.body,
-          draft: mutation.draft,
-          baseBranch: mutation.baseBranch,
-          headBranch: mutation.headBranch,
-        });
-        pullRequestUrl = created.url;
-        await this.recordPullRequest(input.task.id, {
-          repoKey: input.target.repoKey,
-          url: created.url,
-          title: mutation.title,
-          source: "local",
-        });
-        await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
-        logger.info("created pull request", { pullRequestUrl: created.url, pullRequestNumber: created.number });
-      }
-
-      if (mutation.type === "reopen_pull_request") {
-        const reopened = await this.deps.reviewService.reopenPullRequest({
-          cwd: input.worktreePath,
-          draft: mutation.draft,
-          ...(mutation.pullRequestUrl ? { pullRequestUrl: mutation.pullRequestUrl } : {}),
-          ...(mutation.pullRequestNumber ? { pullRequestNumber: mutation.pullRequestNumber } : {}),
-          ...(mutation.title ? { title: mutation.title } : {}),
-          ...(mutation.body ? { body: mutation.body } : {}),
-        });
-        pullRequestUrl = reopened.url;
-        await this.recordPullRequest(input.task.id, {
-          repoKey: input.target.repoKey,
-          url: reopened.url,
-          ...(mutation.title ? { title: mutation.title } : {}),
-          source: "local",
-        });
-        await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
-        logger.info("reopened pull request", { pullRequestUrl: reopened.url, pullRequestNumber: reopened.number });
-      }
+    for (const mutation of createPullRequests) {
+      const created = await this.deps.reviewService.createPullRequest({
+        cwd: input.worktreePath,
+        title: mutation.title,
+        body: mutation.body,
+        draft: mutation.draft,
+        baseBranch: mutation.baseBranch,
+        headBranch: mutation.headBranch,
+      });
+      pullRequestUrl = created.url;
+      await this.recordPullRequest(input.task.id, {
+        repoKey: input.target.repoKey,
+        url: created.url,
+        title: mutation.title,
+        source: "local",
+      });
+      await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
+      logger.info("created pull request", { pullRequestUrl: created.url, pullRequestNumber: created.number });
     }
 
-    if (requiresPullRequest && createOrReopen.length === 0) {
+    if (requiresPullRequest && createPullRequests.length === 0) {
       if (!pullRequestUrl) {
         throw new ForemanError(
           "missing_pull_request",
-          "Execution results with code changes must include a create_pull_request or reopen_pull_request mutation",
+          "Execution results with code changes must include a create_pull_request mutation",
         );
       }
 
@@ -158,7 +134,7 @@ export class WorkerResultApplier {
     }
 
     for (const mutation of workerResult.reviewMutations) {
-      if (mutation.type === "create_pull_request" || mutation.type === "reopen_pull_request") {
+      if (mutation.type === "create_pull_request") {
         continue;
       }
 

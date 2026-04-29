@@ -352,6 +352,7 @@ describe("prompt rendering", () => {
       continuation: true,
     });
     expect(retryPrompt).toContain("# Retry Prompt");
+    expect(retryPrompt).toContain("create_pull_request");
     expect(retryPrompt).not.toContain("# Review Continuation");
   });
 });

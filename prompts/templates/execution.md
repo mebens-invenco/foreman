@@ -44,7 +44,7 @@ Complete the selected task in the provided worktree.
 - Do not perform review-system orchestration directly except through structured review mutations.
 - If you make code changes, commit and push the task branch before returning `completed`.
 - If execution completes with code changes, return a PR review mutation so Foreman can move the task to review.
-- Use `create_pull_request` when no PR exists yet, and `reopen_pull_request` when an existing PR should be reused or reopened.
+- Use `create_pull_request` whenever execution leaves code ready for review.
 - `create_pull_request` must include `title`, `body`, `draft`, `baseBranch`, and `headBranch`.
 - Copy `baseBranch` from the provided Repository Context and `headBranch` from `Repository Context.selectedTarget.branchName`.
 - Do not omit `baseBranch` or `headBranch` even if they seem obvious from the current git state.

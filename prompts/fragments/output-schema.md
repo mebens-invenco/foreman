@@ -34,7 +34,6 @@ Allowed task mutation types:
 Allowed review mutation types:
 
 - `create_pull_request`
-- `reopen_pull_request`
 - `reply_to_review_summary`
 - `reply_to_thread_comment`
 - `reply_to_pr_comment`
@@ -44,7 +43,6 @@ Allowed review mutation types:
 Review mutation field requirements:
 
 - `create_pull_request` requires `title`, `body`, `draft`, `baseBranch`, and `headBranch`
-- `reopen_pull_request` requires `draft` and at least one of `pullRequestUrl` or `pullRequestNumber`; `title` and `body` are optional
 - `reply_to_review_summary` requires `reviewId` and `body`
 - `reply_to_thread_comment` requires `threadId` and `body`
 - `reply_to_pr_comment` requires `commentId` and `body`

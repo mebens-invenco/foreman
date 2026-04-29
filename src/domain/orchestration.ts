@@ -51,14 +51,6 @@ export type ReviewMutation =
       baseBranch: string;
       headBranch: string;
     }
-  | {
-      type: "reopen_pull_request";
-      pullRequestUrl?: string;
-      pullRequestNumber?: number;
-      draft: boolean;
-      title?: string;
-      body?: string;
-    }
   | { type: "reply_to_review_summary"; reviewId: string; body: string }
   | { type: "reply_to_thread_comment"; threadId: string; body: string }
   | { type: "reply_to_pr_comment"; commentId: string; body: string }

@@ -12,14 +12,6 @@ export interface ReviewService {
     baseBranch: string;
     headBranch: string;
   }): Promise<{ url: string; number: number }>;
-  reopenPullRequest(input: {
-    cwd: string;
-    pullRequestUrl?: string;
-    pullRequestNumber?: number;
-    draft: boolean;
-    title?: string;
-    body?: string;
-  }): Promise<{ url: string; number: number }>;
   submitPullRequestReview(
     prUrl: string,
     input: {

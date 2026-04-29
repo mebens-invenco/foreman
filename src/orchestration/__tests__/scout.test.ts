@@ -94,10 +94,6 @@ class FakeReviewService implements ReviewService {
     throw new Error("not used");
   }
 
-  async reopenPullRequest(_input: { cwd: string; pullRequestUrl?: string; pullRequestNumber?: number; draft: boolean; title?: string; body?: string }): Promise<{ url: string; number: number }> {
-    throw new Error("not used");
-  }
-
   async submitPullRequestReview(_prUrl: string, _input: { body: string; event: "COMMENT"; comments: Array<{ path: string; line: number; side?: "LEFT" | "RIGHT"; body: string }> }): Promise<void> {
     throw new Error("not used");
   }
