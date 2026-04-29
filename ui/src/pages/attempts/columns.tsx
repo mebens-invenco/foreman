@@ -47,6 +47,7 @@ function statusTone(status: AttemptRecord["status"]) {
 function buildAttemptSearchText(attempt: AttemptRecord) {
   return [
     attempt.id,
+    attempt.nativeSessionId ?? "",
     attempt.jobId,
     attempt.taskId ?? "",
     attempt.target ?? "",
@@ -93,6 +94,18 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
     enableGlobalFilter: true,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Attempt" />
+    ),
+  },
+  {
+    accessorKey: "nativeSessionId",
+    cell: ({ row }) => (
+      <span className="font-mono text-xs text-foreground">
+        {abbreviateId(row.original.nativeSessionId)}
+      </span>
+    ),
+    enableGlobalFilter: true,
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Session" />
     ),
   },
   {

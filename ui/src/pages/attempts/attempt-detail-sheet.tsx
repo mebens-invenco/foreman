@@ -444,15 +444,12 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
               <DetailRow label="Runner" value={attempt.runnerName} />
               <DetailRow label="Model" value={attempt.runnerModel} />
               <DetailRow label="Variant" value={attempt.runnerVariant} />
+              <DetailRow label="Session" value={attempt.nativeSessionId ?? "-"} />
               <DetailRow label="Started" value={formatTimestamp(attempt.startedAt)} />
               <DetailRow label="Finished" value={formatTimestamp(attempt.finishedAt)} />
               <DetailRow
                 label="Duration"
                 value={formatDuration(attempt.startedAt, attempt.finishedAt)}
-              />
-              <DetailRow
-                label="Exit"
-                value={attempt.exitCode ?? attempt.signal ?? "-"}
               />
             </section>
 

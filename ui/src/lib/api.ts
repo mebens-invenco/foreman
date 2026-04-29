@@ -95,6 +95,7 @@ export type AttemptRecord = {
   runnerName: "opencode" | "claude"
   runnerModel: string
   runnerVariant: string
+  nativeSessionId: string | null
   status: AttemptStatus
   startedAt: string
   finishedAt: string | null

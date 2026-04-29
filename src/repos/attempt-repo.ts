@@ -13,6 +13,7 @@ export type AttemptRecord = {
   runnerModel: string;
   runnerVariant: string;
   runnerSessionId: string | null;
+  nativeSessionId: string | null;
   status: AttemptStatus;
   startedAt: string;
   finishedAt: string | null;

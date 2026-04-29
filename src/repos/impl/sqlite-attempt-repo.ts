@@ -19,6 +19,7 @@ const mapAttempt = (row: SqliteRow): AttemptRecord => ({
   runnerModel: String(row.runner_model),
   runnerVariant: String(row.runner_variant),
   runnerSessionId: (row.runner_session_id as string | null) ?? null,
+  nativeSessionId: (row.native_session_id as string | null) ?? null,
   status: row.status as AttemptStatus,
   startedAt: String(row.started_at),
   finishedAt: (row.finished_at as string | null) ?? null,
@@ -57,6 +58,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
       runnerModel: input.runnerModel,
       runnerVariant: input.runnerVariant,
       runnerSessionId: null,
+      nativeSessionId: null,
       status: "running",
       startedAt: isoNow(),
       finishedAt: null,
@@ -213,10 +215,12 @@ export class SqliteAttemptRepo implements AttemptRepo {
     return this.sqlite
       .prepare(
         `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
-                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id, ea.status, ea.started_at,
+                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id,
+                rs.native_session_id, ea.status, ea.started_at,
                 ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
            FROM execution_attempt ea
       LEFT JOIN job ON job.id = ea.job_id
+      LEFT JOIN runner_session rs ON rs.id = ea.runner_session_id
                 ${where}
        ORDER BY ea.started_at DESC${paginationClause}`,
       )
@@ -228,10 +232,12 @@ export class SqliteAttemptRepo implements AttemptRepo {
     const row = this.sqlite
       .prepare(
         `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
-                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id, ea.status, ea.started_at,
+                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id,
+                rs.native_session_id, ea.status, ea.started_at,
                 ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
            FROM execution_attempt ea
       LEFT JOIN job ON job.id = ea.job_id
+      LEFT JOIN runner_session rs ON rs.id = ea.runner_session_id
           WHERE ea.id = ?`,
       )
       .get(attemptId) as SqliteRow | undefined;
@@ -247,10 +253,12 @@ export class SqliteAttemptRepo implements AttemptRepo {
     const row = this.sqlite
       .prepare(
         `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
-                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id, ea.status, ea.started_at,
+                ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id,
+                rs.native_session_id, ea.status, ea.started_at,
                 ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
            FROM execution_attempt ea
       LEFT JOIN job ON job.id = ea.job_id
+      LEFT JOIN runner_session rs ON rs.id = ea.runner_session_id
           WHERE ea.job_id = ?
        ORDER BY ea.started_at DESC, ea.attempt_number DESC LIMIT 1`,
       )
@@ -273,6 +281,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
                 execution_attempt.runner_model,
                 execution_attempt.runner_variant,
                 execution_attempt.runner_session_id,
+                runner_session.native_session_id,
                 execution_attempt.status,
                 execution_attempt.started_at,
                 execution_attempt.finished_at,
@@ -280,8 +289,9 @@ export class SqliteAttemptRepo implements AttemptRepo {
                 execution_attempt.signal,
                 execution_attempt.summary,
                 execution_attempt.error_message
-           FROM execution_attempt
-           JOIN job ON job.id = execution_attempt.job_id
+            FROM execution_attempt
+            JOIN job ON job.id = execution_attempt.job_id
+       LEFT JOIN runner_session ON runner_session.id = execution_attempt.runner_session_id
           WHERE job.task_target_id = ?
           ORDER BY execution_attempt.started_at DESC, execution_attempt.attempt_number DESC
           LIMIT 1`,

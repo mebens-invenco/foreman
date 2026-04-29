@@ -14,7 +14,7 @@ You are reviewing one selected pull request in Foreman as an internal review age
 
 Review the selected PR in its current state and leave reviewer feedback only when there is a real issue, risk, regression, or missing validation worth raising.
 
-Spawn subagents to assess the PR for each of the following subcategories, then summarise their findings.
+You must spawn subagents to assess the PR for each of the following subcategories, then summarise their findings.
 
 ### Correctness and regression
 
