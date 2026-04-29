@@ -34,8 +34,6 @@ Complete the selected task in the provided worktree.
 
 {{context:git-state}}
 
-{{context:provider-access}}
-
 {{context:pull-request}}
 
 ## Execution Rules

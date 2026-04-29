@@ -36,8 +36,6 @@ Priority order inside this action:
 
 {{context:git-state}}
 
-{{context:provider-access}}
-
 {{context:pull-request}}
 
 ## Review Rules

@@ -6,6 +6,9 @@ The review system is GitHub.
 - Prefer `gh pr view`, `gh pr diff`, `gh api`, and `gh api graphql` for pull request, review, thread, check, commit, and status context.
 - Let `gh` read `GH_TOKEN` from the environment; do not expand or print the token.
 - Discover PR review history, review threads, conversation comments, checks, merge state, and relevant commits yourself before acting.
+
+## GitHub Review Rules
+
 - For `review` and `retry`, determine current-head review summaries, unresolved review threads, post-head PR comments, failing checks, and merge conflicts from GitHub directly.
 - Only current-head review summaries are actionable.
 - Only PR conversation comments created after the current head became current are actionable; use `Pull Request Reference.headIntroducedAt` as the cutoff when filtering post-head conversation comments.

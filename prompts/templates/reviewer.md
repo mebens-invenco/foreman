@@ -25,8 +25,6 @@ risk, regression, or missing validation worth raising.
 
 {{context:git-state}}
 
-{{context:provider-access}}
-
 {{context:pull-request}}
 
 ## Reviewer Rules

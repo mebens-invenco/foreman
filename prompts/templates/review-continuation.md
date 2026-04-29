@@ -20,8 +20,6 @@ Address only the current actionable review activity for the selected pull reques
 
 {{context:git-state}}
 
-{{context:provider-access}}
-
 {{context:pull-request}}
 
 {{fragment:output-schema}}

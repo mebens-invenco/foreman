@@ -166,7 +166,6 @@ describe("prompt rendering", () => {
     expect(result).toContain("## Selected Task");
     expect(result).toContain("## Task Provider Context");
     expect(result).toContain("## Current Git State");
-    expect(result).toContain("## Provider Access");
     expect(result).toContain("## Pull Request Reference");
     expect(result).toContain("## Required Output");
     expect(result).toContain("Discover the full task details from the task provider before implementing.");
@@ -203,6 +202,7 @@ describe("prompt rendering", () => {
     expect(result).toContain("LINEAR_API_KEY");
     expect(result).toContain("linear-issue-id");
     expect(result).not.toContain("## File Task Access");
+    expect(result).not.toContain("## Provider Access");
   });
 
   test("renders compact provider references instead of serialized review history", async () => {

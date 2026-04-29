@@ -130,13 +130,6 @@ const renderPullRequestReference = (input: {
   });
 };
 
-const renderProviderAccess = (config: WorkspaceConfig): string =>
-  jsonSection("Provider Access", {
-    taskSystem: config.taskSystem.type,
-    reviewSystem: config.reviewSystem.type,
-    credentialNames: [config.taskSystem.type === "linear" ? "LINEAR_API_KEY" : null, "GH_TOKEN"].filter(Boolean),
-  });
-
 export const renderWorkerPrompt = async (input: {
   action: WorkerPromptTemplateName;
   config: WorkspaceConfig;
@@ -182,7 +175,6 @@ export const renderWorkerPrompt = async (input: {
         baseBranch: input.gitState?.baseBranch ?? input.baseBranch,
         previousSessionHeadSha: input.gitState?.previousSessionHeadSha ?? null,
       }),
-      "provider-access": renderProviderAccess(input.config),
       "pull-request": pullRequestReference,
     },
     fragmentAliases: {

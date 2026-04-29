@@ -28,8 +28,6 @@ Reattempt the task cleanly from fresh branch state while reusing only the prior 
 
 {{context:git-state}}
 
-{{context:provider-access}}
-
 {{context:pull-request}}
 
 ## Retry Rules

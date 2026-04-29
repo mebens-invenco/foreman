@@ -36,8 +36,6 @@ Do not make repository code changes unless the provided context explicitly requi
 
 {{context:git-state}}
 
-{{context:provider-access}}
-
 {{context:pull-request}}
 
 ## Consolidation Rules

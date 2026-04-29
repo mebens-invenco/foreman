@@ -18,8 +18,6 @@ Use prior native session context for settled reviewer decisions, but review the 
 
 {{context:git-state}}
 
-{{context:provider-access}}
-
 {{context:pull-request}}
 
 {{fragment:output-schema}}
