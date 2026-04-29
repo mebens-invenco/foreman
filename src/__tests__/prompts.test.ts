@@ -201,6 +201,8 @@ describe("prompt rendering", () => {
     expect(result).toContain("## Linear Provider Access");
     expect(result).toContain("LINEAR_API_KEY");
     expect(result).toContain("attachments { nodes { id title url } }");
+    expect(result).toContain("When downloading Linear-hosted attachments");
+    expect(result).toContain("verify the response is an actual image file");
     expect(result).toContain("linear-issue-id");
     expect(result).not.toContain("## File Task Access");
     expect(result).not.toContain("## Provider Access");

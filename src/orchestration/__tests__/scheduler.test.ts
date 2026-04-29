@@ -1359,6 +1359,7 @@ describe("SchedulerService applyWorkerResult", () => {
       const updateJobStatus = vi.fn();
       const releaseLeasesForAttempt = vi.fn();
       const updateWorkerStatus = vi.fn();
+      const transition = vi.fn(async () => undefined);
       const logger = {
         ...fakeLogger,
         flush: async () => {
@@ -1385,7 +1386,7 @@ describe("SchedulerService applyWorkerResult", () => {
         }),
         taskSystem: {
           getTask: vi.fn(async () => sampleTask({ state: "ready", providerState: "ready" })),
-          transition: vi.fn(async () => undefined),
+          transition,
           listComments: vi.fn(async () => []),
         } as any,
         reviewService: {} as any,
@@ -1417,6 +1418,8 @@ describe("SchedulerService applyWorkerResult", () => {
         "attempt_failed",
         expect.stringContaining("Runner exited with exit code 1"),
       );
+      expect(transition).toHaveBeenNthCalledWith(1, { taskId: "TASK-0001", toState: "in_progress" });
+      expect(transition).toHaveBeenNthCalledWith(2, { taskId: "TASK-0001", toState: "ready" });
       expect(addAttemptEvent).toHaveBeenCalledWith(
         "attempt-runner-failure",
         "attempt_failed",

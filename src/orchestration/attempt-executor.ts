@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskTarget, type WorkerResult } from "../domain/index.js";
+import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskState, type TaskTarget, type WorkerResult } from "../domain/index.js";
 import { createAgentRunner, parseWorkerResult, validateWorkerResult } from "../execution/index.js";
 import { parseWorkerPromptPullRequestReference, renderWorkerPrompt } from "../execution/render-worker-prompt.js";
 import { ForemanError } from "../lib/errors.js";
@@ -100,6 +100,8 @@ export class AttemptExecutor {
     let repo: RepoRef | null = null;
     let worktreePath: string | null = null;
     let beforeSha: string | null = null;
+    let taskStateBeforeExecution: TaskState | null = null;
+    let transitionedTaskToInProgress = false;
 
     try {
       task = await this.deps.taskSystem.getTask(job.taskId);
@@ -123,6 +125,7 @@ export class AttemptExecutor {
         runnerModel: runnerConfig.model,
         runnerVariant: runnerTuningValue(runnerConfig),
       };
+      taskStateBeforeExecution = task.state;
       jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
       jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
@@ -181,6 +184,7 @@ export class AttemptExecutor {
 
         if (job.action === "execution" || job.action === "retry") {
           await this.deps.taskSystem.transition({ taskId: task.id, toState: "in_progress" });
+          transitionedTaskToInProgress = true;
           attemptLogger.info("transitioned task to in_progress");
         }
 
@@ -389,6 +393,17 @@ export class AttemptExecutor {
       if (attempt) {
         const attemptLogger = jobLogger.child({ attemptId: attempt.id });
         attemptLogger.error("attempt failed", { error: message, aborted: controller.signal.aborted });
+        if (task && transitionedTaskToInProgress && taskStateBeforeExecution && taskStateBeforeExecution !== "in_progress") {
+          try {
+            await this.deps.taskSystem.transition({ taskId: task.id, toState: taskStateBeforeExecution });
+            attemptLogger.info("restored task state after failed attempt", { restoredState: taskStateBeforeExecution });
+          } catch (restoreError) {
+            attemptLogger.warn("failed to restore task state after failed attempt", {
+              restoreState: taskStateBeforeExecution,
+              error: restoreError instanceof Error ? restoreError.message : String(restoreError),
+            });
+          }
+        }
         this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "attempt_failed", message);
         this.deps.foremanRepos.attempts.finalizeAttempt(attempt.id, controller.signal.aborted ? "canceled" : "failed", {
           finishedAt: isoNow(),
