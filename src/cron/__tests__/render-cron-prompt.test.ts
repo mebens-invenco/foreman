@@ -48,6 +48,7 @@ describe("renderCronPrompt", () => {
     const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
     const config = createDefaultWorkspaceConfig("foo", "linear");
     config.agentTaskCreation.enabled = true;
+    config.taskSystem.linear!.agentCreatedLabel = "AI Generated";
 
     const prompt = await renderCronPrompt({
       config,
@@ -67,5 +68,6 @@ describe("renderCronPrompt", () => {
 
     expect(prompt).toContain("LINEAR_API_KEY");
     expect(prompt).toContain("never print, log, or expose its value");
+    expect(prompt).toContain("apply these labels: Agent, AI Generated");
   });
 });

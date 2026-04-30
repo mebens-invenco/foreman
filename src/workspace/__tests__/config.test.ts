@@ -28,6 +28,13 @@ describe("workspace config", () => {
     expect(parsed.http.port).toBe(8765);
   });
 
+  test("round-trips default Linear agent-created label", () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    const parsed = parseWorkspaceConfig(stringifyWorkspaceConfig(config));
+
+    expect(parsed.taskSystem.linear!.agentCreatedLabel).toBe("Agent Created");
+  });
+
   test("routes review to execution and reviewer to reviewer runner", () => {
     const config = createDefaultWorkspaceConfig("foo", "file");
 
@@ -45,6 +52,15 @@ describe("workspace config", () => {
 
     expect(parsed.cron).toEqual({ enabled: true, jobsDir: "automation" });
     expect(parsed.agentTaskCreation).toEqual({ enabled: true });
+  });
+
+  test("persists Linear agent-created label", () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.agentCreatedLabel = "AI Generated";
+
+    const parsed = parseWorkspaceConfig(stringifyWorkspaceConfig(config));
+
+    expect(parsed.taskSystem.linear!.agentCreatedLabel).toBe("AI Generated");
   });
 
   test("accepts legacy flat claude runner config", () => {

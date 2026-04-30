@@ -219,6 +219,7 @@ taskSystem:
     team: Engineering
     assignee: me
     includeLabels: [Agent]
+    agentCreatedLabel: "Agent Created"
     consolidatedLabel: "Agent Consolidated"
     states:
       ready: [Todo, Ready]

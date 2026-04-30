@@ -27,6 +27,7 @@ export const linearSchema = z.object({
   team: z.string().min(1),
   assignee: z.string().min(1).default("me"),
   includeLabels: z.array(z.string().min(1)).default(["Agent"]),
+  agentCreatedLabel: z.string().min(1).default("Agent Created"),
   consolidatedLabel: z.string().min(1).default("Agent Consolidated"),
   states: z.object({
     ready: z.array(z.string().min(1)).min(1).default(["Todo", "Ready"]),
@@ -248,6 +249,7 @@ export const createDefaultWorkspaceConfig = (
             team: "Engineering",
             assignee: "me",
             includeLabels: ["Agent"],
+            agentCreatedLabel: "Agent Created",
             consolidatedLabel: "Agent Consolidated",
             states: {
               ready: ["Todo", "Ready"],

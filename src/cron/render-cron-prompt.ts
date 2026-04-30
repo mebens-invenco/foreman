@@ -35,6 +35,10 @@ export const renderCronPrompt = async (input: {
 }): Promise<string> => {
   const plan = await readPlan(input.paths);
   const tasksDir = path.join(input.paths.workspaceRoot, input.config.taskSystem.file?.tasksDir ?? "tasks");
+  const linearTaskLabels =
+    input.config.taskSystem.type === "linear"
+      ? [...input.config.taskSystem.linear!.includeLabels, input.config.taskSystem.linear!.agentCreatedLabel].join(", ")
+      : "";
 
   return renderPromptTemplate({
     paths: input.paths,
@@ -62,6 +66,9 @@ export const renderCronPrompt = async (input: {
       cron: {
         planPath: input.paths.planPath,
         tasksDir,
+      },
+      linear: {
+        taskLabels: linearTaskLabels,
       },
     },
   });
