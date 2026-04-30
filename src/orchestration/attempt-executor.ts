@@ -104,14 +104,19 @@ export class AttemptExecutor {
     let transitionedTaskToInProgress = false;
 
     try {
+      if (job.jobKind === "cron" || job.action === "cron" || !job.taskId) {
+        throw new ForemanError("invalid_task_job", `Job ${job.id} is not a task job.`, 500);
+      }
+      const taskTargetId = job.taskTargetId ?? "";
+
       task = await this.deps.taskSystem.getTask(job.taskId);
       const mirroredTask = this.deps.foremanRepos.taskMirror.getTask(job.taskId);
       if (mirroredTask && mirroredTask.pullRequests.length > 0) {
         task = { ...task, pullRequests: mirroredTask.pullRequests };
       }
-      const persistedTarget = this.deps.foremanRepos.taskMirror.getTaskTargetById(job.taskTargetId);
+      const persistedTarget = this.deps.foremanRepos.taskMirror.getTaskTargetById(taskTargetId);
       if (!persistedTarget) {
-        throw new ForemanError("task_missing_target", `Job ${job.id} references missing task target ${job.taskTargetId}.`);
+        throw new ForemanError("task_missing_target", `Job ${job.id} references missing task target ${taskTargetId}.`);
       }
 
       const actionableTarget = assertTaskActionableTarget(task, this.deps.repos, persistedTarget);
@@ -119,7 +124,7 @@ export class AttemptExecutor {
       repo = actionableTarget.repo;
       const runnerConfig = runnerForAction(this.deps.config, job.action);
       const runnerSessionSelector = {
-        taskTargetId: job.taskTargetId,
+        taskTargetId,
         role: runnerSessionRoleForAction(job.action),
         runnerName: runnerConfig.type,
         runnerModel: runnerConfig.model,
@@ -361,7 +366,7 @@ export class AttemptExecutor {
         if (job.action === "retry" && attemptStatus === "completed") {
           const reviewerRunnerConfig = runnerForAction(this.deps.config, "reviewer");
           const activeReviewerSession = this.deps.foremanRepos.runnerSessions.getActiveSession({
-            taskTargetId: job.taskTargetId,
+            taskTargetId,
             role: "reviewer",
             runnerName: reviewerRunnerConfig.type,
             runnerModel: reviewerRunnerConfig.model,

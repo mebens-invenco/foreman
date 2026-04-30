@@ -284,6 +284,46 @@ describe("persistence repos", () => {
     }
   });
 
+  test("persists cron jobs with nullable task fields and runner output artifacts", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      const job = db.jobs.createCronJob({
+        cronJobId: "cron/check.md",
+        dedupeKey: "cron:cron/check.md",
+        selectionReason: "test cron",
+      });
+
+      expect(job).toMatchObject({
+        jobKind: "cron",
+        taskId: null,
+        taskTargetId: null,
+        taskProvider: null,
+        cronJobId: "cron/check.md",
+        action: "cron",
+        repoKey: null,
+      });
+      expect(db.jobs.latestJobForDedupeKey("cron:cron/check.md")?.id).toBe(job.id);
+
+      db.artifacts.createArtifact({
+        ownerType: "execution_attempt",
+        ownerId: "attempt-1",
+        artifactType: "runner_output",
+        relativePath: "artifacts/attempt-1-runner-output.txt",
+        mediaType: "text/plain",
+        sizeBytes: 12,
+      });
+
+      expect(db.artifacts.listArtifacts("execution_attempt", "attempt-1")[0]).toMatchObject({
+        artifactType: "runner_output",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("recovers orphaned running attempts without active leases", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);

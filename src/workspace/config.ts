@@ -14,6 +14,15 @@ export const schedulerSchema = z.object({
   shutdownGracePeriodSeconds: z.number().int().positive().default(10),
 });
 
+export const cronSchema = z.object({
+  enabled: z.boolean().default(false),
+  jobsDir: z.string().min(1).default("cron"),
+});
+
+export const agentTaskCreationSchema = z.object({
+  enabled: z.boolean().default(false),
+});
+
 export const linearSchema = z.object({
   team: z.string().min(1),
   assignee: z.string().min(1).default("me"),
@@ -186,6 +195,8 @@ export const workspaceConfigSchema = z.preprocess(
       reviewSystem: reviewSystemSchema.default({ type: "github" }),
       runner: runnerSchema,
       reviewer: reviewerSchema.default({ agentPrefix: "[review agent] " }),
+      cron: cronSchema.default({ enabled: false, jobsDir: "cron" }),
+      agentTaskCreation: agentTaskCreationSchema.default({ enabled: false }),
       scheduler: schedulerSchema.default({
         workerConcurrency: 4,
         scoutPollIntervalSeconds: 60,
@@ -270,6 +281,13 @@ export const createDefaultWorkspaceConfig = (
   },
   reviewer: {
     agentPrefix: "[review agent] ",
+  },
+  cron: {
+    enabled: false,
+    jobsDir: "cron",
+  },
+  agentTaskCreation: {
+    enabled: false,
   },
   scheduler: {
     workerConcurrency: 4,

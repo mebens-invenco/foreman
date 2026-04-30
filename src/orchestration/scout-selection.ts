@@ -464,6 +464,9 @@ export const runScoutSelection = async (input: {
   const blockedReasons = new Set<string>();
   const activeJobsByTarget = new Map<string, JobRecord[]>();
   for (const job of input.foremanRepos.jobs.listJobsByStatus(["queued", "leased", "running"])) {
+    if (!job.taskTargetId) {
+      continue;
+    }
     const existing = activeJobsByTarget.get(job.taskTargetId) ?? [];
     existing.push(job);
     activeJobsByTarget.set(job.taskTargetId, existing);

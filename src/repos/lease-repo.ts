@@ -1,4 +1,4 @@
-export type LeaseResourceType = "job" | "task" | "branch";
+export type LeaseResourceType = "job" | "task" | "branch" | "cron";
 
 export interface LeaseRepo {
   acquireLease(input: {

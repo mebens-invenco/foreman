@@ -8,13 +8,15 @@ import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 const mapJob = (row: SqliteRow): JobRecord => ({
   id: String(row.id),
-  taskId: String(row.task_id),
-  taskTargetId: String(row.task_target_id),
-  taskProvider: row.task_provider as JobRecord["taskProvider"],
+  jobKind: (row.job_kind as JobRecord["jobKind"] | null) ?? "task",
+  taskId: (row.task_id as string | null) ?? null,
+  taskTargetId: (row.task_target_id as string | null) ?? null,
+  taskProvider: (row.task_provider as JobRecord["taskProvider"] | null) ?? null,
+  cronJobId: (row.cron_job_id as string | null) ?? null,
   action: row.action as ActionType,
   status: row.status as JobStatus,
   priorityRank: Number(row.priority_rank),
-  repoKey: String(row.repo_key),
+  repoKey: (row.repo_key as string | null) ?? null,
   baseBranch: (row.base_branch as string | null) ?? null,
   dedupeKey: String(row.dedupe_key),
   selectionReason: String(row.selection_reason),
@@ -29,7 +31,18 @@ const mapJob = (row: SqliteRow): JobRecord => ({
 });
 
 export class SqliteJobRepo implements JobRepo {
+  private supportsCronColumnsCache: boolean | null = null;
+
   constructor(private readonly sqlite: SqliteDatabase) {}
+
+  private supportsCronColumns(): boolean {
+    if (this.supportsCronColumnsCache !== null) {
+      return this.supportsCronColumnsCache;
+    }
+    const columns = this.sqlite.prepare("PRAGMA table_info(job)").all() as Array<{ name: string }>;
+    this.supportsCronColumnsCache = columns.some((column) => column.name === "job_kind");
+    return this.supportsCronColumnsCache;
+  }
 
   activeJobCount(): number {
     const row = this.sqlite
@@ -60,12 +73,40 @@ export class SqliteJobRepo implements JobRepo {
   }): JobRecord {
     const id = newId();
     const now = isoNow();
+    if (!this.supportsCronColumns()) {
+      this.sqlite
+        .prepare(
+          `INSERT INTO job(
+            id, task_id, task_target_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+            selection_reason, selection_context_json, scout_run_id, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          input.taskId,
+          input.taskTargetId,
+          input.taskProvider,
+          input.action,
+          input.priorityRank,
+          input.repoKey,
+          input.baseBranch ?? null,
+          input.dedupeKey,
+          input.selectionReason,
+          stableStringify(input.selectionContext ?? {}),
+          input.scoutRunId ?? null,
+          now,
+          now,
+        );
+
+      return this.getJob(id);
+    }
+
     this.sqlite
       .prepare(
         `INSERT INTO job(
-          id, task_id, task_target_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+          id, job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
           selection_reason, selection_context_json, scout_run_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, 'task', ?, ?, ?, NULL, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -87,10 +128,40 @@ export class SqliteJobRepo implements JobRepo {
     return this.getJob(id);
   }
 
+  createCronJob(input: {
+    cronJobId: string;
+    priorityRank?: number;
+    dedupeKey: string;
+    selectionReason: string;
+    selectionContext?: Record<string, unknown>;
+  }): JobRecord {
+    const id = newId();
+    const now = isoNow();
+    this.sqlite
+      .prepare(
+        `INSERT INTO job(
+          id, job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+          selection_reason, selection_context_json, scout_run_id, created_at, updated_at
+        ) VALUES (?, 'cron', NULL, NULL, NULL, ?, 'cron', 'queued', ?, NULL, NULL, ?, ?, ?, NULL, ?, ?)`,
+      )
+      .run(
+        id,
+        input.cronJobId,
+        input.priorityRank ?? 3,
+        input.dedupeKey,
+        input.selectionReason,
+        stableStringify(input.selectionContext ?? {}),
+        now,
+        now,
+      );
+
+    return this.getJob(id);
+  }
+
   listQueue(limit = 100): JobRecord[] {
     return this.sqlite
       .prepare(
-        `SELECT id, task_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+        `SELECT id, COALESCE(job_kind, 'task') AS job_kind, task_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 task_target_id,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
                 started_at, finished_at, error_message
@@ -107,7 +178,7 @@ export class SqliteJobRepo implements JobRepo {
     const placeholders = statuses.map(() => "?").join(", ");
     return this.sqlite
       .prepare(
-        `SELECT id, task_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+        `SELECT id, COALESCE(job_kind, 'task') AS job_kind, task_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 task_target_id,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
                  started_at, finished_at, error_message
@@ -120,7 +191,7 @@ export class SqliteJobRepo implements JobRepo {
   latestJobForTaskTarget(taskTargetId: string): JobRecord | null {
     const row = this.sqlite
       .prepare(
-        `SELECT id, task_id, task_target_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+        `SELECT id, COALESCE(job_kind, 'task') AS job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
                 started_at, finished_at, error_message
            FROM job
@@ -133,10 +204,43 @@ export class SqliteJobRepo implements JobRepo {
     return row ? mapJob(row) : null;
   }
 
-  getJob(jobId: string): JobRecord {
+  latestJobForDedupeKey(dedupeKey: string): JobRecord | null {
     const row = this.sqlite
       .prepare(
-        `SELECT id, task_id, task_target_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+        `SELECT id, COALESCE(job_kind, 'task') AS job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
+                started_at, finished_at, error_message
+           FROM job
+          WHERE dedupe_key = ?
+          ORDER BY created_at DESC
+          LIMIT 1`,
+      )
+      .get(dedupeKey) as SqliteRow | undefined;
+
+    return row ? mapJob(row) : null;
+  }
+
+  getJob(jobId: string): JobRecord {
+    if (!this.supportsCronColumns()) {
+      const legacyRow = this.sqlite
+        .prepare(
+          `SELECT id, 'task' AS job_kind, task_id, task_target_id, task_provider, NULL AS cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+                  selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
+                  started_at, finished_at, error_message
+             FROM job WHERE id = ?`,
+        )
+        .get(jobId) as SqliteRow | undefined;
+
+      if (!legacyRow) {
+        throw new ForemanError("job_not_found", `Job not found: ${jobId}`, 404);
+      }
+
+      return mapJob(legacyRow);
+    }
+
+    const row = this.sqlite
+      .prepare(
+        `SELECT id, COALESCE(job_kind, 'task') AS job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
                 started_at, finished_at, error_message
            FROM job WHERE id = ?`,

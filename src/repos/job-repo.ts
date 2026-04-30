@@ -2,13 +2,15 @@ import type { ActionType, JobStatus } from "../domain/index.js";
 
 export type JobRecord = {
   id: string;
-  taskId: string;
-  taskTargetId: string;
-  taskProvider: "linear" | "file";
+  jobKind: "task" | "cron";
+  taskId: string | null;
+  taskTargetId: string | null;
+  taskProvider: "linear" | "file" | null;
+  cronJobId: string | null;
   action: ActionType;
   status: JobStatus;
   priorityRank: number;
-  repoKey: string;
+  repoKey: string | null;
   baseBranch: string | null;
   dedupeKey: string;
   selectionReason: string;
@@ -38,8 +40,16 @@ export interface JobRepo {
     selectionContext?: Record<string, unknown>;
     scoutRunId?: string | null;
   }): JobRecord;
+  createCronJob(input: {
+    cronJobId: string;
+    priorityRank?: number;
+    dedupeKey: string;
+    selectionReason: string;
+    selectionContext?: Record<string, unknown>;
+  }): JobRecord;
   listQueue(limit?: number): JobRecord[];
   listJobsByStatus(statuses: JobStatus[]): JobRecord[];
+  latestJobForDedupeKey(dedupeKey: string): JobRecord | null;
   latestJobForTaskTarget(taskTargetId: string): JobRecord | null;
   getJob(jobId: string): JobRecord;
   updateJobStatus(
