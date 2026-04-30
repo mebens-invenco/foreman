@@ -53,6 +53,26 @@ function statusTone(status: AttemptRecord["status"]) {
   }
 }
 
+function shellQuote(value: string) {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function buildOpenSessionCommand(attempt: AttemptRecord) {
+  if (!attempt.nativeSessionId || !attempt.worktreePath) {
+    return null
+  }
+
+  const sessionId = shellQuote(attempt.nativeSessionId)
+  const prefix = `cd ${shellQuote(attempt.worktreePath)} && `
+
+  switch (attempt.runnerName) {
+    case "opencode":
+      return `${prefix}opencode -s ${sessionId}`
+    case "claude":
+      return `${prefix}claude --resume ${sessionId}`
+  }
+}
+
 function AttemptStatusBadge({ status }: { status: AttemptRecord["status"] }) {
   return (
     <span
@@ -76,6 +96,57 @@ function DetailRow({ label, value }: { label: string; value: ReactNode }) {
         {value}
       </div>
     </div>
+  )
+}
+
+function OpenSessionSection({ attempt }: { attempt: AttemptRecord }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle")
+  const command = buildOpenSessionCommand(attempt)
+
+  useEffect(() => {
+    if (copyState === "idle") {
+      return
+    }
+
+    const timeoutId = window.setTimeout(() => setCopyState("idle"), 2000)
+    return () => window.clearTimeout(timeoutId)
+  }, [copyState])
+
+  if (!command) {
+    return null
+  }
+
+  const copyCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(command)
+      setCopyState("copied")
+    } catch {
+      setCopyState("failed")
+    }
+  }
+
+  return (
+    <section className="border border-border/70 bg-background/70 px-4 py-3">
+      <p className="text-xxs tracking-[0.28em] text-muted-foreground uppercase">
+        Open session
+      </p>
+      <pre className="mt-3 flex items-center gap-3 overflow-auto border border-border/70 bg-muted/35 p-3 font-mono text-xs leading-6 text-foreground">
+        <code className="min-w-0 flex-1 break-all whitespace-pre-wrap">{command}</code>
+        <Button
+          type="button"
+          variant="outline"
+          size="xs"
+          className="font-sans"
+          onClick={copyCommand}
+        >
+          {copyState === "copied"
+            ? "Copied"
+            : copyState === "failed"
+              ? "Failed"
+              : "Copy"}
+        </Button>
+      </pre>
+    </section>
   )
 }
 
@@ -452,6 +523,8 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
                 value={formatDuration(attempt.startedAt, attempt.finishedAt)}
               />
             </section>
+
+            <OpenSessionSection attempt={attempt} />
 
             {attempt.summary || attempt.errorMessage ? (
               <section className="border border-border/70 bg-background/70 px-4 py-3">

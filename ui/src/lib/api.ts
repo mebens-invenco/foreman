@@ -96,6 +96,7 @@ export type AttemptRecord = {
   runnerModel: string
   runnerVariant: string
   nativeSessionId: string | null
+  worktreePath: string | null
   status: AttemptStatus
   startedAt: string
   finishedAt: string | null

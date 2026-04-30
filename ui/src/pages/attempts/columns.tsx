@@ -5,7 +5,11 @@ import {
   matchesStringFilter,
   type DataTableFilterOption,
 } from "@/components/data-table"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import {
   abbreviateId,
   formatActionLabel,
@@ -65,12 +69,11 @@ function buildAttemptSearchText(attempt: AttemptRecord) {
     .toLowerCase()
 }
 
-export const attemptFilterOptions: DataTableFilterOption[] = attemptStatusValues.map(
-  (status) => ({
+export const attemptFilterOptions: DataTableFilterOption[] =
+  attemptStatusValues.map((status) => ({
     label: formatStatusLabel(status),
     value: status,
-  })
-)
+  }))
 
 export const attemptsGlobalFilter: FilterFn<AttemptRecord> = (
   row,
@@ -89,7 +92,9 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
   {
     accessorKey: "id",
     cell: ({ row }) => (
-      <span className="font-mono text-xs text-foreground">{abbreviateId(row.original.id)}</span>
+      <span className="font-mono text-xs text-foreground">
+        {abbreviateId(row.original.id)}
+      </span>
     ),
     enableGlobalFilter: true,
     header: ({ column }) => (
@@ -123,7 +128,9 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
   {
     accessorKey: "target",
     cell: ({ row }) => (
-      <span className="text-xs text-foreground">{row.original.target ?? "-"}</span>
+      <span className="text-xs text-foreground">
+        {row.original.target ?? "-"}
+      </span>
     ),
     enableGlobalFilter: false,
     header: ({ column }) => (
@@ -145,7 +152,9 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
   {
     accessorKey: "runnerName",
     cell: ({ row }) => (
-      <span className="text-xs uppercase text-foreground">{row.original.runnerName}</span>
+      <span className="text-xs text-foreground uppercase">
+        {row.original.runnerName}
+      </span>
     ),
     enableGlobalFilter: false,
     header: ({ column }) => (
@@ -157,7 +166,7 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
     cell: ({ row }) => (
       <span
         className={cn(
-          "inline-flex rounded-none border px-2 py-1 text-xxs font-medium uppercase tracking-[0.18em]",
+          "inline-flex rounded-none border px-2 py-1 text-xxs font-medium tracking-[0.18em] uppercase",
           statusTone(row.original.status)
         )}
       >
@@ -204,13 +213,17 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
       )
 
       if (!row.original.finishedAt) {
-        return <span className="text-xs text-muted-foreground">{durationLabel}</span>
+        return (
+          <span className="text-xs text-muted-foreground">{durationLabel}</span>
+        )
       }
 
       return (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="text-xs text-muted-foreground">{durationLabel}</span>
+            <span className="text-xs text-muted-foreground">
+              {durationLabel}
+            </span>
           </TooltipTrigger>
           <TooltipContent sideOffset={6}>
             Finished {formatTimestamp(row.original.finishedAt)}
@@ -227,7 +240,7 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
     accessorKey: "summary",
     cell: ({ row }) => (
       <p
-        className="block max-w-[32rem] truncate text-xs text-muted-foreground"
+        className="block max-w-60 truncate text-xs text-muted-foreground"
         title={row.original.summary || row.original.errorMessage || "-"}
       >
         {row.original.summary || row.original.errorMessage || "-"}

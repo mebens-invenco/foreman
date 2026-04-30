@@ -4,7 +4,7 @@ import path from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 
-import type { JobRecord } from "./repos/index.js";
+import type { AttemptRecord, JobRecord } from "./repos/index.js";
 import type { RepoRef, ResolvedPullRequest, Task, TaskState, TaskTarget, TaskTargetStatus } from "./domain/index.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
 import type { SchedulerService } from "./orchestration/index.js";
@@ -34,6 +34,19 @@ const errorShape = (error: unknown): { error: { code: string; message: string } 
 
 const attemptLogPath = (paths: WorkspacePaths, attemptId: string): string =>
   path.join(paths.workspaceRoot, "logs", "attempts", `${attemptId}.log`);
+
+const attemptWorktreePath = (paths: WorkspacePaths, attempt: AttemptRecord): string | null => {
+  if (!attempt.taskId || !attempt.target) {
+    return null;
+  }
+
+  return path.join(paths.worktreesDir, attempt.target, attempt.taskId);
+};
+
+const attemptApiRecord = (paths: WorkspacePaths, attempt: AttemptRecord): AttemptRecord & { worktreePath: string | null } => ({
+  ...attempt,
+  worktreePath: attemptWorktreePath(paths, attempt),
+});
 
 const resolveArtifactContentPath = async (paths: WorkspacePaths, relativePath: string): Promise<string> => {
   const workspaceRoot = path.resolve(paths.workspaceRoot);
@@ -475,14 +488,15 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       filters.offset = offset;
     }
     return {
-      attempts: deps.repos.attempts.listAttempts(filters),
+      attempts: deps.repos.attempts.listAttempts(filters).map((attempt) => attemptApiRecord(deps.paths, attempt)),
     };
   });
 
   server.get("/api/attempts/:attemptId", async (request) => {
     const params = request.params as { attemptId: string };
+    const attempt = deps.repos.attempts.getAttempt(params.attemptId);
     return {
-      attempt: deps.repos.attempts.getAttempt(params.attemptId),
+      attempt: attemptApiRecord(deps.paths, attempt),
       events: deps.repos.attempts.listAttemptEvents(params.attemptId),
       artifacts: deps.repos.artifacts.listArtifacts("execution_attempt", params.attemptId),
     };
