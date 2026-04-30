@@ -22,6 +22,8 @@ describe("workspace config", () => {
       timeoutMs: 3_600_000,
     });
     expect(parsed.reviewer.agentPrefix).toBe("[review agent] ");
+    expect(parsed.cron).toEqual({ enabled: false, jobsDir: "cron" });
+    expect(parsed.agentTaskCreation).toEqual({ enabled: false });
     expect(parsed.scheduler.workerConcurrency).toBe(4);
     expect(parsed.http.port).toBe(8765);
   });
@@ -31,6 +33,18 @@ describe("workspace config", () => {
 
     expect(runnerForAction(config, "review")).toEqual(config.runner.execution);
     expect(runnerForAction(config, "reviewer")).toEqual(config.runner.reviewer);
+  });
+
+  test("persists cron and agent task creation settings", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.cron.enabled = true;
+    config.cron.jobsDir = "automation";
+    config.agentTaskCreation.enabled = true;
+
+    const parsed = parseWorkspaceConfig(stringifyWorkspaceConfig(config));
+
+    expect(parsed.cron).toEqual({ enabled: true, jobsDir: "automation" });
+    expect(parsed.agentTaskCreation).toEqual({ enabled: true });
   });
 
   test("accepts legacy flat claude runner config", () => {

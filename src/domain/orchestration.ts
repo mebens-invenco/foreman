@@ -1,6 +1,6 @@
 export type RunnerProvider = "opencode" | "claude";
 
-export type ActionType = "execution" | "review" | "reviewer" | "retry" | "consolidation";
+export type ActionType = "execution" | "review" | "reviewer" | "retry" | "consolidation" | "cron";
 
 export type RunnerSessionRole = "implementation" | "reviewer";
 

@@ -46,6 +46,49 @@ const secondaryTask: Task = {
 };
 
 describe("HTTP query validation", () => {
+  test("patches live cron settings and persists workspace config", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    await fs.writeFile(paths.configPath, "");
+    const server = createHttpServer({
+      config,
+      paths,
+      repoRefs: [],
+      repos: db,
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({
+        method: "PATCH",
+        url: "/api/settings",
+        payload: { cron: { enabled: true, jobsDir: "automation" }, agentTaskCreation: { enabled: true } },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({
+        cron: { enabled: true, jobsDir: "automation" },
+        agentTaskCreation: { enabled: true },
+      });
+      expect(config.cron.enabled).toBe(true);
+      expect(await fs.readFile(paths.configPath, "utf8")).toContain("jobsDir: automation");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
   test("returns invalid_request for malformed query params", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
     cleanupDirs.push(workspaceRoot);

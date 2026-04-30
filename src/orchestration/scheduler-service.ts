@@ -1,5 +1,6 @@
 import { EventEmitter } from "node:events";
 
+import { discoverCronJobs, type CronJobDefinition } from "../cron/index.js";
 import type { ActionType, RepoRef, ReviewContext, Task, TaskTarget, WorkerResult } from "../domain/index.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
@@ -9,6 +10,7 @@ import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { AttemptExecutor } from "./attempt-executor.js";
+import { CronAttemptExecutor } from "./cron-attempt-executor.js";
 import { runScoutSelection } from "./scout-selection.js";
 import { WorkerResultApplier } from "./worker-result-applier.js";
 
@@ -41,6 +43,8 @@ export class SchedulerService extends EventEmitter {
   private readonly logger: LoggerService;
   private readonly workerResultApplier: WorkerResultApplier;
   private readonly attemptExecutor: AttemptExecutor;
+  private readonly cronAttemptExecutor: CronAttemptExecutor;
+  private cronScheduleInFlight = false;
 
   constructor(private readonly deps: SchedulerDeps) {
     super();
@@ -66,6 +70,23 @@ export class SchedulerService extends EventEmitter {
       env: deps.env,
       logger: this.logger,
       applyWorkerResult: (input) => this.applyWorkerResult(input),
+      onWorkerUpdated: ({ workerId, status, attemptId }) => {
+        this.emit("worker_updated", { workerId, status, ...(attemptId ? { attemptId } : {}) });
+      },
+      onAttemptChanged: ({ attemptId, status }) => {
+        this.emit("attempt_changed", { attemptId, status });
+      },
+      onWorkerFinished: () => {
+        this.scheduleScout("worker_finished");
+      },
+    });
+    this.cronAttemptExecutor = new CronAttemptExecutor({
+      config: deps.config,
+      paths: deps.paths,
+      foremanRepos: deps.foremanRepos,
+      repos: deps.repos,
+      env: deps.env,
+      logger: this.logger,
       onWorkerUpdated: ({ workerId, status, attemptId }) => {
         this.emit("worker_updated", { workerId, status, ...(attemptId ? { attemptId } : {}) });
       },
@@ -396,6 +417,8 @@ export class SchedulerService extends EventEmitter {
       return;
     }
 
+    await this.scheduleDueCronJobs();
+
     const queuedJobs = this.deps.foremanRepos.jobs.listJobsByStatus(["queued"]);
     const idleWorkers = this.deps.foremanRepos.workers
       .listWorkers()
@@ -440,12 +463,67 @@ export class SchedulerService extends EventEmitter {
     const controller = new AbortController();
     this.workerAbortControllers.set(worker.id, controller);
     try {
-      await this.attemptExecutor.execute(worker, job, controller);
+      if (job.jobKind === "cron") {
+        await this.cronAttemptExecutor.execute(worker, job, controller);
+      } else {
+        await this.attemptExecutor.execute(worker, job, controller);
+      }
     } finally {
       if (this.workerAbortControllers.get(worker.id) === controller) {
         this.workerAbortControllers.delete(worker.id);
       }
     }
+  }
+
+  private async scheduleDueCronJobs(): Promise<void> {
+    if (this.cronScheduleInFlight || !this.deps.config.cron.enabled) {
+      return;
+    }
+
+    this.cronScheduleInFlight = true;
+    try {
+      const jobs = await discoverCronJobs(this.deps.config, this.deps.paths);
+      const now = Date.now();
+      for (const cronJob of jobs) {
+        if (!cronJob.enabled || !this.isCronJobDue(cronJob, now)) {
+          continue;
+        }
+
+        const dedupeKey = `cron:${cronJob.id}`;
+        if (this.deps.foremanRepos.jobs.hasActiveDedupeKey(dedupeKey)) {
+          this.logger.debug("skipped cron job because an active run already exists", { cronJobId: cronJob.id });
+          continue;
+        }
+
+        const job = this.deps.foremanRepos.jobs.createCronJob({
+          cronJobId: cronJob.id,
+          dedupeKey,
+          selectionReason: `Cron interval elapsed: ${cronJob.interval}`,
+          selectionContext: {
+            cron: {
+              id: cronJob.id,
+              interval: cronJob.interval,
+              relativePath: cronJob.relativePath,
+            },
+          },
+        });
+        this.logger.info("enqueued cron job", { jobId: job.id, cronJobId: cronJob.id, interval: cronJob.interval });
+      }
+    } catch (error) {
+      this.logger.error("cron scheduling failed", { error: error instanceof Error ? error.message : String(error) });
+    } finally {
+      this.cronScheduleInFlight = false;
+    }
+  }
+
+  private isCronJobDue(cronJob: CronJobDefinition, now: number): boolean {
+    const latest = this.deps.foremanRepos.jobs.latestJobForDedupeKey(`cron:${cronJob.id}`);
+    if (!latest) {
+      return true;
+    }
+
+    const referenceTime = latest.finishedAt ?? latest.createdAt;
+    return now - Date.parse(referenceTime) >= cronJob.intervalMs;
   }
 
   private async applyWorkerResult(input: {

@@ -11,7 +11,7 @@ import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
 import type { ReviewService } from "./review/index.js";
 import type { TaskSystem } from "./tasking/index.js";
-import type { WorkspaceConfig } from "./workspace/config.js";
+import { stringifyWorkspaceConfig, type WorkspaceConfig } from "./workspace/config.js";
 import type { WorkspacePaths } from "./workspace/workspace-paths.js";
 
 type HttpServerDeps = {
@@ -123,6 +123,31 @@ const parseEnumQuery = <T extends string>(name: string, value: string | undefine
   }
 
   return value as T;
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readOptionalBooleanPatch = (parent: Record<string, unknown>, key: string): boolean | undefined => {
+  const value = parent[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "boolean") {
+    throw new ForemanError("invalid_request", `${key} must be a boolean.`, 400);
+  }
+  return value;
+};
+
+const readOptionalStringPatch = (parent: Record<string, unknown>, key: string): string | undefined => {
+  const value = parent[key];
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new ForemanError("invalid_request", `${key} must be a non-empty string.`, 400);
+  }
+  return value;
 };
 
 const taskStates = ["ready", "in_progress", "in_review", "done", "canceled"] as const satisfies readonly TaskState[];
@@ -381,6 +406,8 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       lastScoutRunAt: deps.repos.scoutRuns.listScoutRuns(1)[0]?.startedAt ?? null,
       nextScoutPollAt: deps.scheduler.getStatus().nextScoutPollAt,
     },
+    cron: deps.config.cron,
+    agentTaskCreation: deps.config.agentTaskCreation,
     integrations: {
       taskSystem: { type: deps.config.taskSystem.type, status: "ok" },
       reviewSystem: { type: deps.config.reviewSystem.type, status: "ok" },
@@ -695,6 +722,51 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     };
   });
   server.get("/api/scout/runs", async () => ({ runs: deps.repos.scoutRuns.listScoutRuns() }));
+
+  server.get("/api/settings", async () => ({
+    cron: deps.config.cron,
+    agentTaskCreation: deps.config.agentTaskCreation,
+  }));
+
+  server.patch("/api/settings", async (request) => {
+    const body = request.body;
+    if (!isRecord(body)) {
+      throw new ForemanError("invalid_request", "Settings patch body must be an object.", 400);
+    }
+
+    const cron = isRecord(body.cron) ? body.cron : undefined;
+    if (body.cron !== undefined && !cron) {
+      throw new ForemanError("invalid_request", "cron must be an object.", 400);
+    }
+    const agentTaskCreation = isRecord(body.agentTaskCreation) ? body.agentTaskCreation : undefined;
+    if (body.agentTaskCreation !== undefined && !agentTaskCreation) {
+      throw new ForemanError("invalid_request", "agentTaskCreation must be an object.", 400);
+    }
+
+    if (cron) {
+      const enabled = readOptionalBooleanPatch(cron, "enabled");
+      const jobsDir = readOptionalStringPatch(cron, "jobsDir");
+      deps.config.cron = {
+        ...deps.config.cron,
+        ...(enabled !== undefined ? { enabled } : {}),
+        ...(jobsDir !== undefined ? { jobsDir } : {}),
+      };
+    }
+
+    if (agentTaskCreation) {
+      const enabled = readOptionalBooleanPatch(agentTaskCreation, "enabled");
+      deps.config.agentTaskCreation = {
+        ...deps.config.agentTaskCreation,
+        ...(enabled !== undefined ? { enabled } : {}),
+      };
+    }
+
+    await fs.writeFile(deps.paths.configPath, stringifyWorkspaceConfig(deps.config));
+    return {
+      cron: deps.config.cron,
+      agentTaskCreation: deps.config.agentTaskCreation,
+    };
+  });
 
   server.post("/api/scheduler/start", async () => {
     await deps.scheduler.start();

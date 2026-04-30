@@ -1,7 +1,7 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { describe, expect, test, vi } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../../domain/index.js";
@@ -29,6 +29,12 @@ const sampleTask = (overrides: Partial<Task> = {}): Task => ({
     overrides.targets ??
     [{ repoKey: "repo-a", branchName: "task-0001", position: 0 }],
   targetDependencies: overrides.targetDependencies ?? [],
+});
+
+const cleanupDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
 const baseWorkerResult = (overrides: Partial<WorkerResult> = {}): WorkerResult => ({
@@ -104,8 +110,10 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     activeJobCount: vi.fn(() => 0),
     hasActiveDedupeKey: vi.fn(() => false),
     createJob: vi.fn(),
+    createCronJob: vi.fn(),
     listQueue: vi.fn(() => []),
     listJobsByStatus: vi.fn(() => []),
+    latestJobForDedupeKey: vi.fn(() => null),
     latestJobForTaskTarget: vi.fn(() => null),
     getJob: vi.fn(),
     updateJobStatus: vi.fn(),
@@ -197,6 +205,59 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     ...((overrides.history as object | undefined) ?? {}),
   },
   close: vi.fn(),
+});
+
+describe("SchedulerService cron scheduling", () => {
+  test("does not discover cron jobs when cron scheduling is disabled", async () => {
+    const workspaceRoot = await createTempDir("foreman-scheduler-cron-test-");
+    cleanupDirs.push(workspaceRoot);
+    await fs.mkdir(path.join(workspaceRoot, "cron"), { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "cron", "check.md"), "---\ninterval: 15m\n---\nCheck.");
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.cron.enabled = false;
+    const foremanRepos = createMockRepos();
+    const scheduler = new SchedulerService({
+      config,
+      paths: createWorkspacePaths(testProjectRoot, workspaceRoot),
+      foremanRepos,
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    await (scheduler as any).scheduleDueCronJobs();
+
+    expect(foremanRepos.jobs.createCronJob).not.toHaveBeenCalled();
+  });
+
+  test("dedupes cron scheduling when an active run exists", async () => {
+    const workspaceRoot = await createTempDir("foreman-scheduler-cron-test-");
+    cleanupDirs.push(workspaceRoot);
+    await fs.mkdir(path.join(workspaceRoot, "cron"), { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "cron", "check.md"), "---\ninterval: 15m\n---\nCheck.");
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.cron.enabled = true;
+    const foremanRepos = createMockRepos({
+      jobs: { hasActiveDedupeKey: vi.fn(() => true) },
+    });
+    const scheduler = new SchedulerService({
+      config,
+      paths: createWorkspacePaths(testProjectRoot, workspaceRoot),
+      foremanRepos,
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    await (scheduler as any).scheduleDueCronJobs();
+
+    expect(foremanRepos.jobs.hasActiveDedupeKey).toHaveBeenCalledWith("cron:cron/check.md");
+    expect(foremanRepos.jobs.createCronJob).not.toHaveBeenCalled();
+  });
 });
 
 describe("SchedulerService applyWorkerResult", () => {
@@ -1010,6 +1071,7 @@ describe("SchedulerService applyWorkerResult", () => {
       {
         id: "job-1",
         taskId: "TASK-0001",
+        taskTargetId: sampleTarget.id,
         action: "execution",
         repoKey: "repo-a",
         baseBranch: "main",
@@ -1080,6 +1142,7 @@ describe("SchedulerService applyWorkerResult", () => {
       {
         id: "job-1",
         taskId: "TASK-0001",
+        taskTargetId: sampleTarget.id,
         action: "execution",
         repoKey: "repo-a",
         baseBranch: "main",
