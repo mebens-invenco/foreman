@@ -7,6 +7,7 @@ import { HistoryPage } from "@/pages/history"
 import { LearningsPage } from "@/pages/learnings"
 import { NotFoundPage } from "@/pages/not-found"
 import { OverviewPage } from "@/pages/overview"
+import { SettingsPage } from "@/pages/settings"
 
 export function AppRoutes() {
   return (
@@ -17,6 +18,7 @@ export function AppRoutes() {
         <Route path={navigationItems[1].href} element={<AttemptsPage />} />
         <Route path={navigationItems[2].href} element={<HistoryPage />} />
         <Route path={navigationItems[3].href} element={<LearningsPage />} />
+        <Route path={navigationItems[4].href} element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

@@ -368,6 +368,7 @@ function ArtifactsPanel({ artifacts }: { artifacts: ArtifactRecord[] }) {
       }
 
       return (
+        artifacts.find((artifact) => artifact.artifactType === "runner_output")?.id ??
         artifacts.find((artifact) => artifact.artifactType === "rendered_prompt")?.id ??
         artifacts[0]?.id ??
         null
@@ -475,6 +476,11 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
   const attempt = detail?.attempt ?? null
   const events = detail?.events ?? []
   const artifacts = detail?.artifacts ?? []
+  const isCronAttempt = attempt?.jobKind === "cron"
+  const workItemLabel = isCronAttempt ? "Cron job" : "Task"
+  const workItemValue = isCronAttempt ? attempt?.cronJobId : attempt?.taskId
+  const targetLabel = isCronAttempt ? "Scope" : "Target"
+  const targetValue = isCronAttempt ? "Workspace" : attempt?.target
 
   return (
     <SheetContent
@@ -507,8 +513,8 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
         ) : attempt ? (
           <>
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <DetailRow label="Task" value={attempt.taskId ?? "-"} />
-              <DetailRow label="Target" value={attempt.target ?? "-"} />
+              <DetailRow label={workItemLabel} value={workItemValue ?? "-"} />
+              <DetailRow label={targetLabel} value={targetValue ?? "-"} />
               <DetailRow label="Stage" value={formatActionLabel(attempt.stage)} />
               <DetailRow label="Worker" value={attempt.workerId ?? "-"} />
               <DetailRow label="Job" value={attempt.jobId} />
@@ -545,7 +551,7 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
               <TabsList className="w-full justify-start" variant="line">
                 <TabsTrigger value="events">Events</TabsTrigger>
                 <TabsTrigger value="logs">Logs</TabsTrigger>
-                <TabsTrigger value="artifacts">Artefacts</TabsTrigger>
+                <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
               </TabsList>
 
               <TabsContent value="events" className="mt-4">

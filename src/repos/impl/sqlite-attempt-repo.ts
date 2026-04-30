@@ -10,8 +10,10 @@ import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 const mapAttempt = (row: SqliteRow): AttemptRecord => ({
   id: String(row.id),
   jobId: String(row.job_id),
+  jobKind: (row.job_kind as AttemptRecord["jobKind"] | null) ?? "task",
   taskId: (row.task_id as string | null) ?? null,
   target: (row.target as string | null) ?? null,
+  cronJobId: (row.cron_job_id as string | null) ?? null,
   stage: (row.stage as string | null) ?? null,
   workerId: (row.worker_id as string | null) ?? null,
   attemptNumber: Number(row.attempt_number),
@@ -49,8 +51,10 @@ export class SqliteAttemptRepo implements AttemptRepo {
     return {
       id: newId(),
       jobId: input.jobId,
+      jobKind: "task",
       taskId: null,
       target: null,
+      cronJobId: null,
       stage: null,
       workerId: input.workerId,
       attemptNumber: this.nextAttemptNumber(input.jobId),
@@ -214,7 +218,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
 
     return this.sqlite
       .prepare(
-        `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
+        `SELECT ea.id, ea.job_id, job.job_kind, job.task_id, job.repo_key AS target, job.cron_job_id, job.action AS stage,
                 ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id,
                 rs.native_session_id, ea.status, ea.started_at,
                 ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
@@ -231,7 +235,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
   getAttempt(attemptId: string): AttemptRecord {
     const row = this.sqlite
       .prepare(
-        `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
+        `SELECT ea.id, ea.job_id, job.job_kind, job.task_id, job.repo_key AS target, job.cron_job_id, job.action AS stage,
                 ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id,
                 rs.native_session_id, ea.status, ea.started_at,
                 ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
@@ -252,7 +256,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
   latestAttemptForJob(jobId: string): AttemptRecord | null {
     const row = this.sqlite
       .prepare(
-        `SELECT ea.id, ea.job_id, job.task_id, job.repo_key AS target, job.action AS stage,
+        `SELECT ea.id, ea.job_id, job.job_kind, job.task_id, job.repo_key AS target, job.cron_job_id, job.action AS stage,
                 ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id,
                 rs.native_session_id, ea.status, ea.started_at,
                 ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
@@ -272,8 +276,10 @@ export class SqliteAttemptRepo implements AttemptRepo {
       .prepare(
         `SELECT execution_attempt.id,
                 execution_attempt.job_id,
+                job.job_kind,
                 job.task_id,
                 job.repo_key AS target,
+                job.cron_job_id,
                 job.action AS stage,
                 execution_attempt.worker_id,
                 execution_attempt.attempt_number,

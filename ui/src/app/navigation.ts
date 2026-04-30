@@ -3,6 +3,7 @@ import {
   BookOpenTextIcon,
   ChartColumnIncreasingIcon,
   Clock3Icon,
+  SlidersHorizontalIcon,
   type LucideIcon,
 } from "lucide-react"
 
@@ -37,6 +38,12 @@ export const navigationItems: NavigationItem[] = [
     href: "/learnings",
     description: "Captured findings, recurring issues, and operational memory.",
     icon: BookOpenTextIcon,
+  },
+  {
+    title: "Settings",
+    href: "/settings",
+    description: "Cron scheduling and agent task creation controls.",
+    icon: SlidersHorizontalIcon,
   },
 ]
 

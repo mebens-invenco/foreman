@@ -33,6 +33,10 @@ export function formatActionLabel(value: string | null | undefined) {
     return "-"
   }
 
+  if (value === "cron") {
+    return "Cron job"
+  }
+
   return value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ")
 }
 

@@ -53,7 +53,9 @@ function buildAttemptSearchText(attempt: AttemptRecord) {
     attempt.id,
     attempt.nativeSessionId ?? "",
     attempt.jobId,
+    attempt.jobKind,
     attempt.taskId ?? "",
+    attempt.cronJobId ?? "",
     attempt.target ?? "",
     attempt.stage ?? "",
     attempt.workerId ?? "",
@@ -116,20 +118,29 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
   {
     accessorKey: "taskId",
     cell: ({ row }) => (
-      <span className="font-mono text-xs text-foreground">
-        {row.original.taskId ?? "-"}
-      </span>
+      <div className="space-y-1">
+        <span className="block font-mono text-xs text-foreground">
+          {row.original.jobKind === "cron"
+            ? row.original.cronJobId ?? "-"
+            : row.original.taskId ?? "-"}
+        </span>
+        {row.original.jobKind === "cron" ? (
+          <span className="block text-xxs tracking-[0.18em] text-muted-foreground uppercase">
+            Cron
+          </span>
+        ) : null}
+      </div>
     ),
     enableGlobalFilter: false,
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title="Task" />
+      <DataTableColumnHeader column={column} title="Work item" />
     ),
   },
   {
     accessorKey: "target",
     cell: ({ row }) => (
       <span className="text-xs text-foreground">
-        {row.original.target ?? "-"}
+        {row.original.jobKind === "cron" ? "Workspace" : row.original.target ?? "-"}
       </span>
     ),
     enableGlobalFilter: false,

@@ -1,5 +1,5 @@
 import type { Worker } from "@/lib/api"
-import { formatRelativeTime, formatTimestamp } from "@/lib/format"
+import { formatActionLabel, formatRelativeTime, formatTimestamp } from "@/lib/format"
 
 import {
   SheetContent,
@@ -32,6 +32,13 @@ export function WorkerDetailSheet({ worker, now }: WorkerDetailSheetProps) {
   const timingLabel = worker.currentAttempt?.startedAt
     ? `Started ${formatRelativeTime(worker.currentAttempt.startedAt, now)}`
     : `Idle since ${formatRelativeTime(worker.lastHeartbeatAt, now)}`
+  const isCronJob = worker.currentJob?.jobKind === "cron"
+  const workItemLabel = isCronJob ? "Cron job" : "Task"
+  const workItemValue = isCronJob
+    ? worker.currentJob?.cronJobId
+    : worker.currentJob?.taskId
+  const targetLabel = isCronJob ? "Scope" : "Repo target"
+  const targetValue = isCronJob ? "Workspace" : worker.currentJob?.repoKey
 
   return (
     <SheetContent
@@ -54,12 +61,12 @@ export function WorkerDetailSheet({ worker, now }: WorkerDetailSheetProps) {
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           <DetailRow
             label="Activity"
-            value={worker.currentJob?.action ?? "Idle"}
+            value={worker.currentJob ? formatActionLabel(worker.currentJob.action) : "Idle"}
           />
-          <DetailRow label="Task" value={worker.currentJob?.taskId ?? "-"} />
+          <DetailRow label={workItemLabel} value={workItemValue ?? "-"} />
           <DetailRow
-            label="Repo target"
-            value={worker.currentJob?.repoKey ?? "-"}
+            label={targetLabel}
+            value={targetValue ?? "-"}
           />
           <DetailRow
             label="Attempt"

@@ -1,16 +1,12 @@
 import { useState } from "react"
 
 import type { Worker } from "@/lib/api"
-import { formatRelativeTime } from "@/lib/format"
+import { formatActionLabel, formatRelativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 import { Sheet, SheetTrigger } from "@/components/ui/sheet"
 import { WorkerDetailSheet } from "@/pages/overview/worker-detail-sheet"
 import { WorkerStatusBadge } from "@/pages/overview/worker-status-badge"
-
-function formatActionLabel(action: string) {
-  return action.charAt(0).toUpperCase() + action.slice(1)
-}
 
 type WorkerCardProps = {
   worker: Worker
@@ -23,6 +19,13 @@ export function WorkerCard({ worker, now }: WorkerCardProps) {
   const timeLabel = worker.currentAttempt?.startedAt
     ? `Started ${formatRelativeTime(worker.currentAttempt.startedAt, now)}`
     : `Since ${formatRelativeTime(worker.lastHeartbeatAt, now)}`
+  const isCronJob = worker.currentJob?.jobKind === "cron"
+  const primaryLabel = isCronJob ? "Cron job" : "Task"
+  const primaryValue = isCronJob
+    ? worker.currentJob?.cronJobId
+    : worker.currentJob?.taskId
+  const secondaryLabel = isCronJob ? "Scope" : "Repo"
+  const secondaryValue = isCronJob ? "Workspace" : worker.currentJob?.repoKey
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -57,18 +60,18 @@ export function WorkerCard({ worker, now }: WorkerCardProps) {
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
                     <p className="text-xxs tracking-[0.28em] text-muted-foreground uppercase">
-                      Task
+                      {primaryLabel}
                     </p>
                     <p className="mt-2 font-mono text-sm leading-6 break-all text-foreground">
-                      {worker.currentJob?.taskId}
+                      {primaryValue ?? "-"}
                     </p>
                   </div>
                   <div>
                     <p className="text-xxs tracking-[0.28em] text-muted-foreground uppercase">
-                      Repo
+                      {secondaryLabel}
                     </p>
                     <p className="mt-2 text-sm leading-6 break-all text-foreground">
-                      {worker.currentJob?.repoKey}
+                      {secondaryValue ?? "-"}
                     </p>
                   </div>
                 </div>

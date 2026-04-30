@@ -381,6 +381,77 @@ describe("HTTP query validation", () => {
       db.close();
     }
   });
+
+  test("serializes cron attempts and active worker jobs", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    db.workers.ensureWorkerSlots(1);
+    const worker = db.workers.listWorkers()[0];
+    const job = db.jobs.createCronJob({
+      cronJobId: "cron/check.md",
+      dedupeKey: "cron:cron/check.md",
+      selectionReason: "test cron",
+    });
+    const attempt = db.attempts.createAttemptWithLeases({
+      jobId: job.id,
+      workerId: worker!.id,
+      runnerName: "opencode",
+      runnerModel: "openai/gpt-5.4",
+      runnerVariant: "standard",
+      expiresAt: "2026-03-16T00:10:00Z",
+      leases: [{ resourceType: "cron", resourceKey: job.dedupeKey }],
+    });
+    db.workers.updateWorkerStatus(worker!.id, "running", attempt!.id);
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => []),
+        getTask: vi.fn(),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const attemptsResponse = await server.inject({ method: "GET", url: "/api/attempts" });
+      expect(attemptsResponse.statusCode).toBe(200);
+      expect(attemptsResponse.json().attempts[0]).toMatchObject({
+        id: attempt!.id,
+        jobKind: "cron",
+        taskId: null,
+        target: null,
+        cronJobId: "cron/check.md",
+        stage: "cron",
+      });
+
+      const workersResponse = await server.inject({ method: "GET", url: "/api/workers" });
+      expect(workersResponse.statusCode).toBe(200);
+      expect(workersResponse.json().workers[0].currentJob).toMatchObject({
+        jobKind: "cron",
+        cronJobId: "cron/check.md",
+        taskId: null,
+        repoKey: null,
+      });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
 });
 
 describe("HTTP scheduler control", () => {
