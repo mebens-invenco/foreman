@@ -358,6 +358,22 @@ export class AttemptExecutor {
             ...(attemptStatus === "completed" ? { isActive: true } : {}),
           });
         }
+        if (job.action === "retry" && attemptStatus === "completed") {
+          const reviewerRunnerConfig = runnerForAction(this.deps.config, "reviewer");
+          const activeReviewerSession = this.deps.foremanRepos.runnerSessions.getActiveSession({
+            taskTargetId: job.taskTargetId,
+            role: "reviewer",
+            runnerName: reviewerRunnerConfig.type,
+            runnerModel: reviewerRunnerConfig.model,
+            runnerVariant: runnerTuningValue(reviewerRunnerConfig),
+          });
+          if (activeReviewerSession) {
+            this.deps.foremanRepos.runnerSessions.updateSession(activeReviewerSession.id, { isActive: false });
+            attemptLogger.info("deactivated reviewer session after completed retry", {
+              reviewerRunnerSessionId: activeReviewerSession.id,
+            });
+          }
+        }
         this.deps.foremanRepos.attempts.finalizeAttempt(attempt.id, attemptStatus, {
           finishedAt: runResult.finishedAt,
           exitCode: runResult.exitCode,

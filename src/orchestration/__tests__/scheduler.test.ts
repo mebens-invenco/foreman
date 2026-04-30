@@ -1103,7 +1103,7 @@ describe("SchedulerService applyWorkerResult", () => {
     expect(updateWorkerStatus).toHaveBeenLastCalledWith("worker-1", "idle", null);
   });
 
-  test("uses continuation sessions for review but fresh sessions for reviewer and retry", async () => {
+  test("uses fresh reviewer sessions after retry", async () => {
     const tempDir = await createTempDir("foreman-session-routing-test-");
     const paths = createWorkspacePaths(testProjectRoot, tempDir);
     const worktreePath = path.join(tempDir, "worktree");
@@ -1124,10 +1124,13 @@ describe("SchedulerService applyWorkerResult", () => {
           "process.stdin.on('data', (chunk) => { prompt += chunk; });",
           "process.stdin.on('end', () => {",
           "  fs.writeFileSync(process.env.FOREMAN_TEST_PROMPT_OUT, prompt);",
-          "  fs.writeFileSync(process.env.FOREMAN_TEST_ARGV_OUT, JSON.stringify(process.argv.slice(2)));",
-          "  const action = prompt.includes('# Reviewer Prompt') ? 'reviewer' : prompt.includes('# Retry Prompt') ? 'retry' : 'review';",
+          "  const argv = process.argv.slice(2);",
+          "  fs.writeFileSync(process.env.FOREMAN_TEST_ARGV_OUT, JSON.stringify(argv));",
+          "  const action = prompt.includes('# Retry Prompt') ? 'retry' : prompt.includes('# Reviewer Prompt') || prompt.includes('Review the latest PR changes.') ? 'reviewer' : 'review';",
+          "  const sessionFlag = argv.indexOf('--session');",
+          "  const sessionID = sessionFlag >= 0 ? argv[sessionFlag + 1] : action + '-fresh-session';",
           "  const result = '<agent-result>' + JSON.stringify({ schemaVersion: 1, action, outcome: 'no_action_needed', summary: 'done', taskMutations: [], reviewMutations: [], learningMutations: [], blockers: [], signals: [] }) + '</agent-result>';",
-          "  process.stdout.write(JSON.stringify({ type: 'text', sessionID: 'new-native-session', part: { type: 'text', text: result } }));",
+          "  process.stdout.write(JSON.stringify({ type: 'text', sessionID, part: { type: 'text', text: result } }));",
           "});",
         ].join("\n"),
         { mode: 0o755 },
@@ -1136,29 +1139,80 @@ describe("SchedulerService applyWorkerResult", () => {
 
       const config = createDefaultWorkspaceConfig("foo", "file");
       config.runner.reviewer = { ...config.runner.execution };
-      const getActiveSession = vi.fn((selector: { role: string }) =>
-        selector.role === "implementation"
-          ? {
-              id: "implementation-session",
-              taskTargetId: sampleTarget.id,
-              role: "implementation",
-              runnerName: "opencode",
-              runnerModel: config.runner.execution.model,
-              runnerVariant: "high",
-              nativeSessionId: "implementation-native-session",
-              isActive: true,
-              lastAttemptId: "attempt-execution",
-              lastWorktreeHeadSha: "execution-head",
-              lastReviewHeadSha: null,
-              createdAt: "2026-03-16T00:00:00Z",
-              updatedAt: "2026-03-16T00:00:00Z",
-            }
-          : null,
-      );
-      const createSession = vi.fn((input: { role: string }) => ({
-        id: `${input.role}-new-session`,
-        nativeSessionId: null,
-      }));
+      const activeSessions = new Map<string, any>([
+        [
+          "implementation",
+          {
+            id: "implementation-session",
+            taskTargetId: sampleTarget.id,
+            role: "implementation",
+            runnerName: "opencode",
+            runnerModel: config.runner.execution.model,
+            runnerVariant: "high",
+            nativeSessionId: "implementation-native-session",
+            isActive: true,
+            lastAttemptId: "attempt-execution",
+            lastWorktreeHeadSha: "execution-head",
+            lastReviewHeadSha: null,
+            createdAt: "2026-03-16T00:00:00Z",
+            updatedAt: "2026-03-16T00:00:00Z",
+          },
+        ],
+        [
+          "reviewer",
+          {
+            id: "reviewer-session",
+            taskTargetId: sampleTarget.id,
+            role: "reviewer",
+            runnerName: "opencode",
+            runnerModel: config.runner.reviewer.model,
+            runnerVariant: "high",
+            nativeSessionId: "reviewer-native-session",
+            isActive: true,
+            lastAttemptId: "attempt-reviewer",
+            lastWorktreeHeadSha: "reviewer-head",
+            lastReviewHeadSha: "abc123",
+            createdAt: "2026-03-16T00:00:00Z",
+            updatedAt: "2026-03-16T00:00:00Z",
+          },
+        ],
+      ]);
+      const getActiveSession = vi.fn((selector: { role: string; runnerName: string; runnerModel: string; runnerVariant: string }) => {
+        const session = activeSessions.get(selector.role);
+        return session?.isActive &&
+          session.runnerName === selector.runnerName &&
+          session.runnerModel === selector.runnerModel &&
+          session.runnerVariant === selector.runnerVariant
+          ? session
+          : null;
+      });
+      const createSession = vi.fn((input: { role: string; runnerName: string; runnerModel: string; runnerVariant: string; isActive: boolean }) => {
+        const session = {
+          id: `${input.role}-new-session-${createSession.mock.calls.length + 1}`,
+          taskTargetId: sampleTarget.id,
+          role: input.role,
+          runnerName: input.runnerName,
+          runnerModel: input.runnerModel,
+          runnerVariant: input.runnerVariant,
+          nativeSessionId: null,
+          isActive: input.isActive,
+          lastAttemptId: null,
+          lastWorktreeHeadSha: null,
+          lastReviewHeadSha: null,
+          createdAt: "2026-03-16T00:00:00Z",
+          updatedAt: "2026-03-16T00:00:00Z",
+        };
+        activeSessions.set(input.role, session);
+        return session;
+      });
+      const updateSession = vi.fn((sessionId: string, patch: Record<string, unknown>) => {
+        for (const [role, session] of activeSessions) {
+          if (session.id === sessionId) {
+            activeSessions.set(role, { ...session, ...patch });
+            return;
+          }
+        }
+      });
       const logger = {
         ...fakeLogger,
         flush: async () => {
@@ -1180,6 +1234,7 @@ describe("SchedulerService applyWorkerResult", () => {
           runnerSessions: {
             getActiveSession,
             createSession,
+            updateSession,
           },
         }),
         taskSystem: {
@@ -1218,7 +1273,7 @@ describe("SchedulerService applyWorkerResult", () => {
       });
 
       expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).toContain("implementation-native-session");
-      expect(await fs.readFile(promptOut, "utf8")).toContain("# Review Continuation");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("Continue addressing current PR feedback");
 
       await (scheduler as any).runJob(worker, {
         id: "job-reviewer",
@@ -1230,8 +1285,8 @@ describe("SchedulerService applyWorkerResult", () => {
         selectionContext: { reviewContext },
       });
 
-      expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).not.toContain("implementation-native-session");
-      expect(await fs.readFile(promptOut, "utf8")).toContain("# Reviewer Prompt");
+      expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).toContain("reviewer-native-session");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("Review the latest PR changes.");
 
       getActiveSession.mockClear();
       await (scheduler as any).runJob(worker, {
@@ -1243,9 +1298,23 @@ describe("SchedulerService applyWorkerResult", () => {
         baseBranch: "main",
       });
 
-      expect(getActiveSession).not.toHaveBeenCalled();
+      expect(getActiveSession.mock.calls.map(([selector]) => selector.role)).toEqual(["reviewer"]);
       expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).not.toContain("implementation-native-session");
       expect(await fs.readFile(promptOut, "utf8")).toContain("# Retry Prompt");
+      expect(updateSession).toHaveBeenCalledWith("reviewer-session", { isActive: false });
+
+      await (scheduler as any).runJob(worker, {
+        id: "job-reviewer-after-retry",
+        taskId: "TASK-0001",
+        taskTargetId: sampleTarget.id,
+        action: "reviewer",
+        repoKey: "repo-a",
+        baseBranch: "main",
+        selectionContext: { reviewContext },
+      });
+
+      expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).not.toContain("reviewer-native-session");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("# Reviewer Prompt");
     } finally {
       ensureTaskWorktree.mockRestore();
       if (originalOpencodeBin === undefined) {
