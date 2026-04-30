@@ -109,7 +109,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
   }): AttemptRecord {
     const record = this.buildAttemptRecord(input);
     this.insertAttemptRecord(record);
-    return record;
+    return this.getAttempt(record.id);
   }
 
   createAttemptWithLeases(input: {
@@ -145,7 +145,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
         }
       })();
 
-      return record;
+      return this.getAttempt(record.id);
     } catch {
       return null;
     }

@@ -318,6 +318,25 @@ describe("persistence repos", () => {
       });
       expect(db.jobs.latestJobForDedupeKey("cron:cron/check.md")?.id).toBe(job.id);
 
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0];
+      const attempt = db.attempts.createAttemptWithLeases({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerName: "opencode",
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "standard",
+        expiresAt: "2026-03-16T00:10:00Z",
+        leases: [{ resourceType: "cron", resourceKey: job.dedupeKey }],
+      });
+      expect(attempt).toMatchObject({
+        jobKind: "cron",
+        taskId: null,
+        target: null,
+        cronJobId: "cron/check.md",
+        stage: "cron",
+      });
+
       db.artifacts.createArtifact({
         ownerType: "execution_attempt",
         ownerId: "attempt-1",
