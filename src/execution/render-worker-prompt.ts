@@ -173,31 +173,6 @@ const renderPullRequestReference = (input: {
   pullRequestReference?: WorkerPromptPullRequestReference;
 }): string => jsonSection("Pull Request Reference", resolvePullRequestReferenceContext(input));
 
-const renderContinuationContext = (input: {
-  config: WorkspaceConfig;
-  paths: WorkspacePaths;
-  task: Task;
-  repo: RepoRef;
-  selectedTarget: TaskTargetRef | null;
-  worktreePath: string;
-  baseBranch: string;
-  reviewContext?: ReviewContext;
-  pullRequestReference?: WorkerPromptPullRequestReference;
-  gitState?: {
-    worktreeHeadSha: string | null;
-    reviewHeadSha: string | null;
-    baseBranch: string;
-    previousSessionHeadSha: string | null;
-  };
-}): string =>
-  jsonSection("Continuation Context", {
-    selectedTask: resolveSelectedTaskContext(input.task, input.selectedTarget),
-    taskProvider: resolveTaskProviderContext(input),
-    repository: resolveRepositoryContext(input),
-    gitState: resolveGitStateContext(input),
-    pullRequestReference: resolvePullRequestReferenceContext(input),
-  });
-
 const selectWorkerPromptTemplate = (input: {
   action: WorkerPromptTemplateName;
   continuation?: boolean;
@@ -250,18 +225,6 @@ export const renderWorkerPrompt = async (input: {
       }),
       "git-state": renderGitStateContext(input),
       "pull-request": renderPullRequestReference(input),
-      "continuation-context": renderContinuationContext({
-        config: input.config,
-        paths: input.paths,
-        task: input.task,
-        repo: input.repo,
-        selectedTarget,
-        worktreePath: input.worktreePath,
-        baseBranch: input.baseBranch,
-        ...(input.reviewContext ? { reviewContext: input.reviewContext } : {}),
-        ...(input.pullRequestReference ? { pullRequestReference: input.pullRequestReference } : {}),
-        ...(input.gitState ? { gitState: input.gitState } : {}),
-      }),
     },
     fragmentAliases: {
       "task-system-worker": input.config.taskSystem.type === "linear" ? "task-system-linear-worker" : "task-system-file-worker",

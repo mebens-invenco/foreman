@@ -212,8 +212,8 @@ describe("prompt rendering", () => {
         continuation: true,
       });
 
-      expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action} --help`);
-      expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action}`);
+      expect(result).not.toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action} --help`);
+      expect(result).not.toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action}`);
       expect(result).not.toContain("output-schema-continuation");
     }
   });
@@ -292,6 +292,8 @@ describe("prompt rendering", () => {
     expect(reviewPrompt).toContain("https://github.com/acme/repo/pull/1");
     expect(reviewPrompt).toContain("\"headSha\": \"abc123\"");
     expect(reviewPrompt).toContain("Discover the current actionable GitHub state before deciding whether code, replies, or thread resolution are needed.");
+    expect(reviewPrompt).toContain("include image links or uploaded assets");
+    expect(reviewPrompt).toContain("verify the response is an actual image file");
     expect(reviewPrompt).toContain("Do not assume every actionable review item requires a code change.");
     expect(reviewPrompt).toContain("A review pass may complete with reply mutations only");
     expect(reviewPrompt).toContain("Do not reply again to an unresolved review thread when its latest comment was authored by the agent");
@@ -309,6 +311,7 @@ describe("prompt rendering", () => {
     expect(consolidationPrompt).not.toContain("### Actionable Now");
     expect(reviewerPrompt).toContain("# Reviewer Prompt");
     expect(reviewerPrompt).toContain("submit_pull_request_review");
+    expect(reviewerPrompt).toContain("include image links or uploaded assets");
     expect(reviewerPrompt).not.toContain("### Actionable Now");
 
     const continuationPrompt = await renderWorkerPrompt({
@@ -328,16 +331,19 @@ describe("prompt rendering", () => {
       },
       continuation: true,
     });
-    expect(continuationPrompt).toContain("# Review Continuation");
+    expect(continuationPrompt).toContain("Continue addressing current PR feedback, failing checks, and merge conflicts.");
+    expect(continuationPrompt).toContain("## Current Git State");
     expect(continuationPrompt).toContain("previousSessionHeadSha");
     expect(continuationPrompt).toContain("previous-head");
-    expect(continuationPrompt).toContain("## Continuation Worker Rules");
-    expect(continuationPrompt).toContain("## GitHub Continuation Access");
-    expect(continuationPrompt).toContain("## Review Continuation Rules");
-    expect(continuationPrompt).toContain("## Continuation Context");
-    expect(continuationPrompt).toContain("## Required Output");
-    expect(continuationPrompt).toContain("Do not assume every actionable review item requires a code change.");
-    expect(continuationPrompt).toContain("agent-result validate --action review");
+    expect(continuationPrompt).not.toContain("## Continuation Worker Rules");
+    expect(continuationPrompt).not.toContain("## GitHub Continuation Access");
+    expect(continuationPrompt).not.toContain("include image links or uploaded assets");
+    expect(continuationPrompt).not.toContain("verify the response is an actual image file");
+    expect(continuationPrompt).not.toContain("## Review Continuation Rules");
+    expect(continuationPrompt).not.toContain("## Continuation Context");
+    expect(continuationPrompt).not.toContain("## Required Output");
+    expect(continuationPrompt).not.toContain("Do not assume every actionable review item requires a code change.");
+    expect(continuationPrompt).not.toContain("agent-result validate --action review");
     expect(continuationPrompt).not.toContain("## Common Worker Rules");
     expect(continuationPrompt).not.toContain("## Selected Task");
     expect(continuationPrompt).not.toContain("## Task Provider Context");
@@ -367,15 +373,17 @@ describe("prompt rendering", () => {
       },
       continuation: true,
     });
-    expect(reviewerContinuationPrompt).toContain("# Reviewer Continuation");
+    expect(reviewerContinuationPrompt).toContain("Review the latest PR changes.");
+    expect(reviewerContinuationPrompt).toContain("## Current Git State");
     expect(reviewerContinuationPrompt).toContain("previous-reviewer-head");
-    expect(reviewerContinuationPrompt).toContain("## Continuation Worker Rules");
-    expect(reviewerContinuationPrompt).toContain("## GitHub Continuation Access");
-    expect(reviewerContinuationPrompt).toContain("## Reviewer Continuation Rules");
-    expect(reviewerContinuationPrompt).toContain("## Continuation Context");
-    expect(reviewerContinuationPrompt).toContain("## Required Output");
-    expect(reviewerContinuationPrompt).toContain("agent-result validate --action reviewer");
-    expect(reviewerContinuationPrompt).toContain("submit_pull_request_review");
+    expect(reviewerContinuationPrompt).not.toContain("## Continuation Worker Rules");
+    expect(reviewerContinuationPrompt).not.toContain("## GitHub Continuation Access");
+    expect(reviewerContinuationPrompt).not.toContain("include image links or uploaded assets");
+    expect(reviewerContinuationPrompt).not.toContain("## Reviewer Continuation Rules");
+    expect(reviewerContinuationPrompt).not.toContain("## Continuation Context");
+    expect(reviewerContinuationPrompt).not.toContain("## Required Output");
+    expect(reviewerContinuationPrompt).not.toContain("agent-result validate --action reviewer");
+    expect(reviewerContinuationPrompt).not.toContain("submit_pull_request_review");
     expect(reviewerContinuationPrompt).not.toContain("## Common Worker Rules");
     expect(reviewerContinuationPrompt).not.toContain("## Selected Task");
     expect(reviewerContinuationPrompt).not.toContain("## GitHub Provider Access");
