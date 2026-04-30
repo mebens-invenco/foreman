@@ -9,6 +9,13 @@ export type AttemptStatus =
 export type WorkerStatus = "idle" | "leased" | "running" | "stopping" | "offline"
 export type ActionType = "execution" | "review" | "reviewer" | "retry" | "consolidation" | "cron"
 export type LearningConfidence = "emerging" | "established" | "proven"
+export type CronSettings = {
+  enabled: boolean
+  jobsDir: string
+}
+export type AgentTaskCreationSettings = {
+  enabled: boolean
+}
 export type TaskState =
   | "ready"
   | "in_progress"
@@ -35,6 +42,8 @@ export type StatusResponse = {
     lastScoutRunAt: string | null
     nextScoutPollAt: string | null
   }
+  cron: CronSettings
+  agentTaskCreation: AgentTaskCreationSettings
   integrations: {
     taskSystem: { type: string; status: string }
     reviewSystem: { type: string; status: string }
@@ -76,10 +85,12 @@ export type Worker = {
   } | null
   currentJob: {
     id: string
-    taskId: string
-    taskTargetId: string
+    jobKind: "task" | "cron"
+    taskId: string | null
+    taskTargetId: string | null
+    cronJobId: string | null
     action: ActionType
-    repoKey: string
+    repoKey: string | null
     status: string
   } | null
 }
@@ -87,8 +98,10 @@ export type Worker = {
 export type AttemptRecord = {
   id: string
   jobId: string
+  jobKind: "task" | "cron"
   taskId: string | null
   target: string | null
+  cronJobId: string | null
   stage: ActionType | null
   workerId: string | null
   attemptNumber: number
@@ -138,6 +151,11 @@ export type AttemptDetail = {
   attempt: AttemptRecord
   events: AttemptEventRecord[]
   artifacts: ArtifactRecord[]
+}
+
+export type SettingsResponse = {
+  cron: CronSettings
+  agentTaskCreation: AgentTaskCreationSettings
 }
 
 export type TaskPullRequest = {
@@ -292,6 +310,23 @@ function buildSearch(
 
 export function getStatus() {
   return requestJson<StatusResponse>("/api/status")
+}
+
+export function getSettings() {
+  return requestJson<SettingsResponse>("/api/settings")
+}
+
+export function patchSettings(patch: {
+  cron?: Partial<CronSettings>
+  agentTaskCreation?: Partial<AgentTaskCreationSettings>
+}) {
+  return requestJson<SettingsResponse>("/api/settings", {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(patch),
+  })
 }
 
 export function listWorkers() {

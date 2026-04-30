@@ -621,8 +621,10 @@ export const createHttpServer = (deps: HttpServerDeps) => {
             ? null
             : {
                 id: currentJob.id,
+                jobKind: currentJob.jobKind,
                 taskId: currentJob.taskId,
                 taskTargetId: currentJob.taskTargetId,
+                cronJobId: currentJob.cronJobId,
                 action: currentJob.action,
                 repoKey: currentJob.repoKey,
                 status: currentJob.status,
