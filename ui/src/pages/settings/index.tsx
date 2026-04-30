@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSettingsQuery, usePatchSettingsMutation } from "@/hooks/use-settings-query"
-import { useStatusQuery } from "@/hooks/use-status-query"
 import { cn } from "@/lib/utils"
 
 function StatePill({ enabled }: { enabled: boolean }) {
@@ -81,7 +80,6 @@ function SettingDetail({ label, value }: { label: string; value: string }) {
 
 export function SettingsPage() {
   const { data: settings, isLoading, isError, error } = useSettingsQuery()
-  const { data: status } = useStatusQuery()
   const patchSettings = usePatchSettingsMutation()
   const [jobsDir, setJobsDir] = useState("")
 
@@ -125,8 +123,7 @@ export function SettingsPage() {
         <h2 className="text-3xl tracking-tight text-foreground">Settings</h2>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-muted-foreground">
           Control Foreman cron scheduling and whether cron prompts may create
-          agent tasks. Changes are applied to the live scheduler configuration
-          and persisted to the workspace config.
+          agent tasks. Changes are applied immediately by Foreman.
         </p>
       </header>
 
@@ -176,29 +173,15 @@ export function SettingsPage() {
         }
       />
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-3 sm:grid-cols-3">
         <SettingDetail
-          label="Persisted cron"
+          label="Cron scheduling"
           value={settings.cron.enabled ? "enabled" : "disabled"}
-        />
-        <SettingDetail
-          label="Runtime cron"
-          value={status ? (status.cron.enabled ? "enabled" : "disabled") : "loading"}
         />
         <SettingDetail label="Jobs directory" value={settings.cron.jobsDir} />
         <SettingDetail
-          label="Persisted agent tasks"
+          label="Agent task creation"
           value={settings.agentTaskCreation.enabled ? "enabled" : "disabled"}
-        />
-        <SettingDetail
-          label="Runtime agent tasks"
-          value={
-            status
-              ? status.agentTaskCreation.enabled
-                ? "enabled"
-                : "disabled"
-              : "loading"
-          }
         />
       </section>
     </div>
