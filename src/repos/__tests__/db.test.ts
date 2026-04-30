@@ -139,17 +139,28 @@ describe("persistence repos", () => {
       expect(worker).toBeDefined();
       const taskTarget = syncSingleTargetTask(db, { taskId: "TASK-0001", repoKey: "repo-a", branchName: "task-0001" });
 
-      const job = db.jobs.createJob({
-        taskId: "TASK-0001",
-        taskTargetId: taskTarget.id,
-        taskProvider: "file",
-        action: "execution",
-        priorityRank: priorityToRank("high"),
-        repoKey: "repo-a",
-        baseBranch: "main",
-        dedupeKey: "TASK-0001:execution",
-        selectionReason: "test",
-      });
+      const jobId = "legacy-job-1";
+      db.database.sqlite
+        .prepare(
+          `INSERT INTO job(
+            id, task_id, task_target_id, task_provider, action, status, priority_rank, repo_key, base_branch,
+            dedupe_key, selection_reason, selection_context_json, scout_run_id, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, '{}', NULL, ?, ?)`,
+        )
+        .run(
+          jobId,
+          "TASK-0001",
+          taskTarget.id,
+          "file",
+          "execution",
+          priorityToRank("high"),
+          "repo-a",
+          "main",
+          "TASK-0001:execution",
+          "test",
+          "2026-03-14T12:00:00.000Z",
+          "2026-03-14T12:00:00.000Z",
+        );
 
       const legacyAttemptId = "legacy-attempt-1";
       db.database.sqlite
@@ -161,7 +172,7 @@ describe("persistence repos", () => {
         )
         .run(
           legacyAttemptId,
-          job.id,
+          jobId,
           worker!.id,
           1,
           "opencode",
@@ -180,7 +191,7 @@ describe("persistence repos", () => {
       });
 
       const claudeAttempt = db.attempts.createAttempt({
-        jobId: job.id,
+        jobId,
         workerId: worker!.id,
         runnerName: "claude",
         runnerModel: "claude-opus-4-6",

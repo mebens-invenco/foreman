@@ -31,18 +31,7 @@ const mapJob = (row: SqliteRow): JobRecord => ({
 });
 
 export class SqliteJobRepo implements JobRepo {
-  private supportsCronColumnsCache: boolean | null = null;
-
   constructor(private readonly sqlite: SqliteDatabase) {}
-
-  private supportsCronColumns(): boolean {
-    if (this.supportsCronColumnsCache !== null) {
-      return this.supportsCronColumnsCache;
-    }
-    const columns = this.sqlite.prepare("PRAGMA table_info(job)").all() as Array<{ name: string }>;
-    this.supportsCronColumnsCache = columns.some((column) => column.name === "job_kind");
-    return this.supportsCronColumnsCache;
-  }
 
   activeJobCount(): number {
     const row = this.sqlite
@@ -73,34 +62,6 @@ export class SqliteJobRepo implements JobRepo {
   }): JobRecord {
     const id = newId();
     const now = isoNow();
-    if (!this.supportsCronColumns()) {
-      this.sqlite
-        .prepare(
-          `INSERT INTO job(
-            id, task_id, task_target_id, task_provider, action, status, priority_rank, repo_key, base_branch, dedupe_key,
-            selection_reason, selection_context_json, scout_run_id, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          id,
-          input.taskId,
-          input.taskTargetId,
-          input.taskProvider,
-          input.action,
-          input.priorityRank,
-          input.repoKey,
-          input.baseBranch ?? null,
-          input.dedupeKey,
-          input.selectionReason,
-          stableStringify(input.selectionContext ?? {}),
-          input.scoutRunId ?? null,
-          now,
-          now,
-        );
-
-      return this.getJob(id);
-    }
-
     this.sqlite
       .prepare(
         `INSERT INTO job(
@@ -161,7 +122,7 @@ export class SqliteJobRepo implements JobRepo {
   listQueue(limit = 100): JobRecord[] {
     return this.sqlite
       .prepare(
-        `SELECT id, COALESCE(job_kind, 'task') AS job_kind, task_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+        `SELECT id, job_kind, task_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 task_target_id,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
                 started_at, finished_at, error_message
@@ -178,7 +139,7 @@ export class SqliteJobRepo implements JobRepo {
     const placeholders = statuses.map(() => "?").join(", ");
     return this.sqlite
       .prepare(
-        `SELECT id, COALESCE(job_kind, 'task') AS job_kind, task_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+        `SELECT id, job_kind, task_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 task_target_id,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
                  started_at, finished_at, error_message
@@ -191,7 +152,7 @@ export class SqliteJobRepo implements JobRepo {
   latestJobForTaskTarget(taskTargetId: string): JobRecord | null {
     const row = this.sqlite
       .prepare(
-        `SELECT id, COALESCE(job_kind, 'task') AS job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+        `SELECT id, job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
                 started_at, finished_at, error_message
            FROM job
@@ -207,7 +168,7 @@ export class SqliteJobRepo implements JobRepo {
   latestJobForDedupeKey(dedupeKey: string): JobRecord | null {
     const row = this.sqlite
       .prepare(
-        `SELECT id, COALESCE(job_kind, 'task') AS job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+        `SELECT id, job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
                 started_at, finished_at, error_message
            FROM job
@@ -221,26 +182,9 @@ export class SqliteJobRepo implements JobRepo {
   }
 
   getJob(jobId: string): JobRecord {
-    if (!this.supportsCronColumns()) {
-      const legacyRow = this.sqlite
-        .prepare(
-          `SELECT id, 'task' AS job_kind, task_id, task_target_id, task_provider, NULL AS cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
-                  selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
-                  started_at, finished_at, error_message
-             FROM job WHERE id = ?`,
-        )
-        .get(jobId) as SqliteRow | undefined;
-
-      if (!legacyRow) {
-        throw new ForemanError("job_not_found", `Job not found: ${jobId}`, 404);
-      }
-
-      return mapJob(legacyRow);
-    }
-
     const row = this.sqlite
       .prepare(
-        `SELECT id, COALESCE(job_kind, 'task') AS job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
+        `SELECT id, job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
                 started_at, finished_at, error_message
            FROM job WHERE id = ?`,

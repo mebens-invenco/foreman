@@ -104,10 +104,10 @@ export class AttemptExecutor {
     let transitionedTaskToInProgress = false;
 
     try {
-      if (job.jobKind === "cron" || job.action === "cron" || !job.taskId) {
+      if (job.jobKind === "cron" || job.action === "cron" || !job.taskId || !job.taskTargetId) {
         throw new ForemanError("invalid_task_job", `Job ${job.id} is not a task job.`, 500);
       }
-      const taskTargetId = job.taskTargetId ?? "";
+      const taskTargetId = job.taskTargetId;
 
       task = await this.deps.taskSystem.getTask(job.taskId);
       const mirroredTask = this.deps.foremanRepos.taskMirror.getTask(job.taskId);

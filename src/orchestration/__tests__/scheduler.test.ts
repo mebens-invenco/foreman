@@ -1071,6 +1071,7 @@ describe("SchedulerService applyWorkerResult", () => {
       {
         id: "job-1",
         taskId: "TASK-0001",
+        taskTargetId: sampleTarget.id,
         action: "execution",
         repoKey: "repo-a",
         baseBranch: "main",
@@ -1141,6 +1142,7 @@ describe("SchedulerService applyWorkerResult", () => {
       {
         id: "job-1",
         taskId: "TASK-0001",
+        taskTargetId: sampleTarget.id,
         action: "execution",
         repoKey: "repo-a",
         baseBranch: "main",
