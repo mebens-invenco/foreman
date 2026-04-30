@@ -388,5 +388,27 @@ describe("provider runners", () => {
       stdout: '<agent-result>{"schemaVersion":1}</agent-result>',
       nativeSessionId: "opencode-session",
     });
+
+    const opencodeFinalAnswerOutput = [
+      JSON.stringify({
+        type: "text",
+        part: {
+          type: "text",
+          text: "I will validate the required `<agent-result>` payload now.",
+          metadata: { openai: { phase: "commentary" } },
+        },
+      }),
+      JSON.stringify({
+        type: "text",
+        part: {
+          type: "text",
+          text: '<agent-result>{"schemaVersion":1}</agent-result>',
+          metadata: { openai: { phase: "final_answer" } },
+        },
+      }),
+    ].join("\n");
+    expect(normalizeOpenCodeJsonOutput(opencodeFinalAnswerOutput).stdout).toBe(
+      '<agent-result>{"schemaVersion":1}</agent-result>',
+    );
   });
 });

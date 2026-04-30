@@ -47,6 +47,23 @@ const stringField = (record: JsonRecord, names: string[]): string | null => {
   return null;
 };
 
+const openCodePhase = (record: JsonRecord): string | null => {
+  const metadataValues = [record.metadata, isRecord(record.part) ? record.part.metadata : undefined];
+
+  for (const metadata of metadataValues) {
+    if (!isRecord(metadata) || !isRecord(metadata.openai)) {
+      continue;
+    }
+
+    const phase = metadata.openai.phase;
+    if (typeof phase === "string" && phase.length > 0) {
+      return phase;
+    }
+  }
+
+  return null;
+};
+
 export const normalizeClaudeJsonOutput = (stdout: string): NormalizedJsonOutput => {
   let values: unknown[];
   try {
@@ -80,11 +97,17 @@ export const normalizeOpenCodeJsonOutput = (stdout: string): NormalizedJsonOutpu
   }
   const records = values.filter(isRecord);
   const nativeSessionId = records.map((record) => stringField(record, ["sessionID", "sessionId", "session_id"])).find(Boolean) ?? undefined;
+  const finalAnswerText = [...records]
+    .reverse()
+    .map((record) =>
+      openCodePhase(record) === "final_answer" ? stringField(record, ["text", "content", "result", "output"]) : null,
+    )
+    .find(Boolean);
   const finalText = records
     .filter((record) => record.type === "final" || record.type === "result" || record.type === "message")
     .map((record) => stringField(record, ["text", "content", "result", "output"]))
     .find(Boolean);
-  const text = finalText ?? records.map((record) => stringField(record, ["text", "content"])).filter(Boolean).join("");
+  const text = finalAnswerText ?? finalText ?? records.map((record) => stringField(record, ["text", "content"])).filter(Boolean).join("");
 
   return {
     stdout: text || stdout,

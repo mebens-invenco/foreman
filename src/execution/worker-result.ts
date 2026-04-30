@@ -99,12 +99,34 @@ export const parseWorkerResult = (stdout: string): unknown => {
   try {
     return JSON.parse(trimmed);
   } catch {
-    const match = trimmed.match(/<agent-result>\s*([\s\S]*?)\s*<\/agent-result>/);
-    if (!match?.[1]) {
-      throw new Error("Worker output did not contain a valid <agent-result> block");
+    const openTag = "<agent-result>";
+    const closeTag = "</agent-result>";
+    let searchEnd = trimmed.length;
+
+    while (searchEnd > 0) {
+      const closeStart = trimmed.lastIndexOf(closeTag, searchEnd);
+      if (closeStart === -1) {
+        break;
+      }
+
+      const openStart = trimmed.lastIndexOf(openTag, closeStart);
+      if (openStart === -1) {
+        searchEnd = closeStart;
+        continue;
+      }
+
+      const payload = trimmed.slice(openStart + openTag.length, closeStart).trim();
+
+      try {
+        return JSON.parse(payload);
+      } catch {
+        // Keep looking; earlier text can mention <agent-result> before the final answer block.
+      }
+
+      searchEnd = openStart;
     }
 
-    return JSON.parse(match[1]);
+    throw new Error("Worker output did not contain a valid <agent-result> block");
   }
 };
 
