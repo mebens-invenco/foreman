@@ -1,7 +1,6 @@
 import type { Database } from "./database.js";
 import type { ArtifactRepo } from "./artifact-repo.js";
 import type { AttemptRepo } from "./attempt-repo.js";
-import type { HistoryRepo } from "./history-repo.js";
 import type { JobRepo } from "./job-repo.js";
 import type { LearningRepo } from "./learning-repo.js";
 import type { LeaseRepo } from "./lease-repo.js";
@@ -27,6 +26,5 @@ export type ForemanRepos = {
   reviewerCheckpoints: ReviewerCheckpointRepo;
   runnerSessions: RunnerSessionRepo;
   learnings: LearningRepo;
-  history: HistoryRepo;
   close(): void;
 };

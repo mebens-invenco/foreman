@@ -138,12 +138,6 @@ describe("HTTP query validation", () => {
         error: { code: "invalid_request", message: "Query parameter offset must be a non-negative integer." },
       });
 
-      const invalidHistoryLimit = await server.inject({ method: "GET", url: "/api/history?limit=0" });
-      expect(invalidHistoryLimit.statusCode).toBe(400);
-      expect(invalidHistoryLimit.json()).toEqual({
-        error: { code: "invalid_request", message: "Query parameter limit must be a positive integer." },
-      });
-
       const invalidOffset = await server.inject({ method: "GET", url: "/api/learnings?offset=-1" });
       expect(invalidOffset.statusCode).toBe(400);
       expect(invalidOffset.json()).toEqual({

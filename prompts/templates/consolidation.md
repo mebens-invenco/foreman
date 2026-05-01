@@ -12,7 +12,7 @@ The task is already terminal and its linked PRs are already closed.
 
 {{fragment:learning-policy}}
 
-{{fragment:history-policy}}
+{{fragment:summary-policy}}
 
 ## Objective
 

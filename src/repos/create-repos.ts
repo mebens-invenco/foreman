@@ -2,7 +2,6 @@ import type { ForemanRepos } from "./foreman-repos.js";
 import type { SqliteForemanDatabase } from "./impl/sqlite-database.js";
 import { SqliteArtifactRepo } from "./impl/sqlite-artifact-repo.js";
 import { SqliteAttemptRepo } from "./impl/sqlite-attempt-repo.js";
-import { SqliteHistoryRepo } from "./impl/sqlite-history-repo.js";
 import { SqliteJobRepo } from "./impl/sqlite-job-repo.js";
 import { SqliteLearningRepo } from "./impl/sqlite-learning-repo.js";
 import { SqliteLeaseRepo } from "./impl/sqlite-lease-repo.js";
@@ -30,7 +29,6 @@ export const createRepos = (database: SqliteForemanDatabase): ForemanRepos => {
     reviewerCheckpoints: new SqliteReviewerCheckpointRepo(sqlite),
     runnerSessions: new SqliteRunnerSessionRepo(sqlite),
     learnings: new SqliteLearningRepo(sqlite),
-    history: new SqliteHistoryRepo(sqlite),
     close(): void {
       database.close();
     },

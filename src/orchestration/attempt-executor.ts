@@ -390,16 +390,6 @@ export class AttemptExecutor {
           finishedAt: runResult.finishedAt,
           errorMessage: workerResult.outcome === "failed" ? workerResult.summary : null,
         });
-        const historyInput: Parameters<ForemanRepos["history"]["addHistoryStep"]>[0] = {
-          createdAt: runResult.finishedAt,
-          stage: job.action,
-          issue: task.id.toLowerCase(),
-          summary: workerResult.summary,
-        };
-        if (beforeSha && afterSha) {
-          historyInput.repos = [{ path: repo.rootPath, beforeSha, afterSha }];
-        }
-        this.deps.foremanRepos.history.addHistoryStep(historyInput);
         attemptLogger.info("finalized attempt and job", { attemptStatus, jobStatus, afterSha: afterSha ?? "unknown" });
 
         if (job.action === "consolidation" && workerResult.outcome === "completed" && worktreePath !== repo.rootPath) {

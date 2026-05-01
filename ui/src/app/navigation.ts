@@ -2,7 +2,6 @@ import {
   ActivityIcon,
   BookOpenTextIcon,
   ChartColumnIncreasingIcon,
-  Clock3Icon,
   SlidersHorizontalIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -26,12 +25,6 @@ export const navigationItems: NavigationItem[] = [
     href: "/attempts",
     description: "Active execution flow, live state, and streaming log surfaces.",
     icon: ActivityIcon,
-  },
-  {
-    title: "History",
-    href: "/history",
-    description: "Execution history, outcomes, and searchable prior runs.",
-    icon: Clock3Icon,
   },
   {
     title: "Learnings",

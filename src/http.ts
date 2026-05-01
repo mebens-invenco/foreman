@@ -680,28 +680,6 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     });
   });
 
-  server.get("/api/history", async (request) => {
-    const query = request.query as { stage?: string; repo?: string; search?: string; limit?: string; offset?: string };
-    const filters: { stage?: string; repo?: string; search?: string; limit?: number; offset?: number } = {};
-    if (query.stage) {
-      filters.stage = query.stage;
-    }
-    if (query.repo) {
-      filters.repo = query.repo;
-    }
-    if (query.search) {
-      filters.search = query.search;
-    }
-    const limit = parsePositiveIntegerQuery("limit", query.limit);
-    if (limit !== undefined) {
-      filters.limit = limit;
-    }
-    const offset = parseNonNegativeIntegerQuery("offset", query.offset);
-    if (offset !== undefined) {
-      filters.offset = offset;
-    }
-    return { history: deps.repos.history.listHistory(filters) };
-  });
   server.get("/api/learnings", async (request) => {
     const query = request.query as { search?: string; repo?: string; limit?: string; offset?: string };
     const filters: { search?: string; repo?: string; limit?: number; offset?: number } = {};

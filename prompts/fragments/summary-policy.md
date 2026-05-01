@@ -1,6 +1,6 @@
 ## Summary Policy
 
-Your single `summary` field is used both for the attempt record and the durable history entry.
+Your `summary` field is stored on the attempt record and shown in operator surfaces.
 
 - Keep it concise.
 - Describe the meaningful outcome, not every step.

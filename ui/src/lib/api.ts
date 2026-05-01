@@ -193,22 +193,6 @@ export type TaskListItem = {
   targets: TaskTargetSummary[]
 }
 
-export type HistoryRepoRecord = {
-  path: string
-  beforeSha: string
-  afterSha: string
-  position: number
-}
-
-export type HistoryRecord = {
-  stepId: string
-  createdAt: string
-  stage: string
-  issue: string
-  summary: string
-  repos: HistoryRepoRecord[]
-}
-
 export type LearningRecord = {
   id: string
   title: string
@@ -366,18 +350,6 @@ export function listTasks(params: {
   return requestJson<{ tasks: TaskListItem[] }>(
     `/api/tasks${buildSearch(params)}`
   ).then((payload) => payload.tasks)
-}
-
-export function listHistory(params: {
-  stage?: string
-  repo?: string
-  search?: string
-  limit?: number
-  offset?: number
-}) {
-  return requestJson<{ history: HistoryRecord[] }>(
-    `/api/history${buildSearch(params)}`
-  ).then((payload) => payload.history)
 }
 
 export function listLearnings(params: {

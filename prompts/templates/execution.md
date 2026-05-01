@@ -12,7 +12,7 @@ The task has already been selected. Do not scout, reprioritize, or choose a diff
 
 {{fragment:learning-policy}}
 
-{{fragment:history-policy}}
+{{fragment:summary-policy}}
 
 ## Objective
 

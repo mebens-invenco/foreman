@@ -8,7 +8,7 @@ You are reviewing one selected pull request in Foreman as an internal review age
 
 {{fragment:review-github}}
 
-{{fragment:history-policy}}
+{{fragment:summary-policy}}
 
 ## Objective
 

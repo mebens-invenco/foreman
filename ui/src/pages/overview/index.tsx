@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 
 import { useWorkersQuery } from "@/hooks/use-workers-query"
 import { Skeleton } from "@/components/ui/skeleton"
-import { HistoryTable } from "@/pages/overview/history-table"
+import { AttemptsTable } from "@/pages/overview/attempts-table"
 import { ReviewTable } from "@/pages/overview/review-table"
 import { WorkerCard } from "@/pages/overview/worker-card"
 
@@ -85,7 +85,7 @@ export function OverviewPage() {
       </div>
 
       <ReviewTable now={now} />
-      <HistoryTable now={now} />
+      <AttemptsTable now={now} />
     </>
   )
 }

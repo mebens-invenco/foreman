@@ -13,9 +13,9 @@ Foreman is built around:
 - a GitHub-backed review service,
 - an abstract agent runner,
 - a built-in HTTP API and SSE streams,
-- and a workspace-local SQLite database for operational state, learnings, and history.
+- and a workspace-local SQLite database for operational state and learnings.
 
-Foreman is intended to be implemented from scratch in a new folder. It is a standalone system with its own runtime model, storage layout, prompt system, and HTTP API. The only data assumed to be carried forward is previously captured learnings/history SQLite data, imported once into a new workspace database.
+Foreman is intended to be implemented from scratch in a new folder. It is a standalone system with its own runtime model, storage layout, prompt system, and HTTP API.
 
 ## Goals
 
@@ -25,7 +25,7 @@ Foreman is intended to be implemented from scratch in a new folder. It is a stan
 - Keep GitHub review support strong, even if fully generic review abstraction is deferred.
 - Support multiple workspace-local auth contexts.
 - Keep prompts owned by the Foreman codebase, not workspaces.
-- Preserve operator visibility through HTTP APIs, logs, and Scout/attempt history.
+- Preserve operator visibility through HTTP APIs, logs, Scout records, and attempt records.
 
 ## Non-Goals For V1
 
@@ -34,7 +34,7 @@ Foreman is intended to be implemented from scratch in a new folder. It is a stan
 - No persistent task snapshot cache in the database.
 - No generic multi-provider review abstraction beyond GitHub-first support.
 - No Prisma.
-- No DB admin commands beyond automatic migration and a separate one-off legacy import command.
+- No DB admin commands beyond automatic migration.
 
 ## Naming
 
@@ -103,7 +103,6 @@ Workers are logical in-process worker slots. Each worker may spawn a child proce
 - `foreman scheduler start <workspace>`
 - `foreman scheduler pause <workspace>`
 - `foreman scheduler stop <workspace>`
-- `foreman db import-legacy <workspace> <legacy-memory.db>`
 
 Built CLI fallback script:
 
@@ -184,11 +183,6 @@ Scheduler control semantics:
   - kills all running attempts
   - releases their active leases
   - preserves queued jobs unless they are explicitly canceled by a later operator action
-
-`foreman db import-legacy <workspace> <legacy-memory.db>`:
-
-- is a separate one-off command
-- is never run automatically by `serve`
 
 ## Workspace Config Schema
 
@@ -751,7 +745,7 @@ Fragments:
 - `prompts/fragments/review-github.md`
 - `prompts/fragments/output-schema.md`
 - `prompts/fragments/learning-policy.md`
-- `prompts/fragments/history-policy.md`
+- `prompts/fragments/summary-policy.md`
 
 `templates/plan.md` contains its own shared planning guidance directly and includes the task-system-specific planning fragment.
 
@@ -913,7 +907,7 @@ type Blocker = string
 - `blocked`: action could not proceed safely
 - `failed`: unexpected task-level failure
 
-Foreman uses the single `summary` field both for attempt display and for the history entry.
+Foreman stores the worker `summary` on the attempt record for operator display.
 
 ## Mutation Application Order
 
@@ -929,22 +923,21 @@ After a valid worker result:
 8. apply remaining review mutations
 9. apply remaining task mutations in listed order, unchanged
 10. apply learning mutations
-11. write history entry using `summary`
-12. if eligible, write or update `review_checkpoint`
-13. finalize attempt/job status
-14. trigger local Scout rerun event
+11. if eligible, write or update `review_checkpoint`
+12. finalize attempt/job status
+13. trigger local Scout rerun event
 
 Failure handling:
 
 - task/review mutation failure: blocking
-- learning/history failure: blocking
+- learning failure: blocking
 - review checkpoint failure: non-fatal warning
 
 Mutation failure stopping rule:
 
 - stop applying mutations immediately after the first blocking failure
 - record an `execution_attempt_event` describing the failure
-- do not apply later mutations, history writes, or checkpoints after a blocking failure
+- do not apply later mutations or checkpoints after a blocking failure
 - do not attempt rollback or compensation in v1
 
 ## Scout
@@ -1189,8 +1182,6 @@ Each workspace has its own `foreman.db`.
 - `scout_run`
 - `review_checkpoint`
 - `learning`
-- `history_step`
-- `history_step_repo`
 
 `job_dependency` may be added if needed later.
 
@@ -1204,7 +1195,7 @@ Each workspace has its own `foreman.db`.
 - `artifact`: logs, prompts, results, planning artifacts
 - `scout_run`: one high-level record per Scout pass
 - `review_checkpoint`: no-op review suppression
-- `learning`, `history_step`, `history_step_repo`: semantic memory/history
+- `learning`: reusable semantic memory
 
 ### Suggested SQL Shapes
 
@@ -1376,25 +1367,6 @@ Initial migration plan:
 
 Foreman uses a `schema_migration` table to track applied migrations and checksums.
 
-Legacy import is separate and not part of the migration chain.
-
-## Legacy Import
-
-Legacy import copies learnings and history from the old SQLite database into the new workspace `foreman.db`.
-
-This is a one-off operation triggered manually and is not tracked as an ongoing synchronization concern.
-
-The target workspace must already have been initialized with `foreman init` so that `foreman.db` and the required tables exist before import runs.
-
-Import preconditions:
-
-- destination `learning`, `history_step`, and `history_step_repo` tables may already contain rows
-- rows with primary keys not present in the destination are inserted normally
-- rows whose primary key already exists are skipped only when the destination row matches the legacy row exactly
-- rows whose primary key already exists but whose payload differs must fail the import instead of merging or overwriting
-- `history_step_repo` rows whose parent `history_step` does not exist in either the destination or imported legacy data are skipped
-- if import fails partway through, the operation must roll back the transaction and leave the destination unchanged
-
 ## HTTP API
 
 All endpoints are workspace-scoped because one process serves exactly one workspace.
@@ -1412,7 +1384,6 @@ All endpoints are workspace-scoped because one process serves exactly one worksp
 - `GET /api/attempts/:attemptId/logs/stream`
 - `GET /api/workers`
 - `GET /api/workers/:workerId/logs/stream`
-- `GET /api/history`
 - `GET /api/learnings`
 - `GET /api/scout/runs`
 - `POST /api/scheduler/start`
@@ -1639,10 +1610,6 @@ Returns current worker slots, statuses, and any active attempt ids:
   ]
 }
 ```
-
-#### `GET /api/history`
-
-Returns semantic history entries newest-first.
 
 #### `GET /api/learnings`
 

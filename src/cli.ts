@@ -12,7 +12,6 @@ import {
   workerResultSchema,
   type WorkerResultAction,
 } from "./execution/worker-result.js";
-import { importLegacyMemory } from "./importing/import-legacy-memory.js";
 import { createHttpServer } from "./http.js";
 import { LoggerService } from "./logger.js";
 import { SchedulerService } from "./orchestration/index.js";
@@ -312,15 +311,5 @@ for (const action of ["start", "pause", "stop"] as const) {
     process.stdout.write(`${await response.text()}\n`);
   });
 }
-
-const db = program.command("db");
-db
-  .command("import-legacy")
-  .argument("<workspace>")
-  .argument("<legacy-memory-db>")
-  .action(async (workspace: string, legacyMemoryDb: string) => {
-    await importLegacyMemory(workspace, legacyMemoryDb);
-    process.stdout.write(`Imported legacy memory from ${legacyMemoryDb}\n`);
-  });
 
 await program.parseAsync(process.argv);

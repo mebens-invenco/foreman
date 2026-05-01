@@ -105,7 +105,7 @@ const fakeLogger = {
 
 const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
   database: { close: vi.fn() },
-  migrationRunner: { runMigrations: vi.fn(), importLegacyDatabase: vi.fn() },
+  migrationRunner: { runMigrations: vi.fn() },
   jobs: {
     activeJobCount: vi.fn(() => 0),
     hasActiveDedupeKey: vi.fn(() => false),
@@ -198,11 +198,6 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     updateSession: vi.fn(),
     linkRunnerSession: vi.fn(),
     ...((overrides.runnerSessions as object | undefined) ?? {}),
-  },
-  history: {
-    addHistoryStep: vi.fn(),
-    listHistory: vi.fn(() => []),
-    ...((overrides.history as object | undefined) ?? {}),
   },
   close: vi.fn(),
 });

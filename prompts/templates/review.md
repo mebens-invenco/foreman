@@ -12,7 +12,7 @@ The task and PR have already been selected. Do not scout, reprioritize, or choos
 
 {{fragment:learning-policy}}
 
-{{fragment:history-policy}}
+{{fragment:summary-policy}}
 
 ## Objective
 
