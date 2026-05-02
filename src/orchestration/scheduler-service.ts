@@ -4,7 +4,7 @@ import { discoverCronJobs, type CronJobDefinition } from "../cron/index.js";
 import type { ActionType, RepoRef, ReviewContext, Task, TaskTarget, WorkerResult } from "../domain/index.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
-import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../repos/index.js";
+import type { AttemptRecord, ForemanRepos, JobRecord, RecoveredAttemptRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
@@ -114,15 +114,11 @@ export class SchedulerService extends EventEmitter {
       await this.stopPromise;
     }
 
-    const recovered = this.deps.foremanRepos.attempts.recoverOrphanedRunningAttempts(
-      "Recovered abandoned attempt on scheduler startup after prior shutdown",
-    );
-    if (recovered.length > 0) {
-      this.logger.warn("recovered orphaned running attempts on startup", {
-        recoveredCount: recovered.length,
-        attemptIds: recovered.map((entry) => entry.attemptId).join(","),
-      });
+    const reaped = this.deps.foremanRepos.leases.reapExpiredLeases(isoNow());
+    if (reaped > 0) {
+      this.logger.warn("reaped expired leases before startup recovery", { changes: reaped });
     }
+    this.recoverOrphanedRunningAttempts("Recovered abandoned attempt on scheduler startup after prior shutdown", "startup");
 
     this.status = "running";
     this.emit("scheduler_status_changed", { status: this.status });
@@ -240,9 +236,36 @@ export class SchedulerService extends EventEmitter {
       const changes = this.deps.foremanRepos.leases.reapExpiredLeases(isoNow());
       if (changes > 0) {
         this.logger.warn("reaped expired leases", { changes });
+        this.recoverOrphanedRunningAttempts("Recovered abandoned attempt after stale leases expired", "lease_reap", {
+          excludeWorkerIds: [...this.activeWorkerRuns.keys()],
+        });
         this.scheduleScout("lease_change");
       }
     }, this.deps.config.scheduler.staleLeaseReapIntervalSeconds * 1000);
+  }
+
+  private recoverOrphanedRunningAttempts(
+    reason: string,
+    source: "startup" | "lease_reap",
+    options: { excludeWorkerIds?: string[] } = {},
+  ): RecoveredAttemptRecord[] {
+    const recovered = this.deps.foremanRepos.attempts.recoverOrphanedRunningAttempts(reason, options);
+    if (recovered.length === 0) {
+      return recovered;
+    }
+
+    this.logger.warn("recovered orphaned running attempts", {
+      source,
+      recoveredCount: recovered.length,
+      attemptIds: recovered.map((entry) => entry.attemptId).join(","),
+    });
+    for (const entry of recovered) {
+      this.emit("attempt_changed", { attemptId: entry.attemptId, status: "canceled" });
+      if (entry.workerId) {
+        this.emit("worker_updated", { workerId: entry.workerId, status: "idle" });
+      }
+    }
+    return recovered;
   }
 
   private clearPollTimer(): void {

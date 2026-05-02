@@ -74,5 +74,5 @@ export interface AttemptRepo {
   latestAttemptForTaskTarget(taskTargetId: string): AttemptRecord | null;
   addAttemptEvent(attemptId: string, eventType: string, message: string, payload?: Record<string, unknown>): void;
   listAttemptEvents(attemptId: string): AttemptEventRecord[];
-  recoverOrphanedRunningAttempts(reason: string): RecoveredAttemptRecord[];
+  recoverOrphanedRunningAttempts(reason: string, options?: { excludeWorkerIds?: string[] }): RecoveredAttemptRecord[];
 }

@@ -333,9 +333,14 @@ export class SqliteAttemptRepo implements AttemptRepo {
       });
   }
 
-  recoverOrphanedRunningAttempts(reason: string): RecoveredAttemptRecord[] {
+  recoverOrphanedRunningAttempts(reason: string, options: { excludeWorkerIds?: string[] } = {}): RecoveredAttemptRecord[] {
     const now = isoNow();
     const recovered: RecoveredAttemptRecord[] = [];
+    const excludeWorkerIds = options.excludeWorkerIds ?? [];
+    const excludedWorkerClause =
+      excludeWorkerIds.length === 0
+        ? ""
+        : `\n             AND (ea.worker_id IS NULL OR ea.worker_id NOT IN (${excludeWorkerIds.map(() => "?").join(", ")}))`;
     const rows = this.sqlite
       .prepare(
         `SELECT ea.id AS attempt_id, ea.job_id, ea.worker_id
@@ -343,11 +348,11 @@ export class SqliteAttemptRepo implements AttemptRepo {
       LEFT JOIN lease l
              ON l.execution_attempt_id = ea.id
             AND l.released_at IS NULL
-          WHERE ea.status = 'running'
-            AND l.id IS NULL
-       ORDER BY ea.started_at ASC`,
+           WHERE ea.status = 'running'
+             AND l.id IS NULL${excludedWorkerClause}
+        ORDER BY ea.started_at ASC`,
       )
-      .all() as Array<{ attempt_id: string; job_id: string; worker_id: string | null }>;
+      .all(...excludeWorkerIds) as Array<{ attempt_id: string; job_id: string; worker_id: string | null }>;
 
     this.sqlite.transaction(() => {
       const finalizeAttempt = this.sqlite.prepare(

@@ -255,6 +255,118 @@ describe("SchedulerService cron scheduling", () => {
   });
 });
 
+describe("SchedulerService orphan recovery", () => {
+  test("reaps expired leases before startup recovery", async () => {
+    vi.useFakeTimers();
+    const order: string[] = [];
+    const reapExpiredLeases = vi.fn(() => {
+      order.push("reap");
+      return 2;
+    });
+    const recoverOrphanedRunningAttempts = vi.fn(() => {
+      order.push("recover");
+      return [{ attemptId: "attempt-1", jobId: "job-1", workerId: "worker-1" }];
+    });
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({
+        attempts: { recoverOrphanedRunningAttempts },
+        leases: { reapExpiredLeases },
+      }),
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+    const attemptChanged = vi.fn();
+    const workerUpdated = vi.fn();
+    scheduler.on("attempt_changed", attemptChanged);
+    scheduler.on("worker_updated", workerUpdated);
+
+    try {
+      await scheduler.start();
+
+      expect(order).toEqual(["reap", "recover"]);
+      expect(recoverOrphanedRunningAttempts).toHaveBeenCalledWith(
+        "Recovered abandoned attempt on scheduler startup after prior shutdown",
+        {},
+      );
+      expect(attemptChanged).toHaveBeenCalledWith({ attemptId: "attempt-1", status: "canceled" });
+      expect(workerUpdated).toHaveBeenCalledWith({ workerId: "worker-1", status: "idle" });
+    } finally {
+      (scheduler as any).clearTimers();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  test("recovers after periodic lease reaping while excluding active workers", async () => {
+    vi.useFakeTimers();
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.scoutPollIntervalSeconds = 999;
+    config.scheduler.schedulerLoopIntervalMs = 999_000;
+    config.scheduler.staleLeaseReapIntervalSeconds = 1;
+    const reapExpiredLeases = vi.fn(() => 1);
+    const recoverOrphanedRunningAttempts = vi.fn(() => []);
+    const scheduler = new SchedulerService({
+      config,
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({
+        attempts: { recoverOrphanedRunningAttempts },
+        leases: { reapExpiredLeases },
+      }),
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    try {
+      (scheduler as any).status = "running";
+      (scheduler as any).activeWorkerRuns.set("worker-active", Promise.resolve());
+      (scheduler as any).armTimers();
+
+      await vi.advanceTimersByTimeAsync(1000);
+
+      expect(recoverOrphanedRunningAttempts).toHaveBeenCalledWith(
+        "Recovered abandoned attempt after stale leases expired",
+        { excludeWorkerIds: ["worker-active"] },
+      );
+    } finally {
+      (scheduler as any).clearTimers();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("SchedulerService applyWorkerResult", () => {
   test("swaps consolidation labels on completed consolidation jobs", async () => {
     const updateLabels = vi.fn(async () => undefined);
