@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useSearchParams } from "react-router"
 
 import {
   DataTable,
@@ -19,9 +19,19 @@ import { AttemptDetailSheet } from "@/pages/attempts/attempt-detail-sheet"
 import { useAttemptsTableState } from "@/pages/attempts/use-attempts-table-state"
 
 export function AttemptsPage() {
-  const [selectedAttemptId, setSelectedAttemptId] = useState<string | null>(null)
+  const [searchParams, setSearchParams] = useSearchParams()
+  const selectedAttemptId = searchParams.get("attemptId")
   const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery()
   const tableState = useAttemptsTableState()
+  const setSelectedAttemptId = (attemptId: string | null) => {
+    const nextSearchParams = new URLSearchParams(searchParams)
+    if (attemptId) {
+      nextSearchParams.set("attemptId", attemptId)
+    } else {
+      nextSearchParams.delete("attemptId")
+    }
+    setSearchParams(nextSearchParams, { replace: true })
+  }
   const table = useDataTable({
     columns: createAttemptColumns(),
     columnFilters: tableState.columnFilters,

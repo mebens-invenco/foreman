@@ -1,3 +1,5 @@
+import { useNavigate } from "react-router"
+
 import type { AttemptRecord } from "@/lib/api"
 import { formatActionLabel, formatRelativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -62,7 +64,11 @@ function TableSectionShell({
 }
 
 export function AttemptsTable({ now }: { now: number }) {
+  const navigate = useNavigate()
   const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery(12)
+  const openAttempt = (attemptId: string) => {
+    navigate(`/attempts?attemptId=${encodeURIComponent(attemptId)}`)
+  }
 
   return (
     <TableSectionShell title="Recent Attempts">
@@ -102,9 +108,23 @@ export function AttemptsTable({ now }: { now: number }) {
           </TableHeader>
           <TableBody>
             {attempts.map((attempt) => (
-              <TableRow key={attempt.id}>
+              <TableRow
+                key={attempt.id}
+                role="button"
+                tabIndex={0}
+                className="cursor-pointer"
+                onClick={() => openAttempt(attempt.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault()
+                    openAttempt(attempt.id)
+                  }
+                }}
+              >
                 <TableCell className="px-4 font-mono text-xs text-foreground">
-                  {workItemLabel(attempt)}
+                  <span className="block max-w-full truncate" title={workItemLabel(attempt)}>
+                    {workItemLabel(attempt)}
+                  </span>
                 </TableCell>
                 <TableCell className="text-sm text-foreground">
                   {targetLabel(attempt)}
