@@ -139,6 +139,9 @@ describe("prompt rendering", () => {
     const result = await renderPlanPrompt(config, paths, [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }]);
 
     expect(result.markdown).toContain("## Linear Planning Rules");
+    expect(result.markdown).toContain(
+      "Do not apply the workspace's configured agent-created label to planned tasks unless those tasks are being created by a cron job that references this plan.",
+    );
     expect(result.markdown).toContain("## Relevant Learnings");
     expect(result.markdown).toContain("- <learning-id>: <learning title>");
   });

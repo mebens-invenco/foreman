@@ -3,6 +3,7 @@
 Produce tasks that can be created directly in Linear and executed later by Foreman.
 
 - Use the workspace's configured execution label and consolidation label conventions.
+- Do not apply the workspace's configured agent-created label to planned tasks unless those tasks are being created by a cron job that references this plan.
 - Place new execution-ready tasks into a provider state that maps to Foreman's internal `ready` state.
 - Include the required Agent metadata block in each task description.
 - Include a compact `## Relevant Learnings` section in each executable task description.
