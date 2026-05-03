@@ -1,5 +1,6 @@
 import type { RepoRef, Task, TaskComment, TaskPullRequest, TaskState, TaskTargetDependencyRef, TaskTargetRef } from "../../domain/index.js";
 import { ForemanError, isForemanError } from "../../lib/errors.js";
+import { createTimeoutSignal, isAbortLikeError, PROVIDER_REQUEST_TIMEOUT_MS } from "../../lib/fetch-timeout.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
 import type { WorkspaceConfig } from "../../workspace/config.js";
@@ -175,14 +176,28 @@ export class LinearClient {
       variableKeys: Object.keys(variables).sort().join(","),
     });
 
-    const response = await fetch("https://api.linear.app/graphql", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: this.apiKey,
-      },
-      body: JSON.stringify({ query, variables }),
-    });
+    let response: Response;
+    try {
+      response = await fetch("https://api.linear.app/graphql", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: this.apiKey,
+        },
+        body: JSON.stringify({ query, variables }),
+        signal: createTimeoutSignal(),
+      });
+    } catch (error) {
+      if (isAbortLikeError(error)) {
+        this.logger.error("Linear GraphQL request timed out", {
+          operationName,
+          durationMs: Date.now() - startedAt,
+          timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+        });
+        throw new ForemanError("linear_request_timeout", `Linear request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       this.logger.error("Linear GraphQL request failed", {
