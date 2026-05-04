@@ -215,8 +215,9 @@ describe("prompt rendering", () => {
         continuation: true,
       });
 
-      expect(result).not.toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action} --help`);
-      expect(result).not.toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action}`);
+      expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action} --help`);
+      expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action}`);
+      expect(result).toContain("Return exactly one final result block:");
       expect(result).not.toContain("output-schema-continuation");
     }
   });
@@ -344,9 +345,11 @@ describe("prompt rendering", () => {
     expect(continuationPrompt).not.toContain("verify the response is an actual image file");
     expect(continuationPrompt).not.toContain("## Review Continuation Rules");
     expect(continuationPrompt).not.toContain("## Continuation Context");
-    expect(continuationPrompt).not.toContain("## Required Output");
+    expect(continuationPrompt).toContain("## Required Output");
+    expect(continuationPrompt).toContain("<agent-result>");
+    expect(continuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action review --help`);
+    expect(continuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action review`);
     expect(continuationPrompt).not.toContain("Do not assume every actionable review item requires a code change.");
-    expect(continuationPrompt).not.toContain("agent-result validate --action review");
     expect(continuationPrompt).not.toContain("## Common Worker Rules");
     expect(continuationPrompt).not.toContain("## Selected Task");
     expect(continuationPrompt).not.toContain("## Task Provider Context");
@@ -384,8 +387,10 @@ describe("prompt rendering", () => {
     expect(reviewerContinuationPrompt).not.toContain("include image links or uploaded assets");
     expect(reviewerContinuationPrompt).not.toContain("## Reviewer Continuation Rules");
     expect(reviewerContinuationPrompt).not.toContain("## Continuation Context");
-    expect(reviewerContinuationPrompt).not.toContain("## Required Output");
-    expect(reviewerContinuationPrompt).not.toContain("agent-result validate --action reviewer");
+    expect(reviewerContinuationPrompt).toContain("## Required Output");
+    expect(reviewerContinuationPrompt).toContain("<agent-result>");
+    expect(reviewerContinuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action reviewer --help`);
+    expect(reviewerContinuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action reviewer`);
     expect(reviewerContinuationPrompt).not.toContain("submit_pull_request_review");
     expect(reviewerContinuationPrompt).not.toContain("## Common Worker Rules");
     expect(reviewerContinuationPrompt).not.toContain("## Selected Task");
