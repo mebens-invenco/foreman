@@ -157,6 +157,7 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     ...((overrides.scoutRuns as object | undefined) ?? {}),
   },
   taskMirror: {
+    saveTasks: vi.fn(),
     upsertTaskPullRequest: vi.fn(),
     getTask: vi.fn(() => null),
     getTaskTarget: vi.fn(() => null),
@@ -359,6 +360,85 @@ describe("SchedulerService orphan recovery", () => {
         "Recovered abandoned attempt after stale leases expired",
         { excludeWorkerIds: ["worker-active"] },
       );
+    } finally {
+      (scheduler as any).clearTimers();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("SchedulerService scout timeout", () => {
+  test("marks a hung scout run failed and rearms polling", async () => {
+    vi.useFakeTimers();
+    const timeoutMs = 5 * 60 * 1000;
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+    config.scheduler.schedulerLoopIntervalMs = 999_000;
+    config.scheduler.staleLeaseReapIntervalSeconds = 999_000;
+    const completeScoutRun = vi.fn();
+    const foremanRepos = createMockRepos({
+      scoutRuns: {
+        createScoutRun: vi.fn(() => "scout-1"),
+        completeScoutRun,
+        listScoutRuns: vi.fn(() => [
+          {
+            id: "scout-1",
+            triggerType: "poll",
+            status: "running",
+            startedAt: "2026-03-16T00:00:00Z",
+            finishedAt: null,
+            selectedAction: null,
+            selectedTaskId: null,
+            candidateCount: 1,
+            activeCount: 1,
+            terminalCount: 0,
+          },
+        ]),
+      },
+    });
+    const scheduler = new SchedulerService({
+      config,
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [sampleTask()]),
+      } as any,
+      reviewService: {
+        getContext: vi.fn(() => new Promise<ReviewContext>(() => undefined)),
+      } as any,
+      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    try {
+      (scheduler as any).status = "running";
+      const runPromise = (scheduler as any).runScout("poll") as Promise<void>;
+
+      await vi.advanceTimersByTimeAsync(timeoutMs);
+      await runPromise;
+
+      expect(completeScoutRun).toHaveBeenCalledWith({
+        id: "scout-1",
+        status: "failed",
+        errorMessage: `Scout selection timed out after ${timeoutMs}ms`,
+        summary: { error: `Scout selection timed out after ${timeoutMs}ms` },
+      });
+      expect((scheduler as any).scoutInFlight).toBe(false);
+      expect(scheduler.getStatus().nextScoutPollAt).not.toBeNull();
     } finally {
       (scheduler as any).clearTimers();
       vi.clearAllTimers();

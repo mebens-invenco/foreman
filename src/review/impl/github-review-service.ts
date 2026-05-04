@@ -1,4 +1,5 @@
 import { ForemanError } from "../../lib/errors.js";
+import { createTimeoutSignal, isAbortLikeError, PROVIDER_REQUEST_TIMEOUT_MS } from "../../lib/fetch-timeout.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
 import {
@@ -172,15 +173,30 @@ export class GitHubReviewService implements ReviewService {
     const startedAt = Date.now();
     const method = init.method ?? "GET";
     this.logger.debug("sending GitHub REST request", { method, path });
-    const response = await fetch(`https://api.github.com${path}`, {
-      ...init,
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${this.token}`,
-        "x-github-api-version": "2022-11-28",
-        ...(init.headers ?? {}),
-      },
-    });
+    let response: Response;
+    try {
+      response = await fetch(`https://api.github.com${path}`, {
+        ...init,
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${this.token}`,
+          "x-github-api-version": "2022-11-28",
+          ...(init.headers ?? {}),
+        },
+        signal: createTimeoutSignal(PROVIDER_REQUEST_TIMEOUT_MS, init.signal ? [init.signal] : []),
+      });
+    } catch (error) {
+      if (isAbortLikeError(error)) {
+        this.logger.error("GitHub REST request timed out", {
+          method,
+          path,
+          durationMs: Date.now() - startedAt,
+          timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+        });
+        throw new ForemanError("github_request_timeout", `GitHub request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       const body = await response.text();
@@ -209,16 +225,30 @@ export class GitHubReviewService implements ReviewService {
       operationName,
       variableKeys: Object.keys(variables).sort().join(","),
     });
-    const response = await fetch("https://api.github.com/graphql", {
-      method: "POST",
-      headers: {
-        accept: "application/vnd.github+json",
-        authorization: `Bearer ${this.token}`,
-        "content-type": "application/json",
-        "x-github-api-version": "2022-11-28",
-      },
-      body: JSON.stringify({ query, variables }),
-    });
+    let response: Response;
+    try {
+      response = await fetch("https://api.github.com/graphql", {
+        method: "POST",
+        headers: {
+          accept: "application/vnd.github+json",
+          authorization: `Bearer ${this.token}`,
+          "content-type": "application/json",
+          "x-github-api-version": "2022-11-28",
+        },
+        body: JSON.stringify({ query, variables }),
+        signal: createTimeoutSignal(),
+      });
+    } catch (error) {
+      if (isAbortLikeError(error)) {
+        this.logger.error("GitHub GraphQL request timed out", {
+          operationName,
+          durationMs: Date.now() - startedAt,
+          timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+        });
+        throw new ForemanError("github_request_timeout", `GitHub GraphQL request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       const body = await response.text();

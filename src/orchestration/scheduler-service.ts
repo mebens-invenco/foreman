@@ -17,6 +17,24 @@ import { WorkerResultApplier } from "./worker-result-applier.js";
 export type SchedulerStatus = "running" | "paused" | "stopping" | "stopped";
 type ScoutTrigger = "startup" | "poll" | "worker_finished" | "task_mutation" | "lease_change" | "manual";
 
+const SCOUT_RUN_TIMEOUT_MS = 5 * 60 * 1000;
+
+const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  }
+};
+
 type SchedulerDeps = {
   config: WorkspaceConfig;
   paths: WorkspacePaths;
@@ -328,15 +346,19 @@ export class SchedulerService extends EventEmitter {
     this.scoutInFlight = true;
     this.logger.info("starting scout run", { trigger });
     try {
-      const selection = await runScoutSelection({
-        config: this.deps.config,
-        foremanRepos: this.deps.foremanRepos,
-        taskSystem: this.deps.taskSystem,
-        reviewService: this.deps.reviewService,
-        repos: this.deps.repos,
-        triggerType: trigger,
-        logger: this.logger.child({ component: "scout", trigger }),
-      });
+      const selection = await withTimeout(
+        runScoutSelection({
+          config: this.deps.config,
+          foremanRepos: this.deps.foremanRepos,
+          taskSystem: this.deps.taskSystem,
+          reviewService: this.deps.reviewService,
+          repos: this.deps.repos,
+          triggerType: trigger,
+          logger: this.logger.child({ component: "scout", trigger }),
+        }),
+        SCOUT_RUN_TIMEOUT_MS,
+        `Scout selection timed out after ${SCOUT_RUN_TIMEOUT_MS}ms`,
+      );
 
       if (this.status !== "running" && trigger !== "manual") {
         this.deps.foremanRepos.scoutRuns.completeScoutRun({
@@ -410,11 +432,11 @@ export class SchedulerService extends EventEmitter {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error("scout run failed", { trigger, error: message });
-      const scoutRuns = this.deps.foremanRepos.scoutRuns.listScoutRuns(1);
-      const latestId = String(scoutRuns[0]?.id ?? "");
-      if (latestId) {
+      const scoutRuns = this.deps.foremanRepos.scoutRuns.listScoutRuns(5);
+      const latestRunning = scoutRuns.find((run) => run.status === "running");
+      if (latestRunning) {
         this.deps.foremanRepos.scoutRuns.completeScoutRun({
-          id: latestId,
+          id: latestRunning.id,
           status: "failed",
           errorMessage: message,
           summary: { error: message },
