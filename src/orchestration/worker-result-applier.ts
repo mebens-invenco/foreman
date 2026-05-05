@@ -75,6 +75,9 @@ export class WorkerResultApplier {
         });
         logger.warn("posted blocker comment", { blocker });
       }
+      if (input.job.action === "review" && pullRequestUrl) {
+        await this.saveReviewCheckpoint(input, pullRequestUrl, logger);
+      }
       return pullRequestUrl;
     }
 
@@ -218,33 +221,7 @@ export class WorkerResultApplier {
       workerResult.outcome === "no_action_needed" &&
       pullRequestUrl
     ) {
-      const reviewContext =
-        input.reviewContext ??
-        (await this.deps.reviewService.getContext(
-          input.task,
-          this.deps.config.workspace.agentPrefix,
-          input.repo,
-          input.target,
-        ));
-      if (reviewContext) {
-        try {
-          this.deps.foremanRepos.reviewCheckpoints.upsertReviewCheckpoint({
-            taskId: input.task.id,
-            taskTargetId: input.target.id,
-            prUrl: pullRequestUrl,
-            reviewContext,
-            sourceAttemptId: input.attempt.id,
-          });
-          logger.info("saved review checkpoint", { pullRequestUrl });
-        } catch (error) {
-          this.deps.foremanRepos.attempts.addAttemptEvent(
-            input.attempt.id,
-            "review_checkpoint_warning",
-            error instanceof Error ? error.message : String(error),
-          );
-          logger.warn("failed to save review checkpoint", { error: error instanceof Error ? error.message : String(error) });
-        }
-      }
+      await this.saveReviewCheckpoint(input, pullRequestUrl, logger);
     }
 
     if (
@@ -289,6 +266,38 @@ export class WorkerResultApplier {
   private async resolveCurrentPullRequestUrl(task: Task, repo: RepoRef, target: TaskTarget): Promise<string | null> {
     const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(task, repo, target);
     return resolvedPullRequest?.pullRequestUrl ?? null;
+  }
+
+  private async saveReviewCheckpoint(input: ApplyWorkerResultInput, pullRequestUrl: string, logger: LoggerService): Promise<void> {
+    const reviewContext =
+      input.reviewContext ??
+      (await this.deps.reviewService.getContext(
+        input.task,
+        this.deps.config.workspace.agentPrefix,
+        input.repo,
+        input.target,
+      ));
+    if (!reviewContext) {
+      return;
+    }
+
+    try {
+      this.deps.foremanRepos.reviewCheckpoints.upsertReviewCheckpoint({
+        taskId: input.task.id,
+        taskTargetId: input.target.id,
+        prUrl: pullRequestUrl,
+        reviewContext,
+        sourceAttemptId: input.attempt.id,
+      });
+      logger.info("saved review checkpoint", { pullRequestUrl });
+    } catch (error) {
+      this.deps.foremanRepos.attempts.addAttemptEvent(
+        input.attempt.id,
+        "review_checkpoint_warning",
+        error instanceof Error ? error.message : String(error),
+      );
+      logger.warn("failed to save review checkpoint", { error: error instanceof Error ? error.message : String(error) });
+    }
   }
 
   private async recordPullRequest(taskId: string, pullRequest: TaskPullRequest, logger: LoggerService): Promise<void> {

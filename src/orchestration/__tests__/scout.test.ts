@@ -175,6 +175,50 @@ const seedReviewerCheckpoint = (
   });
 };
 
+const seedReviewCheckpoint = (
+  db: Awaited<ReturnType<typeof createMigratedDb>>,
+  reviewTask: Task,
+  reviewContext: ReviewContext,
+): void => {
+  db.workers.ensureWorkerSlots(1);
+  const worker = db.workers.listWorkers()[0];
+  expect(worker).toBeDefined();
+  db.taskMirror.saveTasks([reviewTask]);
+  const target = db.taskMirror.getTaskTarget(reviewTask.id, reviewTask.targets[0]?.repoKey ?? "repo-a");
+  expect(target).not.toBeNull();
+
+  const reviewJob = db.jobs.createJob({
+    taskId: reviewTask.id,
+    taskTargetId: target!.id,
+    taskProvider: reviewTask.provider,
+    action: "review",
+    priorityRank: priorityToRank(reviewTask.priority),
+    repoKey: target!.repoKey,
+    baseBranch: reviewContext.baseBranch,
+    dedupeKey: `${reviewTask.id}:${target!.repoKey}:review`,
+    selectionReason: "test",
+  });
+  db.jobs.updateJobStatus(reviewJob.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
+  const attempt = db.attempts.createAttemptWithLeases({
+    jobId: reviewJob.id,
+    workerId: worker!.id,
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-5.4",
+    runnerVariant: "high",
+    expiresAt: "2026-03-14T12:05:00Z",
+    leases: [],
+  });
+  expect(attempt).not.toBeNull();
+
+  db.reviewCheckpoints.upsertReviewCheckpoint({
+    taskId: reviewTask.id,
+    taskTargetId: target!.id,
+    prUrl: reviewContext.pullRequestUrl,
+    reviewContext,
+    sourceAttemptId: attempt!.id,
+  });
+};
+
 const writeFileTask = async (workspaceRoot: string, input: { id: string; title: string; state: string; repo?: string }): Promise<void> => {
   await fs.mkdir(path.join(workspaceRoot, "tasks"), { recursive: true });
   await fs.writeFile(
@@ -430,6 +474,125 @@ describe("runScoutSelection", () => {
       expect(result.jobs).toHaveLength(1);
       expect(result.jobs[0]?.action).toBe("review");
       expect(result.jobs[0]?.task.id).toBe("TASK-0003");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not reselect blocked review work when failing checks match the checkpoint", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0010",
+      title: "Blocked review task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/10", source: "provider" } satisfies TaskPullRequest],
+    });
+    const blockedContext: ReviewContext = {
+      provider: "github",
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/10",
+      pullRequestNumber: 10,
+      state: "open",
+      isDraft: false,
+      headSha: "blocked-head",
+      headBranch: "task-0010",
+      baseBranch: "main",
+      headIntroducedAt: "2026-03-14T12:00:00Z",
+      mergeState: "clean",
+      reviewSummaries: [],
+      conversationComments: [],
+      reviewThreads: [],
+      failingChecks: [{ name: "ci/circleci: DEV deploy compute", state: "failure" }],
+      pendingChecks: [],
+    };
+    seedReviewCheckpoint(db, reviewTask, blockedContext);
+
+    const taskSystem = new FakeTaskSystem([reviewTask]);
+    const reviewService = new FakeReviewService({
+      [reviewTask.id]: blockedContext,
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reselects blocked review work when the failing check fingerprint changes", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0011",
+      title: "Changed blocked review task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/11", source: "provider" } satisfies TaskPullRequest],
+    });
+    const blockedContext: ReviewContext = {
+      provider: "github",
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/11",
+      pullRequestNumber: 11,
+      state: "open",
+      isDraft: false,
+      headSha: "blocked-head",
+      headBranch: "task-0011",
+      baseBranch: "main",
+      headIntroducedAt: "2026-03-14T12:00:00Z",
+      mergeState: "clean",
+      reviewSummaries: [],
+      conversationComments: [],
+      reviewThreads: [],
+      failingChecks: [{ name: "ci/circleci: DEV deploy compute", state: "failure" }],
+      pendingChecks: [],
+    };
+    const changedContext: ReviewContext = {
+      ...blockedContext,
+      failingChecks: [{ name: "ci/circleci: Browser tests", state: "failure" }],
+    };
+    seedReviewCheckpoint(db, reviewTask, blockedContext);
+
+    const taskSystem = new FakeTaskSystem([reviewTask]);
+    const reviewService = new FakeReviewService({
+      [reviewTask.id]: changedContext,
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("review");
+      expect(result.jobs[0]?.selectionReason).toBe("failing checks");
+      const reviewTarget = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
+      expect(reviewTarget).not.toBeNull();
+      expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTarget!.id)).toBeNull();
     } finally {
       db.close();
     }

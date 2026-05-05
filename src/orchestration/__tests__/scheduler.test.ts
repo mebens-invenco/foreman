@@ -629,6 +629,72 @@ describe("SchedulerService applyWorkerResult", () => {
     });
   });
 
+  test("saves a review checkpoint for blocked review attempts", async () => {
+    const addComment = vi.fn(async () => undefined);
+    const upsertReviewCheckpoint = vi.fn();
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({
+        reviewCheckpoints: { upsertReviewCheckpoint },
+      }),
+      taskSystem: {
+        addComment,
+        upsertPullRequest: vi.fn(async () => undefined),
+        transition: vi.fn(async () => undefined),
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        getContext: vi.fn(async () => reviewContext),
+        resolvePullRequest: vi.fn(resolvePullRequestFromTask),
+      } as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-2c" },
+        job: { action: "review", taskTargetId: sampleTarget.id },
+        task: sampleTask({ pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }] }),
+        target: sampleTarget,
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        workerResult: baseWorkerResult({
+          outcome: "blocked",
+          blockers: ["Check logs are unavailable."],
+        }),
+      }),
+    ).resolves.toBe(reviewContext.pullRequestUrl);
+
+    expect(addComment).toHaveBeenCalledWith({
+      taskId: "TASK-0001",
+      body: "[agent] Check logs are unavailable.",
+    });
+    expect(upsertReviewCheckpoint).toHaveBeenCalledWith({
+      taskId: "TASK-0001",
+      taskTargetId: sampleTarget.id,
+      prUrl: reviewContext.pullRequestUrl,
+      reviewContext,
+      sourceAttemptId: "attempt-2c",
+    });
+  });
+
   test("submits reviewer comment reviews with the reviewer prefix", async () => {
     const submitPullRequestReview = vi.fn(async () => undefined);
     const scheduler = new SchedulerService({
