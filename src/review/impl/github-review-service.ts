@@ -21,6 +21,13 @@ import type { ReviewService } from "../review-service.js";
 
 type RepoDescriptor = { owner: string; repo: string };
 
+type PullRequestReviewInlineComment = {
+  path: string;
+  line: number;
+  side?: "LEFT" | "RIGHT";
+  body: string;
+};
+
 const parseGitHubUrl = (url: string): RepoDescriptor & { number: number } => {
   const parsed = new URL(url);
   const match = parsed.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
@@ -39,6 +46,26 @@ const parseGitRemote = (remoteUrl: string): RepoDescriptor => {
   }
 
   throw new ForemanError("unsupported_git_remote", `Unsupported GitHub remote URL: ${remoteUrl}`);
+};
+
+const isUnresolvableReviewCommentError = (error: unknown): boolean =>
+  error instanceof ForemanError && error.message.includes("GitHub request failed: 422") && error.message.includes("Line could not be resolved");
+
+const fallbackReviewBodyForUnresolvableComments = (body: string, comments: PullRequestReviewInlineComment[]): string => {
+  const inlineFeedback = comments
+    .map((comment, index) => {
+      const side = comment.side ?? "RIGHT";
+      return [`### Inline comment ${index + 1}`, `Location: \`${comment.path}:${comment.line}\` (${side})`, "", comment.body].join("\n");
+    })
+    .join("\n\n");
+
+  return [
+    body,
+    "GitHub rejected one or more inline review comment locations as unresolvable, so Foreman is preserving the inline feedback here instead.",
+    inlineFeedback,
+  ]
+    .filter((section) => section.length > 0)
+    .join("\n\n");
 };
 
 type GitHubGraphqlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
@@ -928,12 +955,7 @@ export class GitHubReviewService implements ReviewService {
     input: {
       body: string;
       event: "COMMENT";
-      comments: Array<{
-        path: string;
-        line: number;
-        side?: "LEFT" | "RIGHT";
-        body: string;
-      }>;
+      comments: PullRequestReviewInlineComment[];
     },
   ): Promise<void> {
     const { owner, repo, number } = parseGitHubUrl(prUrl);
@@ -945,20 +967,41 @@ export class GitHubReviewService implements ReviewService {
       bodyLength: input.body.length,
       commentCount: input.comments.length,
     });
-    await this.rest(`/repos/${owner}/${repo}/pulls/${number}/reviews`, {
-      method: "POST",
-      body: JSON.stringify({
-        body: input.body,
-        event: input.event,
-        comments: input.comments.map((comment) => ({
-          path: comment.path,
-          line: comment.line,
-          side: comment.side ?? "RIGHT",
-          body: comment.body,
-        })),
-      }),
-      headers: { "content-type": "application/json" },
-    });
+    try {
+      await this.rest(`/repos/${owner}/${repo}/pulls/${number}/reviews`, {
+        method: "POST",
+        body: JSON.stringify({
+          body: input.body,
+          event: input.event,
+          comments: input.comments.map((comment) => ({
+            path: comment.path,
+            line: comment.line,
+            side: comment.side ?? "RIGHT",
+            body: comment.body,
+          })),
+        }),
+        headers: { "content-type": "application/json" },
+      });
+    } catch (error) {
+      if (!isUnresolvableReviewCommentError(error) || input.comments.length === 0) {
+        throw error;
+      }
+
+      this.logger.warn("retrying GitHub pull request review without inline comments after unresolvable line rejection", {
+        owner,
+        repo,
+        pullRequestNumber: number,
+        commentCount: input.comments.length,
+      });
+      await this.rest(`/repos/${owner}/${repo}/pulls/${number}/reviews`, {
+        method: "POST",
+        body: JSON.stringify({
+          body: fallbackReviewBodyForUnresolvableComments(input.body, input.comments),
+          event: input.event,
+        }),
+        headers: { "content-type": "application/json" },
+      });
+    }
     this.logger.info("submitted GitHub pull request review", { owner, repo, pullRequestNumber: number, commentCount: input.comments.length });
   }
 
