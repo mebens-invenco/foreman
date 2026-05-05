@@ -1002,6 +1002,68 @@ describe("GitHubReviewService reply mutations", () => {
     });
   });
 
+  test("deletes a stale pending review and retries when GitHub reports an existing pending review", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ message: "Validation Failed", errors: ["User can only have one pending review per pull request"] }, 422))
+      .mockResolvedValueOnce(jsonResponse([{ id: 123, state: "PENDING" }]))
+      .mockResolvedValueOnce(jsonResponse({ id: 123, state: "DISMISSED" }))
+      .mockResolvedValueOnce(jsonResponse({ id: 124 }, 200)) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await service.submitPullRequestReview("https://github.com/acme/repo/pull/946", {
+      body: "[review agent] Please tighten this validation.",
+      event: "COMMENT",
+      comments: [
+        {
+          path: "src/example.ts",
+          line: 42,
+          body: "[review agent] This branch is missing a null check.",
+        },
+      ],
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(4);
+    expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews?per_page=100&page=1");
+    expect(vi.mocked(global.fetch).mock.calls[2]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews/123");
+    expect((vi.mocked(global.fetch).mock.calls[2]?.[1] as RequestInit).method).toBe("DELETE");
+
+    const retryInit = vi.mocked(global.fetch).mock.calls[3]?.[1] as RequestInit;
+    expect(JSON.parse(String(retryInit.body))).toEqual({
+      body: "[review agent] Please tighten this validation.",
+      event: "COMMENT",
+      comments: [
+        {
+          path: "src/example.ts",
+          line: 42,
+          side: "RIGHT",
+          body: "[review agent] This branch is missing a null check.",
+        },
+      ],
+    });
+  });
+
+  test("does not retry unrelated GitHub review validation failures", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ message: "Validation Failed", errors: ["Some other 422"] }, 422)) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(
+      service.submitPullRequestReview("https://github.com/acme/repo/pull/946", {
+        body: "[review agent] Please tighten this validation.",
+        event: "COMMENT",
+        comments: [
+          {
+            path: "src/example.ts",
+            line: 42,
+            body: "[review agent] This branch is missing a null check.",
+          },
+        ],
+      }),
+    ).rejects.toThrow("GitHub request failed: 422");
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   test("falls back to a body-only review when GitHub cannot resolve an inline comment line", async () => {
     global.fetch = vi
       .fn()

@@ -51,6 +51,11 @@ const parseGitRemote = (remoteUrl: string): RepoDescriptor => {
 const isUnresolvableReviewCommentError = (error: unknown): boolean =>
   error instanceof ForemanError && error.message.includes("GitHub request failed: 422") && error.message.includes("Line could not be resolved");
 
+const isExistingPendingReviewError = (error: unknown): boolean =>
+  error instanceof ForemanError &&
+  error.message.includes("GitHub request failed: 422") &&
+  error.message.includes("User can only have one pending review per pull request");
+
 const fallbackReviewBodyForUnresolvableComments = (body: string, comments: PullRequestReviewInlineComment[]): string => {
   const inlineFeedback = comments
     .map((comment, index) => {
@@ -120,6 +125,11 @@ type GitHubRestPullRequest = {
   base: {
     ref: string;
   };
+};
+
+type GitHubRestPullRequestReview = {
+  id: number;
+  state: string;
 };
 
 type GitHubPullRequestMergeable = "MERGEABLE" | "CONFLICTING" | "UNKNOWN" | null;
@@ -950,6 +960,59 @@ export class GitHubReviewService implements ReviewService {
     return { url: result.html_url, number: result.number };
   }
 
+  private async findPendingPullRequestReview(owner: string, repo: string, number: number): Promise<GitHubRestPullRequestReview | null> {
+    for (let page = 1; ; page += 1) {
+      const reviews = await this.rest<GitHubRestPullRequestReview[]>(`/repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100&page=${page}`);
+      const pendingReview = reviews.find((review) => review.state === "PENDING");
+      if (pendingReview) {
+        return pendingReview;
+      }
+
+      if (reviews.length < 100) {
+        return null;
+      }
+    }
+  }
+
+  private async createPullRequestReviewWithPendingRecovery(input: {
+    owner: string;
+    repo: string;
+    number: number;
+    body: Record<string, unknown>;
+    commentCount: number;
+  }): Promise<void> {
+    const path = `/repos/${input.owner}/${input.repo}/pulls/${input.number}/reviews`;
+    const init = {
+      method: "POST",
+      body: JSON.stringify(input.body),
+      headers: { "content-type": "application/json" },
+    };
+
+    try {
+      await this.rest(path, init);
+      return;
+    } catch (error) {
+      if (!isExistingPendingReviewError(error)) {
+        throw error;
+      }
+
+      const pendingReview = await this.findPendingPullRequestReview(input.owner, input.repo, input.number);
+      if (!pendingReview) {
+        throw error;
+      }
+
+      this.logger.warn("deleting stale GitHub pending pull request review before retrying submission", {
+        owner: input.owner,
+        repo: input.repo,
+        pullRequestNumber: input.number,
+        reviewId: pendingReview.id,
+        commentCount: input.commentCount,
+      });
+      await this.rest(`/repos/${input.owner}/${input.repo}/pulls/${input.number}/reviews/${pendingReview.id}`, { method: "DELETE" });
+      await this.rest(path, init);
+    }
+  }
+
   async submitPullRequestReview(
     prUrl: string,
     input: {
@@ -968,9 +1031,12 @@ export class GitHubReviewService implements ReviewService {
       commentCount: input.comments.length,
     });
     try {
-      await this.rest(`/repos/${owner}/${repo}/pulls/${number}/reviews`, {
-        method: "POST",
-        body: JSON.stringify({
+      await this.createPullRequestReviewWithPendingRecovery({
+        owner,
+        repo,
+        number,
+        commentCount: input.comments.length,
+        body: {
           body: input.body,
           event: input.event,
           comments: input.comments.map((comment) => ({
@@ -979,8 +1045,7 @@ export class GitHubReviewService implements ReviewService {
             side: comment.side ?? "RIGHT",
             body: comment.body,
           })),
-        }),
-        headers: { "content-type": "application/json" },
+        },
       });
     } catch (error) {
       if (!isUnresolvableReviewCommentError(error) || input.comments.length === 0) {
@@ -993,13 +1058,15 @@ export class GitHubReviewService implements ReviewService {
         pullRequestNumber: number,
         commentCount: input.comments.length,
       });
-      await this.rest(`/repos/${owner}/${repo}/pulls/${number}/reviews`, {
-        method: "POST",
-        body: JSON.stringify({
+      await this.createPullRequestReviewWithPendingRecovery({
+        owner,
+        repo,
+        number,
+        commentCount: 0,
+        body: {
           body: fallbackReviewBodyForUnresolvableComments(input.body, input.comments),
           event: input.event,
-        }),
-        headers: { "content-type": "application/json" },
+        },
       });
     }
     this.logger.info("submitted GitHub pull request review", { owner, repo, pullRequestNumber: number, commentCount: input.comments.length });
