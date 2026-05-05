@@ -26,6 +26,8 @@ const ensureAgentPrefix = (body: string, agentPrefix: string): string =>
 const ensureReviewCommentPrefix = (body: string, prefix: string): string =>
   body.startsWith(prefix) ? body : `${prefix}${body}`;
 
+const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
 type WorkerResultApplierDeps = {
   config: WorkspaceConfig;
   foremanRepos: ForemanRepos;
@@ -102,7 +104,7 @@ export class WorkerResultApplier {
         url: created.url,
         title: mutation.title,
         source: "local",
-      });
+      }, logger);
       await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
       logger.info("created pull request", { pullRequestUrl: created.url, pullRequestNumber: created.number });
     }
@@ -127,7 +129,7 @@ export class WorkerResultApplier {
           repoKey: input.target.repoKey,
           url: resolvedPullRequest.pullRequestUrl,
           source: "branch_inferred",
-        });
+        }, logger);
         await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
         logger.info("transitioned task to in_review after execution no-op on open pull request", { pullRequestUrl });
       }
@@ -289,8 +291,22 @@ export class WorkerResultApplier {
     return resolvedPullRequest?.pullRequestUrl ?? null;
   }
 
-  private async recordPullRequest(taskId: string, pullRequest: TaskPullRequest): Promise<void> {
-    await this.deps.taskSystem.upsertPullRequest({ taskId, pullRequest });
+  private async recordPullRequest(taskId: string, pullRequest: TaskPullRequest, logger: LoggerService): Promise<void> {
     this.deps.foremanRepos.taskMirror.upsertTaskPullRequest({ taskId, pullRequest });
+    try {
+      await this.deps.taskSystem.upsertPullRequest({ taskId, pullRequest });
+    } catch (error) {
+      if (this.deps.taskSystem.getProvider() !== "linear") {
+        throw error;
+      }
+
+      logger.warn("failed to sync pull request with Linear task provider", {
+        taskId,
+        repoKey: pullRequest.repoKey,
+        pullRequestUrl: pullRequest.url,
+        source: pullRequest.source,
+        error: errorMessage(error),
+      });
+    }
   }
 }
