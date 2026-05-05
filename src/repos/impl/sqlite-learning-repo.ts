@@ -39,6 +39,14 @@ const mapLearningSearchRecord = (row: unknown): LearningSearchRecord => {
 const normalizeFilterValues = (values: readonly string[] | undefined): string[] =>
   Array.from(new Set((values ?? []).map((value) => value.trim()).filter((value) => value.length > 0)));
 
+const toSafeFtsQuery = (query: string): string =>
+  query
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length > 0)
+    .map((term) => `"${term.replaceAll('"', '""')}"`)
+    .join(" ");
+
 export class SqliteLearningRepo implements LearningRepo {
   constructor(private readonly sqlite: SqliteDatabase) {}
 
@@ -137,7 +145,7 @@ export class SqliteLearningRepo implements LearningRepo {
     const selectMatches = this.sqlite.prepare("SELECT rowid, bm25(learning_fts) AS score FROM learning_fts WHERE learning_fts MATCH ?");
 
     for (const query of queries) {
-      const rows = selectMatches.all(query) as SqliteRow[];
+      const rows = selectMatches.all(toSafeFtsQuery(query)) as SqliteRow[];
       for (const row of rows) {
         const rowId = Number(row.rowid);
         const score = Number(row.score);
