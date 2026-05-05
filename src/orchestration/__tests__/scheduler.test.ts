@@ -886,6 +886,98 @@ describe("SchedulerService applyWorkerResult", () => {
     expect(transition).toHaveBeenCalledWith({ taskId: "TASK-0001", toState: "in_review" });
   });
 
+  test("keeps created pull requests in the task mirror when Linear PR sync fails", async () => {
+    const upsertPullRequest = vi.fn(async () => {
+      throw new Error("Linear request failed: 502 Bad Gateway");
+    });
+    const upsertTaskPullRequest = vi.fn();
+    const createPullRequest = vi.fn(async () => ({ url: "https://github.com/acme/repo-a/pull/2", number: 2 }));
+    const transition = vi.fn(async () => undefined);
+    const warn = vi.fn();
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "linear"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({ taskMirror: { upsertTaskPullRequest } }),
+      taskSystem: {
+        getProvider: vi.fn(() => "linear"),
+        addComment: vi.fn(async () => undefined),
+        upsertPullRequest,
+        transition,
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        createPullRequest,
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      repos: [],
+      env: {},
+      logger: {
+        ...fakeLogger,
+        child() {
+          return this;
+        },
+        warn,
+      } as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-3b" },
+        job: { action: "execution", taskTargetId: sampleTarget.id },
+        task: sampleTask({ state: "in_progress", providerState: "in_progress", pullRequests: [] }),
+        target: sampleTarget,
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        workerResult: baseWorkerResult({
+          action: "execution",
+          outcome: "completed",
+          signals: ["code_changed"],
+          reviewMutations: [
+            {
+              type: "create_pull_request",
+              title: "TASK-0001: Sample task",
+              body: "## Summary\n- Adds the implementation.",
+              draft: true,
+              baseBranch: "main",
+              headBranch: "task-0001",
+            },
+          ],
+        }),
+      }),
+    ).resolves.toBe("https://github.com/acme/repo-a/pull/2");
+
+    const pullRequest = {
+      repoKey: "repo-a",
+      url: "https://github.com/acme/repo-a/pull/2",
+      title: "TASK-0001: Sample task",
+      source: "local",
+    };
+    expect(upsertTaskPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
+    expect(upsertPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
+    expect(transition).toHaveBeenCalledWith({ taskId: "TASK-0001", toState: "in_review" });
+    expect(warn).toHaveBeenCalledWith("failed to sync pull request with Linear task provider", {
+      taskId: "TASK-0001",
+      repoKey: "repo-a",
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/2",
+      source: "local",
+      error: "Linear request failed: 502 Bad Gateway",
+    });
+  });
+
   test("returns execution no-op tasks to in_review when an open pull request already exists", async () => {
     const transition = vi.fn(async () => undefined);
     const upsertPullRequest = vi.fn(async () => undefined);

@@ -785,7 +785,20 @@ export class LinearTaskSystem implements TaskSystem {
       return;
     }
 
-    const issue = await this.fetchIssueNode(input.taskId);
+    let issue: LinearIssueNode;
+    try {
+      issue = await this.fetchIssueNode(input.taskId);
+    } catch (error) {
+      this.logger.warn("failed to sync Linear pull request attachment", {
+        taskId: input.taskId,
+        repoKey: pullRequest.repoKey,
+        pullRequestUrl: pullRequest.url,
+        source: pullRequest.source,
+        error: errorMessage(error),
+      });
+      return;
+    }
+
     if (issue.attachments.nodes.some((attachment) => attachment.url === pullRequest.url)) {
       this.logger.info("skipping duplicate Linear pull request attachment", {
         taskId: input.taskId,

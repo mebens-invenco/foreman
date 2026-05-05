@@ -638,4 +638,56 @@ describe("LinearTaskSystem.upsertPullRequest", () => {
       error: "Linear request failed: attachment rejected",
     });
   });
+
+  test("logs a warning and continues when Linear issue lookup fails", async () => {
+    const logger = {
+      child() {
+        return this;
+      },
+      debug: vi.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      line: vi.fn(),
+      runnerLine: vi.fn(),
+      flush: async () => undefined,
+    };
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanIssue")) {
+        return new Response("Bad Gateway", {
+          status: 502,
+          statusText: "Bad Gateway",
+          headers: { "content-type": "text/plain" },
+        });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], logger as any);
+    await expect(
+      taskSystem.upsertPullRequest({
+        taskId: "ENG-123",
+        pullRequest: {
+          repoKey: "repo-a",
+          url: "https://github.com/acme/repo-a/pull/1",
+          title: "PR 1",
+          source: "local",
+        },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(requests).toHaveLength(1);
+    expect(logger.warn).toHaveBeenCalledWith("failed to sync Linear pull request attachment", {
+      taskId: "ENG-123",
+      repoKey: "repo-a",
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/1",
+      source: "local",
+      error: "Linear request failed: 502 Bad Gateway",
+    });
+  });
 });
