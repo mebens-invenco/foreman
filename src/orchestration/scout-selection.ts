@@ -23,7 +23,7 @@ import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import { branchExistsOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
-import { runScoutStatePromotions } from "./scout-state-transitions.js";
+import { runStateTransitions } from "./state-transition.js";
 
 type Selection = {
   task: Task;
@@ -504,7 +504,7 @@ export const runScoutSelection = async (input: {
     return promise;
   };
 
-  await runScoutStatePromotions({
+  await runStateTransitions({
     config: input.config,
     foremanRepos: input.foremanRepos,
     taskSystem: input.taskSystem,

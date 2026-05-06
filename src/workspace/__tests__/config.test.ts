@@ -46,12 +46,6 @@ describe("workspace config", () => {
     expect(getProviderStateForNormalized(linearConfig, "deployable")).toBe("Ready to Deploy");
   });
 
-  test("initializes lynk repos done on merge", () => {
-    const config = createDefaultWorkspaceConfig("lynk", "linear");
-
-    expect(config.repos.reposDoneOnMerge).toEqual(["foreman"]);
-  });
-
   test("routes review to execution and reviewer to reviewer runner", () => {
     const config = createDefaultWorkspaceConfig("foo", "file");
 

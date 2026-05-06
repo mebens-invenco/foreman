@@ -7,29 +7,29 @@ import type { WorkspaceConfig } from "../workspace/config.js";
 
 type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable";
 
-export type ScoutStateTransitionTargetProgress = {
+export type StateTransitionTargetProgress = {
   latestJob: JobRecord | null;
   latestAttempt: AttemptRecord | null;
   pullRequest: ResolvedPullRequest | null;
   state: TargetProgressState;
 };
 
-type PromotionRuleEvaluation =
+type StateTransitionRuleEvaluation =
   | { eligible: false; reason: string }
   | { eligible: true; reason: string; toState: TaskState };
 
-type ScoutStatePromotionRule = {
+type StateTransitionRule = {
   name: string;
   evaluate(input: {
     task: Task;
     targets: TaskTarget[];
     reposByKey: ReadonlyMap<string, RepoRef>;
     config: WorkspaceConfig;
-    getTargetProgress(task: Task, target: TaskTarget, repo: RepoRef): Promise<ScoutStateTransitionTargetProgress>;
-  }): Promise<PromotionRuleEvaluation>;
+    getTargetProgress(task: Task, target: TaskTarget, repo: RepoRef): Promise<StateTransitionTargetProgress>;
+  }): Promise<StateTransitionRuleEvaluation>;
 };
 
-const mergedPullRequestPromotionRule: ScoutStatePromotionRule = {
+const mergedPullRequestTransitionRule: StateTransitionRule = {
   name: "merged_pull_requests",
   async evaluate(input) {
     if (input.task.state !== "in_review") {
@@ -64,20 +64,20 @@ const mergedPullRequestPromotionRule: ScoutStatePromotionRule = {
   },
 };
 
-const promotionRules: ScoutStatePromotionRule[] = [mergedPullRequestPromotionRule];
+const transitionRules: StateTransitionRule[] = [mergedPullRequestTransitionRule];
 
-export const runScoutStatePromotions = async (input: {
+export const runStateTransitions = async (input: {
   config: WorkspaceConfig;
   foremanRepos: ForemanRepos;
   taskSystem: TaskSystem;
   tasks: Task[];
   reposByKey: ReadonlyMap<string, RepoRef>;
   getTargets(task: Task): TaskTarget[];
-  getTargetProgress(task: Task, target: TaskTarget, repo: RepoRef): Promise<ScoutStateTransitionTargetProgress>;
+  getTargetProgress(task: Task, target: TaskTarget, repo: RepoRef): Promise<StateTransitionTargetProgress>;
   logger?: LoggerService;
 }): Promise<void> => {
   for (const task of input.tasks) {
-    for (const rule of promotionRules) {
+    for (const rule of transitionRules) {
       const evaluation = await rule.evaluate({
         task,
         targets: input.getTargets(task),
@@ -87,7 +87,7 @@ export const runScoutStatePromotions = async (input: {
       });
 
       if (!evaluation.eligible) {
-        input.logger?.debug("scout state promotion rule not eligible", {
+        input.logger?.debug("state transition rule not eligible", {
           taskId: task.id,
           rule: rule.name,
           reason: evaluation.reason,
@@ -107,7 +107,7 @@ export const runScoutStatePromotions = async (input: {
       Object.assign(task, updatedTask);
       input.foremanRepos.taskMirror.saveTasks([updatedTask]);
 
-      input.logger?.info("promoted task state during scout", {
+      input.logger?.info("transitioned task state during scout", {
         taskId: task.id,
         rule: rule.name,
         toState: evaluation.toState,

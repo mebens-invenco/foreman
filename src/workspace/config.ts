@@ -243,7 +243,7 @@ export const createDefaultWorkspaceConfig = (
     explicit: [],
     roots: [],
     ignore: ["**/node_modules/**", "**/.git/**"],
-    reposDoneOnMerge: workspaceName === "lynk" ? ["foreman"] : [],
+    reposDoneOnMerge: [],
   },
   taskSystem:
     taskSystemType === "linear"
