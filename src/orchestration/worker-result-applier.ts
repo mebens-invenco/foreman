@@ -384,6 +384,7 @@ export class WorkerResultApplier {
       latestSummary: workerResult.summary,
       nextEligibleAt,
       retryCount,
+      // Retained for deployment history/audit even though retry scheduling uses retryCount backoff.
       blockedRetryCount: (prior?.blockedRetryCount ?? 0) + (workerResult.outcome === "blocked" ? 1 : 0),
       createdFollowUpTaskIds,
       successful: workerResult.outcome === "succeeded",

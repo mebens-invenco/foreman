@@ -42,12 +42,12 @@ Check the deployment status for the merged pull request associated with this sel
 
 ## Deployment Rules
 
-- Treat the Deployment Instructions section below as authoritative and follow it verbatim.
+- Treat the Deployment Instructions section above as authoritative and follow it verbatim.
 - The pull request reference is expected to be a merged pull request for the selected target.
 - Return `succeeded` only when the deployed behavior is verified as successful according to the Deployment Instructions section.
 - Return `in_progress` when deployment is still rolling out or the check is temporarily inconclusive without concrete failure evidence.
 - Return `follow_up_created` only when you also return one or more task `create_task` mutations documenting concrete failure/regression evidence.
-- Return `blocked` only when the deployment check cannot be performed due to an explicit blocker that a later retry might clear.
+- Return `blocked` when the deployment cannot be checked, when the failure source is unclear, when the issue appears to be transitive rather than an obvious code fix, or when an explicit blocker may clear on a later retry.
 - Do not make code changes, commits, pushes, or pull requests during deployment tracking.
 - Return all task-system writes as Foreman task mutations instead of calling write APIs directly.
 
