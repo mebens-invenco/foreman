@@ -183,7 +183,7 @@ describe("AttemptExecutor", () => {
       expect(runnerMocks.invoke.mock.calls[1]![0]).toMatchObject({
         nativeSessionId: "native-session-1",
       });
-      expect(runnerMocks.invoke.mock.calls[1]![0].prompt).toContain("could not parse a valid <agent-result> block");
+      expect(runnerMocks.invoke.mock.calls[1]![0].prompt).toContain("could not parse a valid `<agent-result>` block");
 
       const attempt = db.attempts.latestAttemptForJob(job.id)!;
       expect(attempt.status).toBe("completed");

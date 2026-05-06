@@ -2,16 +2,16 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskState, type TaskTarget, type WorkerResult } from "../domain/index.js";
-import { createAgentRunner, parseWorkerResult, validateWorkerResult } from "../execution/index.js";
-import { parseWorkerPromptPullRequestReference, renderWorkerPrompt } from "../execution/render-worker-prompt.js";
+import { createAgentRunner, parseWorkerResult, validateWorkerResult, type AgentRunner, type CapturedAgentRunResult, type WorkerResultAction } from "../execution/index.js";
+import { parseWorkerPromptPullRequestReference, renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
 import { ForemanError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
-import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../repos/index.js";
+import type { AttemptRecord, ForemanRepos, JobRecord, RunnerSessionRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
-import { runnerForAction, runnerSessionRoleForAction, runnerTuningValue, type WorkspaceConfig } from "../workspace/config.js";
+import { runnerForAction, runnerSessionRoleForAction, runnerTuningValue, type WorkspaceConfig, type WorkspaceRunnerConfig } from "../workspace/config.js";
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { assertTaskActionableTarget, leaseResourceKeysForAction } from "./scout-selection.js";
@@ -65,33 +65,6 @@ const formatWorkerResultParseFailure = (input: {
   }
 
   return details.join("\n");
-};
-
-const renderWorkerResultRecoveryPrompt = (input: {
-  action: WorkerResult["action"];
-  taskId: string;
-  taskTitle: string;
-  parseError: unknown;
-  stdoutArtifactPath: string;
-  invalidStdout: string;
-}): string => {
-  const parseMessage = input.parseError instanceof Error ? input.parseError.message : String(input.parseError);
-
-  return [
-    `Foreman needs to recover the missing worker result for task ${input.taskId}: ${input.taskTitle}`,
-    "",
-    `The previous ${input.action} runner process exited 0, but Foreman could not parse a valid <agent-result> block from stdout.`,
-    `Parse error: ${parseMessage}`,
-    `The invalid normalized stdout has been persisted at: ${input.stdoutArtifactPath}`,
-    "",
-    "Do not continue implementation, review, or make code changes. Inspect the existing worktree state only if needed.",
-    `Return exactly one valid <agent-result> block for action \"${input.action}\" and no prose after it.`,
-    "If you cannot safely determine the completed result, return a valid result with outcome \"failed\", no mutations, and a concise diagnostic summary.",
-    "Do not convert unvalidated prose into task or review mutations.",
-    "",
-    "Invalid stdout excerpt:",
-    truncateRunnerOutput(input.invalidStdout.trim() || "<empty>"),
-  ].join("\n");
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -365,87 +338,21 @@ export class AttemptExecutor {
         });
         attemptLogger.info("recorded attempt log artifact", { logPath: logAbsolutePath, sizeBytes: logStat.size });
 
-        let workerResult: WorkerResult;
-        let finalRunResult = runResult;
-        try {
-          workerResult = validateWorkerResult(parseWorkerResult(runResult.stdout));
-        } catch (parseError) {
-          if (runResult.exitCode !== 0 || runResult.signal) {
-            throw new ForemanError("runner_failed", formatRunnerFailure(runResult), 500);
-          }
-
-          attemptLogger.warn("worker result parsing failed after successful runner exit; requesting recovery", {
-            error: parseError instanceof Error ? parseError.message : String(parseError),
-            runnerOutputPath: runnerOutputRelativePath,
-          });
-          this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "worker_result_recovery_started", "Requesting recovered worker result", {
-            parseError: parseError instanceof Error ? parseError.message : String(parseError),
-            runnerOutputPath: runnerOutputRelativePath,
-          });
-
-          const recoveryNativeSessionId = runResult.nativeSessionId ?? activeRunnerSession?.nativeSessionId;
-          const recoveryResult = await runner.invoke({
-            attemptId: attempt.id,
-            action: job.action,
-            cwd: worktreePath,
-            env: this.deps.env,
-            prompt: renderWorkerResultRecoveryPrompt({
-              action: job.action,
-              taskId: task.id,
-              taskTitle: task.title,
-              parseError,
-              stdoutArtifactPath: runnerOutputRelativePath,
-              invalidStdout: runResult.stdout,
-            }),
-            timeoutMs: Math.min(runnerConfig.timeoutMs, workerResultRecoveryTimeoutMs),
-            ...(recoveryNativeSessionId ? { nativeSessionId: recoveryNativeSessionId } : {}),
-            abortSignal: controller.signal,
-            onStdoutLine: (line: string) => {
-              attemptLogger.runnerLine(line);
-            },
-            onStderrLine: (line: string) => {
-              attemptLogger.runnerLine(line);
-            },
-          });
-          finalRunResult = recoveryResult;
-          attemptLogger.info("worker result recovery invocation completed", {
-            exitCode: recoveryResult.exitCode,
-            signal: recoveryResult.signal,
-            nativeSessionId: recoveryResult.nativeSessionId ?? null,
-            stdoutBytes: recoveryResult.stdoutBytes,
-            stderrBytes: recoveryResult.stderrBytes,
-          });
-          if (runnerSession) {
-            this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
-              nativeSessionId: recoveryResult.nativeSessionId ?? runResult.nativeSessionId ?? null,
-              lastAttemptId: attempt.id,
-              lastReviewHeadSha: reviewHeadSha,
-            });
-          }
-          const recoveryOutputRelativePath = await this.writeRunnerOutputArtifact(attempt.id, recoveryResult.stdout, "runner-recovery-output");
-
-          try {
-            if (recoveryResult.exitCode !== 0 || recoveryResult.signal) {
-              throw new Error(formatRunnerFailure(recoveryResult));
-            }
-
-            workerResult = validateWorkerResult(parseWorkerResult(recoveryResult.stdout));
-            this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "worker_result_recovered", workerResult.summary, {
-              recoveryOutputPath: recoveryOutputRelativePath,
-            });
-          } catch (recoveryError) {
-            throw new ForemanError(
-              "worker_result_invalid",
-              formatWorkerResultParseFailure({
-                parseError,
-                stdoutArtifactPath: runnerOutputRelativePath,
-                recoveryError,
-                recoveryStdoutArtifactPath: recoveryOutputRelativePath,
-              }),
-              500,
-            );
-          }
-        }
+        const { workerResult, finalRunResult } = await this.parseOrRecoverWorkerResult({
+          runner,
+          runnerConfig,
+          attempt,
+          attemptLogger,
+          job,
+          task,
+          worktreePath,
+          runResult,
+          runnerOutputRelativePath,
+          runnerSession,
+          activeRunnerSession,
+          reviewHeadSha,
+          abortSignal: controller.signal,
+        });
         attemptLogger.info("parsed worker result", { outcome: workerResult.outcome });
 
         const resultRelativePath = path.join("artifacts", `attempt-${attempt.id}-result.json`);
@@ -572,6 +479,125 @@ export class AttemptExecutor {
   private async gitHead(cwd: string): Promise<string> {
     const { exec } = await import("../lib/process.js");
     return (await exec("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim();
+  }
+
+  private async parseOrRecoverWorkerResult(input: {
+    runner: AgentRunner;
+    runnerConfig: WorkspaceRunnerConfig;
+    attempt: AttemptRecord;
+    attemptLogger: LoggerService;
+    job: JobRecord;
+    task: Task;
+    worktreePath: string;
+    runResult: CapturedAgentRunResult;
+    runnerOutputRelativePath: string;
+    runnerSession: RunnerSessionRecord | null;
+    activeRunnerSession: RunnerSessionRecord | null;
+    reviewHeadSha: string | null;
+    abortSignal: AbortSignal;
+  }): Promise<{ workerResult: WorkerResult; finalRunResult: CapturedAgentRunResult }> {
+    try {
+      return {
+        workerResult: validateWorkerResult(parseWorkerResult(input.runResult.stdout)),
+        finalRunResult: input.runResult,
+      };
+    } catch (parseError) {
+      if (input.runResult.exitCode !== 0 || input.runResult.signal) {
+        throw new ForemanError("runner_failed", formatRunnerFailure(input.runResult), 500);
+      }
+
+      input.attemptLogger.warn("worker result parsing failed after successful runner exit; requesting recovery", {
+        error: parseError instanceof Error ? parseError.message : String(parseError),
+        runnerOutputPath: input.runnerOutputRelativePath,
+      });
+      this.deps.foremanRepos.attempts.addAttemptEvent(input.attempt.id, "worker_result_recovery_started", "Requesting recovered worker result", {
+        parseError: parseError instanceof Error ? parseError.message : String(parseError),
+        runnerOutputPath: input.runnerOutputRelativePath,
+      });
+
+      return this.recoverWorkerResult({ ...input, parseError });
+    }
+  }
+
+  private async recoverWorkerResult(input: {
+    runner: AgentRunner;
+    runnerConfig: WorkspaceRunnerConfig;
+    attempt: AttemptRecord;
+    attemptLogger: LoggerService;
+    job: JobRecord;
+    task: Task;
+    worktreePath: string;
+    runResult: CapturedAgentRunResult;
+    runnerOutputRelativePath: string;
+    runnerSession: RunnerSessionRecord | null;
+    activeRunnerSession: RunnerSessionRecord | null;
+    reviewHeadSha: string | null;
+    abortSignal: AbortSignal;
+    parseError: unknown;
+  }): Promise<{ workerResult: WorkerResult; finalRunResult: CapturedAgentRunResult }> {
+    const recoveryNativeSessionId = input.runResult.nativeSessionId ?? input.activeRunnerSession?.nativeSessionId;
+    const recoveryResult = await input.runner.invoke({
+      attemptId: input.attempt.id,
+      action: input.job.action,
+      cwd: input.worktreePath,
+      env: this.deps.env,
+      prompt: await renderWorkerResultRecoveryPrompt({
+        action: input.job.action as WorkerResultAction,
+        paths: this.deps.paths,
+        task: input.task,
+        parseError: input.parseError,
+        stdoutArtifactPath: input.runnerOutputRelativePath,
+        invalidStdout: input.runResult.stdout,
+      }),
+      timeoutMs: Math.min(input.runnerConfig.timeoutMs, workerResultRecoveryTimeoutMs),
+      ...(recoveryNativeSessionId ? { nativeSessionId: recoveryNativeSessionId } : {}),
+      abortSignal: input.abortSignal,
+      onStdoutLine: (line: string) => {
+        input.attemptLogger.runnerLine(line);
+      },
+      onStderrLine: (line: string) => {
+        input.attemptLogger.runnerLine(line);
+      },
+    });
+    input.attemptLogger.info("worker result recovery invocation completed", {
+      exitCode: recoveryResult.exitCode,
+      signal: recoveryResult.signal,
+      nativeSessionId: recoveryResult.nativeSessionId ?? null,
+      stdoutBytes: recoveryResult.stdoutBytes,
+      stderrBytes: recoveryResult.stderrBytes,
+    });
+    if (input.runnerSession) {
+      this.deps.foremanRepos.runnerSessions.updateSession(input.runnerSession.id, {
+        nativeSessionId: recoveryResult.nativeSessionId ?? input.runResult.nativeSessionId ?? null,
+        lastAttemptId: input.attempt.id,
+        lastReviewHeadSha: input.reviewHeadSha,
+      });
+    }
+    const recoveryOutputRelativePath = await this.writeRunnerOutputArtifact(input.attempt.id, recoveryResult.stdout, "runner-recovery-output");
+
+    try {
+      if (recoveryResult.exitCode !== 0 || recoveryResult.signal) {
+        throw new Error(formatRunnerFailure(recoveryResult));
+      }
+
+      const workerResult = validateWorkerResult(parseWorkerResult(recoveryResult.stdout));
+      this.deps.foremanRepos.attempts.addAttemptEvent(input.attempt.id, "worker_result_recovered", workerResult.summary, {
+        recoveryOutputPath: recoveryOutputRelativePath,
+      });
+
+      return { workerResult, finalRunResult: recoveryResult };
+    } catch (recoveryError) {
+      throw new ForemanError(
+        "worker_result_invalid",
+        formatWorkerResultParseFailure({
+          parseError: input.parseError,
+          stdoutArtifactPath: input.runnerOutputRelativePath,
+          recoveryError,
+          recoveryStdoutArtifactPath: recoveryOutputRelativePath,
+        }),
+        500,
+      );
+    }
   }
 
   private async writeRunnerOutputArtifact(attemptId: string, stdout: string, name: string): Promise<string> {

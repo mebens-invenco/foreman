@@ -11,9 +11,10 @@ export type PromptTemplateName =
   | "retry"
   | "consolidation"
   | "cron"
+  | "worker-result-recovery"
   | "review-continuation"
   | "reviewer-continuation";
-export type WorkerPromptTemplateName = Exclude<PromptTemplateName, "plan" | "review-continuation" | "reviewer-continuation">;
+export type WorkerPromptTemplateName = Exclude<PromptTemplateName, "plan" | "worker-result-recovery" | "review-continuation" | "reviewer-continuation">;
 
 const TEMPLATE_PATHS: Record<PromptTemplateName, string> = {
   plan: "prompts/templates/plan.md",
@@ -23,6 +24,7 @@ const TEMPLATE_PATHS: Record<PromptTemplateName, string> = {
   retry: "prompts/templates/retry.md",
   consolidation: "prompts/templates/consolidation.md",
   cron: "prompts/templates/cron.md",
+  "worker-result-recovery": "prompts/templates/worker-result-recovery.md",
   "review-continuation": "prompts/templates/review-continuation.md",
   "reviewer-continuation": "prompts/templates/reviewer-continuation.md",
 };

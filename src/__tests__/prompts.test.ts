@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../workspace/config.js";
 import type { ReviewContext, Task } from "../domain/index.js";
-import { renderWorkerPrompt } from "../execution/render-worker-prompt.js";
+import { renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
 import { renderPlanPrompt } from "../planning/render-plan-prompt.js";
 import { createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
 
@@ -178,6 +178,31 @@ describe("prompt rendering", () => {
     expect(result).not.toContain("upsert_artifact");
     expect(result).not.toContain("{{fragment:");
     expect(result).not.toContain("{{context:");
+  });
+
+  test("renders worker result recovery prompts from a template", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-worker-result-recovery-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+
+    const result = await renderWorkerResultRecoveryPrompt({
+      action: "execution",
+      paths,
+      task: sampleTask,
+      parseError: new Error("Worker output did not contain a valid <agent-result> block"),
+      stdoutArtifactPath: "artifacts/attempt-1-runner-output.txt",
+      invalidStdout: "Implemented the change.",
+    });
+
+    expect(result).toContain("# Worker Result Recovery Prompt");
+    expect(result).toContain("## Parse Failure");
+    expect(result).toContain("artifacts/attempt-1-runner-output.txt");
+    expect(result).toContain("## Invalid Stdout Excerpt");
+    expect(result).toContain("Implemented the change.");
+    expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action execution --help`);
+    expect(result).not.toContain("{{context:");
+    expect(result).not.toContain("{{fragment:");
+    expect(result).not.toContain("{{session:");
   });
 
   test("renders action-specific agent result validator commands", async () => {
