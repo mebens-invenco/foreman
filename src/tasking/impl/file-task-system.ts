@@ -21,7 +21,7 @@ import { isoNow } from "../../lib/time.js";
 import { LoggerService } from "../../logger.js";
 import type { WorkspaceConfig } from "../../workspace/config.js";
 import type { WorkspacePaths } from "../../workspace/workspace-paths.js";
-import type { TaskSystem } from "../task-system.js";
+import { renderTaskCreateDescription, type CreatedTask, type TaskSystem } from "../task-system.js";
 import { getProviderStateForNormalized, normalizeTaskState } from "../task-state-mapping.js";
 
 const normalizePriority = (value: unknown): Task["priority"] => {
@@ -188,6 +188,8 @@ const fileCommentsPath = (taskPath: string): string => taskPath.replace(/\.md$/,
 const isUnknownProviderStateError = (error: unknown): error is ForemanError =>
   isForemanError(error) && error.code === "unknown_provider_state";
 
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 export class FileTaskSystem implements TaskSystem {
   private readonly logger: LoggerService;
 
@@ -212,6 +214,19 @@ export class FileTaskSystem implements TaskSystem {
   private async listTaskFiles(): Promise<string[]> {
     await ensureDir(this.taskDir);
     return fg("*.md", { cwd: this.taskDir, absolute: true, onlyFiles: true }).then((entries) => entries.sort());
+  }
+
+  private async nextTaskId(): Promise<string> {
+    const prefix = this.config.taskSystem.file!.idPrefix;
+    const pattern = new RegExp(`^${escapeRegExp(prefix)}-(\\d+)$`);
+    let max = 0;
+    for (const filePath of await this.listTaskFiles()) {
+      const match = path.basename(filePath, ".md").match(pattern);
+      if (match) {
+        max = Math.max(max, Number.parseInt(match[1]!, 10));
+      }
+    }
+    return `${prefix}-${String(max + 1).padStart(4, "0")}`;
   }
 
   private async loadTaskDocument(taskId: string): Promise<{ task: Task; frontmatter: FileTaskFrontmatter; path: string }> {
@@ -260,6 +275,33 @@ export class FileTaskSystem implements TaskSystem {
 
   async getTask(taskId: string): Promise<Task> {
     return (await this.loadTaskDocument(taskId)).task;
+  }
+
+  async createTask(input: Parameters<TaskSystem["createTask"]>[0]): Promise<CreatedTask> {
+    await ensureDir(this.taskDir);
+    const id = await this.nextTaskId();
+    const now = isoNow();
+    const branchName = input.mutation.branchName ?? id.toLowerCase();
+    const taskPath = path.join(this.taskDir, `${id}.md`);
+    const frontmatter: FileTaskFrontmatter = {
+      id,
+      title: input.mutation.title,
+      state: getProviderStateForNormalized(this.config, "ready"),
+      priority: input.mutation.priority ?? "none",
+      labels: ["Agent"],
+      targets: input.mutation.repos.map((repoKey, position) => ({ repoKey, branchName, position })),
+      targetDependencies: (input.mutation.repoDependencies ?? []).map((dependency, position) => ({ ...dependency, position })),
+      dependsOnTasks: input.mutation.dependencies?.taskIds ?? [],
+      baseFromTask: input.mutation.dependencies?.baseTaskId ?? null,
+      pullRequests: [],
+      assignee: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await atomicWriteFile(taskPath, stringifyFileTask(frontmatter, renderTaskCreateDescription(input.mutation)));
+    this.logger.info("created file task", { taskId: id, parentTaskId: input.parentTask.id, filePath: taskPath });
+    return { id, providerId: id, url: null };
   }
 
   async listComments(taskId: string): Promise<TaskComment[]> {

@@ -17,7 +17,38 @@ export const workerResultExample = {
   signals: [],
 } satisfies WorkerResult;
 
-const taskMutationSchema = z.object({ type: z.literal("add_comment"), body: z.string().min(1) });
+const taskPrioritySchema = z.enum(["urgent", "high", "normal", "none", "low"]);
+
+const taskMutationSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("add_comment"), body: z.string().min(1) }),
+  z.object({
+    type: z.literal("create_task"),
+    title: z.string().min(1),
+    description: z.string().min(1).optional(),
+    body: z.string().min(1).optional(),
+    repos: z.array(z.string().min(1)).min(1),
+    priority: taskPrioritySchema.optional(),
+    dependencies: z
+      .object({
+        taskIds: z.array(z.string().min(1)).optional(),
+        baseTaskId: z.string().min(1).nullable().optional(),
+      })
+      .optional(),
+    repoDependencies: z
+      .array(
+        z.object({
+          taskTargetRepoKey: z.string().min(1),
+          dependsOnRepoKey: z.string().min(1),
+        }),
+      )
+      .optional(),
+    branchName: z.string().min(1).optional(),
+  }),
+]).superRefine((mutation, ctx) => {
+  if (mutation.type === "create_task" && !mutation.description && !mutation.body) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["description"], message: "Either description or body is required" });
+  }
+});
 
 const reviewMutationSchema = z.discriminatedUnion("type", [
   z.object({

@@ -193,6 +193,20 @@ export class WorkerResultApplier {
         await this.deps.taskSystem.addComment({ taskId: input.task.id, body: mutation.body });
         logger.info("added task comment from worker mutation");
       }
+      if (mutation.type === "create_task") {
+        const createdTask = await this.deps.taskSystem.createTask({ parentTask: input.task, mutation });
+        this.deps.foremanRepos.attempts.addAttemptEvent(
+          input.attempt.id,
+          "task_created",
+          `Created task ${createdTask.id}`,
+          { taskId: createdTask.id, providerId: createdTask.providerId, url: createdTask.url },
+        );
+        logger.info("created task from worker mutation", {
+          createdTaskId: createdTask.id,
+          createdProviderId: createdTask.providerId,
+          url: createdTask.url,
+        });
+      }
     }
 
     if (input.job.action === "consolidation" && workerResult.outcome === "completed") {

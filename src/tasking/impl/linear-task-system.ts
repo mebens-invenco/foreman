@@ -1,10 +1,10 @@
-import type { RepoRef, Task, TaskComment, TaskPullRequest, TaskState, TaskTargetDependencyRef, TaskTargetRef } from "../../domain/index.js";
+import type { RepoRef, Task, TaskComment, TaskCreateMutation, TaskPullRequest, TaskState, TaskTargetDependencyRef, TaskTargetRef } from "../../domain/index.js";
 import { ForemanError, isForemanError } from "../../lib/errors.js";
 import { createTimeoutSignal, isAbortLikeError, PROVIDER_REQUEST_TIMEOUT_MS } from "../../lib/fetch-timeout.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
 import type { WorkspaceConfig } from "../../workspace/config.js";
-import type { TaskSystem } from "../task-system.js";
+import { renderTaskCreateDescription, type CreatedTask, type TaskSystem } from "../task-system.js";
 import { getProviderStateForNormalized, normalizeTaskState } from "../task-state-mapping.js";
 
 type LinearIssueNode = {
@@ -25,6 +25,22 @@ type LinearIssueNode = {
 type LinearViewer = {
   id: string;
   name: string;
+};
+
+type LinearAssignee = {
+  id: string;
+  name: string;
+};
+
+type LinearIssueCreatePayload = {
+  issueCreate: {
+    success: boolean;
+    issue: {
+      id: string;
+      identifier: string;
+      url: string | null;
+    } | null;
+  };
 };
 
 type RepoDescriptor = { owner: string; repo: string };
@@ -253,6 +269,21 @@ const linearPriorityToNormalized = (label: string | null): Task["priority"] => {
       return "normal";
     default:
       return "none";
+  }
+};
+
+const normalizedPriorityToLinear = (priority: Task["priority"] | undefined): number => {
+  switch (priority ?? "none") {
+    case "urgent":
+      return 1;
+    case "high":
+      return 2;
+    case "normal":
+      return 3;
+    case "low":
+      return 4;
+    case "none":
+      return 0;
   }
 };
 
@@ -529,6 +560,28 @@ export class LinearTaskSystem implements TaskSystem {
     return { assigneeId: viewer.id };
   }
 
+  private async resolveIssueCreateAssigneeId(): Promise<string> {
+    const assignee = this.config.taskSystem.linear!.assignee;
+    if (assignee === "me") {
+      return (await this.getViewer()).id;
+    }
+
+    const data = await this.client.request<{ users: { nodes: LinearAssignee[] } }>(
+      `query ForemanAssigneeByName($name: String!) {
+        users(filter: { name: { eq: $name } }, first: 1) {
+          nodes { id name }
+        }
+      }`,
+      { name: assignee },
+    );
+    const user = data.users.nodes.find((item) => item.name === assignee);
+    if (!user) {
+      this.logger.error("Linear assignee was not found for task creation", { assignee });
+      throw new ForemanError("linear_assignee_not_found", `Linear assignee not found: ${assignee}`);
+    }
+    return user.id;
+  }
+
   async validateStartup(): Promise<void> {
     const linear = this.config.taskSystem.linear!;
     this.logger.info("validating Linear startup configuration", { team: linear.team });
@@ -560,7 +613,7 @@ export class LinearTaskSystem implements TaskSystem {
         }
       }
 
-      const requiredLabels = [...linear.includeLabels, linear.consolidatedLabel];
+      const requiredLabels = [...linear.includeLabels, linear.agentCreatedLabel, linear.consolidatedLabel];
       const availableLabels = new Set(response.issueLabels.nodes.map((label) => label.name));
       for (const label of requiredLabels) {
         if (!availableLabels.has(label)) {
@@ -693,6 +746,87 @@ export class LinearTaskSystem implements TaskSystem {
     const issue = await this.fetchIssueNode(taskId);
     this.logger.debug("fetched Linear issue", { taskId, providerId: issue.id, state: issue.state.name });
     return this.linearIssueToTask(issue);
+  }
+
+  private async resolveReadyStateId(): Promise<string> {
+    const linear = this.config.taskSystem.linear!;
+    const team = await this.getConfiguredTeamInfo();
+    const state = linear.states.ready.map((name) => team.states.find((item) => item.name === name)).find(Boolean);
+    if (!state) {
+      this.logger.error("Linear ready state was not found for task creation", { team: linear.team, readyStates: linear.states.ready.join(",") });
+      throw new ForemanError("linear_state_not_found", `Linear ready state not found: ${linear.states.ready.join(", ")}`);
+    }
+    return state.id;
+  }
+
+  private async resolveLabelIds(labelNames: string[]): Promise<string[]> {
+    const labelData = await this.client.request<{ issueLabels: { nodes: Array<{ id: string; name: string }> } }>(
+      `query ForemanLabels {
+        issueLabels(first: 250) { nodes { id name } }
+      }`,
+    );
+    const labelsByName = new Map(labelData.issueLabels.nodes.map((label) => [label.name, label.id]));
+    const labelIds: string[] = [];
+    for (const name of uniqueValues(labelNames)) {
+      const id = labelsByName.get(name);
+      if (!id) {
+        this.logger.error("Linear label was not found for task creation", { label: name });
+        throw new ForemanError("linear_label_not_found", `Linear label not found: ${name}`);
+      }
+      labelIds.push(id);
+    }
+    return labelIds;
+  }
+
+  async createTask(input: { parentTask: Task; mutation: TaskCreateMutation }): Promise<CreatedTask> {
+    const linear = this.config.taskSystem.linear!;
+    const team = await this.getConfiguredTeamInfo();
+    const stateId = await this.resolveReadyStateId();
+    const labelIds = await this.resolveLabelIds([...linear.includeLabels, linear.agentCreatedLabel]);
+    const assigneeId = await this.resolveIssueCreateAssigneeId();
+    const variables = {
+      input: {
+        teamId: team.id,
+        parentId: input.parentTask.providerId,
+        title: input.mutation.title,
+        description: renderTaskCreateDescription(input.mutation),
+        stateId,
+        labelIds,
+        priority: normalizedPriorityToLinear(input.mutation.priority),
+        assigneeId,
+      },
+    };
+
+    this.logger.info("creating Linear child issue", {
+      parentTaskId: input.parentTask.id,
+      parentProviderId: input.parentTask.providerId,
+      title: input.mutation.title,
+      repoCount: input.mutation.repos.length,
+      labelCount: labelIds.length,
+    });
+    const data = await this.client.request<LinearIssueCreatePayload>(
+      `mutation ForemanIssueCreate($input: IssueCreateInput!) {
+        issueCreate(input: $input) {
+          success
+          issue { id identifier url }
+        }
+      }`,
+      variables,
+    );
+    if (!data.issueCreate.issue) {
+      throw new ForemanError("linear_request_failed", "Linear issueCreate returned no issue", 502);
+    }
+    this.logger.info("created Linear child issue", {
+      parentTaskId: input.parentTask.id,
+      createdTaskId: data.issueCreate.issue.identifier,
+      createdProviderId: data.issueCreate.issue.id,
+      url: data.issueCreate.issue.url,
+    });
+    return {
+      id: data.issueCreate.issue.identifier,
+      providerId: data.issueCreate.issue.id,
+      url: data.issueCreate.issue.url,
+    };
   }
 
   async listComments(taskId: string): Promise<TaskComment[]> {
