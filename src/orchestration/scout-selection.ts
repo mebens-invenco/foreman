@@ -843,14 +843,6 @@ export const runScoutSelection = async (input: {
               continue;
             }
 
-            if (record?.latestStatus === "blocked" && record.blockedRetryCount >= input.config.deployment.maxBlockedRetries) {
-              await recordBlocker(
-                task.id,
-                `Deployment tracking stopped for target ${target.repoKey} after ${record.blockedRetryCount} blocked retries. Manual intervention is required before Foreman will retry deployment tracking for this merged pull request.`,
-              );
-              continue;
-            }
-
             if (record?.nextEligibleAt && Date.parse(record.nextEligibleAt) > Date.now()) {
               continue;
             }

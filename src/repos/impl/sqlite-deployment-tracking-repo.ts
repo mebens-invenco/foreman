@@ -18,6 +18,7 @@ const mapDeploymentRecord = (row: SqliteRow): DeploymentRecord => ({
   latestStatus: row.latest_status as DeploymentStatus,
   latestSummary: String(row.latest_summary ?? ""),
   nextEligibleAt: (row.next_eligible_at as string | null) ?? null,
+  retryCount: Number(row.retry_count ?? 0),
   blockedRetryCount: Number(row.blocked_retry_count ?? 0),
   createdFollowUpTaskIds: JSON.parse(String(row.created_follow_up_task_ids_json ?? "[]")),
   successful: Number(row.successful) === 1,
@@ -34,9 +35,9 @@ export class SqliteDeploymentTrackingRepo implements DeploymentTrackingRepo {
       .prepare(
         `SELECT id, task_id, task_target_id, repo_key, pr_url, pr_number, pr_head_branch, pr_base_branch,
                 instruction_hash, instruction_body, latest_status, latest_summary, next_eligible_at,
-                blocked_retry_count, created_follow_up_task_ids_json, successful, source_attempt_id,
+                retry_count, blocked_retry_count, created_follow_up_task_ids_json, successful, source_attempt_id,
                 created_at, updated_at
-           FROM deployment_tracking
+           FROM deployment
           WHERE task_target_id = ?
             AND pr_url = ?
             AND instruction_hash = ?
@@ -52,9 +53,9 @@ export class SqliteDeploymentTrackingRepo implements DeploymentTrackingRepo {
       .prepare(
         `SELECT id, task_id, task_target_id, repo_key, pr_url, pr_number, pr_head_branch, pr_base_branch,
                 instruction_hash, instruction_body, latest_status, latest_summary, next_eligible_at,
-                blocked_retry_count, created_follow_up_task_ids_json, successful, source_attempt_id,
+                retry_count, blocked_retry_count, created_follow_up_task_ids_json, successful, source_attempt_id,
                 created_at, updated_at
-           FROM deployment_tracking
+           FROM deployment
           WHERE task_id = ?
           ORDER BY repo_key ASC, updated_at DESC`,
       )
@@ -75,6 +76,7 @@ export class SqliteDeploymentTrackingRepo implements DeploymentTrackingRepo {
     latestStatus: DeploymentStatus;
     latestSummary: string;
     nextEligibleAt: string | null;
+    retryCount: number;
     blockedRetryCount: number;
     createdFollowUpTaskIds: string[];
     successful: boolean;
@@ -84,11 +86,11 @@ export class SqliteDeploymentTrackingRepo implements DeploymentTrackingRepo {
     const now = isoNow();
     this.sqlite
       .prepare(
-        `INSERT INTO deployment_tracking(
+        `INSERT INTO deployment(
           id, task_id, task_target_id, repo_key, pr_url, pr_number, pr_head_branch, pr_base_branch,
           instruction_hash, instruction_body, latest_status, latest_summary, next_eligible_at,
-          blocked_retry_count, created_follow_up_task_ids_json, successful, source_attempt_id, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          retry_count, blocked_retry_count, created_follow_up_task_ids_json, successful, source_attempt_id, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(task_target_id, pr_url, instruction_hash) DO UPDATE SET
           task_id = excluded.task_id,
           repo_key = excluded.repo_key,
@@ -99,6 +101,7 @@ export class SqliteDeploymentTrackingRepo implements DeploymentTrackingRepo {
           latest_status = excluded.latest_status,
           latest_summary = excluded.latest_summary,
           next_eligible_at = excluded.next_eligible_at,
+          retry_count = excluded.retry_count,
           blocked_retry_count = excluded.blocked_retry_count,
           created_follow_up_task_ids_json = excluded.created_follow_up_task_ids_json,
           successful = excluded.successful,
@@ -119,6 +122,7 @@ export class SqliteDeploymentTrackingRepo implements DeploymentTrackingRepo {
         input.latestStatus,
         input.latestSummary,
         input.nextEligibleAt,
+        input.retryCount,
         input.blockedRetryCount,
         stableStringify(input.createdFollowUpTaskIds),
         input.successful ? 1 : 0,

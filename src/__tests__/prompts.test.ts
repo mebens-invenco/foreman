@@ -467,7 +467,10 @@ describe("prompt rendering", () => {
     expect(result).toContain("Check once");
     expect(result).toContain("Never poll, sleep, wait");
     expect(result).toContain("return `in_progress`");
-    expect(result).toContain("follow-up task only when you have concrete evidence");
+    expect(result).toContain("Create a follow-up fix task only when concrete evidence");
+    expect(result).toContain("Correctness is the primary goal");
+    expect(result).toContain("transitive deployment failure");
+    expect(result).toContain("Deployment Instructions section");
     expect(result).toContain("Ship plan notes");
     expect(result).toContain("Check the production dashboard once.");
     expect(result).toContain("https://github.com/acme/repo-a/pull/10");

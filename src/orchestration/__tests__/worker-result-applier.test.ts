@@ -227,7 +227,8 @@ describe("WorkerResultApplier deployment tracking", () => {
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
-    config.deployment.retryIntervalMinutes = 15;
+    config.deployment.minRetryIntervalMinutes = 15;
+    config.deployment.maxRetryIntervalMinutes = 60;
     const deployableTask = task();
     const repo: RepoRef = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
     const pullRequest: ResolvedPullRequest = {
@@ -308,6 +309,7 @@ describe("WorkerResultApplier deployment tracking", () => {
 
       const record = db.deploymentTracking.getDeploymentRecord({ taskTargetId: target!.id, prUrl: pullRequest.pullRequestUrl, instructionHash: "deploy-hash" });
       expect(record).toMatchObject({ latestStatus: "in_progress", successful: false });
+      expect(record!.retryCount).toBe(1);
       expect(Date.parse(record!.nextEligibleAt!)).toBeGreaterThanOrEqual(before + 15 * 60 * 1000 - 1000);
       expect(taskSystem.transitions).toEqual([]);
     } finally {
@@ -505,7 +507,8 @@ describe("WorkerResultApplier deployment tracking", () => {
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
-    config.deployment.retryIntervalMinutes = 12;
+    config.deployment.minRetryIntervalMinutes = 12;
+    config.deployment.maxRetryIntervalMinutes = 36;
     const deployableTask = task();
     const repo: RepoRef = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
     const pullRequest: ResolvedPullRequest = {
@@ -535,6 +538,7 @@ describe("WorkerResultApplier deployment tracking", () => {
         latestStatus: "blocked",
         latestSummary: "Provider unavailable.",
         nextEligibleAt: "2000-01-01T00:00:00.000Z",
+        retryCount: 1,
         blockedRetryCount: 1,
         createdFollowUpTaskIds: [],
         successful: false,
@@ -603,8 +607,8 @@ describe("WorkerResultApplier deployment tracking", () => {
       });
 
       const record = db.deploymentTracking.getDeploymentRecord({ taskTargetId: target!.id, prUrl: pullRequest.pullRequestUrl, instructionHash: "deploy-hash" });
-      expect(record).toMatchObject({ latestStatus: "blocked", blockedRetryCount: 2, successful: false });
-      expect(Date.parse(record!.nextEligibleAt!)).toBeGreaterThanOrEqual(before + 12 * 60 * 1000 - 1000);
+      expect(record).toMatchObject({ latestStatus: "blocked", retryCount: 2, blockedRetryCount: 2, successful: false });
+      expect(Date.parse(record!.nextEligibleAt!)).toBeGreaterThanOrEqual(before + 24 * 60 * 1000 - 1000);
       expect(taskSystem.comments).toEqual([{ taskId: deployableTask.id, body: "[agent] Deployment provider unavailable." }]);
     } finally {
       db.close();

@@ -14,6 +14,7 @@ export type DeploymentRecord = {
   latestStatus: DeploymentStatus;
   latestSummary: string;
   nextEligibleAt: string | null;
+  retryCount: number;
   blockedRetryCount: number;
   createdFollowUpTaskIds: string[];
   successful: boolean;
@@ -38,6 +39,7 @@ export interface DeploymentTrackingRepo {
     latestStatus: DeploymentStatus;
     latestSummary: string;
     nextEligibleAt: string | null;
+    retryCount: number;
     blockedRetryCount: number;
     createdFollowUpTaskIds: string[];
     successful: boolean;

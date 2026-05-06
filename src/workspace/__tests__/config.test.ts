@@ -25,7 +25,7 @@ describe("workspace config", () => {
     expect(parsed.reviewer.agentPrefix).toBe("[review agent] ");
     expect(parsed.cron).toEqual({ enabled: false, jobsDir: "cron" });
     expect(parsed.agentTaskCreation).toEqual({ enabled: false });
-    expect(parsed.deployment).toEqual({ retryIntervalMinutes: 10, maxBlockedRetries: 6 });
+    expect(parsed.deployment).toEqual({ minRetryIntervalMinutes: 10, maxRetryIntervalMinutes: 180 });
     expect(parsed.scheduler.workerConcurrency).toBe(4);
     expect(parsed.http.port).toBe(8765);
   });
@@ -35,6 +35,14 @@ describe("workspace config", () => {
     const parsed = parseWorkspaceConfig(stringifyWorkspaceConfig(config));
 
     expect(parsed.taskSystem.linear!.agentCreatedLabel).toBe("Agent Created");
+  });
+
+  test("requires deployment max retry interval to be at least the min interval", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.deployment.minRetryIntervalMinutes = 60;
+    config.deployment.maxRetryIntervalMinutes = 10;
+
+    expect(() => parseWorkspaceConfig(stringifyWorkspaceConfig(config))).toThrow("maxRetryIntervalMinutes");
   });
 
   test("parses deployable state mappings for file and Linear task systems", () => {

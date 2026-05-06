@@ -30,6 +30,15 @@ const ensureReviewCommentPrefix = (body: string, prefix: string): string =>
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
+const deploymentRetryIntervalMinutes = (input: {
+  retryCount: number;
+  minRetryIntervalMinutes: number;
+  maxRetryIntervalMinutes: number;
+}): number => {
+  const multiplier = 2 ** Math.max(0, input.retryCount - 1);
+  return Math.min(input.maxRetryIntervalMinutes, input.minRetryIntervalMinutes * multiplier);
+};
+
 type WorkerResultApplierDeps = {
   config: WorkspaceConfig;
   foremanRepos: ForemanRepos;
@@ -348,10 +357,18 @@ export class WorkerResultApplier {
       }
     }
 
-    const nextEligibleAt =
-      workerResult.outcome === "in_progress" || workerResult.outcome === "blocked"
-        ? addSeconds(new Date(), this.deps.config.deployment.retryIntervalMinutes * 60)
-        : null;
+    const shouldRetry = workerResult.outcome === "in_progress" || workerResult.outcome === "blocked";
+    const retryCount = shouldRetry ? (prior?.retryCount ?? 0) + 1 : 0;
+    const nextEligibleAt = shouldRetry
+      ? addSeconds(
+          new Date(),
+          deploymentRetryIntervalMinutes({
+            retryCount,
+            minRetryIntervalMinutes: this.deps.config.deployment.minRetryIntervalMinutes,
+            maxRetryIntervalMinutes: this.deps.config.deployment.maxRetryIntervalMinutes,
+          }) * 60,
+        )
+      : null;
     const latestStatus = workerResult.outcome as DeploymentStatus;
     this.deps.foremanRepos.deploymentTracking.upsertDeploymentRecord({
       taskId: input.task.id,
@@ -366,6 +383,7 @@ export class WorkerResultApplier {
       latestStatus,
       latestSummary: workerResult.summary,
       nextEligibleAt,
+      retryCount,
       blockedRetryCount: (prior?.blockedRetryCount ?? 0) + (workerResult.outcome === "blocked" ? 1 : 0),
       createdFollowUpTaskIds,
       successful: workerResult.outcome === "succeeded",

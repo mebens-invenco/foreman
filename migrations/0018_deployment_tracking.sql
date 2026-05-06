@@ -154,7 +154,7 @@ CREATE TABLE runner_session (
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE deployment_tracking (
+CREATE TABLE deployment (
   id TEXT PRIMARY KEY,
   task_id TEXT NOT NULL,
   task_target_id TEXT NOT NULL REFERENCES task_target(id) ON DELETE CASCADE,
@@ -168,6 +168,7 @@ CREATE TABLE deployment_tracking (
   latest_status TEXT NOT NULL CHECK (latest_status IN ('succeeded', 'in_progress', 'follow_up_created', 'blocked')),
   latest_summary TEXT NOT NULL DEFAULT '',
   next_eligible_at TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
   blocked_retry_count INTEGER NOT NULL DEFAULT 0 CHECK (blocked_retry_count >= 0),
   created_follow_up_task_ids_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(created_follow_up_task_ids_json) AND json_type(created_follow_up_task_ids_json) = 'array'),
   successful INTEGER NOT NULL DEFAULT 0 CHECK (successful IN (0, 1)),
@@ -302,7 +303,7 @@ CREATE UNIQUE INDEX idx_runner_session_unique_active_config
   ON runner_session(task_target_id, role, runner_name, runner_model, runner_variant)
   WHERE is_active = 1;
 
-CREATE INDEX idx_deployment_tracking_task_target ON deployment_tracking(task_id, task_target_id);
-CREATE INDEX idx_deployment_tracking_next_eligible ON deployment_tracking(next_eligible_at);
+CREATE INDEX idx_deployment_task_target ON deployment(task_id, task_target_id);
+CREATE INDEX idx_deployment_next_eligible ON deployment(next_eligible_at);
 
 PRAGMA foreign_keys=ON;

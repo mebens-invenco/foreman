@@ -2089,7 +2089,6 @@ describe("runScoutSelection", () => {
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
-    config.deployment.maxBlockedRetries = 2;
     const paths = createWorkspacePaths(projectRoot, tempDir);
     await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
 
@@ -2128,6 +2127,7 @@ describe("runScoutSelection", () => {
         latestStatus: "in_progress",
         latestSummary: "Still rolling out",
         nextEligibleAt: "2999-01-01T00:00:00.000Z",
+        retryCount: 99,
         blockedRetryCount: 99,
         createdFollowUpTaskIds: [],
         successful: false,
@@ -2158,6 +2158,7 @@ describe("runScoutSelection", () => {
         latestStatus: "in_progress",
         latestSummary: "Still rolling out",
         nextEligibleAt: "2000-01-01T00:00:00.000Z",
+        retryCount: 99,
         blockedRetryCount: 99,
         createdFollowUpTaskIds: [],
         successful: false,
@@ -2179,12 +2180,11 @@ describe("runScoutSelection", () => {
     }
   });
 
-  test("stops blocked deployment retries at the configured cap", async () => {
+  test("continues blocked deployment retries after prior blocked attempts", async () => {
     const tempDir = await createTempDir("foreman-scout-deployment-blocked-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
-    config.deployment.maxBlockedRetries = 2;
     const paths = createWorkspacePaths(projectRoot, tempDir);
     await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
 
@@ -2213,6 +2213,7 @@ describe("runScoutSelection", () => {
       latestStatus: "blocked",
       latestSummary: "Provider unavailable",
       nextEligibleAt: "2000-01-01T00:00:00.000Z",
+      retryCount: 2,
       blockedRetryCount: 2,
       createdFollowUpTaskIds: [],
       successful: false,
@@ -2238,8 +2239,8 @@ describe("runScoutSelection", () => {
         triggerType: "manual",
       });
 
-      expect(result.jobs).toHaveLength(0);
-      expect(taskSystem.comments.get(deployableTask.id)?.[0]?.body).toContain("Deployment tracking stopped for target repo-a after 2 blocked retries");
+      expect(result.jobs.map((job) => job.action)).toEqual(["deployment"]);
+      expect(taskSystem.comments.get(deployableTask.id)).toBeUndefined();
     } finally {
       db.close();
     }
@@ -2286,6 +2287,7 @@ describe("runScoutSelection", () => {
       latestStatus: "follow_up_created",
       latestSummary: "Follow-up created",
       nextEligibleAt: null,
+      retryCount: 0,
       blockedRetryCount: 0,
       createdFollowUpTaskIds: [childTask.id],
       successful: false,
