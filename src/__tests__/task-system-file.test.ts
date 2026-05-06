@@ -227,6 +227,45 @@ Task body
     expect(rewritten).toContain("source: local");
   });
 
+  test("creates structured file tasks with normalized Agent metadata", async () => {
+    const workspaceRoot = await createTempDir("foreman-file-task-system-");
+    cleanupDirs.push(workspaceRoot);
+
+    await writeTask(workspaceRoot, {
+      id: "TASK-0007",
+      title: "Existing task",
+      state: "ready",
+    });
+
+    const paths = createWorkspacePaths(workspaceRoot, workspaceRoot);
+    const taskSystem = new FileTaskSystem(createDefaultWorkspaceConfig("foo", "file"), paths);
+
+    const created = await taskSystem.createTask({
+      parentTask: await taskSystem.getTask("TASK-0007"),
+      mutation: {
+        type: "create_task",
+        title: "Follow-up task",
+        body: "Do the follow-up work.",
+        repos: ["repo-a", "repo-b"],
+        priority: "high",
+        dependencies: { taskIds: ["TASK-0007"], baseTaskId: "TASK-0006" },
+        repoDependencies: [{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a" }],
+        branchName: "follow-up-branch",
+      },
+    });
+
+    expect(created).toEqual({ id: "TASK-0008", providerId: "TASK-0008", url: null });
+    const task = await taskSystem.getTask("TASK-0008");
+    expect(task.targets).toEqual([
+      { repoKey: "repo-a", branchName: "follow-up-branch", position: 0 },
+      { repoKey: "repo-b", branchName: "follow-up-branch", position: 1 },
+    ]);
+    expect(task.targetDependencies).toEqual([{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a", position: 0 }]);
+    expect(task.dependencies).toEqual({ taskIds: ["TASK-0007"], baseTaskId: "TASK-0006" });
+    const contents = await fs.readFile(path.join(workspaceRoot, "tasks", "TASK-0008.md"), "utf8");
+    expect(contents).toContain("Agent:\n  Repos: repo-a, repo-b\n  Repo dependencies: repo-b<-repo-a\n  Depends on tasks: TASK-0007\n  Base from task: TASK-0006\n  Branch: follow-up-branch");
+  });
+
   test("getTask still fails for unmapped provider states", async () => {
     const workspaceRoot = await createTempDir("foreman-file-task-system-");
     cleanupDirs.push(workspaceRoot);

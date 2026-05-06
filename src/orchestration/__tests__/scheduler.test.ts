@@ -953,6 +953,73 @@ describe("SchedulerService applyWorkerResult", () => {
     expect(transition).toHaveBeenCalledWith({ taskId: "TASK-0001", toState: "in_review" });
   });
 
+  test("records identifiers for tasks created from worker mutations", async () => {
+    const createTask = vi.fn(async () => ({ id: "TASK-0002", providerId: "TASK-0002", url: null }));
+    const addAttemptEvent = vi.fn();
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({ attempts: { addAttemptEvent } }),
+      taskSystem: {
+        createTask,
+        addComment: vi.fn(async () => undefined),
+        upsertPullRequest: vi.fn(async () => undefined),
+        transition: vi.fn(async () => undefined),
+        updateLabels: vi.fn(async () => undefined),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const applyWorkerResult = (scheduler as any).applyWorkerResult.bind(scheduler) as (input: unknown) => Promise<string | null>;
+    const task = sampleTask({ state: "in_progress", providerState: "in_progress", pullRequests: [] });
+    const mutation = {
+      type: "create_task" as const,
+      title: "Follow-up task",
+      description: "Do the follow-up work.",
+      repos: ["repo-a"],
+    };
+
+    await expect(
+      applyWorkerResult({
+        attempt: { id: "attempt-3c" },
+        job: { action: "execution", taskTargetId: sampleTarget.id },
+        task,
+        target: sampleTarget,
+        repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
+        workerResult: baseWorkerResult({
+          action: "execution",
+          outcome: "completed",
+          taskMutations: [mutation],
+        }),
+      }),
+    ).resolves.toBeNull();
+
+    expect(createTask).toHaveBeenCalledWith({ parentTask: task, mutation });
+    expect(addAttemptEvent).toHaveBeenCalledWith(
+      "attempt-3c",
+      "task_created",
+      JSON.stringify({ taskId: "TASK-0002", providerId: "TASK-0002", url: null }),
+    );
+  });
+
   test("keeps created pull requests in the task mirror when Linear PR sync fails", async () => {
     const upsertPullRequest = vi.fn(async () => {
       throw new Error("Linear request failed: 502 Bad Gateway");

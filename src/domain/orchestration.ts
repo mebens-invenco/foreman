@@ -1,3 +1,5 @@
+import type { TaskPriority } from "./task.js";
+
 export type RunnerProvider = "opencode" | "claude";
 
 export type ActionType = "execution" | "review" | "reviewer" | "retry" | "consolidation" | "cron";
@@ -40,7 +42,25 @@ export type AgentRunResult = {
   nativeSessionId?: string;
 };
 
-export type TaskMutation = { type: "add_comment"; body: string };
+export type TaskCreateMutation = {
+  type: "create_task";
+  title: string;
+  description?: string;
+  body?: string;
+  repos: string[];
+  priority?: TaskPriority;
+  dependencies?: {
+    taskIds?: string[];
+    baseTaskId?: string | null;
+  };
+  repoDependencies?: Array<{
+    taskTargetRepoKey: string;
+    dependsOnRepoKey: string;
+  }>;
+  branchName?: string;
+};
+
+export type TaskMutation = { type: "add_comment"; body: string } | TaskCreateMutation;
 
 export type ReviewMutation =
   | {

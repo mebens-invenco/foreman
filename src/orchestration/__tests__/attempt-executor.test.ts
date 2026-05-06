@@ -150,6 +150,7 @@ describe("AttemptExecutor", () => {
         getProvider: () => "file",
         listCandidates: vi.fn(async () => []),
         getTask: vi.fn(async () => task),
+        createTask: vi.fn(async () => ({ id: "TASK-NEW", providerId: "TASK-NEW", url: null })),
         listComments: vi.fn(async () => []),
         addComment: vi.fn(async () => undefined),
         transition: vi.fn(async () => undefined),

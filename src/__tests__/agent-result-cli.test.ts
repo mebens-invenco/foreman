@@ -52,6 +52,26 @@ describe("agent-result cli", () => {
     expect(wrapped.stdout).toContain('Agent result is valid for action "execution".');
   });
 
+  test("accepts structured task creation mutations", () => {
+    const result = {
+      ...validExecutionResult,
+      taskMutations: [
+        {
+          type: "create_task",
+          title: "Follow-up task",
+          description: "Do the follow-up work.",
+          repos: ["repo-a", "repo-b"],
+          priority: "high",
+          dependencies: { taskIds: ["ENG-123"], baseTaskId: "ENG-122" },
+          repoDependencies: [{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a" }],
+          branchName: "eng-124",
+        },
+      ],
+    };
+
+    expect(validateWorkerResultForAction(result, "execution").taskMutations).toEqual(result.taskMutations);
+  });
+
   test("rejects invalid results with field-specific validation errors", async () => {
     const result = await runCli(["agent-result", "validate", "--action", "execution"], JSON.stringify({ schemaVersion: 1, action: "execution" }));
 

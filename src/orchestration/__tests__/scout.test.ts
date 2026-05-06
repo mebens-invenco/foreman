@@ -43,6 +43,10 @@ class FakeTaskSystem implements TaskSystem {
     return task;
   }
 
+  async createTask(): Promise<{ id: string; providerId: string; url: null }> {
+    return { id: "TASK-NEW", providerId: "TASK-NEW", url: null };
+  }
+
   async listComments(taskId: string): Promise<TaskComment[]> {
     return this.comments.get(taskId) ?? [];
   }
