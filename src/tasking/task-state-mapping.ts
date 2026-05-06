@@ -9,6 +9,7 @@ const normalizedStateMap = (config: WorkspaceConfig): Record<string, TaskState> 
       ...states.ready.map((value) => [value, "ready"]),
       ...states.inProgress.map((value) => [value, "in_progress"]),
       ...states.inReview.map((value) => [value, "in_review"]),
+      ...states.deployable.map((value) => [value, "deployable"]),
       ...states.done.map((value) => [value, "done"]),
       ...states.canceled.map((value) => [value, "canceled"]),
     ]);
@@ -19,6 +20,7 @@ const normalizedStateMap = (config: WorkspaceConfig): Record<string, TaskState> 
     ...states.ready.map((value) => [value, "ready"]),
     ...states.inProgress.map((value) => [value, "in_progress"]),
     ...states.inReview.map((value) => [value, "in_review"]),
+    ...states.deployable.map((value) => [value, "deployable"]),
     ...states.done.map((value) => [value, "done"]),
     ...states.canceled.map((value) => [value, "canceled"]),
   ]);
@@ -41,6 +43,8 @@ export const getProviderStateForNormalized = (config: WorkspaceConfig, state: Ta
       return stateConfig.inProgress[0]!;
     case "in_review":
       return stateConfig.inReview[0]!;
+    case "deployable":
+      return stateConfig.deployable[0]!;
     case "done":
       return stateConfig.done[0]!;
     case "canceled":

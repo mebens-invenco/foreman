@@ -23,6 +23,7 @@ afterEach(async () => {
 
 class FakeTaskSystem implements TaskSystem {
   comments = new Map<string, TaskComment[]>();
+  transitions: Array<{ taskId: string; toState: Task["state"] }> = [];
 
   constructor(private readonly tasks: Task[]) {}
 
@@ -60,7 +61,14 @@ class FakeTaskSystem implements TaskSystem {
     this.comments.set(input.taskId, existing);
   }
 
-  async transition(): Promise<void> {}
+  async transition(input: { taskId: string; toState: Task["state"] }): Promise<void> {
+    this.transitions.push(input);
+    const task = this.tasks.find((item) => item.id === input.taskId);
+    if (task) {
+      task.state = input.toState;
+      task.providerState = input.toState;
+    }
+  }
   async upsertPullRequest(): Promise<void> {}
   async updateLabels(): Promise<void> {}
 }
@@ -68,8 +76,12 @@ class FakeTaskSystem implements TaskSystem {
 class FakeReviewService implements ReviewService {
   constructor(private readonly contexts: Record<string, ReviewContext | null>) {}
 
+  private contextFor(task: Task, target?: { repoKey: string }): ReviewContext | null {
+    return this.contexts[`${task.id}:${target?.repoKey ?? ""}`] ?? this.contexts[task.id] ?? null;
+  }
+
   async resolvePullRequest(task: Task, _repo?: RepoRef, _target?: { repoKey: string; branchName: string }): Promise<ResolvedPullRequest | null> {
-    const context = this.contexts[task.id];
+    const context = this.contextFor(task, _target);
     if (!context) {
       return null;
     }
@@ -84,11 +96,12 @@ class FakeReviewService implements ReviewService {
   }
 
   async getContext(task: Task, _agentPrefix: string, _repo?: RepoRef, _target?: { repoKey: string; branchName: string }): Promise<ReviewContext | null> {
-    return this.contexts[task.id] ?? null;
+    return this.contextFor(task, _target);
   }
 
   async findLatestOpenPullRequestBranch(task: Task, _repo?: RepoRef, _target?: { repoKey: string; branchName: string }): Promise<string | null> {
-    return this.contexts[task.id]?.state === "open" ? this.contexts[task.id]?.headBranch ?? null : null;
+    const context = this.contextFor(task, _target);
+    return context?.state === "open" ? context.headBranch : null;
   }
 
   async createPullRequest(_input: { cwd: string; title: string; body: string; draft: boolean; baseBranch: string; headBranch: string }): Promise<{ url: string; number: number }> {
@@ -131,6 +144,56 @@ const task = (input: Partial<Task> & Pick<Task, "id" | "title" | "state" | "prov
     [{ repoKey: "repo-a", branchName: input.id.toLowerCase(), position: 0 }],
   targetDependencies: input.targetDependencies ?? [],
 });
+
+const reviewContext = (input: Partial<ReviewContext> & Pick<ReviewContext, "pullRequestUrl" | "pullRequestNumber" | "state" | "headBranch" | "baseBranch">): ReviewContext => ({
+  provider: "github",
+  isDraft: false,
+  headSha: "abc",
+  headIntroducedAt: "2026-03-14T12:00:00Z",
+  mergeState: "clean",
+  reviewSummaries: [],
+  conversationComments: [],
+  reviewThreads: [],
+  failingChecks: [],
+  pendingChecks: [],
+  ...input,
+});
+
+const seedCompletedExecution = (
+  db: Awaited<ReturnType<typeof createMigratedDb>>,
+  completedTask: Task,
+): void => {
+  db.workers.ensureWorkerSlots(1);
+  const worker = db.workers.listWorkers()[0];
+  expect(worker).toBeDefined();
+  db.taskMirror.saveTasks([completedTask]);
+  const target = db.taskMirror.getTaskTarget(completedTask.id, completedTask.targets[0]?.repoKey ?? "repo-a");
+  expect(target).not.toBeNull();
+
+  const job = db.jobs.createJob({
+    taskId: completedTask.id,
+    taskTargetId: target!.id,
+    taskProvider: completedTask.provider,
+    action: "execution",
+    priorityRank: priorityToRank(completedTask.priority),
+    repoKey: target!.repoKey,
+    baseBranch: "main",
+    dedupeKey: `${completedTask.id}:${target!.repoKey}:execution`,
+    selectionReason: "test",
+  });
+  db.jobs.updateJobStatus(job.id, "completed", { finishedAt: "2026-03-14T12:04:00Z" });
+  const attempt = db.attempts.createAttemptWithLeases({
+    jobId: job.id,
+    workerId: worker!.id,
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-5.4",
+    runnerVariant: "high",
+    expiresAt: "2026-03-14T12:05:00Z",
+    leases: [],
+  });
+  expect(attempt).not.toBeNull();
+  db.attempts.finalizeAttempt(attempt!.id, "completed", { finishedAt: "2026-03-14T12:04:00Z" });
+};
 
 const seedReviewerCheckpoint = (
   db: Awaited<ReturnType<typeof createMigratedDb>>,
@@ -243,6 +306,195 @@ Task body
 };
 
 describe("runScoutSelection", () => {
+  test("promotes in-review tasks with merged pull requests to deployable", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-5052A",
+      title: "Merged review task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/1", source: "provider" } satisfies TaskPullRequest],
+    });
+    const taskSystem = new FakeTaskSystem([reviewTask]);
+    const reviewService = new FakeReviewService({
+      [reviewTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/1",
+        pullRequestNumber: 1,
+        state: "merged",
+        headBranch: "task-5052a",
+        baseBranch: "main",
+      }),
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.transitions).toEqual([{ taskId: reviewTask.id, toState: "deployable" }]);
+      expect(db.taskMirror.getTask(reviewTask.id)).toMatchObject({ state: "deployable", providerState: "deployable" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("promotes merged pull request tasks directly to done for repos done on merge and consolidates in the same scout", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.repos.reposDoneOnMerge = ["repo-a"];
+
+    const reviewTask = task({
+      id: "TASK-5052B",
+      title: "Merged done-on-merge task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/2", source: "provider" } satisfies TaskPullRequest],
+    });
+    const taskSystem = new FakeTaskSystem([reviewTask]);
+    const reviewService = new FakeReviewService({
+      [reviewTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/2",
+        pullRequestNumber: 2,
+        state: "merged",
+        headBranch: "task-5052b",
+        baseBranch: "main",
+      }),
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(taskSystem.transitions).toEqual([{ taskId: reviewTask.id, toState: "done" }]);
+      expect(db.taskMirror.getTask(reviewTask.id)).toMatchObject({ state: "done", providerState: "done" });
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.task.id).toBe(reviewTask.id);
+      expect(result.jobs[0]?.action).toBe("consolidation");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("promotes mixed done-on-merge multi-target tasks to deployable", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.repos.reposDoneOnMerge = ["repo-a"];
+
+    const reviewTask = task({
+      id: "TASK-5052C",
+      title: "Mixed merged task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      targets: [
+        { repoKey: "repo-a", branchName: "task-5052c", position: 0 },
+        { repoKey: "repo-b", branchName: "task-5052c", position: 1 },
+      ],
+      pullRequests: [
+        { repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/3", source: "provider" } satisfies TaskPullRequest,
+        { repoKey: "repo-b", url: "https://github.com/acme/repo-b/pull/4", source: "provider" } satisfies TaskPullRequest,
+      ],
+    });
+    const taskSystem = new FakeTaskSystem([reviewTask]);
+    const reviewService = new FakeReviewService({
+      [`${reviewTask.id}:repo-a`]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/3",
+        pullRequestNumber: 3,
+        state: "merged",
+        headBranch: "task-5052c",
+        baseBranch: "main",
+      }),
+      [`${reviewTask.id}:repo-b`]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-b/pull/4",
+        pullRequestNumber: 4,
+        state: "merged",
+        headBranch: "task-5052c",
+        baseBranch: "main",
+      }),
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [
+          { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+          { key: "repo-b", rootPath: "/repos/repo-b", defaultBranch: "main" },
+        ],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.transitions).toEqual([{ taskId: reviewTask.id, toState: "deployable" }]);
+      expect(db.taskMirror.getTask(reviewTask.id)).toMatchObject({ state: "deployable", providerState: "deployable" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("leaves completed targets without pull requests in review", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-5052D",
+      title: "Completed without pull request",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    seedCompletedExecution(db, reviewTask);
+    const taskSystem = new FakeTaskSystem([reviewTask]);
+    const reviewService = new FakeReviewService({});
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.transitions).toEqual([]);
+      expect(db.taskMirror.getTask(reviewTask.id)).toMatchObject({ state: "in_review" });
+    } finally {
+      db.close();
+    }
+  });
+
   test("prioritizes review before execution", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);

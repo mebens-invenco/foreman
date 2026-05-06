@@ -1,7 +1,7 @@
 import type { AttemptStatus, WorkerResult } from "./orchestration.js";
 
 export type TaskProvider = "linear" | "file";
-export type TaskState = "ready" | "in_progress" | "in_review" | "done" | "canceled";
+export type TaskState = "ready" | "in_progress" | "in_review" | "deployable" | "done" | "canceled";
 export type TaskPriority = "urgent" | "high" | "normal" | "none" | "low";
 export type TaskTargetStatus = TaskState | "blocked";
 

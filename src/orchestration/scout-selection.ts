@@ -23,6 +23,7 @@ import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import { branchExistsOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
+import { runScoutStatePromotions } from "./scout-state-transitions.js";
 
 type Selection = {
   task: Task;
@@ -187,11 +188,18 @@ const resolveTargetProgress = async (input: {
   foremanRepos: ForemanRepos;
   reviewService: ReviewService;
   selectedTargetKeys?: ReadonlySet<string>;
+  resolvedPullRequestCache?: Map<string, Promise<ResolvedPullRequest | null>>;
 }): Promise<TargetProgress> => {
   const selectedTargetKeys = input.selectedTargetKeys ?? new Set<string>();
   const latestJob = input.foremanRepos.jobs.latestJobForTaskTarget(input.target.id);
   const latestAttempt = input.foremanRepos.attempts.latestAttemptForTaskTarget(input.target.id);
-  const pullRequest = await input.reviewService.resolvePullRequest(input.task, input.repo, input.target);
+  const pullRequestCacheKey = targetKey(input.task.id, input.target.repoKey);
+  let pullRequestPromise = input.resolvedPullRequestCache?.get(pullRequestCacheKey);
+  if (!pullRequestPromise) {
+    pullRequestPromise = input.reviewService.resolvePullRequest(input.task, input.repo, input.target);
+    input.resolvedPullRequestCache?.set(pullRequestCacheKey, pullRequestPromise);
+  }
+  const pullRequest = await pullRequestPromise;
   if (pullRequest) {
     syncResolvedPullRequest({
       task: input.task,
@@ -246,6 +254,7 @@ export const resolveBaseBranch = async (input: {
   taskSystem: TaskSystem;
   reviewService: ReviewService;
   pendingSelections?: ReadonlyArray<Selection>;
+  getTargetProgress?: (task: Task, target: TaskTarget, repo: RepoRef, selectedTargetKeys?: ReadonlySet<string>) => Promise<TargetProgress>;
 }): Promise<{ baseBranch: string; blockers: string[] }> => {
   const blockers: string[] = [];
   const dependencies = input.task.dependencies.taskIds;
@@ -288,6 +297,10 @@ export const resolveBaseBranch = async (input: {
   };
 
   const getTargetProgress = async (task: Task, target: TaskTarget, repo: RepoRef): Promise<TargetProgress> => {
+    if (input.getTargetProgress) {
+      return input.getTargetProgress(task, target, repo, selectedTargetKeys);
+    }
+
     const cacheKey = targetKey(task.id, target.repoKey);
     let promise = targetProgressCache.get(cacheKey);
     if (!promise) {
@@ -465,6 +478,43 @@ export const runScoutSelection = async (input: {
   input.foremanRepos.taskMirror.saveTasks(listedTasks);
   const allTasks = listedTasks.map((task) => input.foremanRepos.taskMirror.getTask(task.id) ?? task);
   const reposByKey = new Map(input.repos.map((repo) => [repo.key, repo]));
+  const resolvedPullRequestCache = new Map<string, Promise<ResolvedPullRequest | null>>();
+  const targetProgressCache = new Map<string, Promise<TargetProgress>>();
+  const getTargetProgress = async (
+    task: Task,
+    target: TaskTarget,
+    repo: RepoRef,
+    selectedTargetKeys: ReadonlySet<string> = new Set<string>(),
+  ): Promise<TargetProgress> => {
+    const selectedFingerprint = stableStringify([...selectedTargetKeys].sort());
+    const cacheKey = `${targetKey(task.id, target.repoKey)}:${selectedFingerprint}`;
+    let promise = targetProgressCache.get(cacheKey);
+    if (!promise) {
+      promise = resolveTargetProgress({
+        task,
+        target,
+        repo,
+        foremanRepos: input.foremanRepos,
+        reviewService: input.reviewService,
+        selectedTargetKeys,
+        resolvedPullRequestCache,
+      });
+      targetProgressCache.set(cacheKey, promise);
+    }
+    return promise;
+  };
+
+  await runScoutStatePromotions({
+    config: input.config,
+    foremanRepos: input.foremanRepos,
+    taskSystem: input.taskSystem,
+    tasks: allTasks,
+    reposByKey,
+    getTargets: (task) => resolvePersistedTaskTargets(task, input.foremanRepos),
+    getTargetProgress: (task, target, repo) => getTargetProgress(task, target, repo),
+    ...(logger ? { logger } : {}),
+  });
+
   const activeCandidates = allTasks.filter(
     (task) => task.state === "ready" || task.state === "in_review" || task.state === "in_progress",
   );
@@ -639,6 +689,7 @@ export const runScoutSelection = async (input: {
             taskSystem: input.taskSystem,
             reviewService: input.reviewService,
             pendingSelections: jobs,
+            getTargetProgress,
           });
           if (base.blockers.length > 0) {
             for (const blocker of base.blockers) {
@@ -739,14 +790,12 @@ export const runScoutSelection = async (input: {
             continue;
           }
 
-          const progress = await resolveTargetProgress({
+          const progress = await getTargetProgress(
             task,
             target,
             repo,
-            foremanRepos: input.foremanRepos,
-            reviewService: input.reviewService,
-            selectedTargetKeys: new Set(jobs.map((job) => targetKey(job.task.id, job.target.repoKey))),
-          });
+            new Set(jobs.map((job) => targetKey(job.task.id, job.target.repoKey))),
+          );
           if (progress.state !== "pending") {
             continue;
           }
@@ -760,6 +809,7 @@ export const runScoutSelection = async (input: {
             taskSystem: input.taskSystem,
             reviewService: input.reviewService,
             pendingSelections: jobs,
+            getTargetProgress,
           });
           if (base.blockers.length > 0) {
             for (const blocker of base.blockers) {

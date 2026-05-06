@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 
+import { getProviderStateForNormalized, normalizeTaskState } from "../../tasking/task-state-mapping.js";
 import { createDefaultWorkspaceConfig, parseWorkspaceConfig, runnerForAction, stringifyWorkspaceConfig } from "../config.js";
 
 describe("workspace config", () => {
@@ -33,6 +34,22 @@ describe("workspace config", () => {
     const parsed = parseWorkspaceConfig(stringifyWorkspaceConfig(config));
 
     expect(parsed.taskSystem.linear!.agentCreatedLabel).toBe("Agent Created");
+  });
+
+  test("parses deployable state mappings for file and Linear task systems", () => {
+    const fileConfig = createDefaultWorkspaceConfig("foo", "file");
+    const linearConfig = createDefaultWorkspaceConfig("foo", "linear");
+
+    expect(parseWorkspaceConfig(stringifyWorkspaceConfig(fileConfig)).taskSystem.file!.states.deployable).toEqual(["deployable"]);
+    expect(parseWorkspaceConfig(stringifyWorkspaceConfig(linearConfig)).taskSystem.linear!.states.deployable).toEqual(["Ready to Deploy"]);
+    expect(normalizeTaskState(linearConfig, "Ready to Deploy")).toBe("deployable");
+    expect(getProviderStateForNormalized(linearConfig, "deployable")).toBe("Ready to Deploy");
+  });
+
+  test("initializes lynk repos done on merge", () => {
+    const config = createDefaultWorkspaceConfig("lynk", "linear");
+
+    expect(config.repos.reposDoneOnMerge).toEqual(["foreman"]);
   });
 
   test("routes review to execution and reviewer to reviewer runner", () => {

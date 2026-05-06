@@ -33,6 +33,7 @@ export const linearSchema = z.object({
     ready: z.array(z.string().min(1)).min(1).default(["Todo", "Ready"]),
     inProgress: z.array(z.string().min(1)).min(1).default(["In Progress"]),
     inReview: z.array(z.string().min(1)).min(1).default(["In Review"]),
+    deployable: z.array(z.string().min(1)).min(1).default(["Ready to Deploy"]),
     done: z.array(z.string().min(1)).min(1).default(["Done"]),
     canceled: z.array(z.string().min(1)).min(1).default(["Canceled"]),
   }),
@@ -45,6 +46,7 @@ export const fileTaskSchema = z.object({
     ready: z.array(z.string().min(1)).min(1).default(["ready"]),
     inProgress: z.array(z.string().min(1)).min(1).default(["in_progress"]),
     inReview: z.array(z.string().min(1)).min(1).default(["in_review"]),
+    deployable: z.array(z.string().min(1)).min(1).default(["deployable"]),
     done: z.array(z.string().min(1)).min(1).default(["done"]),
     canceled: z.array(z.string().min(1)).min(1).default(["canceled"]),
   }),
@@ -187,6 +189,7 @@ export const workspaceConfigSchema = z.preprocess(
         explicit: z.array(z.string()).default([]),
         roots: z.array(z.string()).default([]),
         ignore: z.array(z.string()).default(["**/node_modules/**", "**/.git/**"]),
+        reposDoneOnMerge: z.array(z.string().min(1)).default([]),
       }),
       taskSystem: z.object({
         type: z.enum(["linear", "file"]),
@@ -240,6 +243,7 @@ export const createDefaultWorkspaceConfig = (
     explicit: [],
     roots: [],
     ignore: ["**/node_modules/**", "**/.git/**"],
+    reposDoneOnMerge: workspaceName === "lynk" ? ["foreman"] : [],
   },
   taskSystem:
     taskSystemType === "linear"
@@ -255,6 +259,7 @@ export const createDefaultWorkspaceConfig = (
               ready: ["Todo", "Ready"],
               inProgress: ["In Progress"],
               inReview: ["In Review"],
+              deployable: ["Ready to Deploy"],
               done: ["Done"],
               canceled: ["Canceled"],
             },
@@ -269,6 +274,7 @@ export const createDefaultWorkspaceConfig = (
               ready: ["ready"],
               inProgress: ["in_progress"],
               inReview: ["in_review"],
+              deployable: ["deployable"],
               done: ["done"],
               canceled: ["canceled"],
             },
