@@ -64,6 +64,37 @@ const openCodePhase = (record: JsonRecord): string | null => {
   return null;
 };
 
+const compactJson = (value: unknown): string => {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const openCodeErrorSummary = (record: JsonRecord): string | null => {
+  const errorRecord = record.type === "error" ? record : isRecord(record.part) && record.part.type === "error" ? record.part : null;
+  if (!errorRecord) {
+    return null;
+  }
+
+  const directMessage = stringField(errorRecord, ["message", "text", "content", "error"]);
+  if (directMessage) {
+    return directMessage;
+  }
+
+  const error = errorRecord.error;
+  if (error !== undefined) {
+    return compactJson(error);
+  }
+
+  return compactJson(errorRecord);
+};
+
 export const normalizeClaudeJsonOutput = (stdout: string): NormalizedJsonOutput => {
   let values: unknown[];
   try {
@@ -108,9 +139,13 @@ export const normalizeOpenCodeJsonOutput = (stdout: string): NormalizedJsonOutpu
     .map((record) => stringField(record, ["text", "content", "result", "output"]))
     .find(Boolean);
   const text = finalAnswerText ?? finalText ?? records.map((record) => stringField(record, ["text", "content"])).filter(Boolean).join("");
+  const errorSummaries = records.map(openCodeErrorSummary).filter(Boolean);
 
   return {
     stdout: text || stdout,
     ...(nativeSessionId ? { nativeSessionId } : {}),
+    ...(errorSummaries.length > 0
+      ? { warning: `OpenCode JSON output contained error record(s): ${errorSummaries.join("; ")}` }
+      : {}),
   };
 };

@@ -410,5 +410,14 @@ describe("provider runners", () => {
     expect(normalizeOpenCodeJsonOutput(opencodeFinalAnswerOutput).stdout).toBe(
       '<agent-result>{"schemaVersion":1}</agent-result>',
     );
+
+    const opencodeProviderErrorOutput = [
+      JSON.stringify({ type: "text", text: "Implemented the change." }),
+      JSON.stringify({ type: "error", message: "JSON parsing failed: expected value" }),
+    ].join("\n");
+    expect(normalizeOpenCodeJsonOutput(opencodeProviderErrorOutput)).toMatchObject({
+      stdout: "Implemented the change.",
+      warning: expect.stringContaining("OpenCode JSON output contained error record(s): JSON parsing failed"),
+    });
   });
 });

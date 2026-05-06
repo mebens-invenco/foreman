@@ -3,6 +3,10 @@ import { describe, expect, test } from "vitest";
 import { parseWorkerResult, workerResultExample } from "../worker-result.js";
 
 describe("parseWorkerResult", () => {
+  test("accepts valid raw JSON output", () => {
+    expect(parseWorkerResult(JSON.stringify(workerResultExample))).toEqual(workerResultExample);
+  });
+
   test("uses the final parseable agent-result block when earlier text mentions the tag", () => {
     const finalResult = {
       ...workerResultExample,
@@ -29,5 +33,11 @@ describe("parseWorkerResult", () => {
         "<agent-result>not json</agent-result>",
       ].join("\n")),
     ).toEqual(finalResult);
+  });
+
+  test("rejects natural final text without an agent-result block", () => {
+    expect(() => parseWorkerResult("Implemented the change and pushed the branch.")).toThrow(
+      "Worker output did not contain a valid <agent-result> block",
+    );
   });
 });
