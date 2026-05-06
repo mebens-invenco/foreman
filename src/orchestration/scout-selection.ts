@@ -15,7 +15,7 @@ import {
   type TaskTarget,
   type TaskTargetRef,
 } from "../domain/index.js";
-import { ForemanError } from "../lib/errors.js";
+import { ForemanError, isForemanError } from "../lib/errors.js";
 import { stableStringify } from "../lib/json.js";
 import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, ScoutRunTrigger } from "../repos/index.js";
@@ -234,6 +234,9 @@ const satisfiesRepoDependency = (progress: TargetProgress): boolean =>
 const satisfiesMergedDependency = (progress: TargetProgress): boolean =>
   progress.state === "merged" || progress.state === "completed";
 
+const isUnknownProviderStateError = (error: unknown): error is ForemanError =>
+  isForemanError(error) && error.code === "unknown_provider_state";
+
 export const resolveBaseBranch = async (input: {
   task: Task;
   target: TaskTarget;
@@ -246,17 +249,26 @@ export const resolveBaseBranch = async (input: {
 }): Promise<{ baseBranch: string; blockers: string[] }> => {
   const blockers: string[] = [];
   const dependencies = input.task.dependencies.taskIds;
-  const dependencyTaskCache = new Map<string, Promise<Task>>();
+  const dependencyTaskCache = new Map<string, Promise<Task | null>>();
   const targetProgressCache = new Map<string, Promise<TargetProgress>>();
   const selectedTargetKeys = new Set((input.pendingSelections ?? []).map((selection) => targetKey(selection.task.id, selection.target.repoKey)));
 
-  const getDependencyTask = async (taskId: string): Promise<Task> => {
+  const getDependencyTask = async (taskId: string): Promise<Task | null> => {
     let promise = dependencyTaskCache.get(taskId);
     if (!promise) {
-      promise = input.taskSystem.getTask(taskId).then((task) => {
-        input.foremanRepos.taskMirror.saveTasks([task]);
-        return input.foremanRepos.taskMirror.getTask(task.id) ?? task;
-      });
+      promise = input.taskSystem
+        .getTask(taskId)
+        .then((task) => {
+          input.foremanRepos.taskMirror.saveTasks([task]);
+          return input.foremanRepos.taskMirror.getTask(task.id) ?? task;
+        })
+        .catch((error: unknown) => {
+          if (isUnknownProviderStateError(error)) {
+            blockers.push(`Dependency task ${taskId} cannot be evaluated because ${error.message}.`);
+            return null;
+          }
+          throw error;
+        });
       dependencyTaskCache.set(taskId, promise);
     }
     return promise;
@@ -268,7 +280,10 @@ export const resolveBaseBranch = async (input: {
       return persisted;
     }
 
-    await getDependencyTask(taskId);
+    const dependencyTask = await getDependencyTask(taskId);
+    if (!dependencyTask) {
+      return null;
+    }
     return input.foremanRepos.taskMirror.getTaskTarget(taskId, repoKey);
   };
 
@@ -301,6 +316,9 @@ export const resolveBaseBranch = async (input: {
     taskId: string,
   ): Promise<{ task: Task; target: TaskTarget; repo: RepoRef; progress: TargetProgress } | null> => {
     const dependencyTask = await getDependencyTask(taskId);
+    if (!dependencyTask) {
+      return null;
+    }
     const dependencyTarget = await getDependencyTarget(taskId, input.target.repoKey);
     if (!dependencyTarget) {
       blockers.push(`Dependency task ${taskId} does not expose repo target ${input.target.repoKey}.`);
