@@ -8,6 +8,7 @@ import { runScoutSelection } from "../index.js";
 import type { ReviewService } from "../../review/index.js";
 import { FileTaskSystem } from "../../tasking/index.js";
 import type { TaskSystem } from "../../tasking/index.js";
+import { ForemanError } from "../../lib/errors.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import * as worktrees from "../../workspace/git-worktrees.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
@@ -1281,6 +1282,73 @@ describe("runScoutSelection", () => {
       expect(taskSystem.comments.get("ENG-4748") ?? []).toHaveLength(0);
       expect(taskSystem.comments.get("ENG-4749") ?? []).toHaveLength(0);
       expect(taskSystem.comments.get("ENG-4750") ?? []).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips dependent execution when a dependency has an unmapped provider state", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const dependentTask = task({
+      id: "ENG-5048",
+      title: "Depends on unmapped dependency",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T10:00:00Z",
+      dependencies: { taskIds: ["ENG-5045"], baseTaskId: null },
+    });
+    const staleDependencyTask = task({
+      id: "ENG-5045",
+      title: "Previously mapped dependency",
+      state: "ready",
+      providerState: "ready",
+      priority: "normal",
+      updatedAt: "2026-03-14T09:00:00Z",
+    });
+    const unrelatedTask = task({
+      id: "ENG-5049",
+      title: "Unrelated ready task",
+      state: "ready",
+      providerState: "ready",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:01:00Z",
+    });
+    db.taskMirror.saveTasks([staleDependencyTask]);
+    const taskSystem = new FakeTaskSystem([dependentTask, unrelatedTask]);
+    vi.spyOn(taskSystem, "getTask").mockImplementation(async (taskId) => {
+      if (taskId === "ENG-5045") {
+        throw new ForemanError("unknown_provider_state", "Unmapped provider state: Ready to Deploy");
+      }
+      if (taskId === dependentTask.id) {
+        return dependentTask;
+      }
+      if (taskId === unrelatedTask.id) {
+        return unrelatedTask;
+      }
+      throw new Error(`missing task ${taskId}`);
+    });
+    const reviewService = new FakeReviewService({});
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.task.id).toBe("ENG-5049");
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(taskSystem.comments.get("ENG-5048") ?? []).toHaveLength(0);
     } finally {
       db.close();
     }
