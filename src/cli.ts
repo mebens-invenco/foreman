@@ -68,7 +68,7 @@ const resolveHelpAction = (): WorkerResultAction | undefined => {
 const renderAgentResultValidateHelp = (): string => {
   const action = resolveHelpAction();
   const actionLiteral = action ?? `<${workerResultActionValues.join("|")}>`;
-  const schema = action ? workerResultSchema.extend({ action: z.literal(action) }) : workerResultSchema;
+  const schema = action ? workerResultSchema.safeExtend({ action: z.literal(action) }) : workerResultSchema;
   const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, 2);
   const exampleJson = JSON.stringify({ ...workerResultExample, action: actionLiteral });
 

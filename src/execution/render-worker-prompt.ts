@@ -5,6 +5,7 @@ import { z } from "zod";
 import { resolveTaskPullRequest, resolveTaskTargetRef, type RepoRef, type ReviewContext, type Task, type TaskTargetRef } from "../domain/index.js";
 import { jsonSection, renderPromptTemplate, textSection, type WorkerPromptTemplateName } from "../prompts/template-renderer.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
+import { readWorkspacePlan, resolveDeploymentInstructions } from "../workspace/deployment.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import type { WorkerResultAction } from "./worker-result.js";
 
@@ -174,6 +175,23 @@ const renderPullRequestReference = (input: {
   pullRequestReference?: WorkerPromptPullRequestReference;
 }): string => jsonSection("Pull Request Reference", resolvePullRequestReferenceContext(input));
 
+const renderWorkspacePlan = async (paths: WorkspacePaths): Promise<string> => {
+  const plan = await readWorkspacePlan(paths);
+  return textSection("Workspace Plan", plan || `No plan.md was found at ${paths.planPath}.`);
+};
+
+const renderDeploymentInstructions = async (paths: WorkspacePaths, instructionBody?: string): Promise<string> => {
+  if (instructionBody !== undefined) {
+    return textSection("Deployment Instructions", instructionBody);
+  }
+
+  const instructions = await resolveDeploymentInstructions(paths);
+  return textSection(
+    "Deployment Instructions",
+    instructions?.body ?? `Deployment tracking is inactive because deployment.md was not found at ${path.join(paths.workspaceRoot, "deployment.md")}.`,
+  );
+};
+
 const selectWorkerPromptTemplate = (input: {
   action: WorkerPromptTemplateName;
   continuation?: boolean;
@@ -201,6 +219,7 @@ export const renderWorkerPrompt = async (input: {
   baseBranch: string;
   reviewContext?: ReviewContext;
   pullRequestReference?: WorkerPromptPullRequestReference;
+  deploymentInstructionBody?: string;
   gitState?: {
     worktreeHeadSha: string | null;
     reviewHeadSha: string | null;
@@ -226,6 +245,8 @@ export const renderWorkerPrompt = async (input: {
       }),
       "git-state": renderGitStateContext(input),
       "pull-request": renderPullRequestReference(input),
+      "workspace-plan": await renderWorkspacePlan(input.paths),
+      "deployment-instructions": await renderDeploymentInstructions(input.paths, input.deploymentInstructionBody),
     },
     fragmentAliases: {
       "task-system-worker": input.config.taskSystem.type === "linear" ? "task-system-linear-worker" : "task-system-file-worker",

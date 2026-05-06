@@ -75,6 +75,7 @@ export class SchedulerService extends EventEmitter {
       foremanRepos: deps.foremanRepos,
       taskSystem: deps.taskSystem,
       reviewService: deps.reviewService,
+      repos: deps.repos,
       logger: this.logger,
       scheduleScout: () => this.scheduleScout("task_mutation"),
     });
@@ -349,6 +350,7 @@ export class SchedulerService extends EventEmitter {
       const selection = await withTimeout(
         runScoutSelection({
           config: this.deps.config,
+          paths: this.deps.paths,
           foremanRepos: this.deps.foremanRepos,
           taskSystem: this.deps.taskSystem,
           reviewService: this.deps.reviewService,

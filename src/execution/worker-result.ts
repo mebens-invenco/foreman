@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { WorkerResult } from "../domain/index.js";
 
-export const workerResultActionValues = ["execution", "review", "reviewer", "retry", "consolidation"] as const satisfies readonly WorkerResult["action"][];
+export const workerResultActionValues = ["execution", "review", "reviewer", "retry", "deployment", "consolidation"] as const satisfies readonly WorkerResult["action"][];
 export type WorkerResultAction = (typeof workerResultActionValues)[number];
 
 export const workerResultExample = {
@@ -101,16 +101,31 @@ const learningMutationSchema = z.discriminatedUnion("type", [
 
 const blockerSchema = z.string().min(1);
 
-export const workerResultSchema = z.object({
+const workerResultBaseSchema = z.object({
   schemaVersion: z.literal(1),
   action: z.enum(workerResultActionValues),
-  outcome: z.enum(["completed", "no_action_needed", "blocked", "failed"]),
+  outcome: z.enum(["completed", "no_action_needed", "succeeded", "in_progress", "follow_up_created", "blocked", "failed"]),
   summary: z.string().min(1),
   taskMutations: z.array(taskMutationSchema),
   reviewMutations: z.array(reviewMutationSchema),
   learningMutations: z.array(learningMutationSchema),
   blockers: z.array(blockerSchema),
   signals: z.array(z.enum(["code_changed", "review_checkpoint_eligible", "reviewer_checkpoint_eligible"])),
+});
+
+const deploymentOutcomes = ["succeeded", "in_progress", "follow_up_created", "blocked", "failed"] as const;
+
+export const workerResultSchema = workerResultBaseSchema.superRefine((result, ctx) => {
+  if (result.action !== "deployment") {
+    if ((deploymentOutcomes as readonly string[]).includes(result.outcome) && result.outcome !== "blocked" && result.outcome !== "failed") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["outcome"], message: "Deployment-only outcome is only valid for deployment action" });
+    }
+    return;
+  }
+
+  if (!(deploymentOutcomes as readonly string[]).includes(result.outcome)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["outcome"], message: `Deployment outcome must be one of: ${deploymentOutcomes.join(", ")}` });
+  }
 });
 
 export const formatWorkerResultValidationError = (error: z.ZodError): string =>
@@ -164,4 +179,4 @@ export const parseWorkerResult = (stdout: string): unknown => {
 export const validateWorkerResult = (value: unknown): WorkerResult => workerResultSchema.parse(value) as WorkerResult;
 
 export const validateWorkerResultForAction = (value: unknown, action: WorkerResultAction): WorkerResult =>
-  workerResultSchema.extend({ action: z.literal(action) }).parse(value) as WorkerResult;
+  workerResultSchema.safeExtend({ action: z.literal(action) }).parse(value) as WorkerResult;

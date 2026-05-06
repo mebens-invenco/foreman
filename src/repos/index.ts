@@ -2,6 +2,7 @@ export * from "./artifact-repo.js";
 export * from "./attempt-repo.js";
 export * from "./create-repos.js";
 export * from "./database.js";
+export * from "./deployment-tracking-repo.js";
 export * from "./foreman-repos.js";
 export * from "./job-repo.js";
 export * from "./learning-repo.js";

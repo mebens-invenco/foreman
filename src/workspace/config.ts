@@ -23,6 +23,19 @@ export const agentTaskCreationSchema = z.object({
   enabled: z.boolean().default(false),
 });
 
+export const deploymentSchema = z.object({
+  minRetryIntervalMinutes: z.number().int().positive().default(10),
+  maxRetryIntervalMinutes: z.number().int().positive().default(180),
+}).superRefine((value, ctx) => {
+  if (value.maxRetryIntervalMinutes < value.minRetryIntervalMinutes) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "maxRetryIntervalMinutes must be greater than or equal to minRetryIntervalMinutes",
+      path: ["maxRetryIntervalMinutes"],
+    });
+  }
+});
+
 export const linearSchema = z.object({
   team: z.string().min(1),
   assignee: z.string().min(1).default("me"),
@@ -201,6 +214,7 @@ export const workspaceConfigSchema = z.preprocess(
       reviewer: reviewerSchema.default({ agentPrefix: "[review agent] " }),
       cron: cronSchema.default({ enabled: false, jobsDir: "cron" }),
       agentTaskCreation: agentTaskCreationSchema.default({ enabled: false }),
+      deployment: deploymentSchema.default({ minRetryIntervalMinutes: 10, maxRetryIntervalMinutes: 180 }),
       scheduler: schedulerSchema.default({
         workerConcurrency: 4,
         scoutPollIntervalSeconds: 60,
@@ -296,6 +310,10 @@ export const createDefaultWorkspaceConfig = (
   },
   agentTaskCreation: {
     enabled: false,
+  },
+  deployment: {
+    minRetryIntervalMinutes: 10,
+    maxRetryIntervalMinutes: 180,
   },
   scheduler: {
     workerConcurrency: 4,
