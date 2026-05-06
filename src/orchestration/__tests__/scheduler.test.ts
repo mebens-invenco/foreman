@@ -1016,7 +1016,8 @@ describe("SchedulerService applyWorkerResult", () => {
     expect(addAttemptEvent).toHaveBeenCalledWith(
       "attempt-3c",
       "task_created",
-      JSON.stringify({ taskId: "TASK-0002", providerId: "TASK-0002", url: null }),
+      "Created task TASK-0002",
+      { taskId: "TASK-0002", providerId: "TASK-0002", url: null },
     );
   });
 

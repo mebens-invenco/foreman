@@ -465,6 +465,95 @@ describe("LinearTaskSystem.createTask", () => {
       },
     });
   });
+
+  test("resolves named assignees when creating child issues", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanTeamInfo")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              teams: {
+                nodes: [
+                  {
+                    id: "team-engineering",
+                    name: "Engineering",
+                    states: { nodes: [{ id: "state-todo", name: "Todo" }] },
+                  },
+                ],
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (body.query.includes("query ForemanLabels")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              issueLabels: {
+                nodes: [
+                  { id: "label-agent", name: "Agent" },
+                  { id: "label-agent-created", name: "Agent Created" },
+                ],
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (body.query.includes("query ForemanAssigneeByName")) {
+        return new Response(
+          JSON.stringify({ data: { users: { nodes: [{ id: "user-jane", name: "Jane Doe" }] } } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      if (body.query.includes("mutation ForemanIssueCreate")) {
+        return new Response(
+          JSON.stringify({
+            data: {
+              issueCreate: {
+                success: true,
+                issue: { id: "issue-child", identifier: "ENG-124", url: "https://linear.app/acme/issue/ENG-124/follow-up" },
+              },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+
+    await taskSystem.createTask({
+      parentTask: { id: "ENG-123", providerId: "issue-parent" } as any,
+      mutation: {
+        type: "create_task",
+        title: "Follow-up task",
+        description: "Do the follow-up work.",
+        repos: ["repo-a"],
+      },
+    });
+
+    expect(requests).toHaveLength(4);
+    expect(requests[2]?.query).toContain("query ForemanAssigneeByName");
+    expect(requests[2]?.variables).toEqual({ name: "Jane Doe" });
+    expect(requests[3]?.variables).toMatchObject({
+      input: {
+        assigneeId: "user-jane",
+      },
+    });
+  });
 });
 
 describe("LinearTaskSystem.transition", () => {

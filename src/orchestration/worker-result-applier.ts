@@ -198,7 +198,8 @@ export class WorkerResultApplier {
         this.deps.foremanRepos.attempts.addAttemptEvent(
           input.attempt.id,
           "task_created",
-          JSON.stringify({ taskId: createdTask.id, providerId: createdTask.providerId, url: createdTask.url }),
+          `Created task ${createdTask.id}`,
+          { taskId: createdTask.id, providerId: createdTask.providerId, url: createdTask.url },
         );
         logger.info("created task from worker mutation", {
           createdTaskId: createdTask.id,

@@ -27,6 +27,11 @@ type LinearViewer = {
   name: string;
 };
 
+type LinearAssignee = {
+  id: string;
+  name: string;
+};
+
 type LinearIssueCreatePayload = {
   issueCreate: {
     success: boolean;
@@ -555,6 +560,28 @@ export class LinearTaskSystem implements TaskSystem {
     return { assigneeId: viewer.id };
   }
 
+  private async resolveIssueCreateAssigneeId(): Promise<string> {
+    const assignee = this.config.taskSystem.linear!.assignee;
+    if (assignee === "me") {
+      return (await this.getViewer()).id;
+    }
+
+    const data = await this.client.request<{ users: { nodes: LinearAssignee[] } }>(
+      `query ForemanAssigneeByName($name: String!) {
+        users(filter: { name: { eq: $name } }, first: 1) {
+          nodes { id name }
+        }
+      }`,
+      { name: assignee },
+    );
+    const user = data.users.nodes.find((item) => item.name === assignee);
+    if (!user) {
+      this.logger.error("Linear assignee was not found for task creation", { assignee });
+      throw new ForemanError("linear_assignee_not_found", `Linear assignee not found: ${assignee}`);
+    }
+    return user.id;
+  }
+
   async validateStartup(): Promise<void> {
     const linear = this.config.taskSystem.linear!;
     this.logger.info("validating Linear startup configuration", { team: linear.team });
@@ -756,7 +783,7 @@ export class LinearTaskSystem implements TaskSystem {
     const team = await this.getConfiguredTeamInfo();
     const stateId = await this.resolveReadyStateId();
     const labelIds = await this.resolveLabelIds([...linear.includeLabels, linear.agentCreatedLabel]);
-    const assignee = await this.resolveAssigneeFilter();
+    const assigneeId = await this.resolveIssueCreateAssigneeId();
     const variables = {
       input: {
         teamId: team.id,
@@ -766,7 +793,7 @@ export class LinearTaskSystem implements TaskSystem {
         stateId,
         labelIds,
         priority: normalizedPriorityToLinear(input.mutation.priority),
-        ...(assignee.assigneeId ? { assigneeId: assignee.assigneeId } : {}),
+        assigneeId,
       },
     };
 
