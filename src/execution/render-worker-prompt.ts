@@ -180,7 +180,11 @@ const renderWorkspacePlan = async (paths: WorkspacePaths): Promise<string> => {
   return textSection("Workspace Plan", plan || `No plan.md was found at ${paths.planPath}.`);
 };
 
-const renderDeploymentInstructions = async (paths: WorkspacePaths): Promise<string> => {
+const renderDeploymentInstructions = async (paths: WorkspacePaths, instructionBody?: string): Promise<string> => {
+  if (instructionBody !== undefined) {
+    return textSection("Deployment Instructions", instructionBody);
+  }
+
   const instructions = await resolveDeploymentInstructions(paths);
   return textSection(
     "Deployment Instructions",
@@ -215,6 +219,7 @@ export const renderWorkerPrompt = async (input: {
   baseBranch: string;
   reviewContext?: ReviewContext;
   pullRequestReference?: WorkerPromptPullRequestReference;
+  deploymentInstructionBody?: string;
   gitState?: {
     worktreeHeadSha: string | null;
     reviewHeadSha: string | null;
@@ -241,7 +246,7 @@ export const renderWorkerPrompt = async (input: {
       "git-state": renderGitStateContext(input),
       "pull-request": renderPullRequestReference(input),
       "workspace-plan": await renderWorkspacePlan(input.paths),
-      "deployment-instructions": await renderDeploymentInstructions(input.paths),
+      "deployment-instructions": await renderDeploymentInstructions(input.paths, input.deploymentInstructionBody),
     },
     fragmentAliases: {
       "task-system-worker": input.config.taskSystem.type === "linear" ? "task-system-linear-worker" : "task-system-file-worker",

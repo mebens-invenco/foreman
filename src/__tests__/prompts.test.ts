@@ -492,4 +492,26 @@ describe("prompt rendering", () => {
 
     expect(result).toContain("Deployment tracking is inactive because deployment.md was not found");
   });
+
+  test("renders deployment prompts from scout-selected instructions when provided", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-deployment-selected-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    await fs.writeFile(`${workspaceRoot}/deployment.md`, "New instructions from disk.", "utf8");
+
+    const result = await renderWorkerPrompt({
+      action: "deployment",
+      config,
+      paths,
+      task: { ...sampleTask, state: "deployable", providerState: "deployable" },
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      deploymentInstructionBody: "Scout-selected instructions.",
+    });
+
+    expect(result).toContain("Scout-selected instructions.");
+    expect(result).not.toContain("New instructions from disk.");
+  });
 });

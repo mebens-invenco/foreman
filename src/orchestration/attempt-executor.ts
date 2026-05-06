@@ -75,6 +75,11 @@ const readReviewContext = (selectionContext: Record<string, unknown>): ReviewCon
   return isRecord(raw) && raw.provider === "github" ? (raw as ReviewContext) : undefined;
 };
 
+const readDeploymentInstructionBody = (selectionContext: Record<string, unknown>): string | undefined => {
+  const raw = selectionContext.deployment;
+  return isRecord(raw) && typeof raw.instructionBody === "string" ? raw.instructionBody : undefined;
+};
+
 type AttemptExecutorDeps = {
   config: WorkspaceConfig;
   paths: WorkspacePaths;
@@ -228,6 +233,7 @@ export class AttemptExecutor {
         const selectionContext = job.selectionContext ?? {};
         const pullRequestReference = parseWorkerPromptPullRequestReference(selectionContext.pullRequestReference);
         const reviewContext = readReviewContext(selectionContext);
+        const deploymentInstructionBody = readDeploymentInstructionBody(selectionContext);
         const reviewHeadSha = pullRequestReference?.headSha ?? reviewContext?.headSha ?? null;
         const usesRunnerSession = job.action !== "consolidation";
         const activeRunnerSession =
@@ -268,6 +274,7 @@ export class AttemptExecutor {
           },
           continuation: isContinuation,
           ...(pullRequestReference ? { pullRequestReference } : {}),
+          ...(deploymentInstructionBody !== undefined ? { deploymentInstructionBody } : {}),
         });
         attemptLogger.info("rendered worker prompt", { hasPullRequestReference: Boolean(pullRequestReference) });
 
