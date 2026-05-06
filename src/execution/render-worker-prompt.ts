@@ -3,9 +3,10 @@ import path from "node:path";
 import { z } from "zod";
 
 import { resolveTaskPullRequest, resolveTaskTargetRef, type RepoRef, type ReviewContext, type Task, type TaskTargetRef } from "../domain/index.js";
-import { jsonSection, renderPromptTemplate, type WorkerPromptTemplateName } from "../prompts/template-renderer.js";
+import { jsonSection, renderPromptTemplate, textSection, type WorkerPromptTemplateName } from "../prompts/template-renderer.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
+import type { WorkerResultAction } from "./worker-result.js";
 
 const parsePullRequestNumber = (url: string | null): number | null => {
   if (!url) {
@@ -232,3 +233,36 @@ export const renderWorkerPrompt = async (input: {
     properties: { foreman: { cliPath: path.join(input.paths.projectRoot, "dist/cli.js") }, session: { action: input.action } },
   });
 };
+
+export const renderWorkerResultRecoveryPrompt = async (input: {
+  action: WorkerResultAction;
+  paths: WorkspacePaths;
+  task: Task;
+  parseError: unknown;
+  stdoutArtifactPath: string;
+  invalidStdout: string;
+}): Promise<string> => {
+  const parseMessage = input.parseError instanceof Error ? input.parseError.message : String(input.parseError);
+
+  return renderPromptTemplate({
+    paths: input.paths,
+    template: "worker-result-recovery",
+    context: {
+      "parse-failure": jsonSection("Parse Failure", {
+        parseError: parseMessage,
+        stdoutArtifactPath: input.stdoutArtifactPath,
+      }),
+      "invalid-output": textSection("Invalid Stdout Excerpt", truncateWorkerResultRecoveryOutput(input.invalidStdout.trim() || "<empty>")),
+    },
+    properties: {
+      foreman: { cliPath: path.join(input.paths.projectRoot, "dist/cli.js") },
+      session: { action: input.action },
+      task: { id: input.task.id, title: input.task.title },
+    },
+  });
+};
+
+const workerResultRecoveryOutputLimit = 4_000;
+
+const truncateWorkerResultRecoveryOutput = (output: string): string =>
+  output.length > workerResultRecoveryOutputLimit ? `${output.slice(0, workerResultRecoveryOutputLimit)}\n... truncated ...` : output;
