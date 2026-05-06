@@ -20,6 +20,7 @@ export type TaskState =
   | "ready"
   | "in_progress"
   | "in_review"
+  | "deployable"
   | "done"
   | "canceled"
 export type TargetProgressState =

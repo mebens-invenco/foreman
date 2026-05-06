@@ -150,7 +150,7 @@ const readOptionalStringPatch = (parent: Record<string, unknown>, key: string): 
   return value;
 };
 
-const taskStates = ["ready", "in_progress", "in_review", "done", "canceled"] as const satisfies readonly TaskState[];
+const taskStates = ["ready", "in_progress", "in_review", "deployable", "done", "canceled"] as const satisfies readonly TaskState[];
 const attemptStatuses = ["running", "completed", "failed", "blocked", "canceled", "timed_out"] as const;
 const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
 type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable";

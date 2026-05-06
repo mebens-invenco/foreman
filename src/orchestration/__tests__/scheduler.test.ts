@@ -417,6 +417,7 @@ describe("SchedulerService scout timeout", () => {
         listCandidates: vi.fn(async () => [sampleTask()]),
       } as any,
       reviewService: {
+        resolvePullRequest: vi.fn(() => new Promise<ResolvedPullRequest | null>(() => undefined)),
         getContext: vi.fn(() => new Promise<ReviewContext>(() => undefined)),
       } as any,
       repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
