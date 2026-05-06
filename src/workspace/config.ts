@@ -23,6 +23,11 @@ export const agentTaskCreationSchema = z.object({
   enabled: z.boolean().default(false),
 });
 
+export const deploymentSchema = z.object({
+  retryIntervalMinutes: z.number().int().positive().default(10),
+  maxBlockedRetries: z.number().int().positive().default(6),
+});
+
 export const linearSchema = z.object({
   team: z.string().min(1),
   assignee: z.string().min(1).default("me"),
@@ -201,6 +206,7 @@ export const workspaceConfigSchema = z.preprocess(
       reviewer: reviewerSchema.default({ agentPrefix: "[review agent] " }),
       cron: cronSchema.default({ enabled: false, jobsDir: "cron" }),
       agentTaskCreation: agentTaskCreationSchema.default({ enabled: false }),
+      deployment: deploymentSchema.default({ retryIntervalMinutes: 10, maxBlockedRetries: 6 }),
       scheduler: schedulerSchema.default({
         workerConcurrency: 4,
         scoutPollIntervalSeconds: 60,
@@ -296,6 +302,10 @@ export const createDefaultWorkspaceConfig = (
   },
   agentTaskCreation: {
     enabled: false,
+  },
+  deployment: {
+    retryIntervalMinutes: 10,
+    maxBlockedRetries: 6,
   },
   scheduler: {
     workerConcurrency: 4,

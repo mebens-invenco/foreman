@@ -72,6 +72,17 @@ describe("agent-result cli", () => {
     expect(validateWorkerResultForAction(result, "execution").taskMutations).toEqual(result.taskMutations);
   });
 
+  test("accepts deployment-specific outcomes only for deployment action", () => {
+    const deploymentResult = {
+      ...validExecutionResult,
+      action: "deployment",
+      outcome: "in_progress",
+    };
+
+    expect(validateWorkerResultForAction(deploymentResult, "deployment").outcome).toBe("in_progress");
+    expect(() => validateWorkerResultForAction({ ...deploymentResult, action: "execution" }, "execution")).toThrow();
+  });
+
   test("rejects invalid results with field-specific validation errors", async () => {
     const result = await runCli(["agent-result", "validate", "--action", "execution"], JSON.stringify({ schemaVersion: 1, action: "execution" }));
 

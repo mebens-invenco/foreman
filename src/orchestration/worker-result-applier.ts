@@ -1,6 +1,8 @@
 import type { RepoRef, ReviewContext, Task, TaskPullRequest, TaskTarget, WorkerResult } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
+import { addSeconds } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
+import type { DeploymentStatus } from "../repos/deployment-tracking-repo.js";
 import type { AttemptRecord, ForemanRepos, JobRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
@@ -33,6 +35,7 @@ type WorkerResultApplierDeps = {
   foremanRepos: ForemanRepos;
   taskSystem: TaskSystem;
   reviewService: ReviewService;
+  repos: RepoRef[];
   logger: LoggerService;
   scheduleScout: () => void;
 };
@@ -66,6 +69,10 @@ export class WorkerResultApplier {
       outcome: workerResult.outcome,
     });
     logger.info("applying worker result mutations");
+
+    if (input.job.action === "deployment") {
+      return this.applyDeploymentResult(input, pullRequestUrl, logger);
+    }
 
     if (workerResult.outcome === "blocked") {
       for (const blocker of workerResult.blockers) {
@@ -280,6 +287,174 @@ export class WorkerResultApplier {
   private async resolveCurrentPullRequestUrl(task: Task, repo: RepoRef, target: TaskTarget): Promise<string | null> {
     const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(task, repo, target);
     return resolvedPullRequest?.pullRequestUrl ?? null;
+  }
+
+  private async applyDeploymentResult(input: ApplyWorkerResultInput, pullRequestUrl: string | null, logger: LoggerService): Promise<string | null> {
+    const { workerResult } = input;
+    if (workerResult.outcome === "failed") {
+      logger.warn("deployment result marked attempt as failed; skipping deployment tracking side effects");
+      return pullRequestUrl;
+    }
+
+    const context = this.readDeploymentSelectionContext(input.job.selectionContext);
+    if (!context) {
+      throw new ForemanError("missing_deployment_context", `Deployment job ${input.job.id} is missing deployment selection context.`);
+    }
+
+    pullRequestUrl = context.pullRequest.url;
+    const prior = this.deps.foremanRepos.deploymentTracking.getDeploymentRecord({
+      taskTargetId: input.target.id,
+      prUrl: context.pullRequest.url,
+      instructionHash: context.instructionHash,
+    });
+
+    const createdFollowUpTaskIds = [...(prior?.createdFollowUpTaskIds ?? [])];
+    for (const mutation of workerResult.taskMutations) {
+      if (mutation.type === "add_comment") {
+        await this.deps.taskSystem.addComment({ taskId: input.task.id, body: mutation.body });
+        logger.info("added deployment task comment from worker mutation");
+      }
+      if (mutation.type === "create_task") {
+        const createdTask = await this.deps.taskSystem.createTask({ parentTask: input.task, mutation });
+        createdFollowUpTaskIds.push(createdTask.id);
+        this.deps.foremanRepos.attempts.addAttemptEvent(
+          input.attempt.id,
+          "task_created",
+          `Created deployment follow-up task ${createdTask.id}`,
+          { taskId: createdTask.id, providerId: createdTask.providerId, url: createdTask.url },
+        );
+        logger.info("created deployment follow-up task", {
+          createdTaskId: createdTask.id,
+          createdProviderId: createdTask.providerId,
+          url: createdTask.url,
+        });
+      }
+    }
+
+    if (workerResult.outcome === "follow_up_created" && createdFollowUpTaskIds.length === (prior?.createdFollowUpTaskIds.length ?? 0)) {
+      throw new ForemanError(
+        "missing_deployment_follow_up",
+        "Deployment result outcome follow_up_created must include at least one create_task mutation.",
+      );
+    }
+
+    if (workerResult.outcome === "blocked") {
+      for (const blocker of workerResult.blockers) {
+        await this.deps.taskSystem.addComment({
+          taskId: input.task.id,
+          body: `${this.deps.config.workspace.agentPrefix}${blocker}`,
+        });
+        logger.warn("posted deployment blocker comment", { blocker });
+      }
+    }
+
+    const nextEligibleAt =
+      workerResult.outcome === "in_progress" || workerResult.outcome === "blocked"
+        ? addSeconds(new Date(), this.deps.config.deployment.retryIntervalMinutes * 60)
+        : null;
+    const latestStatus = workerResult.outcome as DeploymentStatus;
+    this.deps.foremanRepos.deploymentTracking.upsertDeploymentRecord({
+      taskId: input.task.id,
+      taskTargetId: input.target.id,
+      repoKey: input.target.repoKey,
+      prUrl: context.pullRequest.url,
+      prNumber: context.pullRequest.number,
+      prHeadBranch: context.pullRequest.headBranch,
+      prBaseBranch: context.pullRequest.baseBranch,
+      instructionHash: context.instructionHash,
+      instructionBody: context.instructionBody,
+      latestStatus,
+      latestSummary: workerResult.summary,
+      nextEligibleAt,
+      blockedRetryCount: (prior?.blockedRetryCount ?? 0) + (workerResult.outcome === "blocked" ? 1 : 0),
+      createdFollowUpTaskIds,
+      successful: workerResult.outcome === "succeeded",
+      sourceAttemptId: input.attempt.id,
+    });
+    logger.info("persisted deployment tracking result", { latestStatus, nextEligibleAt });
+
+    if (workerResult.outcome === "succeeded" && (await this.allRelevantDeploymentsSucceeded(input, context.instructionHash))) {
+      await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "done" });
+      logger.info("transitioned task to done after all relevant deployments succeeded");
+    }
+
+    for (const mutation of workerResult.learningMutations) {
+      if (mutation.type === "add") {
+        this.deps.foremanRepos.learnings.addLearning(mutation);
+        logger.info("added learning mutation", { learningTitle: mutation.title, repo: mutation.repo });
+      }
+      if (mutation.type === "update") {
+        this.deps.foremanRepos.learnings.updateLearning(mutation);
+        logger.info("updated learning mutation", { learningId: mutation.id });
+      }
+    }
+
+    this.deps.scheduleScout();
+    return pullRequestUrl;
+  }
+
+  private readDeploymentSelectionContext(selectionContext: Record<string, unknown>): {
+    instructionHash: string;
+    instructionBody: string;
+    pullRequest: { url: string; number: number; headBranch: string; baseBranch: string };
+  } | null {
+    const deployment = selectionContext.deployment;
+    const pullRequest = selectionContext.pullRequestReference;
+    if (!deployment || typeof deployment !== "object" || !pullRequest || typeof pullRequest !== "object") {
+      return null;
+    }
+
+    const deploymentRecord = deployment as Record<string, unknown>;
+    const pullRequestRecord = pullRequest as Record<string, unknown>;
+    if (
+      typeof deploymentRecord.instructionHash !== "string" ||
+      typeof deploymentRecord.instructionBody !== "string" ||
+      typeof pullRequestRecord.url !== "string" ||
+      typeof pullRequestRecord.number !== "number" ||
+      typeof pullRequestRecord.headBranch !== "string" ||
+      typeof pullRequestRecord.baseBranch !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      instructionHash: deploymentRecord.instructionHash,
+      instructionBody: deploymentRecord.instructionBody,
+      pullRequest: {
+        url: pullRequestRecord.url,
+        number: pullRequestRecord.number,
+        headBranch: pullRequestRecord.headBranch,
+        baseBranch: pullRequestRecord.baseBranch,
+      },
+    };
+  }
+
+  private async allRelevantDeploymentsSucceeded(input: ApplyWorkerResultInput, instructionHash: string): Promise<boolean> {
+    let relevantCount = 0;
+    const targets = this.deps.foremanRepos.taskMirror.getTargetsForTask(input.task.id);
+    for (const target of targets.length > 0 ? targets : [input.target]) {
+      const repo = this.deps.repos.find((item) => item.key === target.repoKey);
+      if (!repo) {
+        continue;
+      }
+
+      const pullRequest = await this.deps.reviewService.resolvePullRequest(input.task, repo, target);
+      if (pullRequest?.state !== "merged") {
+        continue;
+      }
+
+      relevantCount += 1;
+      const record = this.deps.foremanRepos.deploymentTracking.getDeploymentRecord({
+        taskTargetId: target.id,
+        prUrl: pullRequest.pullRequestUrl,
+        instructionHash,
+      });
+      if (!record?.successful) {
+        return false;
+      }
+    }
+
+    return relevantCount > 0;
   }
 
   private async saveReviewCheckpoint(input: ApplyWorkerResultInput, pullRequestUrl: string, logger: LoggerService): Promise<void> {

@@ -2,7 +2,7 @@ import type { TaskPriority } from "./task.js";
 
 export type RunnerProvider = "opencode" | "claude";
 
-export type ActionType = "execution" | "review" | "reviewer" | "retry" | "consolidation" | "cron";
+export type ActionType = "execution" | "review" | "reviewer" | "retry" | "deployment" | "consolidation" | "cron";
 
 export type RunnerSessionRole = "implementation" | "reviewer";
 
@@ -114,7 +114,7 @@ export type Signal = "code_changed" | "review_checkpoint_eligible" | "reviewer_c
 export type WorkerResult = {
   schemaVersion: 1;
   action: ActionType;
-  outcome: "completed" | "no_action_needed" | "blocked" | "failed";
+  outcome: "completed" | "no_action_needed" | "succeeded" | "in_progress" | "follow_up_created" | "blocked" | "failed";
   summary: string;
   taskMutations: TaskMutation[];
   reviewMutations: ReviewMutation[];

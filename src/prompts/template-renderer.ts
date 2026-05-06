@@ -9,6 +9,7 @@ export type PromptTemplateName =
   | "review"
   | "reviewer"
   | "retry"
+  | "deployment"
   | "consolidation"
   | "cron"
   | "worker-result-recovery"
@@ -22,6 +23,7 @@ const TEMPLATE_PATHS: Record<PromptTemplateName, string> = {
   review: "prompts/templates/review.md",
   reviewer: "prompts/templates/reviewer.md",
   retry: "prompts/templates/retry.md",
+  deployment: "prompts/templates/deployment.md",
   consolidation: "prompts/templates/consolidation.md",
   cron: "prompts/templates/cron.md",
   "worker-result-recovery": "prompts/templates/worker-result-recovery.md",

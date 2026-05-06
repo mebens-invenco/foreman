@@ -125,6 +125,9 @@ export const deriveAttemptStatus = (workerResult: WorkerResult): AttemptStatus =
   switch (workerResult.outcome) {
     case "completed":
     case "no_action_needed":
+    case "succeeded":
+    case "in_progress":
+    case "follow_up_created":
       return "completed";
     case "blocked":
       return "blocked";

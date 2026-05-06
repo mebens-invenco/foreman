@@ -25,6 +25,7 @@ describe("workspace config", () => {
     expect(parsed.reviewer.agentPrefix).toBe("[review agent] ");
     expect(parsed.cron).toEqual({ enabled: false, jobsDir: "cron" });
     expect(parsed.agentTaskCreation).toEqual({ enabled: false });
+    expect(parsed.deployment).toEqual({ retryIntervalMinutes: 10, maxBlockedRetries: 6 });
     expect(parsed.scheduler.workerConcurrency).toBe(4);
     expect(parsed.http.port).toBe(8765);
   });
@@ -46,10 +47,11 @@ describe("workspace config", () => {
     expect(getProviderStateForNormalized(linearConfig, "deployable")).toBe("Ready to Deploy");
   });
 
-  test("routes review to execution and reviewer to reviewer runner", () => {
+  test("routes review and deployment to execution and reviewer to reviewer runner", () => {
     const config = createDefaultWorkspaceConfig("foo", "file");
 
     expect(runnerForAction(config, "review")).toEqual(config.runner.execution);
+    expect(runnerForAction(config, "deployment")).toEqual(config.runner.execution);
     expect(runnerForAction(config, "reviewer")).toEqual(config.runner.reviewer);
   });
 

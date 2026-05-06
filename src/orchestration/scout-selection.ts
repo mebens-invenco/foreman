@@ -22,7 +22,9 @@ import type { AttemptRecord, ForemanRepos, JobRecord, ScoutRunTrigger } from "..
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
+import { resolveDeploymentInstructions, type DeploymentInstructions } from "../workspace/deployment.js";
 import { branchExistsOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
+import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { runStateTransitions } from "./state-transition.js";
 
 type Selection = {
@@ -80,6 +82,27 @@ const reviewSelectionContext = (context: ReviewContext): Record<string, unknown>
     baseBranch: context.baseBranch,
     headIntroducedAt: context.headIntroducedAt,
     mergeState: context.mergeState,
+  },
+});
+
+const pullRequestReferenceContext = (pullRequest: ResolvedPullRequest): Record<string, unknown> => ({
+  provider: "github",
+  url: pullRequest.pullRequestUrl,
+  number: pullRequest.pullRequestNumber,
+  state: pullRequest.state,
+  isDraft: pullRequest.isDraft,
+  headBranch: pullRequest.headBranch,
+  baseBranch: pullRequest.baseBranch,
+});
+
+const deploymentSelectionContext = (input: {
+  instructions: DeploymentInstructions;
+  pullRequest: ResolvedPullRequest;
+}): Record<string, unknown> => ({
+  pullRequestReference: pullRequestReferenceContext(input.pullRequest),
+  deployment: {
+    instructionHash: input.instructions.hash,
+    instructionBody: input.instructions.body,
   },
 });
 
@@ -466,6 +489,7 @@ export const resolveBaseBranch = async (input: {
 
 export const runScoutSelection = async (input: {
   config: WorkspaceConfig;
+  paths?: WorkspacePaths;
   foremanRepos: ForemanRepos;
   taskSystem: TaskSystem;
   reviewService: ReviewService;
@@ -478,6 +502,7 @@ export const runScoutSelection = async (input: {
   input.foremanRepos.taskMirror.saveTasks(listedTasks);
   const allTasks = listedTasks.map((task) => input.foremanRepos.taskMirror.getTask(task.id) ?? task);
   const reposByKey = new Map(input.repos.map((repo) => [repo.key, repo]));
+  const deploymentInstructions = input.paths ? await resolveDeploymentInstructions(input.paths) : null;
   const resolvedPullRequestCache = new Map<string, Promise<ResolvedPullRequest | null>>();
   const targetProgressCache = new Map<string, Promise<TargetProgress>>();
   const getTargetProgress = async (
@@ -516,6 +541,9 @@ export const runScoutSelection = async (input: {
   });
 
   const activeCandidates = allTasks.filter(
+    (task) => task.state === "ready" || task.state === "in_review" || task.state === "in_progress" || task.state === "deployable",
+  );
+  const executionCandidates = allTasks.filter(
     (task) => task.state === "ready" || task.state === "in_review" || task.state === "in_progress",
   );
   const terminalCandidates = allTasks.filter(isTerminal);
@@ -592,6 +620,20 @@ export const runScoutSelection = async (input: {
       targetReviewContextCache.set(cacheKey, promise);
     }
     return promise;
+  };
+
+  const hasNonTerminalFollowUp = async (taskIds: string[]): Promise<boolean> => {
+    for (const taskId of taskIds) {
+      try {
+        const task = await input.taskSystem.getTask(taskId);
+        if (!isTerminal(task)) {
+          return true;
+        }
+      } catch {
+        return true;
+      }
+    }
+    return false;
   };
 
   for (let index = 0; index < availableCapacity; index += 1) {
@@ -770,9 +812,73 @@ export const runScoutSelection = async (input: {
     }
 
     if (!chosen) {
-      const executionCandidates = activeCandidates.sort(compareExecutionTasks);
+      if (deploymentInstructions) {
+        for (const task of activeCandidates.filter((candidate) => candidate.state === "deployable")) {
+          for (const target of resolvePersistedTaskTargets(task, input.foremanRepos)) {
+            if (!canSchedule(task, target, "deployment")) {
+              continue;
+            }
 
-      for (const task of executionCandidates) {
+            const repo = reposByKey.get(target.repoKey);
+            if (!repo) {
+              await recordBlocker(task.id, `Deployment blocked because repo ${target.repoKey} was not discovered.`);
+              continue;
+            }
+
+            const pullRequest = await input.reviewService.resolvePullRequest(task, repo, target);
+            if (pullRequest?.state !== "merged") {
+              continue;
+            }
+
+            const record = input.foremanRepos.deploymentTracking.getDeploymentRecord({
+              taskTargetId: target.id,
+              prUrl: pullRequest.pullRequestUrl,
+              instructionHash: deploymentInstructions.hash,
+            });
+            if (record?.successful) {
+              continue;
+            }
+
+            if (record?.latestStatus === "follow_up_created" && (await hasNonTerminalFollowUp(record.createdFollowUpTaskIds))) {
+              continue;
+            }
+
+            if (record?.latestStatus === "blocked" && record.blockedRetryCount >= input.config.deployment.maxBlockedRetries) {
+              await recordBlocker(
+                task.id,
+                `Deployment tracking stopped for target ${target.repoKey} after ${record.blockedRetryCount} blocked retries. Manual intervention is required before Foreman will retry deployment tracking for this merged pull request.`,
+              );
+              continue;
+            }
+
+            if (record?.nextEligibleAt && Date.parse(record.nextEligibleAt) > Date.now()) {
+              continue;
+            }
+
+            chosen = {
+              task,
+              target,
+              action: "deployment",
+              repo,
+              baseBranch: pullRequest.baseBranch,
+              priorityRank: priorityToRank(task.priority),
+              selectionReason: "merged pull request eligible for deployment tracking",
+              selectionContext: deploymentSelectionContext({ instructions: deploymentInstructions, pullRequest }),
+            };
+            break;
+          }
+
+          if (chosen) {
+            break;
+          }
+        }
+      }
+    }
+
+    if (!chosen) {
+      const sortedExecutionCandidates = executionCandidates.sort(compareExecutionTasks);
+
+      for (const task of sortedExecutionCandidates) {
         const targets = resolvePersistedTaskTargets(task, input.foremanRepos);
         if (targets.length === 0) {
           await recordBlocker(task.id, "Execution blocked because Agent Repo metadata is missing.");

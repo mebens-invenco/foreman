@@ -2021,4 +2021,312 @@ describe("runScoutSelection", () => {
       db.close();
     }
   });
+
+  test("schedules deployment tracking only when deployment instructions exist", async () => {
+    const tempDir = await createTempDir("foreman-scout-deployment-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, tempDir);
+    await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
+
+    const deployableTask = task({
+      id: "TASK-DEPLOY",
+      title: "Deployable task",
+      state: "deployable",
+      providerState: "deployable",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    const reviewService = new FakeReviewService({
+      [deployableTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/50",
+        pullRequestNumber: 50,
+        state: "merged",
+        headBranch: "task-deploy",
+        baseBranch: "main",
+      }),
+    });
+
+    try {
+      const active = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([deployableTask]),
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(active.jobs).toHaveLength(1);
+      expect(active.jobs[0]?.action).toBe("deployment");
+      expect(active.jobs[0]?.selectionContext).toMatchObject({
+        deployment: { instructionBody: "Check production once." },
+        pullRequestReference: { url: "https://github.com/acme/repo-a/pull/50", state: "merged" },
+      });
+
+      const inactiveRoot = await createTempDir("foreman-scout-deployment-missing-");
+      cleanupDirs.push(inactiveRoot);
+      const inactive = await runScoutSelection({
+        config,
+        paths: createWorkspacePaths(projectRoot, inactiveRoot),
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([deployableTask]),
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(inactive.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("honors deployment retry intervals and does not cap in-progress retries", async () => {
+    const tempDir = await createTempDir("foreman-scout-deployment-retry-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.deployment.maxBlockedRetries = 2;
+    const paths = createWorkspacePaths(projectRoot, tempDir);
+    await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
+
+    const deployableTask = task({
+      id: "TASK-DEPLOY-RETRY",
+      title: "Deployable retry task",
+      state: "deployable",
+      providerState: "deployable",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    const reviewService = new FakeReviewService({
+      [deployableTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/51",
+        pullRequestNumber: 51,
+        state: "merged",
+        headBranch: "task-deploy-retry",
+        baseBranch: "main",
+      }),
+    });
+    db.taskMirror.saveTasks([deployableTask]);
+    const target = db.taskMirror.getTaskTarget(deployableTask.id, "repo-a");
+    expect(target).not.toBeNull();
+
+    try {
+      db.deploymentTracking.upsertDeploymentRecord({
+        taskId: deployableTask.id,
+        taskTargetId: target!.id,
+        repoKey: "repo-a",
+        prUrl: "https://github.com/acme/repo-a/pull/51",
+        prNumber: 51,
+        prHeadBranch: "task-deploy-retry",
+        prBaseBranch: "main",
+        instructionHash: "a693920f695b5bbbcf0933b6a015f6c66b48a443293437b762912ff637ab5e64",
+        instructionBody: "Check production once.",
+        latestStatus: "in_progress",
+        latestSummary: "Still rolling out",
+        nextEligibleAt: "2999-01-01T00:00:00.000Z",
+        blockedRetryCount: 99,
+        createdFollowUpTaskIds: [],
+        successful: false,
+        sourceAttemptId: null,
+      });
+
+      const waiting = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([deployableTask]),
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(waiting.jobs).toHaveLength(0);
+
+      db.deploymentTracking.upsertDeploymentRecord({
+        taskId: deployableTask.id,
+        taskTargetId: target!.id,
+        repoKey: "repo-a",
+        prUrl: "https://github.com/acme/repo-a/pull/51",
+        prNumber: 51,
+        prHeadBranch: "task-deploy-retry",
+        prBaseBranch: "main",
+        instructionHash: "a693920f695b5bbbcf0933b6a015f6c66b48a443293437b762912ff637ab5e64",
+        instructionBody: "Check production once.",
+        latestStatus: "in_progress",
+        latestSummary: "Still rolling out",
+        nextEligibleAt: "2000-01-01T00:00:00.000Z",
+        blockedRetryCount: 99,
+        createdFollowUpTaskIds: [],
+        successful: false,
+        sourceAttemptId: null,
+      });
+
+      const eligible = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([deployableTask]),
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(eligible.jobs.map((job) => job.action)).toEqual(["deployment"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("stops blocked deployment retries at the configured cap", async () => {
+    const tempDir = await createTempDir("foreman-scout-deployment-blocked-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.deployment.maxBlockedRetries = 2;
+    const paths = createWorkspacePaths(projectRoot, tempDir);
+    await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
+
+    const deployableTask = task({
+      id: "TASK-DEPLOY-BLOCKED",
+      title: "Deployable blocked task",
+      state: "deployable",
+      providerState: "deployable",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    const taskSystem = new FakeTaskSystem([deployableTask]);
+    db.taskMirror.saveTasks([deployableTask]);
+    const target = db.taskMirror.getTaskTarget(deployableTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    db.deploymentTracking.upsertDeploymentRecord({
+      taskId: deployableTask.id,
+      taskTargetId: target!.id,
+      repoKey: "repo-a",
+      prUrl: "https://github.com/acme/repo-a/pull/52",
+      prNumber: 52,
+      prHeadBranch: "task-deploy-blocked",
+      prBaseBranch: "main",
+      instructionHash: "a693920f695b5bbbcf0933b6a015f6c66b48a443293437b762912ff637ab5e64",
+      instructionBody: "Check production once.",
+      latestStatus: "blocked",
+      latestSummary: "Provider unavailable",
+      nextEligibleAt: "2000-01-01T00:00:00.000Z",
+      blockedRetryCount: 2,
+      createdFollowUpTaskIds: [],
+      successful: false,
+      sourceAttemptId: null,
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({
+          [deployableTask.id]: reviewContext({
+            pullRequestUrl: "https://github.com/acme/repo-a/pull/52",
+            pullRequestNumber: 52,
+            state: "merged",
+            headBranch: "task-deploy-blocked",
+            baseBranch: "main",
+          }),
+        }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.comments.get(deployableTask.id)?.[0]?.body).toContain("Deployment tracking stopped for target repo-a after 2 blocked retries");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("suppresses deployment retries while follow-up tasks are non-terminal", async () => {
+    const tempDir = await createTempDir("foreman-scout-deployment-follow-up-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, tempDir);
+    await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
+
+    const deployableTask = task({
+      id: "TASK-DEPLOY-FOLLOW-UP",
+      title: "Deployable follow-up task",
+      state: "deployable",
+      providerState: "deployable",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    const childTask = task({
+      id: "TASK-DEPLOY-CHILD",
+      title: "Deployment child task",
+      state: "ready",
+      providerState: "ready",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:01:00Z",
+    });
+    const taskSystem = new FakeTaskSystem([deployableTask, childTask]);
+    db.taskMirror.saveTasks([deployableTask]);
+    const target = db.taskMirror.getTaskTarget(deployableTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    db.deploymentTracking.upsertDeploymentRecord({
+      taskId: deployableTask.id,
+      taskTargetId: target!.id,
+      repoKey: "repo-a",
+      prUrl: "https://github.com/acme/repo-a/pull/53",
+      prNumber: 53,
+      prHeadBranch: "task-deploy-follow-up",
+      prBaseBranch: "main",
+      instructionHash: "a693920f695b5bbbcf0933b6a015f6c66b48a443293437b762912ff637ab5e64",
+      instructionBody: "Check production once.",
+      latestStatus: "follow_up_created",
+      latestSummary: "Follow-up created",
+      nextEligibleAt: null,
+      blockedRetryCount: 0,
+      createdFollowUpTaskIds: [childTask.id],
+      successful: false,
+      sourceAttemptId: null,
+    });
+    const reviewService = new FakeReviewService({
+      [deployableTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/53",
+        pullRequestNumber: 53,
+        state: "merged",
+        headBranch: "task-deploy-follow-up",
+        baseBranch: "main",
+      }),
+    });
+
+    try {
+      const suppressed = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(suppressed.jobs.some((job) => job.action === "deployment")).toBe(false);
+
+      childTask.state = "done";
+      childTask.providerState = "done";
+      const eligible = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(eligible.jobs.map((job) => job.action)).toContain("deployment");
+    } finally {
+      db.close();
+    }
+  });
 });

@@ -7,7 +7,7 @@ export type AttemptStatus =
   | "canceled"
   | "timed_out"
 export type WorkerStatus = "idle" | "leased" | "running" | "stopping" | "offline"
-export type ActionType = "execution" | "review" | "reviewer" | "retry" | "consolidation" | "cron"
+export type ActionType = "execution" | "review" | "reviewer" | "retry" | "deployment" | "consolidation" | "cron"
 export type LearningConfidence = "emerging" | "established" | "proven"
 export type CronSettings = {
   enabled: boolean

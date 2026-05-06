@@ -212,7 +212,7 @@ describe("prompt rendering", () => {
     const paths = createWorkspacePaths(projectRoot, workspaceRoot);
     const repo = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
 
-    for (const action of ["execution", "review", "reviewer", "retry", "consolidation"] as const) {
+    for (const action of ["execution", "review", "reviewer", "retry", "deployment", "consolidation"] as const) {
       const result = await renderWorkerPrompt({
         action,
         config,
@@ -435,5 +435,61 @@ describe("prompt rendering", () => {
     expect(retryPrompt).toContain("# Retry Prompt");
     expect(retryPrompt).toContain("create_pull_request");
     expect(retryPrompt).not.toContain("# Review Continuation");
+  });
+
+  test("renders deployment prompts with workspace plan and deployment instructions", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-deployment-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    await fs.writeFile(paths.planPath, "Ship plan notes", "utf8");
+    await fs.writeFile(`${workspaceRoot}/deployment.md`, "Check the production dashboard once.", "utf8");
+
+    const result = await renderWorkerPrompt({
+      action: "deployment",
+      config,
+      paths,
+      task: { ...sampleTask, state: "deployable", providerState: "deployable" },
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      pullRequestReference: {
+        provider: "github",
+        url: "https://github.com/acme/repo-a/pull/10",
+        number: 10,
+        state: "merged",
+        headBranch: "task-0001",
+        baseBranch: "main",
+      },
+    });
+
+    expect(result).toContain("# Deployment Tracking Prompt");
+    expect(result).toContain("Check once");
+    expect(result).toContain("Never poll, sleep, wait");
+    expect(result).toContain("return `in_progress`");
+    expect(result).toContain("follow-up task only when you have concrete evidence");
+    expect(result).toContain("Ship plan notes");
+    expect(result).toContain("Check the production dashboard once.");
+    expect(result).toContain("https://github.com/acme/repo-a/pull/10");
+    expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action deployment --help`);
+  });
+
+  test("renders deployment inactive context when deployment.md is missing", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-deployment-inactive-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+
+    const result = await renderWorkerPrompt({
+      action: "deployment",
+      config,
+      paths,
+      task: { ...sampleTask, state: "deployable", providerState: "deployable" },
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+    });
+
+    expect(result).toContain("Deployment tracking is inactive because deployment.md was not found");
   });
 });

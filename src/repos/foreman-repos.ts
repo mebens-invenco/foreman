@@ -1,4 +1,5 @@
 import type { Database } from "./database.js";
+import type { DeploymentTrackingRepo } from "./deployment-tracking-repo.js";
 import type { ArtifactRepo } from "./artifact-repo.js";
 import type { AttemptRepo } from "./attempt-repo.js";
 import type { JobRepo } from "./job-repo.js";
@@ -22,6 +23,7 @@ export type ForemanRepos = {
   scoutRuns: ScoutRunRepo;
   taskMirror: TaskMirrorRepo;
   artifacts: ArtifactRepo;
+  deploymentTracking: DeploymentTrackingRepo;
   reviewCheckpoints: ReviewCheckpointRepo;
   reviewerCheckpoints: ReviewerCheckpointRepo;
   runnerSessions: RunnerSessionRepo;
