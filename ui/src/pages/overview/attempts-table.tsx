@@ -90,7 +90,7 @@ export function AttemptsTable({ now }: { now: number }) {
         <Table className="w-full table-fixed">
           <colgroup>
             <col className="w-28" />
-            <col className="w-32" />
+            <col className="w-36" />
             <col className="w-28" />
             <col className="w-28" />
             <col />
@@ -127,10 +127,14 @@ export function AttemptsTable({ now }: { now: number }) {
                   </span>
                 </TableCell>
                 <TableCell className="text-sm text-foreground">
-                  {targetLabel(attempt)}
+                  <span className="block max-w-full truncate" title={targetLabel(attempt)}>
+                    {targetLabel(attempt)}
+                  </span>
                 </TableCell>
                 <TableCell className="text-sm text-foreground">
-                  {formatActionLabel(attempt.stage)}
+                  <span className="block max-w-full truncate" title={formatActionLabel(attempt.stage) ?? undefined}>
+                    {formatActionLabel(attempt.stage)}
+                  </span>
                 </TableCell>
                 <TableCell>
                   <span
