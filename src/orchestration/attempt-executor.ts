@@ -4,7 +4,7 @@ import path from "node:path";
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskState, type TaskTarget, type WorkerResult } from "../domain/index.js";
 import { createAgentRunner, parseWorkerResult, validateWorkerResult, type AgentRunner, type CapturedAgentRunResult, type WorkerResultAction } from "../execution/index.js";
 import { parseWorkerPromptPullRequestReference, renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
-import { ForemanError } from "../lib/errors.js";
+import { ForemanError, isProviderRateLimitError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
@@ -441,9 +441,19 @@ export class AttemptExecutor {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const interruptedByProviderRateLimit = isProviderRateLimitError(error);
+      const interruptedStatus = controller.signal.aborted ? "canceled" : interruptedByProviderRateLimit ? "blocked" : "failed";
       if (attempt) {
         const attemptLogger = jobLogger.child({ attemptId: attempt.id });
-        attemptLogger.error("attempt failed", { error: message, aborted: controller.signal.aborted });
+        if (interruptedByProviderRateLimit) {
+          attemptLogger.warn("attempt blocked by provider rate limit", {
+            provider: error.provider,
+            resetAt: error.resetAt,
+            retryAfterSeconds: error.retryAfterSeconds,
+          });
+        } else {
+          attemptLogger.error("attempt failed", { error: message, aborted: controller.signal.aborted });
+        }
         if (task && transitionedTaskToInProgress && taskStateBeforeExecution && taskStateBeforeExecution !== "in_progress") {
           try {
             await this.deps.taskSystem.transition({ taskId: task.id, toState: taskStateBeforeExecution });
@@ -455,19 +465,27 @@ export class AttemptExecutor {
             });
           }
         }
-        this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "attempt_failed", message);
-        this.deps.foremanRepos.attempts.finalizeAttempt(attempt.id, controller.signal.aborted ? "canceled" : "failed", {
+        this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, interruptedByProviderRateLimit ? "attempt_blocked" : "attempt_failed", message);
+        this.deps.foremanRepos.attempts.finalizeAttempt(attempt.id, interruptedStatus, {
           finishedAt: isoNow(),
           summary: message,
-          errorMessage: message,
+          errorMessage: interruptedByProviderRateLimit ? null : message,
         });
-        this.deps.onAttemptChanged({ attemptId: attempt.id, status: controller.signal.aborted ? "canceled" : "failed" });
+        this.deps.onAttemptChanged({ attemptId: attempt.id, status: interruptedStatus });
       }
-      this.deps.foremanRepos.jobs.updateJobStatus(job.id, controller.signal.aborted ? "canceled" : "failed", {
+      this.deps.foremanRepos.jobs.updateJobStatus(job.id, interruptedStatus, {
         finishedAt: isoNow(),
-        errorMessage: message,
+        errorMessage: interruptedByProviderRateLimit ? null : message,
       });
-      jobLogger.error("job failed", { error: message, aborted: controller.signal.aborted });
+      if (interruptedByProviderRateLimit) {
+        jobLogger.warn("job blocked by provider rate limit", {
+          provider: error.provider,
+          resetAt: error.resetAt,
+          retryAfterSeconds: error.retryAfterSeconds,
+        });
+      } else {
+        jobLogger.error("job failed", { error: message, aborted: controller.signal.aborted });
+      }
     } finally {
       if (attempt) {
         this.deps.foremanRepos.leases.releaseLeasesForAttempt(attempt.id, controller.signal.aborted ? "stopped" : "completed");
