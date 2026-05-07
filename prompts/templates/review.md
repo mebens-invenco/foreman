@@ -42,6 +42,7 @@ Priority order inside this action:
 
 - Discover the current actionable GitHub state before deciding whether code, replies, or thread resolution are needed.
 - Only address review summaries on the current PR head.
+- Only address review-thread comments attached to submitted reviews; ignore unsubmitted or pending review comments even if GitHub exposes them in `reviewThreads`.
 - Only address conversation comments created after the current PR head became current.
 - Do not assume every actionable review item requires a code change.
 - If a conversation comment or review summary asks a question, do your best to answer it within your

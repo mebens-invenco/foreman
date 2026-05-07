@@ -646,7 +646,7 @@ export class GitHubReviewService implements ReviewService {
   }
 
   private isSubmittedReview(review: GitHubPullRequestReviewRef): boolean {
-    return review ? review.state !== "PENDING" && Boolean(review.submittedAt) : true;
+    return Boolean(review && review.state !== "PENDING" && review.submittedAt);
   }
 
   private async listPullRequestReviewSummaries(input: {

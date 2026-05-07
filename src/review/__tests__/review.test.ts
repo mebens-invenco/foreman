@@ -596,6 +596,7 @@ describe("GitHubReviewService.getContext", () => {
                             createdAt: "2026-03-16T04:00:00Z",
                             url: "https://github.com/acme/repo/pull/946#discussion_r1",
                             author: { login: "reviewer-a" },
+                            pullRequestReview: { state: "COMMENTED", submittedAt: "2026-03-16T04:00:00Z" },
                           },
                         ],
                         pageInfo: { hasNextPage: true, endCursor: "thread-comment-page-2" },
@@ -621,6 +622,7 @@ describe("GitHubReviewService.getContext", () => {
                     createdAt: "2026-03-16T04:05:00Z",
                     url: "https://github.com/acme/repo/pull/946#discussion_r2",
                     author: { login: "reviewer-b" },
+                    pullRequestReview: { state: "COMMENTED", submittedAt: "2026-03-16T04:05:00Z" },
                   },
                 ],
                 pageInfo: { hasNextPage: false, endCursor: null },
@@ -649,6 +651,7 @@ describe("GitHubReviewService.getContext", () => {
                             createdAt: "2026-03-16T04:10:00Z",
                             url: "https://github.com/acme/repo/pull/946#discussion_r3",
                             author: { login: "reviewer-c" },
+                            pullRequestReview: { state: "COMMENTED", submittedAt: "2026-03-16T04:10:00Z" },
                           },
                         ],
                         pageInfo: { hasNextPage: false, endCursor: null },
@@ -667,6 +670,7 @@ describe("GitHubReviewService.getContext", () => {
                             createdAt: "2026-03-16T04:20:00Z",
                             url: "https://github.com/acme/repo/pull/946#discussion_r4",
                             author: { login: "foreman-bot" },
+                            pullRequestReview: { state: "COMMENTED", submittedAt: "2026-03-16T04:20:00Z" },
                           },
                         ],
                         pageInfo: { hasNextPage: false, endCursor: null },
@@ -801,7 +805,7 @@ describe("GitHubReviewService.getContext", () => {
     expect(vi.mocked(global.fetch).mock.calls[4]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments?per_page=100&page=2");
   });
 
-  test("ignores pending review summaries and draft review comments until the review is submitted", async () => {
+  test("ignores pending review summaries and review comments without submitted review metadata", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce(pullRequestSummaryResponse)
@@ -879,6 +883,32 @@ describe("GitHubReviewService.getContext", () => {
                             url: "https://github.com/acme/repo/pull/946#discussion_r1",
                             author: { login: "reviewer-draft" },
                             pullRequestReview: { state: "PENDING", submittedAt: null },
+                          },
+                        ],
+                        pageInfo: { hasNextPage: false, endCursor: null },
+                      },
+                    },
+                    {
+                      id: "thread-missing-review-metadata",
+                      isResolved: false,
+                      path: "src/missing.ts",
+                      line: 12,
+                      comments: {
+                        nodes: [
+                          {
+                            id: "thread-comment-missing-review",
+                            body: "Draft inline note without review metadata",
+                            createdAt: "2026-03-16T04:02:00Z",
+                            url: "https://github.com/acme/repo/pull/946#discussion_r_missing",
+                            author: { login: "reviewer-draft" },
+                          },
+                          {
+                            id: "thread-comment-null-review",
+                            body: "Draft inline note with null review metadata",
+                            createdAt: "2026-03-16T04:03:00Z",
+                            url: "https://github.com/acme/repo/pull/946#discussion_r_null",
+                            author: { login: "reviewer-draft" },
+                            pullRequestReview: null,
                           },
                         ],
                         pageInfo: { hasNextPage: false, endCursor: null },

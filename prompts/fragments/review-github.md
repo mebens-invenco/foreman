@@ -6,6 +6,7 @@ The review system is GitHub.
 - Prefer `gh pr view`, `gh pr diff`, `gh api`, and `gh api graphql` for pull request, review, thread, check, commit, and status context.
 - Let `gh` read `GH_TOKEN` from the environment; do not expand or print the token.
 - Discover PR review history, review threads, conversation comments, checks, merge state, and relevant commits yourself before acting.
+- When reading review thread comments, request `pullRequestReview { state submittedAt commit { oid } }`; ignore comments whose review metadata is missing, whose review state is `PENDING`, or whose review has no `submittedAt`.
 - When GitHub PR comments, review summaries, or review threads include image links or uploaded assets, fetch and inspect those images before deciding whether code, replies, or thread resolution are needed. Ensure you authenticate the request using `GH_TOKEN`.
 - Before reading a downloaded GitHub comment asset as an image, verify the response is an actual image file, not JSON, HTML, or text. If the download returns an error payload, inspect the error and retry with the correct URL or authorization instead of passing it to image-reading tools.
 
@@ -13,6 +14,7 @@ The review system is GitHub.
 
 - For `review` and `retry`, determine current-head review summaries, unresolved review threads, post-head PR comments, failing checks, and merge conflicts from GitHub directly.
 - Only current-head review summaries are actionable.
+- Only submitted review thread comments are actionable; unsubmitted or pending review comments are drafts and must not be addressed or resolved.
 - Only PR conversation comments created after the current head became current are actionable; use `Pull Request Reference.headIntroducedAt` as the cutoff when filtering post-head conversation comments.
 - Failing checks and merge conflicts may require code changes or operational responses.
 - If the PR has merge conflicts, first inspect the relevant commit messages and diffs on both the task branch and the base branch so you understand the intent of each side before editing.

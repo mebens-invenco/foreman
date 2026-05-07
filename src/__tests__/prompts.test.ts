@@ -321,6 +321,9 @@ describe("prompt rendering", () => {
     expect(reviewPrompt).toContain("https://github.com/acme/repo/pull/1");
     expect(reviewPrompt).toContain("\"headSha\": \"abc123\"");
     expect(reviewPrompt).toContain("Discover the current actionable GitHub state before deciding whether code, replies, or thread resolution are needed.");
+    expect(reviewPrompt).toContain("request `pullRequestReview { state submittedAt commit { oid } }`");
+    expect(reviewPrompt).toContain("Only submitted review thread comments are actionable");
+    expect(reviewPrompt).toContain("Only address review-thread comments attached to submitted reviews");
     expect(reviewPrompt).toContain("include image links or uploaded assets");
     expect(reviewPrompt).toContain("verify the response is an actual image file");
     expect(reviewPrompt).toContain("Do not assume every actionable review item requires a code change.");
@@ -340,6 +343,7 @@ describe("prompt rendering", () => {
     expect(consolidationPrompt).not.toContain("### Actionable Now");
     expect(reviewerPrompt).toContain("# Reviewer Prompt");
     expect(reviewerPrompt).toContain("submit_pull_request_review");
+    expect(reviewerPrompt).toContain("ignore comments whose review metadata is missing");
     expect(reviewerPrompt).toContain("include image links or uploaded assets");
     expect(reviewerPrompt).not.toContain("### Actionable Now");
 
@@ -361,6 +365,7 @@ describe("prompt rendering", () => {
       continuation: true,
     });
     expect(continuationPrompt).toContain("Continue addressing current PR feedback, failing checks, and merge conflicts.");
+    expect(continuationPrompt).toContain("ignore comments whose review metadata is missing");
     expect(continuationPrompt).toContain("## Current Git State");
     expect(continuationPrompt).toContain("previousSessionHeadSha");
     expect(continuationPrompt).toContain("previous-head");
@@ -405,6 +410,7 @@ describe("prompt rendering", () => {
       continuation: true,
     });
     expect(reviewerContinuationPrompt).toContain("Review the latest PR changes.");
+    expect(reviewerContinuationPrompt).toContain("ignore comments whose review metadata is missing");
     expect(reviewerContinuationPrompt).toContain("## Current Git State");
     expect(reviewerContinuationPrompt).toContain("previous-reviewer-head");
     expect(reviewerContinuationPrompt).not.toContain("## Continuation Worker Rules");
