@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { actionableConversationComments, type RepoRef, type Task } from "../../domain/index.js";
+import { isProviderRateLimitError } from "../../lib/errors.js";
 import * as processLib from "../../lib/process.js";
 import { GitHubReviewService } from "../index.js";
 
@@ -36,10 +37,11 @@ const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   targetDependencies: overrides.targetDependencies ?? [],
 });
 
-const jsonResponse = (body: unknown, status = 200): Response =>
+const jsonResponse = (body: unknown, status = 200, headers: Record<string, string> = {}): Response =>
   ({
     ok: status >= 200 && status < 300,
     status,
+    headers: new Headers(headers),
     json: async () => body,
     text: async () => JSON.stringify(body),
   }) as Response;
@@ -176,29 +178,24 @@ describe("GitHubReviewService.getContext", () => {
     );
   });
 
-  test("prefers the latest open branch pull request over a stale linked pull request", async () => {
-    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+  test("uses a linked pull request before branch lookup", async () => {
+    const execSpy = vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
     global.fetch = vi.fn().mockResolvedValueOnce(
-      jsonResponse([
-        {
-          html_url: "https://github.com/acme/repo/pull/987",
-          number: 987,
-          state: "closed",
-          draft: false,
-          merged_at: null,
-          head: { ref: "eng-4737" },
-          base: { ref: "master" },
+      jsonResponse({
+        data: {
+          repository: {
+            pullRequest: {
+              url: "https://github.com/acme/repo/pull/987",
+              number: 987,
+              state: "OPEN",
+              isDraft: true,
+              merged: false,
+              headRefName: "eng-4737",
+              baseRefName: "master",
+            },
+          },
         },
-        {
-          html_url: "https://github.com/acme/repo/pull/988",
-          number: 988,
-          state: "open",
-          draft: true,
-          merged_at: null,
-          head: { ref: "eng-4737" },
-          base: { ref: "master" },
-        },
-      ]),
+      }),
     ) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
@@ -209,17 +206,55 @@ describe("GitHubReviewService.getContext", () => {
     );
 
     expect(resolved).toMatchObject({
-      pullRequestUrl: "https://github.com/acme/repo/pull/988",
-      pullRequestNumber: 988,
+      pullRequestUrl: "https://github.com/acme/repo/pull/987",
+      pullRequestNumber: 987,
       state: "open",
       isDraft: true,
       headBranch: "eng-4737",
       baseBranch: "master",
     });
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe(
-      "https://api.github.com/repos/acme/repo/pulls?state=all&head=acme%3Aeng-4737&per_page=20",
-    );
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe("https://api.github.com/graphql");
+    expect(execSpy).not.toHaveBeenCalled();
+  });
+
+  test("classifies REST rate-limit responses without retrying", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    const resetAt = Math.ceil((Date.now() + 120_000) / 1000);
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        { message: "API rate limit exceeded for user ID 1." },
+        403,
+        { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(resetAt) },
+      ),
+    ) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+
+    try {
+      await service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo, { repoKey: "repo-a", branchName: "eng-4737", position: 0 });
+      throw new Error("expected rate-limit error");
+    } catch (error) {
+      expect(isProviderRateLimitError(error)).toBe(true);
+      if (isProviderRateLimitError(error)) {
+        expect(error.provider).toBe("github");
+        expect(error.retryAfterSeconds).toBeGreaterThan(0);
+        expect(Date.parse(error.resetAt)).toBeGreaterThan(Date.now());
+      }
+    }
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps non-rate-limit 403 responses non-retryable", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ message: "Resource not accessible by integration" }, 403)) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+
+    await expect(
+      service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo, { repoKey: "repo-a", branchName: "eng-4737", position: 0 }),
+    ).rejects.toMatchObject({ code: "github_request_failed" });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   test("does not reuse another target's pull request when repo context differs", async () => {

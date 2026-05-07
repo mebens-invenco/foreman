@@ -1,4 +1,4 @@
-import { ForemanError } from "../../lib/errors.js";
+import { ForemanError, ProviderRateLimitError } from "../../lib/errors.js";
 import { createTimeoutSignal, isAbortLikeError, PROVIDER_REQUEST_TIMEOUT_MS } from "../../lib/fetch-timeout.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
@@ -78,10 +78,62 @@ type GitHubGraphqlResponse<T> = { data?: T; errors?: Array<{ message: string }> 
 const GITHUB_REQUEST_MAX_ATTEMPTS = 3;
 const GITHUB_REQUEST_RETRY_BACKOFF_MS = [250, 1_000];
 const GITHUB_TRANSIENT_STATUS_CODES = new Set([502, 503, 504]);
+const GITHUB_RATE_LIMIT_DEFAULT_BACKOFF_MS = 60_000;
+const GITHUB_RATE_LIMIT_MAX_BACKOFF_MS = 60 * 60 * 1000;
+const GITHUB_RATE_LIMIT_BODY_PATTERN = /rate limit|secondary rate limit|api rate limit exceeded/i;
 
 const sleep = (durationMs: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, durationMs));
 
 const retryDelayMs = (attempt: number): number => GITHUB_REQUEST_RETRY_BACKOFF_MS[Math.min(attempt - 1, GITHUB_REQUEST_RETRY_BACKOFF_MS.length - 1)]!;
+
+const parsePositiveInt = (value: string | null): number | null => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+};
+
+const boundedRetryAfterMs = (response: Response): number => {
+  const retryAfterSeconds = parsePositiveInt(response.headers.get("retry-after"));
+  if (retryAfterSeconds !== null) {
+    return Math.min(retryAfterSeconds * 1000, GITHUB_RATE_LIMIT_MAX_BACKOFF_MS);
+  }
+
+  const resetEpochSeconds = parsePositiveInt(response.headers.get("x-ratelimit-reset"));
+  if (resetEpochSeconds !== null) {
+    const resetDelayMs = resetEpochSeconds * 1000 - Date.now();
+    if (resetDelayMs > 0) {
+      return Math.min(resetDelayMs, GITHUB_RATE_LIMIT_MAX_BACKOFF_MS);
+    }
+  }
+
+  return GITHUB_RATE_LIMIT_DEFAULT_BACKOFF_MS;
+};
+
+const isGitHubRateLimitResponse = (response: Response, body: string): boolean => {
+  if (response.status === 429) {
+    return true;
+  }
+
+  if (response.status !== 403) {
+    return false;
+  }
+
+  return response.headers.get("retry-after") !== null || response.headers.get("x-ratelimit-remaining") === "0" || GITHUB_RATE_LIMIT_BODY_PATTERN.test(body);
+};
+
+const githubRateLimitError = (response: Response): ProviderRateLimitError => {
+  const retryAfterMs = boundedRetryAfterMs(response);
+  const resetAt = new Date(Date.now() + retryAfterMs).toISOString();
+  return new ProviderRateLimitError({
+    provider: "github",
+    retryAfterSeconds: Math.ceil(retryAfterMs / 1000),
+    resetAt,
+    message: `GitHub API rate limit exceeded; retry after ${resetAt}`,
+  });
+};
 
 type PageInfo = {
   hasNextPage: boolean;
@@ -263,6 +315,20 @@ export class GitHubReviewService implements ReviewService {
 
       if (!response.ok) {
         const body = await response.text();
+        if (isGitHubRateLimitResponse(response, body)) {
+          const error = githubRateLimitError(response);
+          this.logger.warn("GitHub REST request hit rate limit", {
+            method,
+            path,
+            status: response.status,
+            attempt,
+            retryAfterSeconds: error.retryAfterSeconds,
+            resetAt: error.resetAt,
+            durationMs: Date.now() - startedAt,
+          });
+          throw error;
+        }
+
         if (GITHUB_TRANSIENT_STATUS_CODES.has(response.status) && attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
           const delayMs = retryDelayMs(attempt);
           this.logger.warn("GitHub REST request failed with transient status; retrying", {
@@ -356,6 +422,19 @@ export class GitHubReviewService implements ReviewService {
 
       if (!response.ok) {
         const body = await response.text();
+        if (isGitHubRateLimitResponse(response, body)) {
+          const error = githubRateLimitError(response);
+          this.logger.warn("GitHub GraphQL request hit rate limit", {
+            operationName,
+            status: response.status,
+            attempt,
+            retryAfterSeconds: error.retryAfterSeconds,
+            resetAt: error.resetAt,
+            durationMs: Date.now() - startedAt,
+          });
+          throw error;
+        }
+
         if (GITHUB_TRANSIENT_STATUS_CODES.has(response.status) && attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
           const delayMs = retryDelayMs(attempt);
           this.logger.warn("GitHub GraphQL request failed with transient status; retrying", {
@@ -382,6 +461,19 @@ export class GitHubReviewService implements ReviewService {
 
       const json = (await response.json()) as GitHubGraphqlResponse<T>;
       if (json.errors?.length) {
+        if (json.errors.some((error) => GITHUB_RATE_LIMIT_BODY_PATTERN.test(error.message))) {
+          const error = githubRateLimitError(response);
+          this.logger.warn("GitHub GraphQL request returned rate-limit errors", {
+            operationName,
+            errorCount: json.errors.length,
+            attempt,
+            retryAfterSeconds: error.retryAfterSeconds,
+            resetAt: error.resetAt,
+            durationMs: Date.now() - startedAt,
+          });
+          throw error;
+        }
+
         this.logger.error("GitHub GraphQL request returned errors", {
           operationName,
           errorCount: json.errors.length,
@@ -846,16 +938,19 @@ export class GitHubReviewService implements ReviewService {
   }
 
   async resolvePullRequest(task: Task, repo?: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null> {
+    const prUrl = this.pullRequestUrl(task, repo, target);
+    if (prUrl) {
+      const urlPullRequest = await this.resolvePullRequestFromUrl(prUrl, task.id);
+      if (urlPullRequest) {
+        return urlPullRequest;
+      }
+    }
+
     if (repo) {
       const branchPullRequest = await this.resolvePullRequestByBranch(task, repo, target);
       if (branchPullRequest) {
         return branchPullRequest;
       }
-    }
-
-    const prUrl = this.pullRequestUrl(task, repo, target);
-    if (prUrl) {
-      return this.resolvePullRequestFromUrl(prUrl, task.id);
     }
 
     if (!repo) {
