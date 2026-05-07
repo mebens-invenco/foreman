@@ -77,6 +77,80 @@ const createGitRepo = async (root: string): Promise<void> => {
   });
 };
 
+const createWorkerResult = (overrides: Partial<WorkerResult> = {}): WorkerResult => ({
+  schemaVersion: 1,
+  action: "execution",
+  outcome: "completed",
+  summary: "Recovered structured result.",
+  taskMutations: [],
+  reviewMutations: [],
+  learningMutations: [],
+  blockers: [],
+  signals: [],
+  ...overrides,
+});
+
+const createExecutorContext = async () => {
+  const workspaceRoot = await createTempDir("foreman-attempt-executor-test-");
+  cleanupDirs.push(workspaceRoot);
+  const repoRoot = path.join(workspaceRoot, "repo");
+  await createGitRepo(repoRoot);
+  worktreeMocks.worktreePath = repoRoot;
+  worktreeMocks.ensureTaskWorktree.mockResolvedValue(repoRoot);
+
+  const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
+  const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), testProjectRoot);
+  db.workers.ensureWorkerSlots(1);
+  db.taskMirror.saveTasks([task]);
+  const target = db.taskMirror.getTaskTarget(task.id, "foreman")!;
+  const job = db.jobs.createJob({
+    taskId: task.id,
+    taskTargetId: target.id,
+    taskProvider: "file",
+    action: "execution",
+    priorityRank: priorityToRank(task.priority),
+    repoKey: "foreman",
+    baseBranch: "master",
+    dedupeKey: `${task.id}:execution`,
+    selectionReason: "test",
+  });
+  db.jobs.claimQueuedJobForWorker(job.id, db.workers.listWorkers()[0]!.id);
+  const claimedJob = db.jobs.getJob(job.id);
+  const taskSystem: TaskSystem = {
+    getProvider: () => "file",
+    listCandidates: vi.fn(async () => []),
+    getTask: vi.fn(async () => task),
+    createTask: vi.fn(async () => ({ id: "TASK-NEW", providerId: "TASK-NEW", url: null })),
+    listComments: vi.fn(async () => []),
+    addComment: vi.fn(async () => undefined),
+    transition: vi.fn(async () => undefined),
+    upsertPullRequest: vi.fn(async () => undefined),
+    updateLabels: vi.fn(async () => undefined),
+  };
+  const reviewService = {
+    resolvePullRequest: vi.fn(async () => null),
+  } as unknown as ReviewService;
+  const repo: RepoRef = { key: "foreman", rootPath: repoRoot, defaultBranch: "master" };
+  const logger = LoggerService.create({ paths, stdout: nullWritable, minLevel: "info" });
+  const applyWorkerResult = vi.fn(async () => null);
+  const executor = new AttemptExecutor({
+    config: createDefaultWorkspaceConfig("test-workspace", "file"),
+    paths,
+    foremanRepos: db,
+    taskSystem,
+    reviewService,
+    repos: [repo],
+    env: {},
+    logger,
+    applyWorkerResult,
+    onWorkerUpdated: vi.fn(),
+    onAttemptChanged: vi.fn(),
+    onWorkerFinished: vi.fn(),
+  });
+
+  return { workspaceRoot, db, job, claimedJob, executor, logger, applyWorkerResult };
+};
+
 afterEach(async () => {
   runnerMocks.invoke.mockReset();
   worktreeMocks.ensureTaskWorktree.mockReset();
@@ -202,45 +276,125 @@ describe("AttemptExecutor", () => {
     }
   });
 
-  test("marks attempts blocked when provider rate limiting interrupts result application", async () => {
-    const workspaceRoot = await createTempDir("foreman-attempt-executor-rate-limit-test-");
-    cleanupDirs.push(workspaceRoot);
-    const repoRoot = path.join(workspaceRoot, "repo");
-    await createGitRepo(repoRoot);
-    worktreeMocks.worktreePath = repoRoot;
-    worktreeMocks.ensureTaskWorktree.mockResolvedValue(repoRoot);
-
-    const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
-    const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), testProjectRoot);
+  test("recovers a worker result from stdout after a non-aborted runner timeout", async () => {
+    const { db, job, claimedJob, executor, logger, applyWorkerResult } = await createExecutorContext();
 
     try {
-      db.workers.ensureWorkerSlots(1);
-      db.taskMirror.saveTasks([task]);
-      const target = db.taskMirror.getTaskTarget(task.id, "foreman")!;
-      const job = db.jobs.createJob({
-        taskId: task.id,
-        taskTargetId: target.id,
-        taskProvider: "file",
-        action: "execution",
-        priorityRank: priorityToRank(task.priority),
-        repoKey: "foreman",
-        baseBranch: "master",
-        dedupeKey: `${task.id}:execution`,
-        selectionReason: "test",
+      const recoveredResult = createWorkerResult({ summary: "Recovered timeout checkpoint." });
+      runnerMocks.invoke
+        .mockResolvedValueOnce({
+          exitCode: null,
+          signal: "SIGTERM",
+          timedOut: true,
+          timeoutMs: 3_600_000,
+          startedAt: "2026-05-06T00:00:00.000Z",
+          finishedAt: "2026-05-06T01:00:00.000Z",
+          stdoutBytes: Buffer.byteLength("Progress summary that can be recovered."),
+          stderrBytes: 0,
+          stdout: "Progress summary that can be recovered.",
+          stderr: "",
+          nativeSessionId: "native-session-timeout",
+        })
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          signal: null,
+          timedOut: false,
+          timeoutMs: null,
+          startedAt: "2026-05-06T01:00:00.000Z",
+          finishedAt: "2026-05-06T01:01:00.000Z",
+          stdoutBytes: Buffer.byteLength(JSON.stringify(recoveredResult)),
+          stderrBytes: 0,
+          stdout: `<agent-result>\n${JSON.stringify(recoveredResult)}\n</agent-result>`,
+          stderr: "",
+          nativeSessionId: "native-session-timeout",
+        });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      expect(runnerMocks.invoke).toHaveBeenCalledTimes(2);
+      expect(runnerMocks.invoke.mock.calls[1]![0]).toMatchObject({
+        nativeSessionId: "native-session-timeout",
+        timeoutMs: 120_000,
       });
-      db.jobs.claimQueuedJobForWorker(job.id, db.workers.listWorkers()[0]!.id);
-      const claimedJob = db.jobs.getJob(job.id);
-      const workerResult: WorkerResult = {
-        schemaVersion: 1,
-        action: "execution",
-        outcome: "completed",
-        summary: "Implemented change.",
-        taskMutations: [],
-        reviewMutations: [],
-        learningMutations: [],
-        blockers: [],
-        signals: [],
-      };
+      expect(applyWorkerResult).toHaveBeenCalledWith(expect.objectContaining({ workerResult: recoveredResult }));
+
+      const attempt = db.attempts.latestAttemptForJob(job.id)!;
+      expect(attempt.status).toBe("completed");
+      expect(attempt.summary).toBe("Recovered timeout checkpoint.");
+      expect(db.attempts.listAttemptEvents(attempt.id).map((event) => event.eventType)).toContain("worker_result_recovered");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records a timeout-specific failure when timed-out stdout cannot be recovered", async () => {
+    const { db, job, claimedJob, executor, logger } = await createExecutorContext();
+
+    try {
+      runnerMocks.invoke.mockResolvedValueOnce({
+        exitCode: null,
+        signal: "SIGTERM",
+        timedOut: true,
+        timeoutMs: 3_600_000,
+        startedAt: "2026-05-06T00:00:00.000Z",
+        finishedAt: "2026-05-06T01:00:00.000Z",
+        stdoutBytes: 0,
+        stderrBytes: 0,
+        stdout: "",
+        stderr: "",
+      });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      expect(runnerMocks.invoke).toHaveBeenCalledTimes(1);
+      const attempt = db.attempts.latestAttemptForJob(job.id)!;
+      expect(attempt.status).toBe("timed_out");
+      expect(attempt.summary).toContain("Runner exited with timed out after 3600000ms with signal SIGTERM");
+      expect(attempt.summary).toContain("No runner output was captured.");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not attempt timeout recovery when the scheduler abort signal is set", async () => {
+    const { db, job, claimedJob, executor, logger } = await createExecutorContext();
+
+    try {
+      runnerMocks.invoke.mockResolvedValueOnce({
+        exitCode: null,
+        signal: "SIGTERM",
+        timedOut: true,
+        timeoutMs: 3_600_000,
+        startedAt: "2026-05-06T00:00:00.000Z",
+        finishedAt: "2026-05-06T01:00:00.000Z",
+        stdoutBytes: Buffer.byteLength("Progress summary that should not be recovered."),
+        stderrBytes: 0,
+        stdout: "Progress summary that should not be recovered.",
+        stderr: "",
+      });
+      const controller = new AbortController();
+      controller.abort();
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, controller);
+      await logger.flush();
+
+      expect(runnerMocks.invoke).toHaveBeenCalledTimes(1);
+      const attempt = db.attempts.latestAttemptForJob(job.id)!;
+      expect(attempt.status).toBe("canceled");
+      expect(attempt.summary).toContain("Runner exited with timed out after 3600000ms with signal SIGTERM");
+
+    } finally {
+      db.close();
+    }
+  });
+
+  test("marks attempts blocked when provider rate limiting interrupts result application", async () => {
+    const { db, job, claimedJob, executor, logger, applyWorkerResult } = await createExecutorContext();
+
+    try {
+      const workerResult = createWorkerResult({ summary: "Implemented change." });
       runnerMocks.invoke.mockResolvedValueOnce({
         exitCode: 0,
         signal: null,
@@ -251,41 +405,12 @@ describe("AttemptExecutor", () => {
         stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
         stderr: "",
       });
-      const taskSystem: TaskSystem = {
-        getProvider: () => "file",
-        listCandidates: vi.fn(async () => []),
-        getTask: vi.fn(async () => task),
-        createTask: vi.fn(async () => ({ id: "TASK-NEW", providerId: "TASK-NEW", url: null })),
-        listComments: vi.fn(async () => []),
-        addComment: vi.fn(async () => undefined),
-        transition: vi.fn(async () => undefined),
-        upsertPullRequest: vi.fn(async () => undefined),
-        updateLabels: vi.fn(async () => undefined),
-      };
-      const reviewService = {
-        resolvePullRequest: vi.fn(async () => null),
-      } as unknown as ReviewService;
-      const repo: RepoRef = { key: "foreman", rootPath: repoRoot, defaultBranch: "master" };
-      const logger = LoggerService.create({ paths, stdout: nullWritable, minLevel: "info" });
-      const executor = new AttemptExecutor({
-        config: createDefaultWorkspaceConfig("test-workspace", "file"),
-        paths,
-        foremanRepos: db,
-        taskSystem,
-        reviewService,
-        repos: [repo],
-        env: {},
-        logger,
-        applyWorkerResult: vi.fn(async () => {
-          throw new ProviderRateLimitError({
-            provider: "github",
-            retryAfterSeconds: 120,
-            resetAt: "2026-05-06T00:03:00.000Z",
-          });
-        }),
-        onWorkerUpdated: vi.fn(),
-        onAttemptChanged: vi.fn(),
-        onWorkerFinished: vi.fn(),
+      applyWorkerResult.mockImplementation(async () => {
+        throw new ProviderRateLimitError({
+          provider: "github",
+          retryAfterSeconds: 120,
+          resetAt: "2026-05-06T00:03:00.000Z",
+        });
       });
 
       await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { ClaudeRunner, OpenCodeRunner, createAgentRunner } from "../index.js";
 import { normalizeClaudeJsonOutput, normalizeOpenCodeJsonOutput } from "../impl/json-output.js";
+import { runAgentProcess } from "../impl/run-agent-process.js";
 import { createTempDir } from "../../test-support/helpers.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 
@@ -33,6 +34,41 @@ afterEach(async () => {
 });
 
 describe("provider runners", () => {
+  test("reports timeout metadata when the configured runner timeout terminates the process", async () => {
+    const tempDir = await createTempDir("foreman-runner-test-");
+    cleanupDirs.push(tempDir);
+
+    const scriptPath = path.join(tempDir, "fake-runner.js");
+    await writeExecutableScript(
+      scriptPath,
+      [
+        "#!/usr/bin/env node",
+        "process.on('SIGTERM', () => { process.exit(0); });",
+        "process.stdout.write('checkpoint\\n');",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => { setInterval(() => {}, 1000); });",
+      ].join("\n"),
+    );
+
+    const result = await runAgentProcess({
+      command: scriptPath,
+      args: [],
+      request: {
+        attemptId: "attempt-timeout",
+        action: "execution",
+        cwd: tempDir,
+        env: {},
+        prompt: "test prompt",
+        timeoutMs: 20,
+      },
+    });
+
+    expect(result.exitCode).toBeNull();
+    expect(result.timedOut).toBe(true);
+    expect(result.timeoutMs).toBe(20);
+    expect(result.stdout).toBe("checkpoint\n");
+  }, 10_000);
+
   test.each([
     {
       label: "OpenCodeRunner",

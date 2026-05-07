@@ -4,7 +4,7 @@ import path from "node:path";
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskState, type TaskTarget, type WorkerResult } from "../domain/index.js";
 import { createAgentRunner, parseWorkerResult, validateWorkerResult, type AgentRunner, type CapturedAgentRunResult, type WorkerResultAction } from "../execution/index.js";
 import { parseWorkerPromptPullRequestReference, renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
-import { ForemanError, isProviderRateLimitError } from "../lib/errors.js";
+import { ForemanError, isForemanError, isProviderRateLimitError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
@@ -22,12 +22,21 @@ const workerResultRecoveryTimeoutMs = 120_000;
 const truncateRunnerOutput = (output: string): string =>
   output.length > runnerOutputLimit ? `${output.slice(0, runnerOutputLimit)}\n... truncated ...` : output;
 
-const formatRunnerFailure = (runResult: { exitCode: number | null; signal: string | null; stdout: string; stderr: string }): string => {
-  const status = runResult.signal
-    ? `signal ${runResult.signal}`
-    : runResult.exitCode === null
-      ? "without an exit code"
-      : `exit code ${runResult.exitCode}`;
+const formatRunnerFailure = (runResult: {
+  exitCode: number | null;
+  signal: string | null;
+  timedOut?: boolean;
+  timeoutMs?: number | null;
+  stdout: string;
+  stderr: string;
+}): string => {
+  const status = runResult.timedOut
+    ? `timed out${runResult.timeoutMs ? ` after ${runResult.timeoutMs}ms` : ""}${runResult.signal ? ` with signal ${runResult.signal}` : ""}`
+    : runResult.signal
+      ? `signal ${runResult.signal}`
+      : runResult.exitCode === null
+        ? "without an exit code"
+        : `exit code ${runResult.exitCode}`;
   const details = [`Runner exited with ${status}`];
   const stderr = runResult.stderr.trim();
   const stdout = runResult.stdout.trim();
@@ -312,6 +321,8 @@ export class AttemptExecutor {
         attemptLogger.info("runner invocation completed", {
           exitCode: runResult.exitCode,
           signal: runResult.signal,
+          timedOut: runResult.timedOut === true,
+          timeoutMs: runResult.timeoutMs ?? null,
           nativeSessionId: runResult.nativeSessionId ?? null,
           stdoutBytes: runResult.stdoutBytes,
           stderrBytes: runResult.stderrBytes,
@@ -442,7 +453,15 @@ export class AttemptExecutor {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const interruptedByProviderRateLimit = isProviderRateLimitError(error);
-      const interruptedStatus = controller.signal.aborted ? "canceled" : interruptedByProviderRateLimit ? "blocked" : "failed";
+      const interruptedByRunnerTimeout = isForemanError(error) && error.code === "runner_timed_out";
+      const interruptedStatus = controller.signal.aborted
+        ? "canceled"
+        : interruptedByProviderRateLimit
+          ? "blocked"
+          : interruptedByRunnerTimeout
+            ? "timed_out"
+            : "failed";
+      const jobStatus = interruptedStatus === "timed_out" ? "failed" : interruptedStatus;
       if (attempt) {
         const attemptLogger = jobLogger.child({ attemptId: attempt.id });
         if (interruptedByProviderRateLimit) {
@@ -473,7 +492,7 @@ export class AttemptExecutor {
         });
         this.deps.onAttemptChanged({ attemptId: attempt.id, status: interruptedStatus });
       }
-      this.deps.foremanRepos.jobs.updateJobStatus(job.id, interruptedStatus, {
+      this.deps.foremanRepos.jobs.updateJobStatus(job.id, jobStatus, {
         finishedAt: isoNow(),
         errorMessage: interruptedByProviderRateLimit ? null : message,
       });
@@ -527,17 +546,30 @@ export class AttemptExecutor {
         finalRunResult: input.runResult,
       };
     } catch (parseError) {
-      if (input.runResult.exitCode !== 0 || input.runResult.signal) {
-        throw new ForemanError("runner_failed", formatRunnerFailure(input.runResult), 500);
+      const canRecoverTimedOutOutput =
+        input.runResult.timedOut === true && !input.abortSignal.aborted && input.runResult.stdout.trim().length > 0;
+      if ((input.runResult.exitCode !== 0 || input.runResult.signal) && !canRecoverTimedOutOutput) {
+        throw new ForemanError(
+          input.runResult.timedOut === true && !input.abortSignal.aborted ? "runner_timed_out" : "runner_failed",
+          formatRunnerFailure(input.runResult),
+          500,
+        );
       }
 
-      input.attemptLogger.warn("worker result parsing failed after successful runner exit; requesting recovery", {
-        error: parseError instanceof Error ? parseError.message : String(parseError),
-        runnerOutputPath: input.runnerOutputRelativePath,
-      });
+      input.attemptLogger.warn(
+        input.runResult.timedOut
+          ? "worker result parsing failed after runner timeout; requesting recovery"
+          : "worker result parsing failed after successful runner exit; requesting recovery",
+        {
+          error: parseError instanceof Error ? parseError.message : String(parseError),
+          runnerOutputPath: input.runnerOutputRelativePath,
+          timedOut: input.runResult.timedOut === true,
+        },
+      );
       this.deps.foremanRepos.attempts.addAttemptEvent(input.attempt.id, "worker_result_recovery_started", "Requesting recovered worker result", {
         parseError: parseError instanceof Error ? parseError.message : String(parseError),
         runnerOutputPath: input.runnerOutputRelativePath,
+        timedOut: input.runResult.timedOut === true,
       });
 
       return this.recoverWorkerResult({ ...input, parseError });
@@ -587,6 +619,8 @@ export class AttemptExecutor {
     input.attemptLogger.info("worker result recovery invocation completed", {
       exitCode: recoveryResult.exitCode,
       signal: recoveryResult.signal,
+      timedOut: recoveryResult.timedOut === true,
+      timeoutMs: recoveryResult.timeoutMs ?? null,
       nativeSessionId: recoveryResult.nativeSessionId ?? null,
       stdoutBytes: recoveryResult.stdoutBytes,
       stderrBytes: recoveryResult.stderrBytes,

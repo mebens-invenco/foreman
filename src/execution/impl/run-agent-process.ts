@@ -141,6 +141,8 @@ export const runAgentProcess = async (input: {
   return {
     exitCode: timedOut ? null : exitCode,
     signal,
+    timedOut,
+    timeoutMs: timedOut ? input.request.timeoutMs : null,
     startedAt,
     finishedAt: isoNow(),
     stdoutBytes: Buffer.byteLength(normalized?.stdout ?? stdout),
