@@ -46,6 +46,16 @@ const jsonResponse = (body: unknown, status = 200, headers: Record<string, strin
     text: async () => JSON.stringify(body),
   }) as Response;
 
+const spyLogger = () => ({
+  child() {
+    return this;
+  },
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+});
+
 const sampleRepo: RepoRef = {
   key: "repo-a",
   rootPath: "/repos/repo-a",
@@ -178,24 +188,29 @@ describe("GitHubReviewService.getContext", () => {
     );
   });
 
-  test("uses a linked pull request before branch lookup", async () => {
-    const execSpy = vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+  test("prefers the latest open branch pull request over a stale linked pull request", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
     global.fetch = vi.fn().mockResolvedValueOnce(
-      jsonResponse({
-        data: {
-          repository: {
-            pullRequest: {
-              url: "https://github.com/acme/repo/pull/987",
-              number: 987,
-              state: "OPEN",
-              isDraft: true,
-              merged: false,
-              headRefName: "eng-4737",
-              baseRefName: "master",
-            },
-          },
+      jsonResponse([
+        {
+          html_url: "https://github.com/acme/repo/pull/987",
+          number: 987,
+          state: "closed",
+          draft: false,
+          merged_at: null,
+          head: { ref: "eng-4737" },
+          base: { ref: "master" },
         },
-      }),
+        {
+          html_url: "https://github.com/acme/repo/pull/988",
+          number: 988,
+          state: "open",
+          draft: true,
+          merged_at: null,
+          head: { ref: "eng-4737" },
+          base: { ref: "master" },
+        },
+      ]),
     ) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
@@ -206,16 +221,17 @@ describe("GitHubReviewService.getContext", () => {
     );
 
     expect(resolved).toMatchObject({
-      pullRequestUrl: "https://github.com/acme/repo/pull/987",
-      pullRequestNumber: 987,
+      pullRequestUrl: "https://github.com/acme/repo/pull/988",
+      pullRequestNumber: 988,
       state: "open",
       isDraft: true,
       headBranch: "eng-4737",
       baseBranch: "master",
     });
     expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe("https://api.github.com/graphql");
-    expect(execSpy).not.toHaveBeenCalled();
+    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe(
+      "https://api.github.com/repos/acme/repo/pulls?state=all&head=acme%3Aeng-4737&per_page=20",
+    );
   });
 
   test("classifies REST rate-limit responses without retrying", async () => {
@@ -1078,6 +1094,150 @@ describe("GitHubReviewService.getContext", () => {
       }),
     ]);
     expect(context ? actionableConversationComments(context) : []).toEqual([]);
+  });
+});
+
+describe("GitHubReviewService rate-limit handling", () => {
+  test("throws a distinct error and fails fast during REST rate-limit backoff", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    const resetSeconds = Math.floor(Date.now() / 1000) + 3600;
+    const logger = spyLogger();
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        { message: "API rate limit exceeded" },
+        403,
+        {
+          "x-ratelimit-limit": "5000",
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": String(resetSeconds),
+          "x-ratelimit-resource": "core",
+        },
+      ),
+    ) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, logger as any);
+    await expect(service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo)).rejects.toMatchObject({
+      code: "provider_rate_limited",
+      provider: "github",
+      statusCode: 429,
+    });
+    await expect(service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo)).rejects.toMatchObject({
+      code: "provider_rate_limited",
+      provider: "github",
+      statusCode: 429,
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(
+      "GitHub REST request rate limited",
+      expect.objectContaining({
+        method: "GET",
+        path: "/repos/acme/repo/pulls?state=all&head=acme%3Aeng-4737&per_page=20",
+        status: 403,
+        rateLimitRemaining: "0",
+        rateLimitResetAt: new Date(resetSeconds * 1000).toISOString(),
+        rateLimitResource: "core",
+      }),
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      "skipping GitHub request during rate-limit backoff",
+      expect.objectContaining({
+        method: "GET",
+        rateLimitResetAt: new Date(resetSeconds * 1000).toISOString(),
+        rateLimitResource: "core",
+      }),
+    );
+  });
+
+  test("throws a distinct error and fails fast during GraphQL rate-limit backoff", async () => {
+    const resetSeconds = Math.floor(Date.now() / 1000) + 3600;
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        { errors: [{ message: "API rate limit exceeded for user ID 1" }] },
+        200,
+        {
+          "x-ratelimit-limit": "5000",
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": String(resetSeconds),
+          "x-ratelimit-resource": "graphql",
+        },
+      ),
+    ) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toMatchObject({
+      code: "provider_rate_limited",
+      provider: "github",
+      statusCode: 429,
+    });
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toMatchObject({
+      code: "provider_rate_limited",
+      provider: "github",
+      statusCode: 429,
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("warns when GitHub reports low remaining quota", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    const resetSeconds = Math.floor(Date.now() / 1000) + 3600;
+    const logger = spyLogger();
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse([], 200, {
+        "x-ratelimit-limit": "5000",
+        "x-ratelimit-remaining": "3",
+        "x-ratelimit-reset": String(resetSeconds),
+        "x-ratelimit-resource": "core",
+      }),
+    ) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, logger as any);
+    await expect(service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo)).resolves.toBeNull();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      "GitHub rate-limit remaining quota is low",
+      expect.objectContaining({
+        method: "GET",
+        path: "/repos/acme/repo/pulls?state=all&head=acme%3Aeng-4737&per_page=20",
+        rateLimitRemaining: "3",
+        rateLimitResetAt: new Date(resetSeconds * 1000).toISOString(),
+        rateLimitResource: "core",
+      }),
+    );
+  });
+
+  test("prefers retry-after over primary reset headers for secondary rate-limit backoff", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-05-07T04:00:00Z"));
+      const primaryResetSeconds = Math.floor(new Date("2026-05-07T05:00:00Z").getTime() / 1000);
+      global.fetch = vi.fn().mockResolvedValueOnce(
+        jsonResponse(
+          { message: "You have exceeded a secondary rate limit" },
+          403,
+          {
+            "retry-after": "60",
+            "x-ratelimit-limit": "5000",
+            "x-ratelimit-remaining": "4999",
+            "x-ratelimit-reset": String(primaryResetSeconds),
+            "x-ratelimit-resource": "core",
+          },
+        ),
+      ) as typeof fetch;
+
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks")).rejects.toThrow(
+        "GitHub REST rate limit exceeded until 2026-05-07T04:01:00.000Z",
+      );
+      await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks")).rejects.toThrow(
+        "GitHub REST rate limit is active until 2026-05-07T04:01:00.000Z",
+      );
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
