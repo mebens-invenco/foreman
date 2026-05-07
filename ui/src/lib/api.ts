@@ -347,6 +347,7 @@ export function listTasks(params: {
   state?: TaskState
   search?: string
   limit?: number
+  refreshReview?: boolean
 }) {
   return requestJson<{ tasks: TaskListItem[] }>(
     `/api/tasks${buildSearch(params)}`

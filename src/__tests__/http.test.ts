@@ -128,6 +128,12 @@ describe("HTTP query validation", () => {
       expect(invalidTaskState.statusCode).toBe(400);
       expect(invalidTaskState.json().error.code).toBe("invalid_request");
 
+      const invalidRefreshReview = await server.inject({ method: "GET", url: "/api/tasks?refreshReview=1" });
+      expect(invalidRefreshReview.statusCode).toBe(400);
+      expect(invalidRefreshReview.json()).toEqual({
+        error: { code: "invalid_request", message: "Query parameter refreshReview must be true or false." },
+      });
+
       const invalidAttemptStatus = await server.inject({ method: "GET", url: "/api/attempts?status=nope" });
       expect(invalidAttemptStatus.statusCode).toBe(400);
       expect(invalidAttemptStatus.json().error.code).toBe("invalid_request");
@@ -169,26 +175,28 @@ describe("HTTP query validation", () => {
 
     db.taskMirror.saveTasks([taskWithPr, secondaryTask]);
 
+    const reviewService = {
+      resolvePullRequest: vi.fn(async (task: Task) =>
+        task.id === taskWithPr.id
+          ? {
+              pullRequestUrl: "https://github.com/acme/repo-a/pull/7",
+              pullRequestNumber: 7,
+              state: "open",
+              isDraft: true,
+              headBranch: "task-0001",
+              baseBranch: "main",
+            }
+          : null,
+      ),
+    };
+
     const server = createHttpServer({
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths,
       repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
       repos: db,
       taskSystem,
-      reviewService: {
-        resolvePullRequest: vi.fn(async (task: Task) =>
-          task.id === taskWithPr.id
-            ? {
-                pullRequestUrl: "https://github.com/acme/repo-a/pull/7",
-                pullRequestNumber: 7,
-                state: "open",
-                isDraft: true,
-                headBranch: "task-0001",
-                baseBranch: "main",
-              }
-            : null,
-        ),
-      } as any,
+      reviewService: reviewService as any,
       scheduler: {
         getStatus: () => ({ status: "running", nextScoutPollAt: null }),
         start: vi.fn(),
@@ -219,7 +227,7 @@ describe("HTTP query validation", () => {
                   pullRequestUrl: "https://github.com/acme/repo-a/pull/7",
                   pullRequestNumber: 7,
                   state: "open",
-                  isDraft: true,
+                  isDraft: false,
                   baseBranch: "main",
                   headBranch: "task-0001",
                 },
@@ -232,6 +240,7 @@ describe("HTTP query validation", () => {
           }),
         ],
       });
+      expect(reviewService.resolvePullRequest).not.toHaveBeenCalled();
 
       const filteredResponse = await server.inject({ method: "GET", url: "/api/tasks?state=in_review&search=other" });
       expect(filteredResponse.statusCode).toBe(200);
@@ -254,6 +263,19 @@ describe("HTTP query validation", () => {
           status: "in_review",
         },
       ]);
+      expect(reviewService.resolvePullRequest).not.toHaveBeenCalled();
+
+      const refreshedResponse = await server.inject({ method: "GET", url: "/api/tasks?refreshReview=true" });
+      expect(refreshedResponse.statusCode).toBe(200);
+      expect(reviewService.resolvePullRequest).toHaveBeenCalledTimes(1);
+      expect(refreshedResponse.json().tasks[0].targets[0].review).toMatchObject({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/7",
+        pullRequestNumber: 7,
+        state: "open",
+        isDraft: true,
+        baseBranch: "main",
+        headBranch: "task-0001",
+      });
     } finally {
       await server.close();
       db.close();
