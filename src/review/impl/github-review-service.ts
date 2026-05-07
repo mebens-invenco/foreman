@@ -75,6 +75,14 @@ const fallbackReviewBodyForUnresolvableComments = (body: string, comments: PullR
 
 type GitHubGraphqlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
+const GITHUB_REQUEST_MAX_ATTEMPTS = 3;
+const GITHUB_REQUEST_RETRY_BACKOFF_MS = [250, 1_000];
+const GITHUB_TRANSIENT_STATUS_CODES = new Set([502, 503, 504]);
+
+const sleep = (durationMs: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, durationMs));
+
+const retryDelayMs = (attempt: number): number => GITHUB_REQUEST_RETRY_BACKOFF_MS[Math.min(attempt - 1, GITHUB_REQUEST_RETRY_BACKOFF_MS.length - 1)]!;
+
 type PageInfo = {
   hasNextPage: boolean;
   endCursor: string | null;
@@ -209,116 +217,195 @@ export class GitHubReviewService implements ReviewService {
   private async rest<T>(path: string, init: RequestInit = {}): Promise<T> {
     const startedAt = Date.now();
     const method = init.method ?? "GET";
-    this.logger.debug("sending GitHub REST request", { method, path });
-    let response: Response;
-    try {
-      response = await fetch(`https://api.github.com${path}`, {
-        ...init,
-        headers: {
-          accept: "application/vnd.github+json",
-          authorization: `Bearer ${this.token}`,
-          "x-github-api-version": "2022-11-28",
-          ...(init.headers ?? {}),
-        },
-        signal: createTimeoutSignal(PROVIDER_REQUEST_TIMEOUT_MS, init.signal ? [init.signal] : []),
-      });
-    } catch (error) {
-      if (isAbortLikeError(error)) {
-        this.logger.error("GitHub REST request timed out", {
+    for (let attempt = 1; attempt <= GITHUB_REQUEST_MAX_ATTEMPTS; attempt += 1) {
+      this.logger.debug("sending GitHub REST request", { method, path, attempt, maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS });
+      let response: Response;
+      try {
+        response = await fetch(`https://api.github.com${path}`, {
+          ...init,
+          headers: {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${this.token}`,
+            "x-github-api-version": "2022-11-28",
+            ...(init.headers ?? {}),
+          },
+          signal: createTimeoutSignal(PROVIDER_REQUEST_TIMEOUT_MS, init.signal ? [init.signal] : []),
+        });
+      } catch (error) {
+        if (isAbortLikeError(error)) {
+          if (attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
+            const delayMs = retryDelayMs(attempt);
+            this.logger.warn("GitHub REST request timed out; retrying", {
+              method,
+              path,
+              attempt,
+              maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+              delayMs,
+              durationMs: Date.now() - startedAt,
+              timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+            });
+            await sleep(delayMs);
+            continue;
+          }
+
+          this.logger.error("GitHub REST request timed out", {
+            method,
+            path,
+            attempt,
+            maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+            durationMs: Date.now() - startedAt,
+            timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+          });
+          throw new ForemanError("github_request_timeout", `GitHub request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
+        }
+        throw error;
+      }
+
+      if (!response.ok) {
+        const body = await response.text();
+        if (GITHUB_TRANSIENT_STATUS_CODES.has(response.status) && attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
+          const delayMs = retryDelayMs(attempt);
+          this.logger.warn("GitHub REST request failed with transient status; retrying", {
+            method,
+            path,
+            status: response.status,
+            attempt,
+            maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+            delayMs,
+            durationMs: Date.now() - startedAt,
+          });
+          await sleep(delayMs);
+          continue;
+        }
+
+        this.logger.error("GitHub REST request failed", {
           method,
           path,
+          status: response.status,
+          attempt,
+          maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
           durationMs: Date.now() - startedAt,
-          timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
         });
-        throw new ForemanError("github_request_timeout", `GitHub request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
+        throw new ForemanError("github_request_failed", `GitHub request failed: ${response.status} ${body}`, 502);
       }
-      throw error;
+
+      if (response.status === 204) {
+        this.logger.debug("GitHub REST request completed", { method, path, status: response.status, attempt, durationMs: Date.now() - startedAt });
+        return undefined as T;
+      }
+
+      this.logger.debug("GitHub REST request completed", { method, path, status: response.status, attempt, durationMs: Date.now() - startedAt });
+      return (await response.json()) as T;
     }
 
-    if (!response.ok) {
-      const body = await response.text();
-      this.logger.error("GitHub REST request failed", {
-        method,
-        path,
-        status: response.status,
-        durationMs: Date.now() - startedAt,
-      });
-      throw new ForemanError("github_request_failed", `GitHub request failed: ${response.status} ${body}`, 502);
-    }
-
-    if (response.status === 204) {
-      this.logger.debug("GitHub REST request completed", { method, path, status: response.status, durationMs: Date.now() - startedAt });
-      return undefined as T;
-    }
-
-    this.logger.debug("GitHub REST request completed", { method, path, status: response.status, durationMs: Date.now() - startedAt });
-    return (await response.json()) as T;
+    throw new ForemanError("github_request_failed", "GitHub request failed after retry attempts", 502);
   }
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     const startedAt = Date.now();
     const operationName = query.match(/\b(?:query|mutation)\s+(\w+)/)?.[1] ?? "anonymous";
-    this.logger.debug("sending GitHub GraphQL request", {
-      operationName,
-      variableKeys: Object.keys(variables).sort().join(","),
-    });
-    let response: Response;
-    try {
-      response = await fetch("https://api.github.com/graphql", {
-        method: "POST",
-        headers: {
-          accept: "application/vnd.github+json",
-          authorization: `Bearer ${this.token}`,
-          "content-type": "application/json",
-          "x-github-api-version": "2022-11-28",
-        },
-        body: JSON.stringify({ query, variables }),
-        signal: createTimeoutSignal(),
+    const variableKeys = Object.keys(variables).sort().join(",");
+
+    for (let attempt = 1; attempt <= GITHUB_REQUEST_MAX_ATTEMPTS; attempt += 1) {
+      this.logger.debug("sending GitHub GraphQL request", {
+        operationName,
+        variableKeys,
+        attempt,
+        maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
       });
-    } catch (error) {
-      if (isAbortLikeError(error)) {
-        this.logger.error("GitHub GraphQL request timed out", {
-          operationName,
-          durationMs: Date.now() - startedAt,
-          timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+      let response: Response;
+      try {
+        response = await fetch("https://api.github.com/graphql", {
+          method: "POST",
+          headers: {
+            accept: "application/vnd.github+json",
+            authorization: `Bearer ${this.token}`,
+            "content-type": "application/json",
+            "x-github-api-version": "2022-11-28",
+          },
+          body: JSON.stringify({ query, variables }),
+          signal: createTimeoutSignal(),
         });
-        throw new ForemanError("github_request_timeout", `GitHub GraphQL request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
+      } catch (error) {
+        if (isAbortLikeError(error)) {
+          if (attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
+            const delayMs = retryDelayMs(attempt);
+            this.logger.warn("GitHub GraphQL request timed out; retrying", {
+              operationName,
+              attempt,
+              maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+              delayMs,
+              durationMs: Date.now() - startedAt,
+              timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+            });
+            await sleep(delayMs);
+            continue;
+          }
+
+          this.logger.error("GitHub GraphQL request timed out", {
+            operationName,
+            attempt,
+            maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+            durationMs: Date.now() - startedAt,
+            timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+          });
+          throw new ForemanError("github_request_timeout", `GitHub GraphQL request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
+        }
+        throw error;
       }
-      throw error;
+
+      if (!response.ok) {
+        const body = await response.text();
+        if (GITHUB_TRANSIENT_STATUS_CODES.has(response.status) && attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
+          const delayMs = retryDelayMs(attempt);
+          this.logger.warn("GitHub GraphQL request failed with transient status; retrying", {
+            operationName,
+            status: response.status,
+            attempt,
+            maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+            delayMs,
+            durationMs: Date.now() - startedAt,
+          });
+          await sleep(delayMs);
+          continue;
+        }
+
+        this.logger.error("GitHub GraphQL request failed", {
+          operationName,
+          status: response.status,
+          attempt,
+          maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+          durationMs: Date.now() - startedAt,
+        });
+        throw new ForemanError("github_request_failed", `GitHub GraphQL request failed: ${response.status} ${body}`, 502);
+      }
+
+      const json = (await response.json()) as GitHubGraphqlResponse<T>;
+      if (json.errors?.length) {
+        this.logger.error("GitHub GraphQL request returned errors", {
+          operationName,
+          errorCount: json.errors.length,
+          errors: json.errors.map((error) => error.message).join("; "),
+          attempt,
+          durationMs: Date.now() - startedAt,
+        });
+        throw new ForemanError(
+          "github_request_failed",
+          `GitHub GraphQL request failed: ${json.errors.map((error) => error.message).join("; ")}`,
+          502,
+        );
+      }
+
+      if (!json.data) {
+        this.logger.error("GitHub GraphQL request returned no data", { operationName, attempt, durationMs: Date.now() - startedAt });
+        throw new ForemanError("github_request_failed", "GitHub GraphQL response returned no data", 502);
+      }
+
+      this.logger.debug("GitHub GraphQL request completed", { operationName, attempt, durationMs: Date.now() - startedAt });
+      return json.data;
     }
 
-    if (!response.ok) {
-      const body = await response.text();
-      this.logger.error("GitHub GraphQL request failed", {
-        operationName,
-        status: response.status,
-        durationMs: Date.now() - startedAt,
-      });
-      throw new ForemanError("github_request_failed", `GitHub GraphQL request failed: ${response.status} ${body}`, 502);
-    }
-
-    const json = (await response.json()) as GitHubGraphqlResponse<T>;
-    if (json.errors?.length) {
-      this.logger.error("GitHub GraphQL request returned errors", {
-        operationName,
-        errorCount: json.errors.length,
-        errors: json.errors.map((error) => error.message).join("; "),
-        durationMs: Date.now() - startedAt,
-      });
-      throw new ForemanError(
-        "github_request_failed",
-        `GitHub GraphQL request failed: ${json.errors.map((error) => error.message).join("; ")}`,
-        502,
-      );
-    }
-
-    if (!json.data) {
-      this.logger.error("GitHub GraphQL request returned no data", { operationName, durationMs: Date.now() - startedAt });
-      throw new ForemanError("github_request_failed", "GitHub GraphQL response returned no data", 502);
-    }
-
-    this.logger.debug("GitHub GraphQL request completed", { operationName, durationMs: Date.now() - startedAt });
-    return json.data;
+    throw new ForemanError("github_request_failed", "GitHub GraphQL request failed after retry attempts", 502);
   }
 
   private mapConversationComment(input: {
