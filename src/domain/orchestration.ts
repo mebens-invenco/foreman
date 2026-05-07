@@ -35,6 +35,8 @@ export type AgentRunRequest = {
 export type AgentRunResult = {
   exitCode: number | null;
   signal: string | null;
+  timedOut?: boolean;
+  timeoutMs?: number | null;
   startedAt: string;
   finishedAt: string;
   stdoutBytes: number;
