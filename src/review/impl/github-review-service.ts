@@ -75,6 +75,92 @@ const fallbackReviewBodyForUnresolvableComments = (body: string, comments: PullR
 
 type GitHubGraphqlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
 
+type GitHubRequestKind = "REST" | "GraphQL";
+
+type GitHubRequestContext =
+  | { kind: "REST"; method: string; path: string }
+  | { kind: "GraphQL"; operationName: string };
+
+type GitHubRateLimitHeaders = {
+  limit: string | null;
+  remaining: string | null;
+  reset: string | null;
+  resource: string | null;
+  retryAfter: string | null;
+};
+
+const LOW_RATE_LIMIT_REMAINING_THRESHOLD = 10;
+const DEFAULT_SECONDARY_RATE_LIMIT_BACKOFF_MS = 60_000;
+
+const parseHeaderInteger = (value: string | null): number | null => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const rateLimitResetMs = (headers: GitHubRateLimitHeaders): number | null => {
+  const resetSeconds = parseHeaderInteger(headers.reset);
+  return resetSeconds === null ? null : resetSeconds * 1000;
+};
+
+const retryAfterMs = (headers: GitHubRateLimitHeaders): number | null => {
+  const retryAfterSeconds = parseHeaderInteger(headers.retryAfter);
+  return retryAfterSeconds === null ? null : retryAfterSeconds * 1000;
+};
+
+const formatResetAt = (resetMs: number | null): string | null => (resetMs === null ? null : new Date(resetMs).toISOString());
+
+const rateLimitHeadersFromResponse = (response: Response): GitHubRateLimitHeaders => {
+  const headers = (response as { headers?: Headers }).headers;
+  return {
+    limit: headers?.get("x-ratelimit-limit") ?? null,
+    remaining: headers?.get("x-ratelimit-remaining") ?? null,
+    reset: headers?.get("x-ratelimit-reset") ?? null,
+    resource: headers?.get("x-ratelimit-resource") ?? null,
+    retryAfter: headers?.get("retry-after") ?? null,
+  };
+};
+
+const hasRateLimitHeaders = (headers: GitHubRateLimitHeaders): boolean =>
+  Boolean(headers.limit ?? headers.remaining ?? headers.reset ?? headers.resource);
+
+const operationLogContext = (context: GitHubRequestContext): Record<string, string | number | boolean | null> =>
+  context.kind === "REST" ? { method: context.method, path: context.path } : { operationName: context.operationName };
+
+const rateLimitLogContext = (
+  context: GitHubRequestContext,
+  headers: GitHubRateLimitHeaders,
+): Record<string, string | number | boolean | null> => {
+  const resetMs = rateLimitResetMs(headers);
+  return {
+    ...operationLogContext(context),
+    rateLimitLimit: headers.limit,
+    rateLimitRemaining: headers.remaining,
+    rateLimitReset: headers.reset,
+    rateLimitResetAt: formatResetAt(resetMs),
+    rateLimitResource: headers.resource,
+  };
+};
+
+const isGitHubRateLimitResponse = (status: number, body: string, headers: GitHubRateLimitHeaders): boolean => {
+  const remaining = parseHeaderInteger(headers.remaining);
+  const normalizedBody = body.toLowerCase();
+  return (
+    status === 429 ||
+    (status === 403 &&
+      (remaining === 0 || normalizedBody.includes("rate limit") || normalizedBody.includes("abuse detection mechanism")))
+  );
+};
+
+const areGitHubGraphqlRateLimitErrors = (errors: Array<{ message: string }>): boolean =>
+  errors.some((error) => {
+    const message = error.message.toLowerCase();
+    return message.includes("rate limit") || message.includes("abuse detection mechanism");
+  });
+
 type PageInfo = {
   hasNextPage: boolean;
   endCursor: string | null;
@@ -192,6 +278,7 @@ export class GitHubReviewService implements ReviewService {
   private readonly token: string;
   private readonly logger: LoggerService;
   private readonly repoDescriptorPromises = new Map<string, Promise<RepoDescriptor>>();
+  private readonly rateLimitBackoffUntilByKind = new Map<GitHubRequestKind, { untilMs: number; resource: string | null }>();
 
   constructor(env: Record<string, string>, logger?: LoggerService) {
     this.logger = (logger ?? LoggerService.create({ context: { component: "review.github" }, colorMode: "never" })).child({
@@ -206,9 +293,78 @@ export class GitHubReviewService implements ReviewService {
     this.token = token;
   }
 
+  private throwIfRateLimited(context: GitHubRequestContext): void {
+    const backoff = this.rateLimitBackoffUntilByKind.get(context.kind);
+    if (!backoff) {
+      return;
+    }
+
+    const now = Date.now();
+    if (backoff.untilMs <= now) {
+      this.rateLimitBackoffUntilByKind.delete(context.kind);
+      return;
+    }
+
+    const resetAt = new Date(backoff.untilMs).toISOString();
+    this.logger.warn("skipping GitHub request during rate-limit backoff", {
+      ...operationLogContext(context),
+      rateLimitResource: backoff.resource,
+      rateLimitResetAt: resetAt,
+    });
+    throw new ForemanError("github_rate_limit_exceeded", `GitHub ${context.kind} rate limit is active until ${resetAt}`, 429);
+  }
+
+  private logRateLimitHeaders(context: GitHubRequestContext, headers: GitHubRateLimitHeaders): void {
+    if (!hasRateLimitHeaders(headers)) {
+      return;
+    }
+
+    this.logger.debug(`received GitHub ${context.kind} rate-limit headers`, rateLimitLogContext(context, headers));
+
+    const remaining = parseHeaderInteger(headers.remaining);
+    if (remaining !== null && remaining > 0 && remaining <= LOW_RATE_LIMIT_REMAINING_THRESHOLD) {
+      this.logger.warn("GitHub rate-limit remaining quota is low", rateLimitLogContext(context, headers));
+    }
+  }
+
+  private rememberRateLimitBackoff(context: GitHubRequestContext, headers: GitHubRateLimitHeaders): string | null {
+    const retryMs = retryAfterMs(headers);
+    const untilMs = rateLimitResetMs(headers) ?? (retryMs === null ? Date.now() + DEFAULT_SECONDARY_RATE_LIMIT_BACKOFF_MS : Date.now() + retryMs);
+    if (untilMs <= Date.now()) {
+      return formatResetAt(untilMs);
+    }
+
+    this.rateLimitBackoffUntilByKind.set(context.kind, { untilMs, resource: headers.resource });
+    return new Date(untilMs).toISOString();
+  }
+
+  private throwRateLimitError(input: {
+    context: GitHubRequestContext;
+    status: number;
+    body: string;
+    headers: GitHubRateLimitHeaders;
+    durationMs: number;
+  }): never {
+    const resetAt = this.rememberRateLimitBackoff(input.context, input.headers);
+    this.logger.error(`GitHub ${input.context.kind} request rate limited`, {
+      ...rateLimitLogContext(input.context, input.headers),
+      status: input.status,
+      durationMs: input.durationMs,
+      rateLimitResetAt: resetAt,
+    });
+    const resetSuffix = resetAt ? ` until ${resetAt}` : "";
+    throw new ForemanError(
+      "github_rate_limit_exceeded",
+      `GitHub ${input.context.kind} rate limit exceeded${resetSuffix}: ${input.status} ${input.body}`,
+      429,
+    );
+  }
+
   private async rest<T>(path: string, init: RequestInit = {}): Promise<T> {
     const startedAt = Date.now();
     const method = init.method ?? "GET";
+    const requestContext: GitHubRequestContext = { kind: "REST", method, path };
+    this.throwIfRateLimited(requestContext);
     this.logger.debug("sending GitHub REST request", { method, path });
     let response: Response;
     try {
@@ -235,8 +391,20 @@ export class GitHubReviewService implements ReviewService {
       throw error;
     }
 
+    const rateLimitHeaders = rateLimitHeadersFromResponse(response);
+    this.logRateLimitHeaders(requestContext, rateLimitHeaders);
+
     if (!response.ok) {
       const body = await response.text();
+      if (isGitHubRateLimitResponse(response.status, body, rateLimitHeaders)) {
+        this.throwRateLimitError({
+          context: requestContext,
+          status: response.status,
+          body,
+          headers: rateLimitHeaders,
+          durationMs: Date.now() - startedAt,
+        });
+      }
       this.logger.error("GitHub REST request failed", {
         method,
         path,
@@ -258,6 +426,8 @@ export class GitHubReviewService implements ReviewService {
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     const startedAt = Date.now();
     const operationName = query.match(/\b(?:query|mutation)\s+(\w+)/)?.[1] ?? "anonymous";
+    const requestContext: GitHubRequestContext = { kind: "GraphQL", operationName };
+    this.throwIfRateLimited(requestContext);
     this.logger.debug("sending GitHub GraphQL request", {
       operationName,
       variableKeys: Object.keys(variables).sort().join(","),
@@ -287,8 +457,20 @@ export class GitHubReviewService implements ReviewService {
       throw error;
     }
 
+    const rateLimitHeaders = rateLimitHeadersFromResponse(response);
+    this.logRateLimitHeaders(requestContext, rateLimitHeaders);
+
     if (!response.ok) {
       const body = await response.text();
+      if (isGitHubRateLimitResponse(response.status, body, rateLimitHeaders)) {
+        this.throwRateLimitError({
+          context: requestContext,
+          status: response.status,
+          body,
+          headers: rateLimitHeaders,
+          durationMs: Date.now() - startedAt,
+        });
+      }
       this.logger.error("GitHub GraphQL request failed", {
         operationName,
         status: response.status,
@@ -299,6 +481,15 @@ export class GitHubReviewService implements ReviewService {
 
     const json = (await response.json()) as GitHubGraphqlResponse<T>;
     if (json.errors?.length) {
+      if (areGitHubGraphqlRateLimitErrors(json.errors)) {
+        this.throwRateLimitError({
+          context: requestContext,
+          status: response.status,
+          body: json.errors.map((error) => error.message).join("; "),
+          headers: rateLimitHeaders,
+          durationMs: Date.now() - startedAt,
+        });
+      }
       this.logger.error("GitHub GraphQL request returned errors", {
         operationName,
         errorCount: json.errors.length,
