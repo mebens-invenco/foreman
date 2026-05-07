@@ -1438,6 +1438,62 @@ describe("SchedulerService applyWorkerResult", () => {
     await runPromise;
   });
 
+  test("does not immediately dispatch queued jobs delayed after lease conflict", async () => {
+    const claimQueuedJobForWorker = vi.fn(() => true);
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({
+        workers: {
+          listWorkers: vi.fn(() => [
+            {
+              id: "worker-1",
+              slot: 1,
+              status: "idle",
+              currentAttemptId: null,
+              lastHeartbeatAt: "2026-03-16T00:00:00Z",
+            },
+          ]),
+        },
+        jobs: {
+          listJobsByStatus: vi.fn(() => [
+            {
+              id: "job-1",
+              taskId: "TASK-0001",
+              action: "review",
+              repoKey: "repo-a",
+              leasedAt: new Date(Date.now() + 60_000).toISOString(),
+            },
+          ]),
+          claimQueuedJobForWorker,
+        },
+      }),
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    (scheduler as any).status = "running";
+
+    await (scheduler as any).dispatchQueuedJobs();
+
+    expect(claimQueuedJobForWorker).not.toHaveBeenCalled();
+  });
+
   test("returns leased job to queue when execution leases cannot be acquired", async () => {
     const updateWorkerStatus = vi.fn();
     const returnLeasedJobToQueue = vi.fn();
@@ -1492,7 +1548,7 @@ describe("SchedulerService applyWorkerResult", () => {
       },
     );
 
-    expect(returnLeasedJobToQueue).toHaveBeenCalledWith("job-1");
+    expect(returnLeasedJobToQueue).toHaveBeenCalledWith("job-1", { nextEligibleAt: expect.any(String) });
     expect(releaseLeaseByResource).not.toHaveBeenCalled();
     expect(updateWorkerStatus).toHaveBeenLastCalledWith("worker-1", "idle", null);
   });

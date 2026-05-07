@@ -182,6 +182,7 @@ const compareExecutionTasks = (left: Task, right: Task): number => {
 
 const targetKey = (taskId: string, repoKey: string): string => `${taskId}:${repoKey}`;
 const dedupeKeyForAction = (taskId: string, repoKey: string, action: ActionType): string => `${taskId}:${repoKey}:${action}`;
+const consumesBranchLease = (action: ActionType): boolean => action !== "consolidation" && action !== "cron";
 
 const resolvePersistedTaskTargets = (task: Task, foremanRepos: ForemanRepos): TaskTarget[] =>
   foremanRepos.taskMirror.getTargetsForTask(task.id);
@@ -584,6 +585,9 @@ export const runScoutSelection = async (input: {
     if (jobs.some((job) => dedupeKeyForAction(job.task.id, job.target.repoKey, job.action) === dedupeKey)) {
       return false;
     }
+    if (consumesBranchLease(action) && (activeJobsByTarget.get(target.id) ?? []).some((job) => consumesBranchLease(job.action))) {
+      return false;
+    }
     return !input.foremanRepos.jobs.hasActiveDedupeKey(dedupeKey);
   };
 
@@ -763,10 +767,6 @@ export const runScoutSelection = async (input: {
       for (const task of activeCandidates.filter((candidate) => candidate.state === "in_review")) {
         for (const target of resolvePersistedTaskTargets(task, input.foremanRepos)) {
           if (!canSchedule(task, target, "reviewer")) {
-            continue;
-          }
-
-          if ((activeJobsByTarget.get(target.id) ?? []).some((job) => job.action !== "reviewer")) {
             continue;
           }
 

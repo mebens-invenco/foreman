@@ -1215,6 +1215,62 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test("does not schedule review while a reviewer job is active for the same target", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0005L",
+      title: "Lease-conflicted review task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/54", source: "provider" } satisfies TaskPullRequest],
+    });
+
+    db.taskMirror.saveTasks([reviewTask]);
+    const target = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    db.jobs.createJob({
+      taskId: reviewTask.id,
+      taskTargetId: target!.id,
+      taskProvider: reviewTask.provider,
+      action: "reviewer",
+      priorityRank: priorityToRank(reviewTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${reviewTask.id}:repo-a:reviewer`,
+      selectionReason: "test active reviewer",
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({
+          [reviewTask.id]: reviewContext({
+            pullRequestUrl: "https://github.com/acme/repo-a/pull/54",
+            pullRequestNumber: 54,
+            state: "open",
+            headBranch: "task-0005l",
+            baseBranch: "main",
+            failingChecks: [{ name: "ci", state: "failure" }],
+          }),
+        }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
   test("prunes stale reviewer checkpoints and reselects reviewer work when PR state changes", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);

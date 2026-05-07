@@ -18,6 +18,7 @@ import { assertTaskActionableTarget, leaseResourceKeysForAction } from "./scout-
 
 const runnerOutputLimit = 4_000;
 const workerResultRecoveryTimeoutMs = 120_000;
+const leaseConflictRequeueDelaySeconds = 15;
 
 const truncateRunnerOutput = (output: string): string =>
   output.length > runnerOutputLimit ? `${output.slice(0, runnerOutputLimit)}\n... truncated ...` : output;
@@ -174,8 +175,9 @@ export class AttemptExecutor {
         leases: leaseResourceKeysForAction(task, job.action, target),
       });
       if (!attempt) {
-        this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id);
-        jobLogger.warn("returned leased job to queue because required execution leases could not be acquired");
+        const nextEligibleAt = addSeconds(new Date(), leaseConflictRequeueDelaySeconds);
+        this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id, { nextEligibleAt });
+        jobLogger.warn("returned leased job to queue because required execution leases could not be acquired", { nextEligibleAt });
         return;
       }
 

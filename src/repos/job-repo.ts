@@ -62,6 +62,6 @@ export interface JobRepo {
       errorMessage?: string | null;
     },
   ): void;
-  returnLeasedJobToQueue(jobId: string): void;
+  returnLeasedJobToQueue(jobId: string, options?: { nextEligibleAt?: string | null }): void;
   claimQueuedJobForWorker(jobId: string, workerId: string): boolean;
 }

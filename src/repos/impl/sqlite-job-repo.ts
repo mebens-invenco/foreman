@@ -230,20 +230,20 @@ export class SqliteJobRepo implements JobRepo {
       );
   }
 
-  returnLeasedJobToQueue(jobId: string): void {
+  returnLeasedJobToQueue(jobId: string, options: { nextEligibleAt?: string | null } = {}): void {
     this.sqlite
       .prepare(
         `UPDATE job
             SET status = 'queued',
                 updated_at = ?,
-                leased_at = NULL,
+                leased_at = ?,
                 started_at = NULL,
                 finished_at = NULL,
                 error_message = NULL
           WHERE id = ?
             AND status = 'leased'`,
       )
-      .run(isoNow(), jobId);
+      .run(isoNow(), options.nextEligibleAt ?? null, jobId);
   }
 
   claimQueuedJobForWorker(jobId: string, workerId: string): boolean {
@@ -275,9 +275,10 @@ export class SqliteJobRepo implements JobRepo {
                     leased_at = ?,
                     error_message = NULL
               WHERE id = ?
-                AND status = 'queued'`,
+                AND status = 'queued'
+                AND (leased_at IS NULL OR leased_at <= ?)`,
           )
-          .run(now, now, jobId);
+          .run(now, now, jobId, now);
         if (jobResult.changes !== 1) {
           throw new Error("job_not_queued");
         }
