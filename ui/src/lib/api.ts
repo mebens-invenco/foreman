@@ -278,7 +278,7 @@ async function requestText(input: string, init?: RequestInit) {
 }
 
 function buildSearch(
-  params: Record<string, string | number | undefined>
+  params: Record<string, string | number | boolean | undefined>
 ) {
   const search = new URLSearchParams()
 
