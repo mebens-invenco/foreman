@@ -5,7 +5,15 @@ import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 
 import type { AttemptRecord, JobRecord } from "./repos/index.js";
-import type { RepoRef, ResolvedPullRequest, Task, TaskState, TaskTarget, TaskTargetStatus } from "./domain/index.js";
+import type {
+  RepoRef,
+  ResolvedPullRequest,
+  Task,
+  TaskPullRequest,
+  TaskState,
+  TaskTarget,
+  TaskTargetStatus,
+} from "./domain/index.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
 import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
@@ -125,6 +133,18 @@ const parseEnumQuery = <T extends string>(name: string, value: string | undefine
   return value as T;
 };
 
+const parseBooleanQuery = (name: string, value: string | undefined): boolean => {
+  if (value === undefined) {
+    return false;
+  }
+
+  if (value !== "true" && value !== "false") {
+    throw new ForemanError("invalid_request", `Query parameter ${name} must be true or false.`, 400);
+  }
+
+  return value === "true";
+};
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -183,6 +203,34 @@ type BuiltTaskTarget = {
     startedAt: string;
     finishedAt: string | null;
   } | null;
+};
+
+const pullRequestNumberFromUrl = (url: string): number => {
+  const match = /\/pull\/(\d+)(?:\D|$)/.exec(url);
+  return match?.[1] ? Number.parseInt(match[1], 10) : 0;
+};
+
+const mirroredPullRequestForTarget = (task: Task, target: TaskTarget): TaskPullRequest | null =>
+  task.pullRequests.find((pullRequest) => pullRequest.repoKey === target.repoKey) ?? null;
+
+const mirroredReviewForTarget = (
+  task: Task,
+  target: TaskTarget,
+  repo?: RepoRef,
+): ResolvedPullRequest | null => {
+  const pullRequest = mirroredPullRequestForTarget(task, target);
+  if (!pullRequest) {
+    return null;
+  }
+
+  return {
+    pullRequestUrl: pullRequest.url,
+    pullRequestNumber: pullRequestNumberFromUrl(pullRequest.url),
+    state: "open",
+    isDraft: false,
+    headBranch: target.branchName,
+    baseBranch: repo?.defaultBranch ?? "",
+  };
 };
 
 const dependenciesSatisfiedForTask = (task: Task, tasksById: ReadonlyMap<string, Task>): boolean => {
@@ -258,6 +306,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   const buildTaskTargets = async (
     task: Task,
     tasksById: ReadonlyMap<string, Task>,
+    refreshReview: boolean,
     cache = new Map<string, Promise<BuiltTaskTarget>>(),
   ): Promise<BuiltTaskTarget[]> => {
     const buildTarget = async (targetTask: Task, target: TaskTarget): Promise<BuiltTaskTarget> => {
@@ -265,7 +314,10 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       if (!promise) {
         promise = (async () => {
           const repo = deps.repoRefs.find((item) => item.key === target.repoKey);
-          const pullRequest = repo ? await deps.reviewService.resolvePullRequest(targetTask, repo, target) : null;
+          const mirroredPullRequest = mirroredReviewForTarget(targetTask, target, repo);
+          const pullRequest = refreshReview && repo
+            ? (await deps.reviewService.resolvePullRequest(targetTask, repo, target)) ?? mirroredPullRequest
+            : mirroredPullRequest;
           const latestJob = deps.repos.jobs.latestJobForTaskTarget(target.id);
           const latestAttempt = deps.repos.attempts.latestAttemptForTaskTarget(target.id);
           const missingCrossTaskDependency = targetTask.dependencies.taskIds.some((dependencyTaskId) => {
@@ -365,9 +417,10 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   const serializeTask = async (
     task: Task,
     tasksById: ReadonlyMap<string, Task>,
+    refreshReview: boolean,
     cache = new Map<string, Promise<BuiltTaskTarget>>(),
   ) => {
-    const targets = await buildTaskTargets(task, tasksById, cache);
+    const targets = await buildTaskTargets(task, tasksById, refreshReview, cache);
 
     return {
       id: task.id,
@@ -431,9 +484,10 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   }));
 
   server.get("/api/tasks", async (request) => {
-    const query = request.query as { state?: string; search?: string; limit?: string };
+    const query = request.query as { state?: string; search?: string; limit?: string; refreshReview?: string };
     const state = parseEnumQuery("state", query.state, taskStates);
     const limit = parsePositiveIntegerQuery("limit", query.limit);
+    const refreshReview = parseBooleanQuery("refreshReview", query.refreshReview);
     const taskQuery = {
       ...(state ? { state } : {}),
       ...(query.search ? { search: query.search } : {}),
@@ -443,20 +497,22 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const tasks = await Promise.all(
       deps.repos.taskMirror
         .getTasks(taskQuery)
-        .map((task) => serializeTask(task, tasksById)),
+        .map((task) => serializeTask(task, tasksById, refreshReview)),
     );
     return { tasks };
   });
 
   server.get("/api/tasks/:taskId", async (request) => {
     const params = request.params as { taskId: string };
+    const query = request.query as { refreshReview?: string };
+    const refreshReview = parseBooleanQuery("refreshReview", query.refreshReview);
     const commentsPromise = deps.taskSystem.listComments(params.taskId);
     const mirroredTask = deps.repos.taskMirror.getTask(params.taskId);
     const task = mirroredTask ?? (await deps.taskSystem.getTask(params.taskId));
     const comments = await commentsPromise;
     const tasksById = new Map(getAllMirroredTasks().map((candidateTask) => [candidateTask.id, candidateTask]));
     tasksById.set(task.id, task);
-    return { task: await serializeTask(task, tasksById), comments };
+    return { task: await serializeTask(task, tasksById, refreshReview), comments };
   });
 
   server.get("/api/queue", async () => ({

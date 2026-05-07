@@ -1,5 +1,5 @@
-import type { TaskListItem, TaskPullRequest, TaskTargetSummary } from "@/lib/api"
 import { formatRelativeTime } from "@/lib/format"
+import { toReviewRows } from "@/lib/review-rows"
 
 import { useReviewItemsQuery } from "@/hooks/use-review-items-query"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -11,42 +11,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-
-type ReviewRow = {
-  taskId: string
-  target: string
-  pullRequestUrl: string
-  pullRequestLabel: string
-  modifiedAt: string
-}
-
-function findPullRequest(
-  task: TaskListItem,
-  target: TaskTargetSummary
-): TaskPullRequest | null {
-  return task.pullRequests.find((pullRequest) => pullRequest.repoKey === target.repoKey) ?? null
-}
-
-function toReviewRows(tasks: TaskListItem[]): ReviewRow[] {
-  return tasks.flatMap((task) =>
-    task.targets
-      .filter((target) => target.review?.state === "open")
-      .map((target) => {
-        const pullRequest = findPullRequest(task, target)
-        const pullRequestLabel = pullRequest?.title?.trim()
-          ? pullRequest.title
-          : `PR #${target.review?.pullRequestNumber ?? "-"}`
-
-        return {
-          taskId: task.id,
-          target: target.repoKey,
-          pullRequestUrl: target.review?.pullRequestUrl ?? pullRequest?.url ?? "",
-          pullRequestLabel,
-          modifiedAt: task.updatedAt,
-        }
-      })
-  )
-}
 
 function TableSectionShell({
   title,
