@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { RepoRef, Task, WorkerResult } from "../../domain/index.js";
 import { priorityToRank } from "../../domain/index.js";
+import { ProviderRateLimitError } from "../../lib/errors.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
 import type { ReviewService } from "../../review/index.js";
@@ -383,6 +384,43 @@ describe("AttemptExecutor", () => {
       const attempt = db.attempts.latestAttemptForJob(job.id)!;
       expect(attempt.status).toBe("canceled");
       expect(attempt.summary).toContain("Runner exited with timed out after 3600000ms with signal SIGTERM");
+
+    } finally {
+      db.close();
+    }
+  });
+
+  test("marks attempts blocked when provider rate limiting interrupts result application", async () => {
+    const { db, job, claimedJob, executor, logger, applyWorkerResult } = await createExecutorContext();
+
+    try {
+      const workerResult = createWorkerResult({ summary: "Implemented change." });
+      runnerMocks.invoke.mockResolvedValueOnce({
+        exitCode: 0,
+        signal: null,
+        startedAt: "2026-05-06T00:00:00.000Z",
+        finishedAt: "2026-05-06T00:01:00.000Z",
+        stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+        stderrBytes: 0,
+        stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+        stderr: "",
+      });
+      applyWorkerResult.mockImplementation(async () => {
+        throw new ProviderRateLimitError({
+          provider: "github",
+          retryAfterSeconds: 120,
+          resetAt: "2026-05-06T00:03:00.000Z",
+        });
+      });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      const attempt = db.attempts.latestAttemptForJob(job.id)!;
+      expect(attempt.status).toBe("blocked");
+      expect(attempt.errorMessage).toBeNull();
+      expect(db.jobs.getJob(job.id)).toMatchObject({ status: "blocked", errorMessage: null });
+      expect(db.attempts.listAttemptEvents(attempt.id).map((event) => event.eventType)).toContain("attempt_blocked");
     } finally {
       db.close();
     }

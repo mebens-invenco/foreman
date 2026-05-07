@@ -12,3 +12,23 @@ export class ForemanError extends Error {
 
 export const isForemanError = (value: unknown): value is ForemanError =>
   value instanceof ForemanError;
+
+export class ProviderRateLimitError extends ForemanError {
+  readonly provider: string;
+  readonly retryAfterSeconds: number;
+  readonly resetAt: string;
+
+  constructor(input: { provider: string; retryAfterSeconds: number; resetAt: string; message?: string }) {
+    super(
+      "provider_rate_limited",
+      input.message ?? `${input.provider} provider rate limit exceeded; retry after ${input.resetAt}`,
+      429,
+    );
+    this.provider = input.provider;
+    this.retryAfterSeconds = input.retryAfterSeconds;
+    this.resetAt = input.resetAt;
+  }
+}
+
+export const isProviderRateLimitError = (value: unknown): value is ProviderRateLimitError =>
+  value instanceof ProviderRateLimitError;
