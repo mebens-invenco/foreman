@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 
 import { discoverCronJobs, type CronJobDefinition } from "../cron/index.js";
 import type { ActionType, RepoRef, ReviewContext, Task, TaskTarget, WorkerResult } from "../domain/index.js";
+import { isProviderRateLimitError, type ProviderRateLimitError } from "../lib/errors.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, RecoveredAttemptRecord, WorkerRecord } from "../repos/index.js";
@@ -18,6 +19,7 @@ export type SchedulerStatus = "running" | "paused" | "stopping" | "stopped";
 type ScoutTrigger = "startup" | "poll" | "worker_finished" | "task_mutation" | "lease_change" | "manual";
 
 const SCOUT_RUN_TIMEOUT_MS = 5 * 60 * 1000;
+const PROVIDER_COOLDOWN_MAX_MS = 60 * 60 * 1000;
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
   let timer: NodeJS.Timeout | null = null;
@@ -63,6 +65,7 @@ export class SchedulerService extends EventEmitter {
   private readonly attemptExecutor: AttemptExecutor;
   private readonly cronAttemptExecutor: CronAttemptExecutor;
   private cronScheduleInFlight = false;
+  private readonly providerCooldowns = new Map<string, Date>();
 
   constructor(private readonly deps: SchedulerDeps) {
     super();
@@ -344,6 +347,19 @@ export class SchedulerService extends EventEmitter {
       return;
     }
 
+    const githubCooldown = this.providerCooldowns.get("github");
+    if (githubCooldown && githubCooldown.getTime() > Date.now()) {
+      this.logger.warn("skipped scout run during provider rate-limit cooldown", {
+        trigger,
+        provider: "github",
+        resetAt: githubCooldown.toISOString(),
+      });
+      return;
+    }
+    if (githubCooldown) {
+      this.providerCooldowns.delete("github");
+    }
+
     this.scoutInFlight = true;
     this.logger.info("starting scout run", { trigger });
     try {
@@ -433,6 +449,31 @@ export class SchedulerService extends EventEmitter {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      if (isProviderRateLimitError(error)) {
+        const resetAt = this.recordProviderCooldown(error);
+        this.logger.warn("scout run paused by provider rate limit", {
+          trigger,
+          provider: error.provider,
+          resetAt,
+          retryAfterSeconds: error.retryAfterSeconds,
+        });
+        const scoutRuns = this.deps.foremanRepos.scoutRuns.listScoutRuns(5);
+        const latestRunning = scoutRuns.find((run) => run.status === "running");
+        if (latestRunning) {
+          this.deps.foremanRepos.scoutRuns.completeScoutRun({
+            id: latestRunning.id,
+            summary: {
+              enqueued: 0,
+              providerRateLimited: true,
+              provider: error.provider,
+              resetAt,
+              retryAfterSeconds: error.retryAfterSeconds,
+            },
+          });
+        }
+        return;
+      }
+
       this.logger.error("scout run failed", { trigger, error: message });
       const scoutRuns = this.deps.foremanRepos.scoutRuns.listScoutRuns(5);
       const latestRunning = scoutRuns.find((run) => run.status === "running");
@@ -457,6 +498,18 @@ export class SchedulerService extends EventEmitter {
         this.scheduleScout(followUp);
       }
     }
+  }
+
+  private recordProviderCooldown(error: ProviderRateLimitError): string {
+    const parsedResetAt = Date.parse(error.resetAt);
+    const boundedResetAt = new Date(
+      Math.min(
+        Number.isFinite(parsedResetAt) ? parsedResetAt : Date.now() + error.retryAfterSeconds * 1000,
+        Date.now() + PROVIDER_COOLDOWN_MAX_MS,
+      ),
+    );
+    this.providerCooldowns.set(error.provider, boundedResetAt);
+    return boundedResetAt.toISOString();
   }
 
   private async dispatchQueuedJobs(): Promise<void> {

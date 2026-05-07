@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { actionableConversationComments, type RepoRef, type Task } from "../../domain/index.js";
+import { isProviderRateLimitError } from "../../lib/errors.js";
 import * as processLib from "../../lib/process.js";
 import { GitHubReviewService } from "../index.js";
 
@@ -95,6 +96,21 @@ const emptyReviewSummariesResponse = jsonResponse({
     },
   },
 });
+
+const emptyReviewThreadsResponse = jsonResponse({
+  data: {
+    repository: {
+      pullRequest: {
+        reviewThreads: {
+          nodes: [],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      },
+    },
+  },
+});
+
+const timeoutError = (): Error => Object.assign(new Error("Timed out"), { name: "TimeoutError" });
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -218,6 +234,45 @@ describe("GitHubReviewService.getContext", () => {
     );
   });
 
+  test("classifies REST rate-limit responses without retrying", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    const resetAt = Math.ceil((Date.now() + 120_000) / 1000);
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse(
+        { message: "API rate limit exceeded for user ID 1." },
+        403,
+        { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(resetAt) },
+      ),
+    ) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+
+    try {
+      await service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo, { repoKey: "repo-a", branchName: "eng-4737", position: 0 });
+      throw new Error("expected rate-limit error");
+    } catch (error) {
+      expect(isProviderRateLimitError(error)).toBe(true);
+      if (isProviderRateLimitError(error)) {
+        expect(error.provider).toBe("github");
+        expect(error.retryAfterSeconds).toBeGreaterThan(0);
+        expect(Date.parse(error.resetAt)).toBeGreaterThan(Date.now());
+      }
+    }
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps non-rate-limit 403 responses non-retryable", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ message: "Resource not accessible by integration" }, 403)) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+
+    await expect(
+      service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo, { repoKey: "repo-a", branchName: "eng-4737", position: 0 }),
+    ).rejects.toMatchObject({ code: "github_request_failed" });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   test("does not reuse another target's pull request when repo context differs", async () => {
     vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo-b.git\n", stderr: "", exitCode: 0 });
     global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse([])) as typeof fetch;
@@ -312,6 +367,69 @@ describe("GitHubReviewService.getContext", () => {
     expect(context?.pendingChecks).toEqual([{ name: "task-list-completed", state: "pending" }]);
     expect(global.fetch).toHaveBeenCalledTimes(7);
     expect(vi.mocked(global.fetch).mock.calls[6]?.[0]).toBe("https://api.github.com/repos/acme/repo/commits/abc123/status");
+  });
+
+  test("retries transient REST failures when loading check runs", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(pullRequestSummaryResponse)
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            repository: {
+              pullRequest: {
+                url: "https://github.com/acme/repo/pull/946",
+                number: 946,
+                state: "OPEN",
+                isDraft: false,
+                merged: false,
+                headRefOid: "abc123",
+                headRefName: "eng-4737",
+                baseRefName: "master",
+                mergeStateStatus: "CLEAN",
+                mergeable: "MERGEABLE",
+                commits: { nodes: [{ commit: { committedDate: "2026-03-16T02:28:58Z" } }] },
+                reviews: { nodes: [] },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(emptyReviewSummariesResponse)
+      .mockResolvedValueOnce(jsonResponse([]))
+      .mockResolvedValueOnce(emptyReviewThreadsResponse)
+      .mockResolvedValueOnce(jsonResponse({ message: "Gateway Timeout" }, 504))
+      .mockResolvedValueOnce(jsonResponse({ check_runs: [{ name: "unit tests", status: "completed", conclusion: "success" }] }))
+      .mockResolvedValueOnce(jsonResponse({ statuses: [] })) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const context = await service.getContext(sampleTask(), "[agent]");
+
+    expect(context).not.toBeNull();
+    expect(context?.failingChecks).toEqual([]);
+    expect(global.fetch).toHaveBeenCalledTimes(8);
+    expect(vi.mocked(global.fetch).mock.calls[5]?.[0]).toBe("https://api.github.com/repos/acme/repo/commits/abc123/check-runs");
+    expect(vi.mocked(global.fetch).mock.calls[6]?.[0]).toBe("https://api.github.com/repos/acme/repo/commits/abc123/check-runs");
+  });
+
+  test("surfaces REST timeouts after exhausting retries", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi.fn().mockRejectedValue(timeoutError()) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo)).rejects.toThrow("GitHub request timed out after 60000ms");
+
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  test("does not retry non-transient REST failures", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ message: "Not Found" }, 404)) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo)).rejects.toThrow("GitHub request failed: 404");
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   test("maps dirty or conflicting pull requests to conflicting review state", async () => {
@@ -999,11 +1117,13 @@ describe("GitHubReviewService rate-limit handling", () => {
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, logger as any);
     await expect(service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo)).rejects.toMatchObject({
-      code: "github_rate_limit_exceeded",
+      code: "provider_rate_limited",
+      provider: "github",
       statusCode: 429,
     });
     await expect(service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo)).rejects.toMatchObject({
-      code: "github_rate_limit_exceeded",
+      code: "provider_rate_limited",
+      provider: "github",
       statusCode: 429,
     });
 
@@ -1046,11 +1166,13 @@ describe("GitHubReviewService rate-limit handling", () => {
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
     await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toMatchObject({
-      code: "github_rate_limit_exceeded",
+      code: "provider_rate_limited",
+      provider: "github",
       statusCode: 429,
     });
     await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toMatchObject({
-      code: "github_rate_limit_exceeded",
+      code: "provider_rate_limited",
+      provider: "github",
       statusCode: 429,
     });
 
@@ -1280,5 +1402,48 @@ describe("GitHubReviewService reply mutations", () => {
     expect(JSON.parse(String(init.body))).toMatchObject({
       variables: { threadId: "thread-1", body: "[agent] Thanks" },
     });
+  });
+
+  test("retries GraphQL timeouts before succeeding", async () => {
+    global.fetch = vi
+      .fn()
+      .mockRejectedValueOnce(timeoutError())
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            addPullRequestReviewThreadReply: {
+              comment: { id: "reply-1" },
+            },
+          },
+        }),
+      ) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks");
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toBe("https://api.github.com/graphql");
+  });
+
+  test("surfaces transient GraphQL failures after exhausting retries", async () => {
+    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ message: "Service Unavailable" }, 503)) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toThrow(
+      "GitHub GraphQL request failed: 503",
+    );
+
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  test("does not retry GraphQL semantic errors", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ errors: [{ message: "Could not resolve to a node" }] })) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toThrow(
+      "GitHub GraphQL request failed: Could not resolve to a node",
+    );
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 });

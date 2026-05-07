@@ -65,11 +65,12 @@ class FakeReviewService implements ReviewService {
   constructor(private readonly pullRequest: ResolvedPullRequest | Record<string, ResolvedPullRequest>) {}
 
   async resolvePullRequest(_task?: Task, _repo?: RepoRef, target?: { repoKey: string }): Promise<ResolvedPullRequest> {
-    if ("pullRequestUrl" in this.pullRequest) {
-      return this.pullRequest;
+    const pullRequest = this.pullRequest;
+    if (typeof (pullRequest as ResolvedPullRequest).pullRequestUrl === "string") {
+      return pullRequest as ResolvedPullRequest;
     }
 
-    return this.pullRequest[target?.repoKey ?? "repo-a"]!;
+    return (pullRequest as Record<string, ResolvedPullRequest>)[target?.repoKey ?? "repo-a"]!;
   }
 
   async getContext(): Promise<ReviewContext | null> {

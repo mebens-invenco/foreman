@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../../domain/index.js";
+import { ProviderRateLimitError } from "../../lib/errors.js";
 import { SchedulerService } from "../index.js";
 import * as worktrees from "../../workspace/git-worktrees.js";
 import { createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
@@ -444,6 +445,87 @@ describe("SchedulerService scout timeout", () => {
       (scheduler as any).clearTimers();
       vi.clearAllTimers();
       vi.useRealTimers();
+    }
+  });
+
+  test("backs off scout runs during GitHub rate-limit cooldown", async () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+    config.scheduler.schedulerLoopIntervalMs = 999_000;
+    config.scheduler.staleLeaseReapIntervalSeconds = 999_000;
+    const completeScoutRun = vi.fn();
+    const listCandidates = vi.fn(async () => [sampleTask()]);
+    const foremanRepos = createMockRepos({
+      scoutRuns: {
+        createScoutRun: vi.fn(() => "scout-1"),
+        completeScoutRun,
+        listScoutRuns: vi.fn(() => [
+          {
+            id: "scout-1",
+            triggerType: "poll",
+            status: "running",
+            startedAt: "2026-03-16T00:00:00Z",
+            finishedAt: null,
+            selectedAction: null,
+            selectedTaskId: null,
+            candidateCount: 1,
+            activeCount: 1,
+            terminalCount: 0,
+          },
+        ]),
+      },
+    });
+    const resetAt = new Date(Date.now() + 120_000).toISOString();
+    const scheduler = new SchedulerService({
+      config,
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos,
+      taskSystem: {
+        listCandidates,
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+        getContext: vi.fn(async () => {
+          throw new ProviderRateLimitError({ provider: "github", retryAfterSeconds: 120, resetAt });
+        }),
+      } as any,
+      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    try {
+      (scheduler as any).status = "running";
+      await (scheduler as any).runScout("poll");
+      await (scheduler as any).runScout("worker_finished");
+
+      expect(completeScoutRun).toHaveBeenCalledTimes(1);
+      expect(completeScoutRun).toHaveBeenCalledWith({
+        id: "scout-1",
+        summary: {
+          enqueued: 0,
+          providerRateLimited: true,
+          provider: "github",
+          resetAt,
+          retryAfterSeconds: 120,
+        },
+      });
+      expect(listCandidates).toHaveBeenCalledTimes(1);
+    } finally {
+      (scheduler as any).clearTimers();
     }
   });
 });
