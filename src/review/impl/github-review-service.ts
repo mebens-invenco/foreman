@@ -329,7 +329,7 @@ export class GitHubReviewService implements ReviewService {
 
   private rememberRateLimitBackoff(context: GitHubRequestContext, headers: GitHubRateLimitHeaders): string | null {
     const retryMs = retryAfterMs(headers);
-    const untilMs = rateLimitResetMs(headers) ?? (retryMs === null ? Date.now() + DEFAULT_SECONDARY_RATE_LIMIT_BACKOFF_MS : Date.now() + retryMs);
+    const untilMs = retryMs === null ? (rateLimitResetMs(headers) ?? Date.now() + DEFAULT_SECONDARY_RATE_LIMIT_BACKOFF_MS) : Date.now() + retryMs;
     if (untilMs <= Date.now()) {
       return formatResetAt(untilMs);
     }

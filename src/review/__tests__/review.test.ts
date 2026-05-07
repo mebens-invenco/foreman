@@ -1084,6 +1084,39 @@ describe("GitHubReviewService rate-limit handling", () => {
       }),
     );
   });
+
+  test("prefers retry-after over primary reset headers for secondary rate-limit backoff", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-05-07T04:00:00Z"));
+      const primaryResetSeconds = Math.floor(new Date("2026-05-07T05:00:00Z").getTime() / 1000);
+      global.fetch = vi.fn().mockResolvedValueOnce(
+        jsonResponse(
+          { message: "You have exceeded a secondary rate limit" },
+          403,
+          {
+            "retry-after": "60",
+            "x-ratelimit-limit": "5000",
+            "x-ratelimit-remaining": "4999",
+            "x-ratelimit-reset": String(primaryResetSeconds),
+            "x-ratelimit-resource": "core",
+          },
+        ),
+      ) as typeof fetch;
+
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks")).rejects.toThrow(
+        "GitHub REST rate limit exceeded until 2026-05-07T04:01:00.000Z",
+      );
+      await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks")).rejects.toThrow(
+        "GitHub REST rate limit is active until 2026-05-07T04:01:00.000Z",
+      );
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("GitHubReviewService reply mutations", () => {
