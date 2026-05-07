@@ -401,6 +401,61 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test("schedules consolidation even when a branch-consuming job is active for the same target", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const doneTask = task({
+      id: "TASK-5052L",
+      title: "Done task with active branch job",
+      state: "done",
+      providerState: "done",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/22", source: "provider" } satisfies TaskPullRequest],
+    });
+    db.taskMirror.saveTasks([doneTask]);
+    const target = db.taskMirror.getTaskTarget(doneTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    db.jobs.createJob({
+      taskId: doneTask.id,
+      taskTargetId: target!.id,
+      taskProvider: doneTask.provider,
+      action: "review",
+      priorityRank: priorityToRank(doneTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${doneTask.id}:repo-a:review`,
+      selectionReason: "test active review",
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([doneTask]),
+        reviewService: new FakeReviewService({
+          [doneTask.id]: reviewContext({
+            pullRequestUrl: "https://github.com/acme/repo-a/pull/22",
+            pullRequestNumber: 22,
+            state: "merged",
+            headBranch: "task-5052l",
+            baseBranch: "main",
+          }),
+        }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("consolidation");
+    } finally {
+      db.close();
+    }
+  });
+
   test("promotes mixed done-on-merge multi-target tasks to deployable", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);
@@ -1259,6 +1314,61 @@ describe("runScoutSelection", () => {
             headBranch: "task-0005l",
             baseBranch: "main",
             failingChecks: [{ name: "ci", state: "failure" }],
+          }),
+        }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not schedule reviewer while a review job is active for the same target", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const reviewTask = task({
+      id: "TASK-0005M",
+      title: "Lease-conflicted reviewer task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/55", source: "provider" } satisfies TaskPullRequest],
+    });
+
+    db.taskMirror.saveTasks([reviewTask]);
+    const target = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    db.jobs.createJob({
+      taskId: reviewTask.id,
+      taskTargetId: target!.id,
+      taskProvider: reviewTask.provider,
+      action: "review",
+      priorityRank: priorityToRank(reviewTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${reviewTask.id}:repo-a:review`,
+      selectionReason: "test active review",
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({
+          [reviewTask.id]: reviewContext({
+            pullRequestUrl: "https://github.com/acme/repo-a/pull/55",
+            pullRequestNumber: 55,
+            state: "open",
+            headBranch: "task-0005m",
+            baseBranch: "main",
           }),
         }),
         repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],

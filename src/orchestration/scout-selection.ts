@@ -182,7 +182,7 @@ const compareExecutionTasks = (left: Task, right: Task): number => {
 
 const targetKey = (taskId: string, repoKey: string): string => `${taskId}:${repoKey}`;
 const dedupeKeyForAction = (taskId: string, repoKey: string, action: ActionType): string => `${taskId}:${repoKey}:${action}`;
-const consumesBranchLease = (action: ActionType): boolean => action !== "consolidation" && action !== "cron";
+export const actionConsumesBranchLease = (action: ActionType): boolean => action !== "consolidation" && action !== "cron";
 
 const resolvePersistedTaskTargets = (task: Task, foremanRepos: ForemanRepos): TaskTarget[] =>
   foremanRepos.taskMirror.getTargetsForTask(task.id);
@@ -585,7 +585,7 @@ export const runScoutSelection = async (input: {
     if (jobs.some((job) => dedupeKeyForAction(job.task.id, job.target.repoKey, job.action) === dedupeKey)) {
       return false;
     }
-    if (consumesBranchLease(action) && (activeJobsByTarget.get(target.id) ?? []).some((job) => consumesBranchLease(job.action))) {
+    if (actionConsumesBranchLease(action) && (activeJobsByTarget.get(target.id) ?? []).some((job) => actionConsumesBranchLease(job.action))) {
       return false;
     }
     return !input.foremanRepos.jobs.hasActiveDedupeKey(dedupeKey);
@@ -1026,7 +1026,7 @@ export const leaseResourceKeysForAction = (
     { resourceType: "job", resourceKey: dedupeKeyForAction(task.id, target.repoKey, action) },
   ];
 
-  if (action !== "consolidation") {
+  if (actionConsumesBranchLease(action)) {
     leases.push({ resourceType: "branch", resourceKey: `${target.repoKey}:${resolveTaskBranchName(task, target)}` });
   }
 

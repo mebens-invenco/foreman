@@ -1474,7 +1474,7 @@ describe("SchedulerService applyWorkerResult", () => {
               taskId: "TASK-0001",
               action: "review",
               repoKey: "repo-a",
-              leasedAt: new Date(Date.now() + 60_000).toISOString(),
+              nextEligibleAt: new Date(Date.now() + 60_000).toISOString(),
             },
           ]),
           claimQueuedJobForWorker,
@@ -1530,6 +1530,7 @@ describe("SchedulerService applyWorkerResult", () => {
       logger: fakeLogger as any,
     });
 
+    const before = Date.now();
     await (scheduler as any).runJob(
       {
         id: "worker-1",
@@ -1548,7 +1549,9 @@ describe("SchedulerService applyWorkerResult", () => {
       },
     );
 
-    expect(returnLeasedJobToQueue).toHaveBeenCalledWith("job-1", { nextEligibleAt: expect.any(String) });
+    const nextEligibleAt = returnLeasedJobToQueue.mock.calls[0]?.[1]?.nextEligibleAt;
+    expect(nextEligibleAt).toEqual(expect.any(String));
+    expect(Date.parse(nextEligibleAt)).toBeGreaterThanOrEqual(before + 14_000);
     expect(releaseLeaseByResource).not.toHaveBeenCalled();
     expect(updateWorkerStatus).toHaveBeenLastCalledWith("worker-1", "idle", null);
   });

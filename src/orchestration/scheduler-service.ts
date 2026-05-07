@@ -20,11 +20,11 @@ type ScoutTrigger = "startup" | "poll" | "worker_finished" | "task_mutation" | "
 const SCOUT_RUN_TIMEOUT_MS = 5 * 60 * 1000;
 
 const isQueuedJobDispatchable = (job: JobRecord, now: number): boolean => {
-  if (!job.leasedAt) {
+  if (!job.nextEligibleAt) {
     return true;
   }
 
-  const nextEligibleAt = Date.parse(job.leasedAt);
+  const nextEligibleAt = Date.parse(job.nextEligibleAt);
   return Number.isNaN(nextEligibleAt) || nextEligibleAt <= now;
 };
 

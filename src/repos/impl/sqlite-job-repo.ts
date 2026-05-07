@@ -25,6 +25,7 @@ const mapJob = (row: SqliteRow): JobRecord => ({
   createdAt: String(row.created_at),
   updatedAt: String(row.updated_at),
   leasedAt: (row.leased_at as string | null) ?? null,
+  nextEligibleAt: (row.next_eligible_at as string | null) ?? null,
   startedAt: (row.started_at as string | null) ?? null,
   finishedAt: (row.finished_at as string | null) ?? null,
   errorMessage: (row.error_message as string | null) ?? null,
@@ -124,7 +125,7 @@ export class SqliteJobRepo implements JobRepo {
       .prepare(
         `SELECT id, job_kind, task_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 task_target_id,
-                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
+                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at, next_eligible_at,
                 started_at, finished_at, error_message
            FROM job
           WHERE status IN ('queued', 'leased', 'running')
@@ -141,8 +142,8 @@ export class SqliteJobRepo implements JobRepo {
       .prepare(
         `SELECT id, job_kind, task_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
                 task_target_id,
-                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
-                 started_at, finished_at, error_message
+                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at, next_eligible_at,
+                started_at, finished_at, error_message
            FROM job WHERE status IN (${placeholders}) ORDER BY created_at ASC`,
       )
       .all(...statuses)
@@ -153,7 +154,7 @@ export class SqliteJobRepo implements JobRepo {
     const row = this.sqlite
       .prepare(
         `SELECT id, job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
-                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
+                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at, next_eligible_at,
                 started_at, finished_at, error_message
            FROM job
           WHERE task_target_id = ?
@@ -169,7 +170,7 @@ export class SqliteJobRepo implements JobRepo {
     const row = this.sqlite
       .prepare(
         `SELECT id, job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
-                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
+                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at, next_eligible_at,
                 started_at, finished_at, error_message
            FROM job
           WHERE dedupe_key = ?
@@ -185,7 +186,7 @@ export class SqliteJobRepo implements JobRepo {
     const row = this.sqlite
       .prepare(
         `SELECT id, job_kind, task_id, task_target_id, task_provider, cron_job_id, action, status, priority_rank, repo_key, base_branch, dedupe_key,
-                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at,
+                selection_reason, selection_context_json, scout_run_id, created_at, updated_at, leased_at, next_eligible_at,
                 started_at, finished_at, error_message
            FROM job WHERE id = ?`,
       )
@@ -236,7 +237,8 @@ export class SqliteJobRepo implements JobRepo {
         `UPDATE job
             SET status = 'queued',
                 updated_at = ?,
-                leased_at = ?,
+                leased_at = NULL,
+                next_eligible_at = ?,
                 started_at = NULL,
                 finished_at = NULL,
                 error_message = NULL
@@ -273,10 +275,11 @@ export class SqliteJobRepo implements JobRepo {
                 SET status = 'leased',
                     updated_at = ?,
                     leased_at = ?,
+                    next_eligible_at = NULL,
                     error_message = NULL
               WHERE id = ?
                 AND status = 'queued'
-                AND (leased_at IS NULL OR leased_at <= ?)`,
+                AND (next_eligible_at IS NULL OR next_eligible_at <= ?)`,
           )
           .run(now, now, jobId, now);
         if (jobResult.changes !== 1) {

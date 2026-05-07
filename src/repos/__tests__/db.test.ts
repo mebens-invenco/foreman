@@ -543,6 +543,7 @@ describe("persistence repos", () => {
 
       expect(db.jobs.getJob(job.id).status).toBe("queued");
       expect(db.jobs.getJob(job.id).leasedAt).toBeNull();
+      expect(db.jobs.getJob(job.id).nextEligibleAt).toBeNull();
     } finally {
       db.close();
     }
@@ -577,6 +578,8 @@ describe("persistence repos", () => {
 
       expect(db.jobs.claimQueuedJobForWorker(job.id, worker!.id)).toBe(false);
       expect(db.jobs.getJob(job.id).status).toBe("queued");
+      expect(db.jobs.getJob(job.id).leasedAt).toBeNull();
+      expect(db.jobs.getJob(job.id).nextEligibleAt).toBe("2999-01-01T00:00:00.000Z");
     } finally {
       db.close();
     }

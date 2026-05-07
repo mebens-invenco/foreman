@@ -89,4 +89,60 @@ describe("CronAttemptExecutor", () => {
       db.close();
     }
   });
+
+  test("delays redispatch when cron execution leases cannot be acquired", async () => {
+    const workspaceRoot = await createTempDir("foreman-cron-attempt-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
+    await fs.mkdir(path.join(workspaceRoot, "cron"), { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "cron", "check.md"), "---\ninterval: 15m\n---\nCheck the workspace.");
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.cron.enabled = true;
+    const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), testProjectRoot);
+
+    try {
+      db.workers.ensureWorkerSlots(2);
+      const [worker, leaseHolder] = db.workers.listWorkers();
+      expect(worker).toBeDefined();
+      expect(leaseHolder).toBeDefined();
+      const dedupeKey = "cron:cron/check.md";
+      expect(
+        db.leases.acquireLease({
+          resourceType: "cron",
+          resourceKey: dedupeKey,
+          workerId: leaseHolder!.id,
+          expiresAt: "2999-01-01T00:00:00.000Z",
+        }),
+      ).toBe(true);
+      const job = db.jobs.createCronJob({
+        cronJobId: "cron/check.md",
+        dedupeKey,
+        selectionReason: "test",
+      });
+      db.jobs.claimQueuedJobForWorker(job.id, worker!.id);
+      const claimed = db.jobs.getJob(job.id);
+      const executor = new CronAttemptExecutor({
+        config,
+        paths,
+        foremanRepos: db,
+        repos: [],
+        env: {},
+        logger: LoggerService.create({ paths, stdout: nullWritable, minLevel: "error" }),
+        onWorkerUpdated: vi.fn(),
+        onAttemptChanged: vi.fn(),
+        onWorkerFinished: vi.fn(),
+      });
+
+      const before = Date.now();
+      await executor.execute(worker!, claimed, new AbortController());
+
+      const returnedJob = db.jobs.getJob(job.id);
+      expect(db.attempts.latestAttemptForJob(job.id)).toBeNull();
+      expect(returnedJob.status).toBe("queued");
+      expect(returnedJob.nextEligibleAt).toEqual(expect.any(String));
+      expect(Date.parse(returnedJob.nextEligibleAt!)).toBeGreaterThanOrEqual(before + 14_000);
+    } finally {
+      db.close();
+    }
+  });
 });

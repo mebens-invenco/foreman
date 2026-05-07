@@ -11,6 +11,7 @@ import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../repos/index.js";
 import { runnerForAction, runnerTuningValue, type WorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
+import { nextLeaseConflictEligibleAt } from "./lease-conflict.js";
 
 type CronAttemptExecutorDeps = {
   config: WorkspaceConfig;
@@ -79,8 +80,9 @@ export class CronAttemptExecutor {
         leases: [{ resourceType: "cron", resourceKey: job.dedupeKey }],
       });
       if (!attempt) {
-        this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id);
-        jobLogger.warn("returned leased cron job to queue because required execution leases could not be acquired");
+        const nextEligibleAt = nextLeaseConflictEligibleAt();
+        this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id, { nextEligibleAt });
+        jobLogger.warn("returned leased cron job to queue because required execution leases could not be acquired", { nextEligibleAt });
         return;
       }
 

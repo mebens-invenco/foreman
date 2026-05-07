@@ -19,6 +19,7 @@ export type JobRecord = {
   createdAt: string;
   updatedAt: string;
   leasedAt: string | null;
+  nextEligibleAt: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   errorMessage: string | null;

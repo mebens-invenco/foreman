@@ -14,11 +14,11 @@ import type { TaskSystem } from "../tasking/index.js";
 import { runnerForAction, runnerSessionRoleForAction, runnerTuningValue, type WorkspaceConfig, type WorkspaceRunnerConfig } from "../workspace/config.js";
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
+import { nextLeaseConflictEligibleAt } from "./lease-conflict.js";
 import { assertTaskActionableTarget, leaseResourceKeysForAction } from "./scout-selection.js";
 
 const runnerOutputLimit = 4_000;
 const workerResultRecoveryTimeoutMs = 120_000;
-const leaseConflictRequeueDelaySeconds = 15;
 
 const truncateRunnerOutput = (output: string): string =>
   output.length > runnerOutputLimit ? `${output.slice(0, runnerOutputLimit)}\n... truncated ...` : output;
@@ -175,7 +175,7 @@ export class AttemptExecutor {
         leases: leaseResourceKeysForAction(task, job.action, target),
       });
       if (!attempt) {
-        const nextEligibleAt = addSeconds(new Date(), leaseConflictRequeueDelaySeconds);
+        const nextEligibleAt = nextLeaseConflictEligibleAt();
         this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id, { nextEligibleAt });
         jobLogger.warn("returned leased job to queue because required execution leases could not be acquired", { nextEligibleAt });
         return;
