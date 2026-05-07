@@ -324,6 +324,7 @@ describe("prompt rendering", () => {
     expect(reviewPrompt).toContain("request `pullRequestReview { state submittedAt commit { oid } }`");
     expect(reviewPrompt).toContain("Only submitted review thread comments are actionable");
     expect(reviewPrompt).toContain("Only address review-thread comments attached to submitted reviews");
+    expect(reviewPrompt).toContain("do not poll, sleep, wait");
     expect(reviewPrompt).toContain("include image links or uploaded assets");
     expect(reviewPrompt).toContain("verify the response is an actual image file");
     expect(reviewPrompt).toContain("Do not assume every actionable review item requires a code change.");
@@ -365,6 +366,7 @@ describe("prompt rendering", () => {
       continuation: true,
     });
     expect(continuationPrompt).toContain("Continue addressing current PR feedback, failing checks, and merge conflicts.");
+    expect(continuationPrompt).toContain("do not poll, sleep, wait");
     expect(continuationPrompt).toContain("ignore comments whose review metadata is missing");
     expect(continuationPrompt).toContain("## Current Git State");
     expect(continuationPrompt).toContain("previousSessionHeadSha");
