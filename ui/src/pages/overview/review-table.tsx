@@ -3,6 +3,7 @@ import { toReviewRows } from "@/lib/review-rows"
 
 import { useReviewItemsQuery } from "@/hooks/use-review-items-query"
 import { Skeleton } from "@/components/ui/skeleton"
+import { TaskLink } from "@/components/task-link"
 import {
   Table,
   TableBody,
@@ -68,7 +69,7 @@ export function ReviewTable({ now }: { now: number }) {
             {rows.map((row) => (
               <TableRow key={`${row.taskId}:${row.target}:${row.pullRequestUrl}`}>
                 <TableCell className="px-4 font-mono text-xs text-foreground">
-                  {row.taskId}
+                  <TaskLink taskUrl={row.taskUrl}>{row.taskId}</TaskLink>
                 </TableCell>
                 <TableCell className="text-sm text-foreground">
                   {row.target}

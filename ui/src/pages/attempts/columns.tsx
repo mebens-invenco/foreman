@@ -10,6 +10,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { TaskLink } from "@/components/task-link"
 import {
   abbreviateId,
   formatActionLabel,
@@ -119,11 +120,14 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
     accessorKey: "taskId",
     cell: ({ row }) => (
       <div className="space-y-1">
-        <span className="block font-mono text-xs text-foreground">
+        <TaskLink
+          taskUrl={row.original.jobKind === "cron" ? null : row.original.taskUrl}
+          className="block font-mono text-xs text-foreground"
+        >
           {row.original.jobKind === "cron"
             ? row.original.cronJobId ?? "-"
             : row.original.taskId ?? "-"}
-        </span>
+        </TaskLink>
         {row.original.jobKind === "cron" ? (
           <span className="block text-xxs tracking-[0.18em] text-muted-foreground uppercase">
             Cron

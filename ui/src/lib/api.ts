@@ -88,6 +88,7 @@ export type Worker = {
     id: string
     jobKind: "task" | "cron"
     taskId: string | null
+    taskUrl: string | null
     taskTargetId: string | null
     cronJobId: string | null
     action: ActionType
@@ -101,6 +102,7 @@ export type AttemptRecord = {
   jobId: string
   jobKind: "task" | "cron"
   taskId: string | null
+  taskUrl: string | null
   target: string | null
   cronJobId: string | null
   stage: ActionType | null
@@ -190,6 +192,7 @@ export type TaskListItem = {
   title: string
   state: TaskState
   updatedAt: string
+  url: string | null
   pullRequests: TaskPullRequest[]
   targets: TaskTargetSummary[]
 }

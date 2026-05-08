@@ -468,6 +468,169 @@ describe("HTTP query validation", () => {
       db.close();
     }
   });
+
+  test("joins task URL into attempt and worker serializers", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+
+    const linkedTask: Task = {
+      ...sampleTask,
+      url: "https://linear.app/invenco/issue/TASK-0001",
+    };
+    db.taskMirror.saveTasks([linkedTask]);
+    const target = db.taskMirror.getTaskTarget(linkedTask.id, "repo-a");
+
+    db.workers.ensureWorkerSlots(1);
+    const worker = db.workers.listWorkers()[0];
+    const job = db.jobs.createJob({
+      taskId: linkedTask.id,
+      taskTargetId: target!.id,
+      taskProvider: "file",
+      action: "execution",
+      priorityRank: 3,
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${linkedTask.id}:execution`,
+      selectionReason: "test",
+    });
+    const attempt = db.attempts.createAttemptWithLeases({
+      jobId: job.id,
+      workerId: worker!.id,
+      runnerName: "opencode",
+      runnerModel: "openai/gpt-5.4",
+      runnerVariant: "standard",
+      expiresAt: "2026-03-16T00:10:00Z",
+      leases: [{ resourceType: "task", resourceKey: linkedTask.id }],
+    });
+    db.workers.updateWorkerStatus(worker!.id, "running", attempt!.id);
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [linkedTask]),
+        getTask: vi.fn(async () => linkedTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const attemptsResponse = await server.inject({ method: "GET", url: "/api/attempts" });
+      expect(attemptsResponse.statusCode).toBe(200);
+      expect(attemptsResponse.json().attempts[0]).toMatchObject({
+        id: attempt!.id,
+        taskId: linkedTask.id,
+        taskUrl: "https://linear.app/invenco/issue/TASK-0001",
+      });
+
+      const detailResponse = await server.inject({
+        method: "GET",
+        url: `/api/attempts/${encodeURIComponent(attempt!.id)}`,
+      });
+      expect(detailResponse.statusCode).toBe(200);
+      expect(detailResponse.json().attempt).toMatchObject({
+        id: attempt!.id,
+        taskUrl: "https://linear.app/invenco/issue/TASK-0001",
+      });
+
+      const workersResponse = await server.inject({ method: "GET", url: "/api/workers" });
+      expect(workersResponse.statusCode).toBe(200);
+      expect(workersResponse.json().workers[0].currentJob).toMatchObject({
+        taskId: linkedTask.id,
+        taskUrl: "https://linear.app/invenco/issue/TASK-0001",
+      });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("returns null taskUrl when the mirrored task has no provider URL", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+
+    db.taskMirror.saveTasks([sampleTask]);
+    const target = db.taskMirror.getTaskTarget(sampleTask.id, "repo-a");
+    db.workers.ensureWorkerSlots(1);
+    const worker = db.workers.listWorkers()[0];
+    const job = db.jobs.createJob({
+      taskId: sampleTask.id,
+      taskTargetId: target!.id,
+      taskProvider: "file",
+      action: "execution",
+      priorityRank: 3,
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${sampleTask.id}:execution`,
+      selectionReason: "test",
+    });
+    const attempt = db.attempts.createAttemptWithLeases({
+      jobId: job.id,
+      workerId: worker!.id,
+      runnerName: "opencode",
+      runnerModel: "openai/gpt-5.4",
+      runnerVariant: "standard",
+      expiresAt: "2026-03-16T00:10:00Z",
+      leases: [{ resourceType: "task", resourceKey: sampleTask.id }],
+    });
+    db.workers.updateWorkerStatus(worker!.id, "running", attempt!.id);
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [sampleTask]),
+        getTask: vi.fn(async () => sampleTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const attemptsResponse = await server.inject({ method: "GET", url: "/api/attempts" });
+      expect(attemptsResponse.statusCode).toBe(200);
+      expect(attemptsResponse.json().attempts[0]).toMatchObject({
+        id: attempt!.id,
+        taskUrl: null,
+      });
+
+      const workersResponse = await server.inject({ method: "GET", url: "/api/workers" });
+      expect(workersResponse.statusCode).toBe(200);
+      expect(workersResponse.json().workers[0].currentJob).toMatchObject({
+        taskUrl: null,
+      });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
 });
 
 describe("HTTP scheduler control", () => {

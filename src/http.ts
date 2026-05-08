@@ -51,10 +51,27 @@ const attemptWorktreePath = (paths: WorkspacePaths, attempt: AttemptRecord): str
   return path.join(paths.worktreesDir, attempt.target, attempt.taskId);
 };
 
-const attemptApiRecord = (paths: WorkspacePaths, attempt: AttemptRecord): AttemptRecord & { worktreePath: string | null } => ({
+const attemptApiRecord = (
+  paths: WorkspacePaths,
+  attempt: AttemptRecord,
+  taskUrl: string | null,
+): AttemptRecord & { worktreePath: string | null; taskUrl: string | null } => ({
   ...attempt,
   worktreePath: attemptWorktreePath(paths, attempt),
+  taskUrl,
 });
+
+const resolveTaskUrl = (deps: HttpServerDeps, taskId: string | null): string | null => {
+  if (!taskId) {
+    return null;
+  }
+
+  try {
+    return deps.repos.taskMirror.getTask(taskId)?.url ?? null;
+  } catch {
+    return null;
+  }
+};
 
 const resolveArtifactContentPath = async (paths: WorkspacePaths, relativePath: string): Promise<string> => {
   const workspaceRoot = path.resolve(paths.workspaceRoot);
@@ -571,7 +588,9 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       filters.offset = offset;
     }
     return {
-      attempts: deps.repos.attempts.listAttempts(filters).map((attempt) => attemptApiRecord(deps.paths, attempt)),
+      attempts: deps.repos.attempts
+        .listAttempts(filters)
+        .map((attempt) => attemptApiRecord(deps.paths, attempt, resolveTaskUrl(deps, attempt.taskId))),
     };
   });
 
@@ -579,7 +598,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const params = request.params as { attemptId: string };
     const attempt = deps.repos.attempts.getAttempt(params.attemptId);
     return {
-      attempt: attemptApiRecord(deps.paths, attempt),
+      attempt: attemptApiRecord(deps.paths, attempt, resolveTaskUrl(deps, attempt.taskId)),
       events: deps.repos.attempts.listAttemptEvents(params.attemptId),
       artifacts: deps.repos.artifacts.listArtifacts("execution_attempt", params.attemptId),
     };
@@ -679,6 +698,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
                 id: currentJob.id,
                 jobKind: currentJob.jobKind,
                 taskId: currentJob.taskId,
+                taskUrl: resolveTaskUrl(deps, currentJob.taskId),
                 taskTargetId: currentJob.taskTargetId,
                 cronJobId: currentJob.cronJobId,
                 action: currentJob.action,

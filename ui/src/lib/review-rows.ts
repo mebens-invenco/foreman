@@ -2,6 +2,7 @@ import type { TaskListItem, TaskPullRequest, TaskTargetSummary } from "./api"
 
 export type ReviewRow = {
   taskId: string
+  taskUrl: string | null
   target: string
   pullRequestUrl: string
   pullRequestLabel: string
@@ -27,6 +28,7 @@ export function toReviewRows(tasks: TaskListItem[]): ReviewRow[] {
 
         return {
           taskId: task.id,
+          taskUrl: task.url,
           target: target.repoKey,
           pullRequestUrl: target.review?.pullRequestUrl ?? pullRequest?.url ?? "",
           pullRequestLabel,
