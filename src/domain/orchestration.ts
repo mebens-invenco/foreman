@@ -1,6 +1,6 @@
 import type { TaskPriority } from "./task.js";
 
-export type RunnerProvider = "opencode" | "claude";
+export type RunnerProvider = "opencode" | "claude" | "codex";
 
 export type ActionType = "execution" | "review" | "reviewer" | "retry" | "deployment" | "consolidation" | "cron";
 

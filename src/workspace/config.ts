@@ -83,7 +83,14 @@ export const claudeRunnerSchema = z.object({
   timeoutMs: z.number().int().positive().default(3_600_000),
 });
 
-export const runnerProviderSchema = z.discriminatedUnion("type", [opencodeRunnerSchema, claudeRunnerSchema]);
+export const codexRunnerSchema = z.object({
+  type: z.literal("codex"),
+  model: z.string().min(1).default("gpt-5.5"),
+  effort: z.string().min(1).default("high"),
+  timeoutMs: z.number().int().positive().default(3_600_000),
+});
+
+export const runnerProviderSchema = z.discriminatedUnion("type", [opencodeRunnerSchema, claudeRunnerSchema, codexRunnerSchema]);
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -347,5 +354,10 @@ export const runnerSessionRoleForAction = (action: ActionType): RunnerSessionRol
 export const runnerForAction = (config: WorkspaceConfig, action: ActionType): WorkspaceRunnerConfig =>
   config.runner[runnerRoleForAction(action)];
 
-export const runnerTuningValue = (runner: WorkspaceRunnerConfig): string =>
-  runner.type === "opencode" ? runner.variant : runner.effort;
+export const runnerTuningValue = (runner: WorkspaceRunnerConfig): string => {
+  if (runner.type === "opencode") {
+    return runner.variant;
+  }
+
+  return runner.effort;
+};
