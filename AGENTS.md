@@ -12,3 +12,7 @@ When working within the UI, follow these rules:
 * Use design tokens and avoid using magic values.
 * Layout spacing between children should be managed by the parent container.
 * Avoid modifying core UI components in components/ui. Treat as vendored.
+
+## Runner cohesion
+
+Per-runner JSON parsing, token extraction, and other provider-specific output handling lives with the runner (`src/execution/impl/<runner>-runner.ts` or a sibling file such as `<runner>-output.ts`). Shared files (`json-output.ts`, `token-usage.ts`) hold runner-agnostic helpers and types only. Adding a new runner should not require editing existing runners' files.
