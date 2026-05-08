@@ -89,6 +89,7 @@ describe("HTTP query validation", () => {
       expect(response.json().config.scheduler.workerConcurrency).toBe(2);
       expect(response.json().config.runner.execution.model).toBe("openai/gpt-5.5");
       expect(response.json().config.workspace.agentPrefix).toBe("[bot] ");
+      expect(response.json().deploymentInstructions).toEqual({ active: false, relativePath: "deployment.md" });
       expect(config.cron.enabled).toBe(true);
       expect(config.scheduler.workerConcurrency).toBe(2);
       const persisted = await fs.readFile(paths.configPath, "utf8");

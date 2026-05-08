@@ -96,13 +96,11 @@ export type WorkspaceConfig = {
     port: number
   }
 }
-export type DeepPartial<T> = {
-  [K in keyof T]?: T[K] extends Array<infer U>
-    ? U[]
-    : T[K] extends object
-      ? DeepPartial<T[K]>
-      : T[K]
-}
+export type DeepPartial<T> = T extends Array<infer U>
+  ? U[]
+  : T extends object
+    ? { [K in keyof T]?: DeepPartial<T[K]> }
+    : T
 export type SettingsPatch = DeepPartial<WorkspaceConfig>
 export type TaskState =
   | "ready"
@@ -246,6 +244,10 @@ export type AttemptDetail = {
 
 export type SettingsResponse = {
   config: WorkspaceConfig
+  deploymentInstructions: {
+    active: boolean
+    relativePath: string
+  }
 }
 
 export type TaskPullRequest = {

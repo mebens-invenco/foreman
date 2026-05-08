@@ -20,6 +20,7 @@ import type { ForemanRepos } from "./repos/index.js";
 import type { ReviewService } from "./review/index.js";
 import type { TaskSystem } from "./tasking/index.js";
 import { stringifyWorkspaceConfig, workspaceConfigSchema, type WorkspaceConfig } from "./workspace/config.js";
+import { resolveDeploymentInstructions } from "./workspace/deployment.js";
 import type { WorkspacePaths } from "./workspace/workspace-paths.js";
 
 type HttpServerDeps = {
@@ -212,6 +213,17 @@ const applySettingsPatch = (config: WorkspaceConfig, patch: Record<string, unkno
     throw new ForemanError("invalid_request", message, 400);
   }
   return parsed.data;
+};
+
+const settingsResponse = async (config: WorkspaceConfig, paths: WorkspacePaths) => {
+  const deploymentInstructions = await resolveDeploymentInstructions(paths);
+  return {
+    config,
+    deploymentInstructions: {
+      active: deploymentInstructions !== null,
+      relativePath: deploymentInstructions?.relativePath ?? "deployment.md",
+    },
+  };
 };
 
 const taskStates = ["ready", "in_progress", "in_review", "deployable", "done", "canceled"] as const satisfies readonly TaskState[];
@@ -806,9 +818,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   });
   server.get("/api/scout/runs", async () => ({ runs: deps.repos.scoutRuns.listScoutRuns() }));
 
-  server.get("/api/settings", async () => ({
-    config: deps.config,
-  }));
+  server.get("/api/settings", async () => settingsResponse(deps.config, deps.paths));
 
   server.patch("/api/settings", async (request) => {
     const body = request.body;
@@ -821,9 +831,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     assignWorkspaceConfig(deps.config, nextConfig);
     deps.scheduler.syncConfigUpdate(previousScheduler);
     await fs.writeFile(deps.paths.configPath, stringifyWorkspaceConfig(deps.config));
-    return {
-      config: deps.config,
-    };
+    return settingsResponse(deps.config, deps.paths);
   });
 
   server.post("/api/scheduler/start", async () => {

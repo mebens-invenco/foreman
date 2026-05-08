@@ -54,6 +54,7 @@ export function usePatchSettingsMutation() {
       const previous = queryClient.getQueryData<SettingsResponse>(settingsQueryKey)
       if (previous) {
         queryClient.setQueryData<SettingsResponse>(settingsQueryKey, {
+          ...previous,
           config: mergePatch(previous.config, patch),
         })
       }
