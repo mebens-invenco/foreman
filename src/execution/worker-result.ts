@@ -120,11 +120,22 @@ export const workerResultSchema = workerResultBaseSchema.superRefine((result, ct
     if ((deploymentOutcomes as readonly string[]).includes(result.outcome) && result.outcome !== "blocked" && result.outcome !== "failed") {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["outcome"], message: "Deployment-only outcome is only valid for deployment action" });
     }
-    return;
+  } else if (!(deploymentOutcomes as readonly string[]).includes(result.outcome)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["outcome"], message: `Deployment outcome must be one of: ${deploymentOutcomes.join(", ")}` });
   }
 
-  if (!(deploymentOutcomes as readonly string[]).includes(result.outcome)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["outcome"], message: `Deployment outcome must be one of: ${deploymentOutcomes.join(", ")}` });
+  if (
+    (result.action === "review" || result.action === "reviewer") &&
+    result.outcome === "completed" &&
+    result.taskMutations.length === 0 &&
+    result.reviewMutations.length === 0 &&
+    !result.signals.includes("code_changed")
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["outcome"],
+      message: "Review results with no mutations or code changes must use no_action_needed so Foreman can checkpoint them",
+    });
   }
 });
 

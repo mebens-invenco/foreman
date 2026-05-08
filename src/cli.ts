@@ -70,7 +70,14 @@ const renderAgentResultValidateHelp = (): string => {
   const actionLiteral = action ?? `<${workerResultActionValues.join("|")}>`;
   const schema = action ? workerResultSchema.safeExtend({ action: z.literal(action) }) : workerResultSchema;
   const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, 2);
-  const exampleJson = JSON.stringify({ ...workerResultExample, action: actionLiteral });
+  const exampleJson = JSON.stringify({
+    ...workerResultExample,
+    action: actionLiteral,
+    ...((action === "review" || action === "reviewer") ? { outcome: "no_action_needed" } : {}),
+  });
+  const reviewGuidance = action === "review" || action === "reviewer"
+    ? "\n- For no-op review results, use outcome `no_action_needed`; `completed` requires mutations or code changes."
+    : "";
 
   return `
 Action-specific accepted output shape
@@ -79,6 +86,7 @@ Action-specific accepted output shape
 - Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block containing JSON.
 - The final answer returned to Foreman must contain exactly one <agent-result> block and no prose after it.
 - The worker result JSON schema below is generated from Foreman's Zod worker result schema.
+${reviewGuidance}
 
 Worker result JSON schema:
 

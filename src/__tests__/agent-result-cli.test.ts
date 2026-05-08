@@ -83,6 +83,30 @@ describe("agent-result cli", () => {
     expect(() => validateWorkerResultForAction({ ...deploymentResult, action: "execution" }, "execution")).toThrow();
   });
 
+  test("rejects no-op completed review results", async () => {
+    const result = {
+      ...validExecutionResult,
+      action: "review",
+      outcome: "completed",
+    };
+
+    const cliResult = await runCli(["agent-result", "validate", "--action", "review"], JSON.stringify(result));
+
+    expect(cliResult.code).toBe(1);
+    expect(cliResult.stderr).toContain("must use no_action_needed");
+  });
+
+  test("accepts completed review results with code changes", () => {
+    const result = {
+      ...validExecutionResult,
+      action: "review",
+      outcome: "completed",
+      signals: ["code_changed"],
+    };
+
+    expect(validateWorkerResultForAction(result, "review").outcome).toBe("completed");
+  });
+
   test("rejects invalid results with field-specific validation errors", async () => {
     const result = await runCli(["agent-result", "validate", "--action", "execution"], JSON.stringify({ schemaVersion: 1, action: "execution" }));
 
@@ -111,5 +135,7 @@ describe("agent-result cli", () => {
     expect(result.stdout).toContain('"const": "create_pull_request"');
     expect(result.stdout).toContain('"required"');
     expect(result.stdout).toContain("Minimal raw JSON example");
+    expect(result.stdout).toContain("For no-op review results, use outcome `no_action_needed`");
+    expect(result.stdout).toContain('{"schemaVersion":1,"action":"reviewer","outcome":"no_action_needed"');
   });
 });
