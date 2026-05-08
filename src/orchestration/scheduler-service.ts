@@ -134,6 +134,20 @@ export class SchedulerService extends EventEmitter {
     return { status: this.status, nextScoutPollAt: this.nextPollAt };
   }
 
+  syncConfigUpdate(previousScheduler: WorkspaceConfig["scheduler"]): void {
+    if (this.deps.config.scheduler.workerConcurrency > previousScheduler.workerConcurrency) {
+      this.deps.foremanRepos.workers.ensureWorkerSlots(this.deps.config.scheduler.workerConcurrency);
+    }
+
+    const timersChanged =
+      this.deps.config.scheduler.scoutPollIntervalSeconds !== previousScheduler.scoutPollIntervalSeconds ||
+      this.deps.config.scheduler.schedulerLoopIntervalMs !== previousScheduler.schedulerLoopIntervalMs ||
+      this.deps.config.scheduler.staleLeaseReapIntervalSeconds !== previousScheduler.staleLeaseReapIntervalSeconds;
+    if (timersChanged && this.status === "running") {
+      this.armTimers();
+    }
+  }
+
   async start(): Promise<void> {
     if (this.status === "running") {
       this.logger.debug("scheduler start ignored because it is already running");
@@ -532,7 +546,12 @@ export class SchedulerService extends EventEmitter {
     const queuedJobs = allQueuedJobs.filter((job) => isQueuedJobDispatchable(job, Date.now()));
     const idleWorkers = this.deps.foremanRepos.workers
       .listWorkers()
-      .filter((worker) => worker.status === "idle" && !this.activeWorkerRuns.has(worker.id));
+      .filter(
+        (worker) =>
+          worker.slot <= this.deps.config.scheduler.workerConcurrency &&
+          worker.status === "idle" &&
+          !this.activeWorkerRuns.has(worker.id),
+      );
     if (queuedJobs.length > 0 || idleWorkers.length > 0) {
       const delayedQueuedJobs = allQueuedJobs.length - queuedJobs.length;
       this.logger.debug("checked dispatch queue", {

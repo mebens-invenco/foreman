@@ -46,7 +46,7 @@ const secondaryTask: Task = {
 };
 
 describe("HTTP query validation", () => {
-  test("patches live cron settings and persists workspace config", async () => {
+  test("patches live workspace settings and persists workspace config", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
     cleanupDirs.push(workspaceRoot);
     const paths = createWorkspacePaths(projectRoot, workspaceRoot);
@@ -66,6 +66,7 @@ describe("HTTP query validation", () => {
         pause: vi.fn(),
         stop: vi.fn(async () => undefined),
         triggerManualScout: vi.fn(),
+        syncConfigUpdate: vi.fn(),
       } as any,
     });
 
@@ -73,16 +74,64 @@ describe("HTTP query validation", () => {
       const response = await server.inject({
         method: "PATCH",
         url: "/api/settings",
-        payload: { cron: { enabled: true, jobsDir: "automation" }, agentTaskCreation: { enabled: true } },
+        payload: {
+          workspace: { agentPrefix: "[bot] " },
+          cron: { enabled: true, jobsDir: "automation" },
+          agentTaskCreation: { enabled: true },
+          scheduler: { workerConcurrency: 2 },
+          runner: { execution: { model: "openai/gpt-5.5" } },
+        },
       });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({
-        cron: { enabled: true, jobsDir: "automation" },
-        agentTaskCreation: { enabled: true },
-      });
+      expect(response.json().config.cron).toEqual({ enabled: true, jobsDir: "automation" });
+      expect(response.json().config.agentTaskCreation).toEqual({ enabled: true });
+      expect(response.json().config.scheduler.workerConcurrency).toBe(2);
+      expect(response.json().config.runner.execution.model).toBe("openai/gpt-5.5");
+      expect(response.json().config.workspace.agentPrefix).toBe("[bot] ");
       expect(config.cron.enabled).toBe(true);
-      expect(await fs.readFile(paths.configPath, "utf8")).toContain("jobsDir: automation");
+      expect(config.scheduler.workerConcurrency).toBe(2);
+      const persisted = await fs.readFile(paths.configPath, "utf8");
+      expect(persisted).toContain("jobsDir: automation");
+      expect(persisted).toContain("agentPrefix");
+      expect(persisted).toContain("[bot] ");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("rejects read-only live settings patches", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [],
+      repos: db,
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+        syncConfigUpdate: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({
+        method: "PATCH",
+        url: "/api/settings",
+        payload: { http: { port: 9999 } },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.message).toContain("http is read-only");
     } finally {
       await server.close();
       db.close();

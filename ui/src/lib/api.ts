@@ -16,6 +16,94 @@ export type CronSettings = {
 export type AgentTaskCreationSettings = {
   enabled: boolean
 }
+export type RunnerProvider =
+  | {
+      type: "opencode"
+      model: string
+      variant: string
+      timeoutMs: number
+    }
+  | {
+      type: "claude"
+      model: string
+      effort: string
+      timeoutMs: number
+    }
+export type TaskProviderStates = {
+  ready: string[]
+  inProgress: string[]
+  inReview: string[]
+  deployable: string[]
+  done: string[]
+  canceled: string[]
+}
+export type WorkspaceConfig = {
+  version: 1
+  workspace: {
+    name: string
+    agentPrefix: string
+  }
+  repos: {
+    explicit: string[]
+    roots: string[]
+    ignore: string[]
+    reposDoneOnMerge: string[]
+  }
+  taskSystem: {
+    type: "linear" | "file"
+    linear?: {
+      team: string
+      assignee: string
+      includeLabels: string[]
+      agentCreatedLabel: string
+      consolidatedLabel: string
+      states: TaskProviderStates
+    }
+    file?: {
+      tasksDir: string
+      idPrefix: string
+      states: TaskProviderStates
+    }
+  }
+  reviewSystem: {
+    type: "github"
+  }
+  runner: {
+    execution: RunnerProvider
+    reviewer: RunnerProvider
+  }
+  reviewer: {
+    agentPrefix: string
+  }
+  cron: CronSettings
+  agentTaskCreation: AgentTaskCreationSettings
+  deployment: {
+    minRetryIntervalMinutes: number
+    maxRetryIntervalMinutes: number
+  }
+  scheduler: {
+    workerConcurrency: number
+    scoutPollIntervalSeconds: number
+    scoutRerunDebounceMs: number
+    leaseTtlSeconds: number
+    workerHeartbeatSeconds: number
+    staleLeaseReapIntervalSeconds: number
+    schedulerLoopIntervalMs: number
+    shutdownGracePeriodSeconds: number
+  }
+  http: {
+    host: string
+    port: number
+  }
+}
+export type DeepPartial<T> = {
+  [K in keyof T]?: T[K] extends Array<infer U>
+    ? U[]
+    : T[K] extends object
+      ? DeepPartial<T[K]>
+      : T[K]
+}
+export type SettingsPatch = DeepPartial<WorkspaceConfig>
 export type TaskState =
   | "ready"
   | "in_progress"
@@ -157,8 +245,7 @@ export type AttemptDetail = {
 }
 
 export type SettingsResponse = {
-  cron: CronSettings
-  agentTaskCreation: AgentTaskCreationSettings
+  config: WorkspaceConfig
 }
 
 export type TaskPullRequest = {
@@ -304,10 +391,7 @@ export function getSettings() {
   return requestJson<SettingsResponse>("/api/settings")
 }
 
-export function patchSettings(patch: {
-  cron?: Partial<CronSettings>
-  agentTaskCreation?: Partial<AgentTaskCreationSettings>
-}) {
+export function patchSettings(patch: SettingsPatch) {
   return requestJson<SettingsResponse>("/api/settings", {
     method: "PATCH",
     headers: {

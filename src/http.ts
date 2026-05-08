@@ -19,7 +19,7 @@ import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
 import type { ReviewService } from "./review/index.js";
 import type { TaskSystem } from "./tasking/index.js";
-import { stringifyWorkspaceConfig, type WorkspaceConfig } from "./workspace/config.js";
+import { stringifyWorkspaceConfig, workspaceConfigSchema, type WorkspaceConfig } from "./workspace/config.js";
 import type { WorkspacePaths } from "./workspace/workspace-paths.js";
 
 type HttpServerDeps = {
@@ -165,26 +165,53 @@ const parseBooleanQuery = (name: string, value: string | undefined): boolean => 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const readOptionalBooleanPatch = (parent: Record<string, unknown>, key: string): boolean | undefined => {
-  const value = parent[key];
-  if (value === undefined) {
-    return undefined;
+const deepMerge = (target: unknown, patch: unknown): unknown => {
+  if (!isRecord(target) || !isRecord(patch)) {
+    return patch;
   }
-  if (typeof value !== "boolean") {
-    throw new ForemanError("invalid_request", `${key} must be a boolean.`, 400);
+
+  const merged: Record<string, unknown> = { ...target };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) {
+      continue;
+    }
+    merged[key] = key in merged ? deepMerge(merged[key], value) : value;
   }
-  return value;
+  return merged;
 };
 
-const readOptionalStringPatch = (parent: Record<string, unknown>, key: string): string | undefined => {
-  const value = parent[key];
-  if (value === undefined) {
-    return undefined;
+const cloneConfig = (config: WorkspaceConfig): WorkspaceConfig => JSON.parse(JSON.stringify(config)) as WorkspaceConfig;
+
+const assignWorkspaceConfig = (target: WorkspaceConfig, source: WorkspaceConfig): void => {
+  const mutableTarget = target as unknown as Record<string, unknown>;
+  for (const key of Object.keys(mutableTarget)) {
+    delete mutableTarget[key];
   }
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new ForemanError("invalid_request", `${key} must be a non-empty string.`, 400);
+  Object.assign(target, source);
+};
+
+const assertEditableSettingsPatch = (patch: Record<string, unknown>): void => {
+  const readonlyTopLevel = ["version", "repos", "reviewSystem", "http"];
+  for (const key of readonlyTopLevel) {
+    if (key in patch) {
+      throw new ForemanError("invalid_request", `${key} is read-only while Foreman is running.`, 400);
+    }
   }
-  return value;
+
+  if (isRecord(patch.taskSystem) && "type" in patch.taskSystem) {
+    throw new ForemanError("invalid_request", "taskSystem.type is read-only while Foreman is running.", 400);
+  }
+};
+
+const applySettingsPatch = (config: WorkspaceConfig, patch: Record<string, unknown>): WorkspaceConfig => {
+  assertEditableSettingsPatch(patch);
+  const merged = deepMerge(cloneConfig(config), patch);
+  const parsed = workspaceConfigSchema.safeParse(merged);
+  if (!parsed.success) {
+    const message = parsed.error.issues.map((issue) => `${issue.path.join(".") || "config"}: ${issue.message}`).join("; ");
+    throw new ForemanError("invalid_request", message, 400);
+  }
+  return parsed.data;
 };
 
 const taskStates = ["ready", "in_progress", "in_review", "deployable", "done", "canceled"] as const satisfies readonly TaskState[];
@@ -780,8 +807,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   server.get("/api/scout/runs", async () => ({ runs: deps.repos.scoutRuns.listScoutRuns() }));
 
   server.get("/api/settings", async () => ({
-    cron: deps.config.cron,
-    agentTaskCreation: deps.config.agentTaskCreation,
+    config: deps.config,
   }));
 
   server.patch("/api/settings", async (request) => {
@@ -790,37 +816,13 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       throw new ForemanError("invalid_request", "Settings patch body must be an object.", 400);
     }
 
-    const cron = isRecord(body.cron) ? body.cron : undefined;
-    if (body.cron !== undefined && !cron) {
-      throw new ForemanError("invalid_request", "cron must be an object.", 400);
-    }
-    const agentTaskCreation = isRecord(body.agentTaskCreation) ? body.agentTaskCreation : undefined;
-    if (body.agentTaskCreation !== undefined && !agentTaskCreation) {
-      throw new ForemanError("invalid_request", "agentTaskCreation must be an object.", 400);
-    }
-
-    if (cron) {
-      const enabled = readOptionalBooleanPatch(cron, "enabled");
-      const jobsDir = readOptionalStringPatch(cron, "jobsDir");
-      deps.config.cron = {
-        ...deps.config.cron,
-        ...(enabled !== undefined ? { enabled } : {}),
-        ...(jobsDir !== undefined ? { jobsDir } : {}),
-      };
-    }
-
-    if (agentTaskCreation) {
-      const enabled = readOptionalBooleanPatch(agentTaskCreation, "enabled");
-      deps.config.agentTaskCreation = {
-        ...deps.config.agentTaskCreation,
-        ...(enabled !== undefined ? { enabled } : {}),
-      };
-    }
-
+    const previousScheduler = { ...deps.config.scheduler };
+    const nextConfig = applySettingsPatch(deps.config, body);
+    assignWorkspaceConfig(deps.config, nextConfig);
+    deps.scheduler.syncConfigUpdate(previousScheduler);
     await fs.writeFile(deps.paths.configPath, stringifyWorkspaceConfig(deps.config));
     return {
-      cron: deps.config.cron,
-      agentTaskCreation: deps.config.agentTaskCreation,
+      config: deps.config,
     };
   });
 
