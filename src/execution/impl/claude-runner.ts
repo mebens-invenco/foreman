@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { AgentRunner, AgentRunnerInvokeRequest, CapturedAgentRunResult } from "../agent-runner.js";
-import { normalizeClaudeJsonOutput } from "./json-output.js";
+import { normalizeClaudeJsonOutput } from "./claude-output.js";
 import { runAgentProcess } from "./run-agent-process.js";
 
 export class ClaudeRunner implements AgentRunner {

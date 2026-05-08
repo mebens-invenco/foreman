@@ -1,5 +1,5 @@
 import type { AgentRunner, AgentRunnerInvokeRequest, CapturedAgentRunResult } from "../agent-runner.js";
-import { normalizeCodexJsonOutput } from "./json-output.js";
+import { normalizeCodexJsonOutput } from "./codex-output.js";
 import { runAgentProcess } from "./run-agent-process.js";
 
 // Codex CLI sandbox config override applied to every invocation. Resume mode
