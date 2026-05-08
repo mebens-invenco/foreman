@@ -19,6 +19,7 @@ export type JobRecord = {
   createdAt: string;
   updatedAt: string;
   leasedAt: string | null;
+  nextEligibleAt: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   errorMessage: string | null;
@@ -62,6 +63,6 @@ export interface JobRepo {
       errorMessage?: string | null;
     },
   ): void;
-  returnLeasedJobToQueue(jobId: string): void;
+  returnLeasedJobToQueue(jobId: string, options?: { nextEligibleAt?: string | null }): void;
   claimQueuedJobForWorker(jobId: string, workerId: string): boolean;
 }

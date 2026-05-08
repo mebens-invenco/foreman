@@ -182,6 +182,8 @@ const compareExecutionTasks = (left: Task, right: Task): number => {
 
 const targetKey = (taskId: string, repoKey: string): string => `${taskId}:${repoKey}`;
 const dedupeKeyForAction = (taskId: string, repoKey: string, action: ActionType): string => `${taskId}:${repoKey}:${action}`;
+// Cron jobs use CronAttemptExecutor and a cron lease, so they never consume task branch leases.
+export const actionConsumesBranchLease = (action: ActionType): boolean => action !== "consolidation" && action !== "cron";
 
 const resolvePersistedTaskTargets = (task: Task, foremanRepos: ForemanRepos): TaskTarget[] =>
   foremanRepos.taskMirror.getTargetsForTask(task.id);
@@ -584,6 +586,9 @@ export const runScoutSelection = async (input: {
     if (jobs.some((job) => dedupeKeyForAction(job.task.id, job.target.repoKey, job.action) === dedupeKey)) {
       return false;
     }
+    if (actionConsumesBranchLease(action) && (activeJobsByTarget.get(target.id) ?? []).some((job) => actionConsumesBranchLease(job.action))) {
+      return false;
+    }
     return !input.foremanRepos.jobs.hasActiveDedupeKey(dedupeKey);
   };
 
@@ -763,10 +768,6 @@ export const runScoutSelection = async (input: {
       for (const task of activeCandidates.filter((candidate) => candidate.state === "in_review")) {
         for (const target of resolvePersistedTaskTargets(task, input.foremanRepos)) {
           if (!canSchedule(task, target, "reviewer")) {
-            continue;
-          }
-
-          if ((activeJobsByTarget.get(target.id) ?? []).some((job) => job.action !== "reviewer")) {
             continue;
           }
 
@@ -1026,7 +1027,7 @@ export const leaseResourceKeysForAction = (
     { resourceType: "job", resourceKey: dedupeKeyForAction(task.id, target.repoKey, action) },
   ];
 
-  if (action !== "consolidation") {
+  if (actionConsumesBranchLease(action)) {
     leases.push({ resourceType: "branch", resourceKey: `${target.repoKey}:${resolveTaskBranchName(task, target)}` });
   }
 

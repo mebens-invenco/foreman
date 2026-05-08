@@ -543,6 +543,43 @@ describe("persistence repos", () => {
 
       expect(db.jobs.getJob(job.id).status).toBe("queued");
       expect(db.jobs.getJob(job.id).leasedAt).toBeNull();
+      expect(db.jobs.getJob(job.id).nextEligibleAt).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not claim queued jobs before their next eligible time", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0];
+      expect(worker).toBeDefined();
+      const taskTarget = syncSingleTargetTask(db, { taskId: "TASK-0003B", repoKey: "repo-a", branchName: "task-0003b" });
+
+      const job = db.jobs.createJob({
+        taskId: "TASK-0003B",
+        taskTargetId: taskTarget.id,
+        taskProvider: "file",
+        action: "review",
+        priorityRank: priorityToRank("high"),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: "TASK-0003B:repo-a:review",
+        selectionReason: "test",
+      });
+
+      expect(db.jobs.claimQueuedJobForWorker(job.id, worker!.id)).toBe(true);
+      db.jobs.returnLeasedJobToQueue(job.id, { nextEligibleAt: "2999-01-01T00:00:00.000Z" });
+      db.workers.updateWorkerStatus(worker!.id, "idle", null);
+
+      expect(db.jobs.claimQueuedJobForWorker(job.id, worker!.id)).toBe(false);
+      expect(db.jobs.getJob(job.id).status).toBe("queued");
+      expect(db.jobs.getJob(job.id).leasedAt).toBeNull();
+      expect(db.jobs.getJob(job.id).nextEligibleAt).toBe("2999-01-01T00:00:00.000Z");
     } finally {
       db.close();
     }

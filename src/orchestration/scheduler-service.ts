@@ -21,6 +21,15 @@ type ScoutTrigger = "startup" | "poll" | "worker_finished" | "task_mutation" | "
 const SCOUT_RUN_TIMEOUT_MS = 5 * 60 * 1000;
 const PROVIDER_COOLDOWN_MAX_MS = 60 * 60 * 1000;
 
+const isQueuedJobDispatchable = (job: JobRecord, now: number): boolean => {
+  if (!job.nextEligibleAt) {
+    return true;
+  }
+
+  const nextEligibleAt = Date.parse(job.nextEligibleAt);
+  return Number.isNaN(nextEligibleAt) || nextEligibleAt <= now;
+};
+
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> => {
   let timer: NodeJS.Timeout | null = null;
   try {
@@ -519,12 +528,18 @@ export class SchedulerService extends EventEmitter {
 
     await this.scheduleDueCronJobs();
 
-    const queuedJobs = this.deps.foremanRepos.jobs.listJobsByStatus(["queued"]);
+    const allQueuedJobs = this.deps.foremanRepos.jobs.listJobsByStatus(["queued"]);
+    const queuedJobs = allQueuedJobs.filter((job) => isQueuedJobDispatchable(job, Date.now()));
     const idleWorkers = this.deps.foremanRepos.workers
       .listWorkers()
       .filter((worker) => worker.status === "idle" && !this.activeWorkerRuns.has(worker.id));
     if (queuedJobs.length > 0 || idleWorkers.length > 0) {
-      this.logger.debug("checked dispatch queue", { queuedJobs: queuedJobs.length, idleWorkers: idleWorkers.length });
+      const delayedQueuedJobs = allQueuedJobs.length - queuedJobs.length;
+      this.logger.debug("checked dispatch queue", {
+        queuedJobs: queuedJobs.length,
+        idleWorkers: idleWorkers.length,
+        ...(delayedQueuedJobs > 0 ? { delayedQueuedJobs } : {}),
+      });
     }
 
     for (const worker of idleWorkers) {
