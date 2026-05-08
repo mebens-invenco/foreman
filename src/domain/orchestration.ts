@@ -32,6 +32,13 @@ export type AgentRunRequest = {
   nativeSessionId?: string;
 };
 
+export type TokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+};
+
 export type AgentRunResult = {
   exitCode: number | null;
   signal: string | null;
@@ -42,6 +49,7 @@ export type AgentRunResult = {
   stdoutBytes: number;
   stderrBytes: number;
   nativeSessionId?: string;
+  tokensUsed?: TokenUsage;
 };
 
 export type TaskCreateMutation = {

@@ -1,4 +1,4 @@
-import type { AttemptStatus, RunnerProvider } from "../domain/index.js";
+import type { AttemptStatus, RunnerProvider, TokenUsage } from "../domain/index.js";
 import type { LeaseResourceType } from "./lease-repo.js";
 
 export type AttemptRecord = {
@@ -23,6 +23,7 @@ export type AttemptRecord = {
   signal: string | null;
   summary: string;
   errorMessage: string | null;
+  tokensUsed: TokenUsage | null;
 };
 
 export type AttemptEventRecord = {
@@ -66,6 +67,7 @@ export interface AttemptRepo {
       signal?: string | null;
       summary?: string;
       errorMessage?: string | null;
+      tokensUsed?: TokenUsage | null;
     },
   ): void;
   listAttempts(filters?: { status?: AttemptStatus; jobId?: string; limit?: number; offset?: number }): AttemptRecord[];

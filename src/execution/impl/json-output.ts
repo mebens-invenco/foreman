@@ -1,9 +1,13 @@
+import type { TokenUsage } from "../../domain/index.js";
+import { sumTokenUsage } from "./token-usage.js";
+
 type JsonRecord = Record<string, unknown>;
 
 export type NormalizedJsonOutput = {
   stdout: string;
   nativeSessionId?: string;
   warning?: string;
+  tokensUsed?: TokenUsage;
 };
 
 const isRecord = (value: unknown): value is JsonRecord =>
@@ -95,6 +99,34 @@ const openCodeErrorSummary = (record: JsonRecord): string | null => {
   return compactJson(errorRecord);
 };
 
+const numberField = (record: JsonRecord, name: string): number | undefined => {
+  const value = record[name];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+};
+
+const tokenUsageFromRecord = (record: JsonRecord): TokenUsage | undefined => {
+  const inputTokens = numberField(record, "input_tokens") ?? 0;
+  const outputTokens = numberField(record, "output_tokens") ?? 0;
+  const cacheCreationInputTokens = numberField(record, "cache_creation_input_tokens");
+  const cacheReadInputTokens = numberField(record, "cache_read_input_tokens");
+
+  const hasAny =
+    record.input_tokens !== undefined ||
+    record.output_tokens !== undefined ||
+    cacheCreationInputTokens !== undefined ||
+    cacheReadInputTokens !== undefined;
+  if (!hasAny) {
+    return undefined;
+  }
+
+  return {
+    inputTokens,
+    outputTokens,
+    ...(cacheCreationInputTokens !== undefined ? { cacheCreationInputTokens } : {}),
+    ...(cacheReadInputTokens !== undefined ? { cacheReadInputTokens } : {}),
+  };
+};
+
 export const normalizeClaudeJsonOutput = (stdout: string): NormalizedJsonOutput => {
   let values: unknown[];
   try {
@@ -109,10 +141,12 @@ export const normalizeClaudeJsonOutput = (stdout: string): NormalizedJsonOutput 
   const resultRecord = records.find((record) => record.type === "result") ?? records.find((record) => typeof record.result === "string");
   const normalized = resultRecord ? stringField(resultRecord, ["result", "text", "output", "message"]) : null;
   const nativeSessionId = records.map((record) => stringField(record, ["session_id", "sessionId", "sessionID"])).find(Boolean) ?? undefined;
+  const usage = resultRecord && isRecord(resultRecord.usage) ? tokenUsageFromRecord(resultRecord.usage) : undefined;
 
   return {
     stdout: normalized ?? stdout,
     ...(nativeSessionId ? { nativeSessionId } : {}),
+    ...(usage ? { tokensUsed: usage } : {}),
   };
 };
 
@@ -140,6 +174,14 @@ export const normalizeOpenCodeJsonOutput = (stdout: string): NormalizedJsonOutpu
     .find(Boolean);
   const text = finalAnswerText ?? finalText ?? records.map((record) => stringField(record, ["text", "content"])).filter(Boolean).join("");
   const errorSummaries = records.map(openCodeErrorSummary).filter(Boolean);
+  const tokensUsed = records.reduce<TokenUsage | undefined>((totals, record) => {
+    const candidate = tokenUsageFromRecord(record);
+    if (candidate) {
+      return sumTokenUsage(totals, candidate);
+    }
+    const partUsage = isRecord(record.part) ? tokenUsageFromRecord(record.part) : undefined;
+    return sumTokenUsage(totals, partUsage);
+  }, undefined);
 
   return {
     stdout: text || stdout,
@@ -147,5 +189,6 @@ export const normalizeOpenCodeJsonOutput = (stdout: string): NormalizedJsonOutpu
     ...(errorSummaries.length > 0
       ? { warning: `OpenCode JSON output contained error record(s): ${errorSummaries.join("; ")}` }
       : {}),
+    ...(tokensUsed ? { tokensUsed } : {}),
   };
 };

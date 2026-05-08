@@ -150,5 +150,6 @@ export const runAgentProcess = async (input: {
     stdout: normalized?.stdout ?? stdout,
     stderr,
     ...(normalized?.nativeSessionId ? { nativeSessionId: normalized.nativeSessionId } : {}),
+    ...(normalized?.tokensUsed ? { tokensUsed: normalized.tokensUsed } : {}),
   };
 };

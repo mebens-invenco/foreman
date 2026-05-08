@@ -19,7 +19,12 @@ import {
   type AttemptEventRecord,
   type AttemptRecord,
 } from "@/lib/api"
-import { formatActionLabel, formatDuration, formatTimestamp } from "@/lib/format"
+import {
+  formatActionLabel,
+  formatDuration,
+  formatTimestamp,
+  formatTokenCount,
+} from "@/lib/format"
 import {
   appendLogChunk,
   createLogBuffer,
@@ -527,6 +532,20 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
               <DetailRow
                 label="Duration"
                 value={formatDuration(attempt.startedAt, attempt.finishedAt)}
+              />
+              <DetailRow
+                label="Input tokens"
+                value={formatTokenCount(attempt.tokensUsed?.inputTokens ?? null)}
+              />
+              <DetailRow
+                label="Output tokens"
+                value={formatTokenCount(attempt.tokensUsed?.outputTokens ?? null)}
+              />
+              <DetailRow
+                label="Cache-read tokens"
+                value={formatTokenCount(
+                  attempt.tokensUsed?.cacheReadInputTokens ?? null
+                )}
               />
             </section>
 

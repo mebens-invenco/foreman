@@ -96,6 +96,13 @@ export type Worker = {
   } | null
 }
 
+export type TokenUsage = {
+  inputTokens: number
+  outputTokens: number
+  cacheCreationInputTokens?: number
+  cacheReadInputTokens?: number
+}
+
 export type AttemptRecord = {
   id: string
   jobId: string
@@ -118,6 +125,7 @@ export type AttemptRecord = {
   signal: string | null
   summary: string
   errorMessage: string | null
+  tokensUsed: TokenUsage | null
 }
 
 export type AttemptEventRecord = {

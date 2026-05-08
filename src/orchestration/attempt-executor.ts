@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskState, type TaskTarget, type WorkerResult } from "../domain/index.js";
+import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskState, type TaskTarget, type TokenUsage, type WorkerResult } from "../domain/index.js";
+import { sumTokenUsage } from "../execution/impl/token-usage.js";
 import { createAgentRunner, parseWorkerResult, validateWorkerResult, type AgentRunner, type CapturedAgentRunResult, type WorkerResultAction } from "../execution/index.js";
 import { parseWorkerPromptPullRequestReference, renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
 import { ForemanError, isForemanError, isProviderRateLimitError } from "../lib/errors.js";
@@ -356,7 +357,7 @@ export class AttemptExecutor {
         });
         attemptLogger.info("recorded attempt log artifact", { logPath: logAbsolutePath, sizeBytes: logStat.size });
 
-        const { workerResult, finalRunResult } = await this.parseOrRecoverWorkerResult({
+        const { workerResult, finalRunResult, tokensUsed } = await this.parseOrRecoverWorkerResult({
           runner,
           runnerConfig,
           attempt,
@@ -436,6 +437,7 @@ export class AttemptExecutor {
           signal: finalRunResult.signal,
           summary: workerResult.summary,
           errorMessage: workerResult.outcome === "failed" ? workerResult.summary : null,
+          tokensUsed: tokensUsed ?? null,
         });
         this.deps.foremanRepos.jobs.updateJobStatus(job.id, jobStatus, {
           finishedAt: finalRunResult.finishedAt,
@@ -539,11 +541,12 @@ export class AttemptExecutor {
     activeRunnerSession: RunnerSessionRecord | null;
     reviewHeadSha: string | null;
     abortSignal: AbortSignal;
-  }): Promise<{ workerResult: WorkerResult; finalRunResult: CapturedAgentRunResult }> {
+  }): Promise<{ workerResult: WorkerResult; finalRunResult: CapturedAgentRunResult; tokensUsed: TokenUsage | undefined }> {
     try {
       return {
         workerResult: validateWorkerResult(parseWorkerResult(input.runResult.stdout)),
         finalRunResult: input.runResult,
+        tokensUsed: input.runResult.tokensUsed,
       };
     } catch (parseError) {
       const canRecoverTimedOutOutput =
@@ -591,7 +594,7 @@ export class AttemptExecutor {
     reviewHeadSha: string | null;
     abortSignal: AbortSignal;
     parseError: unknown;
-  }): Promise<{ workerResult: WorkerResult; finalRunResult: CapturedAgentRunResult }> {
+  }): Promise<{ workerResult: WorkerResult; finalRunResult: CapturedAgentRunResult; tokensUsed: TokenUsage | undefined }> {
     const recoveryNativeSessionId = input.runResult.nativeSessionId ?? input.activeRunnerSession?.nativeSessionId;
     const recoveryResult = await input.runner.invoke({
       attemptId: input.attempt.id,
@@ -644,7 +647,11 @@ export class AttemptExecutor {
         recoveryOutputPath: recoveryOutputRelativePath,
       });
 
-      return { workerResult, finalRunResult: recoveryResult };
+      return {
+        workerResult,
+        finalRunResult: recoveryResult,
+        tokensUsed: sumTokenUsage(input.runResult.tokensUsed, recoveryResult.tokensUsed),
+      };
     } catch (recoveryError) {
       throw new ForemanError(
         "worker_result_invalid",

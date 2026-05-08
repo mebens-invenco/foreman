@@ -15,9 +15,18 @@ import {
   formatActionLabel,
   formatDuration,
   formatTimestamp,
+  formatTokenCount,
 } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { AttemptRecord } from "@/lib/api"
+import type { AttemptRecord, TokenUsage } from "@/lib/api"
+
+function totalTokens(tokens: TokenUsage | null) {
+  if (!tokens) {
+    return null
+  }
+
+  return tokens.inputTokens + tokens.outputTokens
+}
 
 const attemptStatusValues = [
   "running",
@@ -245,6 +254,51 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
     enableGlobalFilter: false,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Duration" />
+    ),
+  },
+  {
+    accessorFn: (row) => totalTokens(row.tokensUsed) ?? -1,
+    id: "tokens",
+    cell: ({ row }) => {
+      const total = totalTokens(row.original.tokensUsed)
+      const tokens = row.original.tokensUsed
+      const tooltip = tokens
+        ? [
+            `Input: ${formatTokenCount(tokens.inputTokens)}`,
+            `Output: ${formatTokenCount(tokens.outputTokens)}`,
+            tokens.cacheReadInputTokens !== undefined
+              ? `Cache read: ${formatTokenCount(tokens.cacheReadInputTokens)}`
+              : null,
+            tokens.cacheCreationInputTokens !== undefined
+              ? `Cache create: ${formatTokenCount(tokens.cacheCreationInputTokens)}`
+              : null,
+          ]
+            .filter(Boolean)
+            .join("\n")
+        : null
+
+      const label = (
+        <span className="text-xs text-muted-foreground">
+          {formatTokenCount(total)}
+        </span>
+      )
+
+      if (!tooltip) {
+        return label
+      }
+
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>{label}</TooltipTrigger>
+          <TooltipContent sideOffset={6} className="whitespace-pre-line">
+            {tooltip}
+          </TooltipContent>
+        </Tooltip>
+      )
+    },
+    enableGlobalFilter: false,
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Tokens" />
     ),
   },
   {

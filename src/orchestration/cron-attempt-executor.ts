@@ -170,6 +170,7 @@ export class CronAttemptExecutor {
           signal: runResult.signal,
           summary,
           errorMessage: attemptStatus === "failed" || attemptStatus === "timed_out" ? summary : null,
+          tokensUsed: runResult.tokensUsed ?? null,
         });
         this.deps.foremanRepos.jobs.updateJobStatus(job.id, jobStatus, {
           finishedAt: runResult.finishedAt,

@@ -68,6 +68,25 @@ export function formatDuration(startedAt: string | null, finishedAt: string | nu
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
 }
 
+export function formatTokenCount(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "-"
+  }
+
+  const absolute = Math.abs(value)
+  if (absolute < 1_000) {
+    return `${value}`
+  }
+
+  if (absolute < 1_000_000) {
+    const thousands = value / 1_000
+    return `${thousands.toFixed(absolute < 10_000 ? 1 : 0)}k`
+  }
+
+  const millions = value / 1_000_000
+  return `${millions.toFixed(absolute < 10_000_000 ? 1 : 0)}m`
+}
+
 export function formatRelativeTime(value: string | null | undefined, now = Date.now()) {
   if (!value) {
     return "pending"

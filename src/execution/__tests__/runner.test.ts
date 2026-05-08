@@ -456,4 +456,38 @@ describe("provider runners", () => {
       warning: expect.stringContaining("OpenCode JSON output contained error record(s): JSON parsing failed"),
     });
   });
+
+  test("extracts token usage from Claude result and accumulates across OpenCode records", () => {
+    const claudeOutput = JSON.stringify({
+      type: "result",
+      result: "final",
+      session_id: "claude-session",
+      usage: {
+        input_tokens: 1234,
+        output_tokens: 567,
+        cache_creation_input_tokens: 100,
+        cache_read_input_tokens: 50,
+      },
+    });
+    expect(normalizeClaudeJsonOutput(claudeOutput).tokensUsed).toEqual({
+      inputTokens: 1234,
+      outputTokens: 567,
+      cacheCreationInputTokens: 100,
+      cacheReadInputTokens: 50,
+    });
+
+    const claudeOutputNoUsage = JSON.stringify({ type: "result", result: "final" });
+    expect(normalizeClaudeJsonOutput(claudeOutputNoUsage).tokensUsed).toBeUndefined();
+
+    const opencodeOutput = [
+      JSON.stringify({ type: "text", text: "step 1", input_tokens: 10, output_tokens: 20 }),
+      JSON.stringify({ type: "text", text: "step 2", input_tokens: 5, output_tokens: 15, cache_read_input_tokens: 7 }),
+      JSON.stringify({ type: "final", text: "<agent-result>{}</agent-result>" }),
+    ].join("\n");
+    expect(normalizeOpenCodeJsonOutput(opencodeOutput).tokensUsed).toEqual({
+      inputTokens: 15,
+      outputTokens: 35,
+      cacheReadInputTokens: 7,
+    });
+  });
 });

@@ -276,6 +276,98 @@ describe("AttemptExecutor", () => {
     }
   });
 
+  test("persists token usage on the attempt when the primary runner completes successfully", async () => {
+    const { db, job, claimedJob, executor, logger } = await createExecutorContext();
+
+    try {
+      const workerResult = createWorkerResult({ summary: "Done." });
+      runnerMocks.invoke.mockResolvedValueOnce({
+        exitCode: 0,
+        signal: null,
+        startedAt: "2026-05-06T00:00:00.000Z",
+        finishedAt: "2026-05-06T00:01:00.000Z",
+        stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+        stderrBytes: 0,
+        stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+        stderr: "",
+        tokensUsed: { inputTokens: 1000, outputTokens: 200, cacheReadInputTokens: 50 },
+      });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      const attempt = db.attempts.latestAttemptForJob(job.id)!;
+      expect(attempt.tokensUsed).toEqual({ inputTokens: 1000, outputTokens: 200, cacheReadInputTokens: 50 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("accumulates primary plus recovery token usage when recovery succeeds", async () => {
+    const { db, job, claimedJob, executor, logger } = await createExecutorContext();
+
+    try {
+      const recoveredResult = createWorkerResult({ summary: "Recovered." });
+      runnerMocks.invoke
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          signal: null,
+          startedAt: "2026-05-06T00:00:00.000Z",
+          finishedAt: "2026-05-06T00:01:00.000Z",
+          stdoutBytes: Buffer.byteLength("Implemented the change."),
+          stderrBytes: 0,
+          stdout: "Implemented the change.",
+          stderr: "",
+          tokensUsed: { inputTokens: 1000, outputTokens: 200, cacheReadInputTokens: 50 },
+        })
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          signal: null,
+          startedAt: "2026-05-06T00:01:00.000Z",
+          finishedAt: "2026-05-06T00:02:00.000Z",
+          stdoutBytes: Buffer.byteLength(JSON.stringify(recoveredResult)),
+          stderrBytes: 0,
+          stdout: `<agent-result>\n${JSON.stringify(recoveredResult)}\n</agent-result>`,
+          stderr: "",
+          tokensUsed: { inputTokens: 100, outputTokens: 25, cacheReadInputTokens: 10 },
+        });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      const attempt = db.attempts.latestAttemptForJob(job.id)!;
+      expect(attempt.tokensUsed).toEqual({ inputTokens: 1100, outputTokens: 225, cacheReadInputTokens: 60 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("leaves token usage null when the runner fails before producing tokens", async () => {
+    const { db, job, claimedJob, executor, logger } = await createExecutorContext();
+
+    try {
+      runnerMocks.invoke.mockResolvedValueOnce({
+        exitCode: 1,
+        signal: null,
+        startedAt: "2026-05-06T00:00:00.000Z",
+        finishedAt: "2026-05-06T00:01:00.000Z",
+        stdoutBytes: 0,
+        stderrBytes: 0,
+        stdout: "",
+        stderr: "boom",
+      });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      const attempt = db.attempts.latestAttemptForJob(job.id)!;
+      expect(attempt.status).toBe("failed");
+      expect(attempt.tokensUsed).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   test("recovers a worker result from stdout after a non-aborted runner timeout", async () => {
     const { db, job, claimedJob, executor, logger, applyWorkerResult } = await createExecutorContext();
 
