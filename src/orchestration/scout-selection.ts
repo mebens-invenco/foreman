@@ -182,6 +182,7 @@ const compareExecutionTasks = (left: Task, right: Task): number => {
 
 const targetKey = (taskId: string, repoKey: string): string => `${taskId}:${repoKey}`;
 const dedupeKeyForAction = (taskId: string, repoKey: string, action: ActionType): string => `${taskId}:${repoKey}:${action}`;
+// Cron jobs use CronAttemptExecutor and a cron lease, so they never consume task branch leases.
 export const actionConsumesBranchLease = (action: ActionType): boolean => action !== "consolidation" && action !== "cron";
 
 const resolvePersistedTaskTargets = (task: Task, foremanRepos: ForemanRepos): TaskTarget[] =>

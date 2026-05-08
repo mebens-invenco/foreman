@@ -1,5 +1,4 @@
 import { addSeconds } from "../lib/time.js";
+import type { WorkspaceConfig } from "../workspace/config.js";
 
-const leaseConflictRequeueDelaySeconds = 15;
-
-export const nextLeaseConflictEligibleAt = (): string => addSeconds(new Date(), leaseConflictRequeueDelaySeconds);
+export const nextLeaseConflictEligibleAt = (config: WorkspaceConfig): string => addSeconds(new Date(), config.scheduler.leaseConflictRequeueDelaySeconds);

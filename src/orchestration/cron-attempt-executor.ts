@@ -80,7 +80,7 @@ export class CronAttemptExecutor {
         leases: [{ resourceType: "cron", resourceKey: job.dedupeKey }],
       });
       if (!attempt) {
-        const nextEligibleAt = nextLeaseConflictEligibleAt();
+        const nextEligibleAt = nextLeaseConflictEligibleAt(this.deps.config);
         this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id, { nextEligibleAt });
         jobLogger.warn("returned leased cron job to queue because required execution leases could not be acquired", { nextEligibleAt });
         return;

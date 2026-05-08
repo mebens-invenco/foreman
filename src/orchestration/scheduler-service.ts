@@ -481,10 +481,11 @@ export class SchedulerService extends EventEmitter {
       .listWorkers()
       .filter((worker) => worker.status === "idle" && !this.activeWorkerRuns.has(worker.id));
     if (queuedJobs.length > 0 || idleWorkers.length > 0) {
+      const delayedQueuedJobs = allQueuedJobs.length - queuedJobs.length;
       this.logger.debug("checked dispatch queue", {
         queuedJobs: queuedJobs.length,
-        delayedQueuedJobs: allQueuedJobs.length - queuedJobs.length,
         idleWorkers: idleWorkers.length,
+        ...(delayedQueuedJobs > 0 ? { delayedQueuedJobs } : {}),
       });
     }
 

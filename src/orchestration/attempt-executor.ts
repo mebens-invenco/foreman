@@ -175,7 +175,7 @@ export class AttemptExecutor {
         leases: leaseResourceKeysForAction(task, job.action, target),
       });
       if (!attempt) {
-        const nextEligibleAt = nextLeaseConflictEligibleAt();
+        const nextEligibleAt = nextLeaseConflictEligibleAt(this.deps.config);
         this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id, { nextEligibleAt });
         jobLogger.warn("returned leased job to queue because required execution leases could not be acquired", { nextEligibleAt });
         return;
