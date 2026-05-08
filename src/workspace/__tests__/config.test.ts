@@ -84,6 +84,67 @@ describe("workspace config", () => {
     expect(parsed.taskSystem.linear!.agentCreatedLabel).toBe("AI Generated");
   });
 
+  test("parses codex execution and reviewer runner configs", () => {
+    const parsed = parseWorkspaceConfig(`
+version: 1
+workspace:
+  name: foo
+repos:
+  explicit: []
+  roots: []
+  ignore: []
+taskSystem:
+  type: file
+  file:
+    tasksDir: tasks
+    idPrefix: TASK
+    states:
+      ready: [ready]
+      inProgress: [in_progress]
+      inReview: [in_review]
+      done: [done]
+      canceled: [canceled]
+reviewSystem:
+  type: github
+runner:
+  execution:
+    type: codex
+    model: gpt-5.5
+    effort: high
+    timeoutMs: 1800000
+  reviewer:
+    type: codex
+    model: gpt-5.5
+    effort: medium
+    timeoutMs: 600000
+scheduler:
+  workerConcurrency: 4
+  scoutPollIntervalSeconds: 60
+  scoutRerunDebounceMs: 1000
+  leaseTtlSeconds: 120
+  workerHeartbeatSeconds: 15
+  staleLeaseReapIntervalSeconds: 15
+  schedulerLoopIntervalMs: 1000
+  shutdownGracePeriodSeconds: 10
+http:
+  host: 127.0.0.1
+  port: 8765
+`);
+
+    expect(parsed.runner.execution).toEqual({
+      type: "codex",
+      model: "gpt-5.5",
+      effort: "high",
+      timeoutMs: 1_800_000,
+    });
+    expect(parsed.runner.reviewer).toEqual({
+      type: "codex",
+      model: "gpt-5.5",
+      effort: "medium",
+      timeoutMs: 600_000,
+    });
+  });
+
   test("accepts legacy flat claude runner config", () => {
     const parsed = parseWorkspaceConfig(`
 version: 1
