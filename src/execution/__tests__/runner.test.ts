@@ -4,8 +4,9 @@ import { promises as fs } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { ClaudeRunner, OpenCodeRunner, createAgentRunner } from "../index.js";
-import { normalizeClaudeJsonOutput, normalizeOpenCodeJsonOutput } from "../impl/json-output.js";
+import { normalizeClaudeJsonOutput, normalizeCodexJsonOutput, normalizeOpenCodeJsonOutput } from "../impl/json-output.js";
 import { runAgentProcess } from "../impl/run-agent-process.js";
+import { extractClaudeUsage, extractCodexUsage, extractOpenCodeStepUsage, sumTokenUsage } from "../impl/token-usage.js";
 import { createTempDir } from "../../test-support/helpers.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 
@@ -457,37 +458,213 @@ describe("provider runners", () => {
     });
   });
 
-  test("extracts token usage from Claude result and accumulates across OpenCode records", () => {
+  test("extracts Claude token usage from the result event's usage object", () => {
+    // Empirical fixture captured from `claude -p --output-format json --session-id ...`
+    // (single fresh call). `input_tokens` is already NEW input only.
     const claudeOutput = JSON.stringify({
       type: "result",
-      result: "final",
-      session_id: "claude-session",
+      result: "one",
+      session_id: "654bffbb-887d-4b99-9c9e-d93afd40bbcd",
       usage: {
-        input_tokens: 1234,
-        output_tokens: 567,
-        cache_creation_input_tokens: 100,
-        cache_read_input_tokens: 50,
+        input_tokens: 6,
+        output_tokens: 5,
+        cache_creation_input_tokens: 32460,
+        cache_read_input_tokens: 24417,
       },
     });
     expect(normalizeClaudeJsonOutput(claudeOutput).tokensUsed).toEqual({
-      inputTokens: 1234,
-      outputTokens: 567,
-      cacheCreationInputTokens: 100,
-      cacheReadInputTokens: 50,
+      inputTokens: 6,
+      outputTokens: 5,
+      cacheCreationInputTokens: 32460,
+      cacheReadInputTokens: 24417,
     });
 
     const claudeOutputNoUsage = JSON.stringify({ type: "result", result: "final" });
     expect(normalizeClaudeJsonOutput(claudeOutputNoUsage).tokensUsed).toBeUndefined();
+  });
 
-    const opencodeOutput = [
-      JSON.stringify({ type: "text", text: "step 1", input_tokens: 10, output_tokens: 20 }),
-      JSON.stringify({ type: "text", text: "step 2", input_tokens: 5, output_tokens: 15, cache_read_input_tokens: 7 }),
-      JSON.stringify({ type: "final", text: "<agent-result>{}</agent-result>" }),
+  test("extracts Codex token usage and normalizes input_tokens to subtract cached portion", () => {
+    // Empirical fixture from `codex exec --json -s read-only "Reply with 'one'."`.
+    // Codex's raw `input_tokens` is TOTAL input (includes cached); the extractor
+    // subtracts `cached_input_tokens` so stored `inputTokens` matches the
+    // "new only" semantics used by Claude/OpenCode.
+    const codexOutput = [
+      JSON.stringify({ type: "thread.started", thread_id: "019e05ee-8b70-7ff1-812b-ac29b94d03ec" }),
+      JSON.stringify({ type: "turn.started" }),
+      JSON.stringify({
+        type: "item.completed",
+        item: { id: "item_0", type: "agent_message", text: "one" },
+      }),
+      JSON.stringify({
+        type: "turn.completed",
+        usage: {
+          input_tokens: 20341,
+          cached_input_tokens: 3456,
+          output_tokens: 5,
+          reasoning_output_tokens: 0,
+        },
+      }),
     ].join("\n");
+
+    const normalized = normalizeCodexJsonOutput(codexOutput);
+    expect(normalized.tokensUsed).toEqual({
+      inputTokens: 20341 - 3456,
+      outputTokens: 5,
+      cacheReadInputTokens: 3456,
+      reasoningOutputTokens: 0,
+    });
+    expect(normalized.nativeSessionId).toBe("019e05ee-8b70-7ff1-812b-ac29b94d03ec");
+    expect(normalized.stdout).toBe("one");
+  });
+
+  test("extracts OpenCode token usage from step_finish.part.tokens", () => {
+    // Empirical fixture from `opencode run --format json "Reply with 'one'."`.
+    const opencodeOutput = [
+      JSON.stringify({
+        type: "step_start",
+        sessionID: "ses_1fa1181e0ffesZ25ctVlinDFgI",
+        part: { type: "step-start" },
+      }),
+      JSON.stringify({
+        type: "text",
+        sessionID: "ses_1fa1181e0ffesZ25ctVlinDFgI",
+        part: {
+          type: "text",
+          text: "one",
+          metadata: { openai: { phase: "final_answer" } },
+        },
+      }),
+      JSON.stringify({
+        type: "step_finish",
+        sessionID: "ses_1fa1181e0ffesZ25ctVlinDFgI",
+        part: {
+          type: "step-finish",
+          reason: "stop",
+          tokens: { total: 17074, input: 17052, output: 7, reasoning: 15, cache: { write: 0, read: 0 } },
+          cost: 0,
+        },
+      }),
+    ].join("\n");
+
     expect(normalizeOpenCodeJsonOutput(opencodeOutput).tokensUsed).toEqual({
+      inputTokens: 17052,
+      outputTokens: 7,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      reasoningOutputTokens: 15,
+    });
+  });
+
+  test("sums OpenCode token usage across multiple step_finish events", () => {
+    // Empirical fixture from a multi-step opencode run with a tool call. Each
+    // step_finish carries its step's delta; summing is required to get the
+    // per-invocation total.
+    const opencodeOutput = [
+      JSON.stringify({
+        type: "step_finish",
+        sessionID: "ses_multi",
+        part: {
+          type: "step-finish",
+          tokens: { total: 17144, input: 17075, output: 69, reasoning: 0, cache: { write: 0, read: 0 } },
+        },
+      }),
+      JSON.stringify({
+        type: "step_finish",
+        sessionID: "ses_multi",
+        part: {
+          type: "step-finish",
+          tokens: { total: 17168, input: 264, output: 8, reasoning: 0, cache: { write: 0, read: 16896 } },
+        },
+      }),
+    ].join("\n");
+
+    expect(normalizeOpenCodeJsonOutput(opencodeOutput).tokensUsed).toEqual({
+      inputTokens: 17075 + 264,
+      outputTokens: 69 + 8,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 16896,
+      reasoningOutputTokens: 0,
+    });
+  });
+
+  test("ignores OpenCode events that are not step_finish when extracting tokens", () => {
+    const opencodeOutput = [
+      JSON.stringify({
+        type: "text",
+        sessionID: "ses_x",
+        part: { type: "text", text: "hi", tokens: { total: 9999, input: 9999, output: 9999, cache: { read: 0, write: 0 } } },
+      }),
+      JSON.stringify({ type: "step_start", sessionID: "ses_x", part: { type: "step-start" } }),
+    ].join("\n");
+
+    expect(normalizeOpenCodeJsonOutput(opencodeOutput).tokensUsed).toBeUndefined();
+  });
+
+  test("returns undefined when extractors see no usage fields", () => {
+    expect(extractClaudeUsage({})).toBeUndefined();
+    expect(extractCodexUsage({})).toBeUndefined();
+    expect(extractOpenCodeStepUsage({})).toBeUndefined();
+    expect(extractOpenCodeStepUsage({ part: {} })).toBeUndefined();
+  });
+
+  test("session-level sum matches per-call deltas across all three runners", () => {
+    // Property-style: simulate three back-to-back invocations on the same
+    // session. Empirical numbers from spec match these fixtures.
+    const claudeCalls = [
+      // C1 (fresh) — only input/output relevant for the property
+      { input_tokens: 5, output_tokens: 6, cache_creation_input_tokens: 56881, cache_read_input_tokens: 0 },
+      { input_tokens: 5, output_tokens: 6, cache_creation_input_tokens: 111, cache_read_input_tokens: 56881 },
+      { input_tokens: 5, output_tokens: 6, cache_creation_input_tokens: 110, cache_read_input_tokens: 56992 },
+    ];
+    const claudeTotal = claudeCalls
+      .map(extractClaudeUsage)
+      .reduce<ReturnType<typeof sumTokenUsage>>((totals, current) => sumTokenUsage(totals, current), undefined);
+    expect(claudeTotal).toEqual({
       inputTokens: 15,
-      outputTokens: 35,
-      cacheReadInputTokens: 7,
+      outputTokens: 18,
+      cacheCreationInputTokens: 56881 + 111 + 110,
+      cacheReadInputTokens: 0 + 56881 + 56992,
+    });
+
+    const codexCalls = [
+      { input_tokens: 20344, cached_input_tokens: 3456, output_tokens: 17, reasoning_output_tokens: 10 },
+      { input_tokens: 40719, cached_input_tokens: 23296, output_tokens: 22, reasoning_output_tokens: 10 },
+      { input_tokens: 61113, cached_input_tokens: 43648, output_tokens: 27, reasoning_output_tokens: 10 },
+    ];
+    const codexTotal = codexCalls
+      .map(extractCodexUsage)
+      .reduce<ReturnType<typeof sumTokenUsage>>((totals, current) => sumTokenUsage(totals, current), undefined);
+    // After Codex normalization, summing inputTokens is meaningful — each call
+    // contributes only its NEW input, not the rehashed cached prior context.
+    expect(codexTotal).toEqual({
+      inputTokens: (20344 - 3456) + (40719 - 23296) + (61113 - 43648),
+      outputTokens: 17 + 22 + 27,
+      cacheReadInputTokens: 3456 + 23296 + 43648,
+      reasoningOutputTokens: 30,
+    });
+
+    const opencodeSteps = [
+      {
+        type: "step_finish",
+        part: { tokens: { total: 17055, input: 17050, output: 5, cache: { read: 0, write: 0 } } },
+      },
+      {
+        type: "step_finish",
+        part: { tokens: { total: 17079, input: 5298, output: 5, cache: { read: 11776, write: 0 } } },
+      },
+      {
+        type: "step_finish",
+        part: { tokens: { total: 17089, input: 5308, output: 5, cache: { read: 11776, write: 0 } } },
+      },
+    ];
+    const opencodeTotal = opencodeSteps
+      .map(extractOpenCodeStepUsage)
+      .reduce<ReturnType<typeof sumTokenUsage>>((totals, current) => sumTokenUsage(totals, current), undefined);
+    expect(opencodeTotal).toEqual({
+      inputTokens: 17050 + 5298 + 5308,
+      outputTokens: 15,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 11776 + 11776,
     });
   });
 });

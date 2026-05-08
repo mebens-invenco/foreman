@@ -1,5 +1,5 @@
 import type { TokenUsage } from "../../domain/index.js";
-import { sumTokenUsage } from "./token-usage.js";
+import { extractClaudeUsage, extractCodexUsage, extractOpenCodeStepUsage, sumTokenUsage } from "./token-usage.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -99,34 +99,6 @@ const openCodeErrorSummary = (record: JsonRecord): string | null => {
   return compactJson(errorRecord);
 };
 
-const numberField = (record: JsonRecord, name: string): number | undefined => {
-  const value = record[name];
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-};
-
-const tokenUsageFromRecord = (record: JsonRecord): TokenUsage | undefined => {
-  const inputTokens = numberField(record, "input_tokens") ?? 0;
-  const outputTokens = numberField(record, "output_tokens") ?? 0;
-  const cacheCreationInputTokens = numberField(record, "cache_creation_input_tokens");
-  const cacheReadInputTokens = numberField(record, "cache_read_input_tokens");
-
-  const hasAny =
-    record.input_tokens !== undefined ||
-    record.output_tokens !== undefined ||
-    cacheCreationInputTokens !== undefined ||
-    cacheReadInputTokens !== undefined;
-  if (!hasAny) {
-    return undefined;
-  }
-
-  return {
-    inputTokens,
-    outputTokens,
-    ...(cacheCreationInputTokens !== undefined ? { cacheCreationInputTokens } : {}),
-    ...(cacheReadInputTokens !== undefined ? { cacheReadInputTokens } : {}),
-  };
-};
-
 export const normalizeClaudeJsonOutput = (stdout: string): NormalizedJsonOutput => {
   let values: unknown[];
   try {
@@ -141,10 +113,47 @@ export const normalizeClaudeJsonOutput = (stdout: string): NormalizedJsonOutput 
   const resultRecord = records.find((record) => record.type === "result") ?? records.find((record) => typeof record.result === "string");
   const normalized = resultRecord ? stringField(resultRecord, ["result", "text", "output", "message"]) : null;
   const nativeSessionId = records.map((record) => stringField(record, ["session_id", "sessionId", "sessionID"])).find(Boolean) ?? undefined;
-  const usage = resultRecord && isRecord(resultRecord.usage) ? tokenUsageFromRecord(resultRecord.usage) : undefined;
+  const usage = resultRecord && isRecord(resultRecord.usage) ? extractClaudeUsage(resultRecord.usage) : undefined;
 
   return {
     stdout: normalized ?? stdout,
+    ...(nativeSessionId ? { nativeSessionId } : {}),
+    ...(usage ? { tokensUsed: usage } : {}),
+  };
+};
+
+export const normalizeCodexJsonOutput = (stdout: string): NormalizedJsonOutput => {
+  let values: unknown[];
+  try {
+    values = parseJsonValues(stdout);
+  } catch (error) {
+    return {
+      stdout,
+      warning: `Failed to parse Codex JSON output; using raw stdout: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  const records = values.filter(isRecord);
+  const nativeSessionId = records
+    .map((record) => stringField(record, ["thread_id", "threadId", "session_id", "sessionId"]))
+    .find(Boolean) ?? undefined;
+  const turnCompleted = [...records].reverse().find((record) => record.type === "turn.completed");
+  const usage = turnCompleted && isRecord(turnCompleted.usage) ? extractCodexUsage(turnCompleted.usage) : undefined;
+  const agentMessageText = [...records]
+    .reverse()
+    .map((record) => {
+      if (record.type !== "item.completed") {
+        return null;
+      }
+      const item = isRecord(record.item) ? record.item : null;
+      if (!item || item.type !== "agent_message") {
+        return null;
+      }
+      return stringField(item, ["text", "content", "result", "output"]);
+    })
+    .find(Boolean);
+
+  return {
+    stdout: agentMessageText ?? stdout,
     ...(nativeSessionId ? { nativeSessionId } : {}),
     ...(usage ? { tokensUsed: usage } : {}),
   };
@@ -174,13 +183,15 @@ export const normalizeOpenCodeJsonOutput = (stdout: string): NormalizedJsonOutpu
     .find(Boolean);
   const text = finalAnswerText ?? finalText ?? records.map((record) => stringField(record, ["text", "content"])).filter(Boolean).join("");
   const errorSummaries = records.map(openCodeErrorSummary).filter(Boolean);
+  // OpenCode emits one `step_finish` event per agent step. Each event's
+  // `part.tokens` carries the delta for that step (verified empirically against
+  // a multi-step run). Sum across all step_finish events to get a per-invocation
+  // total — and in turn an attempt total once the executor sums attempts.
   const tokensUsed = records.reduce<TokenUsage | undefined>((totals, record) => {
-    const candidate = tokenUsageFromRecord(record);
-    if (candidate) {
-      return sumTokenUsage(totals, candidate);
+    if (record.type !== "step_finish") {
+      return totals;
     }
-    const partUsage = isRecord(record.part) ? tokenUsageFromRecord(record.part) : undefined;
-    return sumTokenUsage(totals, partUsage);
+    return sumTokenUsage(totals, extractOpenCodeStepUsage(record));
   }, undefined);
 
   return {

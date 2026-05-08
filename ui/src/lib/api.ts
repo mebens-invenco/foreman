@@ -101,6 +101,7 @@ export type TokenUsage = {
   outputTokens: number
   cacheCreationInputTokens?: number
   cacheReadInputTokens?: number
+  reasoningOutputTokens?: number
 }
 
 export type AttemptRecord = {

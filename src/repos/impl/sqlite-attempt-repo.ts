@@ -28,6 +28,9 @@ const parseTokensUsed = (raw: unknown): TokenUsage | null => {
     if (typeof parsed.cacheReadInputTokens === "number") {
       tokens.cacheReadInputTokens = parsed.cacheReadInputTokens;
     }
+    if (typeof parsed.reasoningOutputTokens === "number") {
+      tokens.reasoningOutputTokens = parsed.reasoningOutputTokens;
+    }
 
     return tokens;
   } catch {

@@ -35,7 +35,11 @@ export class ClaudeRunner implements AgentRunner {
       request: { ...request, nativeSessionId },
       normalizeStdout: (stdout) => {
         const normalized = normalizeClaudeJsonOutput(stdout);
-        return { stdout: normalized.stdout, nativeSessionId: normalized.nativeSessionId ?? nativeSessionId };
+        return {
+          ...normalized,
+          stdout: normalized.stdout,
+          nativeSessionId: normalized.nativeSessionId ?? nativeSessionId,
+        };
       },
     });
   }

@@ -32,11 +32,28 @@ export type AgentRunRequest = {
   nativeSessionId?: string;
 };
 
+/**
+ * Per-API-call token usage, normalized across runners.
+ *
+ * `inputTokens` is always the count of NEW (non-cached) input tokens for the call.
+ * Codex emits `input_tokens` inclusive of `cached_input_tokens`; the Codex
+ * extractor subtracts the cached portion so this field has consistent semantics
+ * across Claude, Codex, and OpenCode. Summing per-attempt rows for a session
+ * therefore produces clean session-level deltas without double-counting.
+ *
+ * `cacheCreationInputTokens` and `cacheReadInputTokens` mirror the underlying
+ * provider semantics: cached portion served on the call, and tokens written
+ * into the provider's cache during the call. Not every runner emits both.
+ *
+ * `reasoningOutputTokens` covers the hidden reasoning trace that some
+ * providers (Codex, OpenCode) report alongside the visible output.
+ */
 export type TokenUsage = {
   inputTokens: number;
   outputTokens: number;
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
+  reasoningOutputTokens?: number;
 };
 
 export type AgentRunResult = {
