@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 
 import { useAttemptsQuery } from "@/hooks/use-attempts-query"
 import { Skeleton } from "@/components/ui/skeleton"
+import { TaskLink } from "@/components/task-link"
 import {
   Table,
   TableBody,
@@ -122,9 +123,13 @@ export function AttemptsTable({ now }: { now: number }) {
                 }}
               >
                 <TableCell className="px-4 font-mono text-xs text-foreground">
-                  <span className="block max-w-full truncate" title={workItemLabel(attempt)}>
+                  <TaskLink
+                    taskUrl={attempt.jobKind === "cron" ? null : attempt.taskUrl}
+                    className="block max-w-full truncate"
+                    title={workItemLabel(attempt)}
+                  >
                     {workItemLabel(attempt)}
-                  </span>
+                  </TaskLink>
                 </TableCell>
                 <TableCell className="text-sm text-foreground">
                   <span className="block max-w-full truncate" title={targetLabel(attempt)}>

@@ -8,6 +8,7 @@ const taskWithMirroredPullRequest: TaskListItem = {
   title: "Avoid live GitHub calls in tasks API",
   state: "in_review",
   updatedAt: "2026-05-07T12:00:00Z",
+  url: "https://linear.app/invenco/issue/ENG-5068/avoid-live-github-calls",
   pullRequests: [
     {
       repoKey: "foreman",
@@ -41,6 +42,22 @@ describe("review rows", () => {
     expect(toReviewRows([taskWithMirroredPullRequest])).toEqual([
       {
         taskId: "ENG-5068",
+        taskUrl: "https://linear.app/invenco/issue/ENG-5068/avoid-live-github-calls",
+        target: "foreman",
+        pullRequestUrl: "https://github.com/invenco/foreman/pull/123",
+        pullRequestLabel: "ENG-5068: Avoid live GitHub calls",
+        modifiedAt: "2026-05-07T12:00:00Z",
+      },
+    ])
+  })
+
+  test("returns null taskUrl when the task has no provider URL", () => {
+    expect(
+      toReviewRows([{ ...taskWithMirroredPullRequest, url: null }]),
+    ).toEqual([
+      {
+        taskId: "ENG-5068",
+        taskUrl: null,
         target: "foreman",
         pullRequestUrl: "https://github.com/invenco/foreman/pull/123",
         pullRequestLabel: "ENG-5068: Avoid live GitHub calls",

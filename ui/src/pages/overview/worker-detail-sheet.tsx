@@ -1,3 +1,5 @@
+import type { ReactNode } from "react"
+
 import type { Worker } from "@/lib/api"
 import { formatActionLabel, formatRelativeTime, formatTimestamp } from "@/lib/format"
 
@@ -7,18 +9,19 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { TaskLink } from "@/components/task-link"
 import { WorkerLogStream } from "@/pages/overview/worker-log-stream"
 import { WorkerStatusBadge } from "@/pages/overview/worker-status-badge"
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function DetailRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="border border-border/70 bg-background/70 px-4 py-3">
       <p className="text-xxs tracking-[0.28em] text-muted-foreground uppercase">
         {label}
       </p>
-      <p className="mt-2 text-sm leading-6 break-all text-foreground">
+      <div className="mt-2 text-sm leading-6 break-all text-foreground">
         {value}
-      </p>
+      </div>
     </div>
   )
 }
@@ -37,6 +40,7 @@ export function WorkerDetailSheet({ worker, now }: WorkerDetailSheetProps) {
   const workItemValue = isCronJob
     ? worker.currentJob?.cronJobId
     : worker.currentJob?.taskId
+  const taskUrl = isCronJob ? null : worker.currentJob?.taskUrl ?? null
   const targetLabel = isCronJob ? "Scope" : "Repo target"
   const targetValue = isCronJob ? "Workspace" : worker.currentJob?.repoKey
 
@@ -63,7 +67,16 @@ export function WorkerDetailSheet({ worker, now }: WorkerDetailSheetProps) {
             label="Activity"
             value={worker.currentJob ? formatActionLabel(worker.currentJob.action) : "Idle"}
           />
-          <DetailRow label={workItemLabel} value={workItemValue ?? "-"} />
+          <DetailRow
+            label={workItemLabel}
+            value={
+              workItemValue ? (
+                <TaskLink taskUrl={taskUrl}>{workItemValue}</TaskLink>
+              ) : (
+                "-"
+              )
+            }
+          />
           <DetailRow
             label={targetLabel}
             value={targetValue ?? "-"}

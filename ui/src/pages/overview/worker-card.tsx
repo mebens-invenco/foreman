@@ -5,6 +5,7 @@ import { formatActionLabel, formatRelativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 import { Sheet, SheetTrigger } from "@/components/ui/sheet"
+import { TaskLink } from "@/components/task-link"
 import { WorkerDetailSheet } from "@/pages/overview/worker-detail-sheet"
 import { WorkerStatusBadge } from "@/pages/overview/worker-status-badge"
 
@@ -24,6 +25,7 @@ export function WorkerCard({ worker, now }: WorkerCardProps) {
   const primaryValue = isCronJob
     ? worker.currentJob?.cronJobId
     : worker.currentJob?.taskId
+  const primaryUrl = isCronJob ? null : worker.currentJob?.taskUrl ?? null
   const secondaryLabel = isCronJob ? "Scope" : "Repo"
   const secondaryValue = isCronJob ? "Workspace" : worker.currentJob?.repoKey
 
@@ -63,7 +65,11 @@ export function WorkerCard({ worker, now }: WorkerCardProps) {
                       {primaryLabel}
                     </p>
                     <p className="mt-2 font-mono text-sm leading-6 break-all text-foreground">
-                      {primaryValue ?? "-"}
+                      {primaryValue ? (
+                        <TaskLink taskUrl={primaryUrl}>{primaryValue}</TaskLink>
+                      ) : (
+                        "-"
+                      )}
                     </p>
                   </div>
                   <div>

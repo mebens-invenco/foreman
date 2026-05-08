@@ -11,6 +11,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { TaskLink } from "@/components/task-link"
 import {
   getArtifactContent,
   getAttempt,
@@ -479,6 +480,7 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
   const isCronAttempt = attempt?.jobKind === "cron"
   const workItemLabel = isCronAttempt ? "Cron job" : "Task"
   const workItemValue = isCronAttempt ? attempt?.cronJobId : attempt?.taskId
+  const taskUrl = isCronAttempt ? null : attempt?.taskUrl ?? null
   const targetLabel = isCronAttempt ? "Scope" : "Target"
   const targetValue = isCronAttempt ? "Workspace" : attempt?.target
 
@@ -513,7 +515,16 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
         ) : attempt ? (
           <>
             <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <DetailRow label={workItemLabel} value={workItemValue ?? "-"} />
+              <DetailRow
+                label={workItemLabel}
+                value={
+                  workItemValue ? (
+                    <TaskLink taskUrl={taskUrl}>{workItemValue}</TaskLink>
+                  ) : (
+                    "-"
+                  )
+                }
+              />
               <DetailRow label={targetLabel} value={targetValue ?? "-"} />
               <DetailRow label="Stage" value={formatActionLabel(attempt.stage)} />
               <DetailRow label="Worker" value={attempt.workerId ?? "-"} />
