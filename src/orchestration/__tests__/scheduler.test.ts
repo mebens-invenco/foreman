@@ -714,6 +714,7 @@ describe("SchedulerService applyWorkerResult", () => {
 
   test("saves a review checkpoint for blocked review attempts", async () => {
     const addComment = vi.fn(async () => undefined);
+    const resolveThreads = vi.fn(async () => undefined);
     const upsertReviewCheckpoint = vi.fn();
     const scheduler = new SchedulerService({
       config: createDefaultWorkspaceConfig("foo", "file"),
@@ -742,6 +743,7 @@ describe("SchedulerService applyWorkerResult", () => {
       reviewService: {
         getContext: vi.fn(async () => reviewContext),
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
+        resolveThreads,
       } as any,
       repos: [],
       env: {},
@@ -761,6 +763,7 @@ describe("SchedulerService applyWorkerResult", () => {
         workerResult: baseWorkerResult({
           outcome: "blocked",
           blockers: ["Check logs are unavailable."],
+          reviewMutations: [{ type: "resolve_threads", threadIds: ["thread-1"] }],
         }),
       }),
     ).resolves.toBe(reviewContext.pullRequestUrl);
@@ -776,6 +779,7 @@ describe("SchedulerService applyWorkerResult", () => {
       reviewContext,
       sourceAttemptId: "attempt-2c",
     });
+    expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
   });
 
   test("submits reviewer comment reviews with the reviewer prefix", async () => {

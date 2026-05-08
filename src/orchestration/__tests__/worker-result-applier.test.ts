@@ -62,7 +62,12 @@ class FakeTaskSystem implements TaskSystem {
 }
 
 class FakeReviewService implements ReviewService {
-  constructor(private readonly pullRequest: ResolvedPullRequest | Record<string, ResolvedPullRequest>) {}
+  resolvedThreads: Array<{ pullRequestUrl: string; threadIds: string[] }> = [];
+
+  constructor(
+    private readonly pullRequest: ResolvedPullRequest | Record<string, ResolvedPullRequest>,
+    private readonly reviewContext: ReviewContext | null = null,
+  ) {}
 
   async resolvePullRequest(_task?: Task, _repo?: RepoRef, target?: { repoKey: string }): Promise<ResolvedPullRequest> {
     const pullRequest = this.pullRequest;
@@ -74,7 +79,7 @@ class FakeReviewService implements ReviewService {
   }
 
   async getContext(): Promise<ReviewContext | null> {
-    return null;
+    return this.reviewContext;
   }
 
   async findLatestOpenPullRequestBranch(): Promise<string | null> {
@@ -101,8 +106,8 @@ class FakeReviewService implements ReviewService {
     throw new Error("not used");
   }
 
-  async resolveThreads(): Promise<void> {
-    throw new Error("not used");
+  async resolveThreads(pullRequestUrl: string, threadIds: string[]): Promise<void> {
+    this.resolvedThreads.push({ pullRequestUrl, threadIds });
   }
 }
 
@@ -123,6 +128,116 @@ const task = (): Task => ({
   pullRequests: [],
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
+});
+
+describe("WorkerResultApplier review result mutations", () => {
+  test("applies review mutations and saves checkpoints for blocked review results", async () => {
+    const tempDir = await createTempDir("foreman-review-applier-blocked-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const reviewTask: Task = {
+      ...task(),
+      state: "in_review",
+      providerState: "in_review",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/67", source: "provider" }],
+    };
+    const repo: RepoRef = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
+    const pullRequest: ResolvedPullRequest = {
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/67",
+      pullRequestNumber: 67,
+      state: "open",
+      isDraft: false,
+      headBranch: "task-review-apply",
+      baseBranch: "main",
+    };
+    const reviewContext: ReviewContext = {
+      provider: "github",
+      pullRequestUrl: pullRequest.pullRequestUrl,
+      pullRequestNumber: pullRequest.pullRequestNumber,
+      state: "open",
+      isDraft: false,
+      headSha: "abc123",
+      headBranch: pullRequest.headBranch,
+      baseBranch: pullRequest.baseBranch,
+      headIntroducedAt: "2026-03-14T12:00:00Z",
+      mergeState: "clean",
+      reviewSummaries: [],
+      conversationComments: [],
+      reviewThreads: [],
+      failingChecks: [],
+      pendingChecks: [{ name: "ci", state: "pending" }],
+    };
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      db.taskMirror.saveTasks([reviewTask]);
+      const target = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
+      expect(target).not.toBeNull();
+      const job = db.jobs.createJob({
+        taskId: reviewTask.id,
+        taskTargetId: target!.id,
+        taskProvider: reviewTask.provider,
+        action: "review",
+        priorityRank: priorityToRank(reviewTask.priority),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: `${reviewTask.id}:repo-a:review`,
+        selectionReason: "unresolved review threads",
+      });
+      const worker = db.workers.listWorkers()[0];
+      const attempt = db.attempts.createAttempt({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerName: "opencode",
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+      });
+      const taskSystem = new FakeTaskSystem([reviewTask]);
+      const reviewService = new FakeReviewService(pullRequest, reviewContext);
+      const applier = new WorkerResultApplier({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [repo],
+        logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
+        scheduleScout: () => undefined,
+      });
+
+      await applier.apply({
+        attempt,
+        job,
+        task: reviewTask,
+        target: target!,
+        repo,
+        worktreePath: tempDir,
+        workerResult: {
+          schemaVersion: 1,
+          action: "review",
+          outcome: "blocked",
+          summary: "Checks are still pending.",
+          taskMutations: [],
+          reviewMutations: [{ type: "resolve_threads", threadIds: ["thread-1"] }],
+          learningMutations: [],
+          blockers: ["Checks are still pending."],
+          signals: [],
+        },
+      });
+
+      expect(reviewService.resolvedThreads).toEqual([{ pullRequestUrl: pullRequest.pullRequestUrl, threadIds: ["thread-1"] }]);
+      expect(taskSystem.comments).toEqual([{ taskId: reviewTask.id, body: "[agent] Checks are still pending." }]);
+      expect(db.reviewCheckpoints.getReviewCheckpoint(target!.id)).toMatchObject({
+        taskId: reviewTask.id,
+        taskTargetId: target!.id,
+        prUrl: pullRequest.pullRequestUrl,
+        headSha: reviewContext.headSha,
+        sourceAttemptId: attempt.id,
+      });
+    } finally {
+      db.close();
+    }
+  });
 });
 
 describe("WorkerResultApplier deployment tracking", () => {

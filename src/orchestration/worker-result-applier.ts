@@ -1,4 +1,4 @@
-import type { RepoRef, ReviewContext, Task, TaskPullRequest, TaskTarget, WorkerResult } from "../domain/index.js";
+import type { RepoRef, ReviewContext, ReviewMutation, Task, TaskPullRequest, TaskTarget, WorkerResult } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 import { addSeconds } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
@@ -92,6 +92,7 @@ export class WorkerResultApplier {
         logger.warn("posted blocker comment", { blocker });
       }
       if (input.job.action === "review" && pullRequestUrl) {
+        await this.applyReviewMutations(workerResult.reviewMutations, pullRequestUrl, logger);
         await this.saveReviewCheckpoint(input, pullRequestUrl, logger);
       }
       return pullRequestUrl;
@@ -154,55 +155,7 @@ export class WorkerResultApplier {
       }
     }
 
-    for (const mutation of workerResult.reviewMutations) {
-      if (mutation.type === "create_pull_request") {
-        continue;
-      }
-
-      if (!pullRequestUrl) {
-        throw new ForemanError("missing_pull_request", `Review mutation ${mutation.type} requires a pull request URL`);
-      }
-
-      if (mutation.type === "reply_to_review_summary") {
-        await this.deps.reviewService.replyToReviewSummary(
-          pullRequestUrl,
-          mutation.reviewId,
-          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
-        );
-        logger.info("replied to review summary", { reviewId: mutation.reviewId });
-      }
-      if (mutation.type === "reply_to_thread_comment") {
-        await this.deps.reviewService.replyToThreadComment(
-          pullRequestUrl,
-          mutation.threadId,
-          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
-        );
-        logger.info("replied to review thread", { threadId: mutation.threadId });
-      }
-      if (mutation.type === "reply_to_pr_comment") {
-        await this.deps.reviewService.replyToPrComment(
-          pullRequestUrl,
-          mutation.commentId,
-          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
-        );
-        logger.info("replied to pull request comment", { commentId: mutation.commentId });
-      }
-      if (mutation.type === "submit_pull_request_review") {
-        await this.deps.reviewService.submitPullRequestReview(pullRequestUrl, {
-          body: ensureReviewCommentPrefix(mutation.body, this.deps.config.reviewer.agentPrefix),
-          event: mutation.event,
-          comments: mutation.comments.map((comment) => ({
-            ...comment,
-            body: ensureReviewCommentPrefix(comment.body, this.deps.config.reviewer.agentPrefix),
-          })),
-        });
-        logger.info("submitted pull request review", { commentCount: mutation.comments.length, event: mutation.event });
-      }
-      if (mutation.type === "resolve_threads") {
-        await this.deps.reviewService.resolveThreads(pullRequestUrl, mutation.threadIds);
-        logger.info("resolved review threads", { threadCount: mutation.threadIds.length });
-      }
-    }
+    await this.applyReviewMutations(workerResult.reviewMutations, pullRequestUrl, logger);
 
     for (const mutation of workerResult.taskMutations) {
       if (mutation.type === "add_comment") {
@@ -296,6 +249,58 @@ export class WorkerResultApplier {
   private async resolveCurrentPullRequestUrl(task: Task, repo: RepoRef, target: TaskTarget): Promise<string | null> {
     const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(task, repo, target);
     return resolvedPullRequest?.pullRequestUrl ?? null;
+  }
+
+  private async applyReviewMutations(mutations: ReviewMutation[], pullRequestUrl: string | null, logger: LoggerService): Promise<void> {
+    for (const mutation of mutations) {
+      if (mutation.type === "create_pull_request") {
+        continue;
+      }
+
+      if (!pullRequestUrl) {
+        throw new ForemanError("missing_pull_request", `Review mutation ${mutation.type} requires a pull request URL`);
+      }
+
+      if (mutation.type === "reply_to_review_summary") {
+        await this.deps.reviewService.replyToReviewSummary(
+          pullRequestUrl,
+          mutation.reviewId,
+          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+        );
+        logger.info("replied to review summary", { reviewId: mutation.reviewId });
+      }
+      if (mutation.type === "reply_to_thread_comment") {
+        await this.deps.reviewService.replyToThreadComment(
+          pullRequestUrl,
+          mutation.threadId,
+          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+        );
+        logger.info("replied to review thread", { threadId: mutation.threadId });
+      }
+      if (mutation.type === "reply_to_pr_comment") {
+        await this.deps.reviewService.replyToPrComment(
+          pullRequestUrl,
+          mutation.commentId,
+          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+        );
+        logger.info("replied to pull request comment", { commentId: mutation.commentId });
+      }
+      if (mutation.type === "submit_pull_request_review") {
+        await this.deps.reviewService.submitPullRequestReview(pullRequestUrl, {
+          body: ensureReviewCommentPrefix(mutation.body, this.deps.config.reviewer.agentPrefix),
+          event: mutation.event,
+          comments: mutation.comments.map((comment) => ({
+            ...comment,
+            body: ensureReviewCommentPrefix(comment.body, this.deps.config.reviewer.agentPrefix),
+          })),
+        });
+        logger.info("submitted pull request review", { commentCount: mutation.comments.length, event: mutation.event });
+      }
+      if (mutation.type === "resolve_threads") {
+        await this.deps.reviewService.resolveThreads(pullRequestUrl, mutation.threadIds);
+        logger.info("resolved review threads", { threadCount: mutation.threadIds.length });
+      }
+    }
   }
 
   private async applyDeploymentResult(input: ApplyWorkerResultInput, pullRequestUrl: string | null, logger: LoggerService): Promise<string | null> {
