@@ -42,4 +42,53 @@ describe("extractCodexUsage", () => {
   test("returns undefined when no usage fields are present", () => {
     expect(extractCodexUsage({})).toBeUndefined();
   });
+
+  test("when cached_input_tokens === input_tokens, all input is treated as cached", () => {
+    // Boundary case: every input token is a cache read. New input = 0,
+    // cacheRead = total. Sum still equals the provider-reported total.
+    const usage = extractCodexUsage({
+      input_tokens: 5_000,
+      cached_input_tokens: 5_000,
+      output_tokens: 10,
+      reasoning_output_tokens: 0,
+    });
+    expect(usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 10,
+      cacheReadInputTokens: 5_000,
+      reasoningOutputTokens: 0,
+    });
+  });
+
+  test("when cached_input_tokens > input_tokens (invariant violation), cacheRead is clamped to total and new is 0", () => {
+    // Provider invariant: cached_input_tokens <= input_tokens. If violated,
+    // clamp so that cacheReadInputTokens + inputTokens === provider's
+    // input_tokens, restoring internal consistency rather than silently
+    // inflating cacheReadInputTokens past the total.
+    const usage = extractCodexUsage({
+      input_tokens: 1_000,
+      cached_input_tokens: 2_000,
+      output_tokens: 7,
+    });
+    expect(usage).toEqual({
+      inputTokens: 0,
+      outputTokens: 7,
+      cacheReadInputTokens: 1_000,
+    });
+  });
+
+  test("ignores non-integer or negative token fields", () => {
+    // Defence in depth: token counts must be non-negative integers; anything
+    // else gets treated as absent.
+    expect(
+      extractCodexUsage({
+        input_tokens: -5,
+        cached_input_tokens: 3.14,
+        output_tokens: 10,
+      }),
+    ).toEqual({
+      inputTokens: 0, // input_tokens was absent (rejected) -> defaults to 0
+      outputTokens: 10,
+    });
+  });
 });

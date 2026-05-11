@@ -8,6 +8,15 @@
  * means "new (non-cached) input only" (matching Claude/OpenCode), this
  * extractor subtracts `cached_input_tokens` and stores the cached portion
  * under `cacheReadInputTokens`. Codex also reports `reasoning_output_tokens`.
+ *
+ * Invariant handling: Codex *should* always report
+ * `cached_input_tokens <= input_tokens`. If a row violates this (provider
+ * bug, fixture error), we clamp `cacheReadInputTokens` to `input_tokens`
+ * and set `inputTokens = 0`. This keeps the stored values internally
+ * consistent (cacheRead + new = total reported by provider) instead of
+ * leaving an inflated `cacheReadInputTokens` next to a silently-zeroed
+ * `inputTokens`. Clamp also preserves a non-zero `cacheReadInputTokens`
+ * for aggregation rather than dropping the row entirely.
  */
 import type { TokenUsage } from "../../domain/index.js";
 import {
@@ -19,29 +28,44 @@ import {
   stringField,
 } from "./json-output.js";
 
-const nonNegative = (value: number): number => (value > 0 ? value : 0);
+const nonNegativeInt = (value: number | undefined): number | undefined => {
+  if (value === undefined) {
+    return undefined;
+  }
+  return Number.isInteger(value) && value >= 0 ? value : undefined;
+};
 
 export const extractCodexUsage = (usage: JsonRecord): TokenUsage | undefined => {
-  const rawInput = numberField(usage, "input_tokens");
-  const cachedInput = numberField(usage, "cached_input_tokens");
-  const outputTokens = numberField(usage, "output_tokens");
-  const reasoningOutputTokens = numberField(usage, "reasoning_output_tokens");
+  const rawInput = nonNegativeInt(numberField(usage, "input_tokens"));
+  const rawCached = nonNegativeInt(numberField(usage, "cached_input_tokens"));
+  const outputTokens = nonNegativeInt(numberField(usage, "output_tokens"));
+  const reasoningOutputTokens = nonNegativeInt(numberField(usage, "reasoning_output_tokens"));
 
   if (
     rawInput === undefined &&
-    cachedInput === undefined &&
+    rawCached === undefined &&
     outputTokens === undefined &&
     reasoningOutputTokens === undefined
   ) {
     return undefined;
   }
 
-  const inputTokens = rawInput !== undefined && cachedInput !== undefined ? nonNegative(rawInput - cachedInput) : rawInput ?? 0;
+  // Clamp the cached portion to the total when both fields are present so
+  // `cacheReadInputTokens + inputTokens === rawInput` always holds.
+  let inputTokens: number;
+  let cacheReadInputTokens: number | undefined;
+  if (rawInput !== undefined && rawCached !== undefined) {
+    cacheReadInputTokens = Math.min(rawCached, rawInput);
+    inputTokens = rawInput - cacheReadInputTokens;
+  } else {
+    cacheReadInputTokens = rawCached;
+    inputTokens = rawInput ?? 0;
+  }
 
   return {
     inputTokens,
     outputTokens: outputTokens ?? 0,
-    ...(cachedInput !== undefined ? { cacheReadInputTokens: cachedInput } : {}),
+    ...(cacheReadInputTokens !== undefined ? { cacheReadInputTokens } : {}),
     ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
   };
 };
