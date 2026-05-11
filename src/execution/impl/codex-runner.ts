@@ -4,10 +4,12 @@ import { runAgentProcess } from "./run-agent-process.js";
 
 // Codex CLI sandbox config override applied to every invocation. Resume mode
 // (`codex exec resume`) does not accept the `-s/--sandbox` flag, so we pass
-// the equivalent permissions via the dotted-path TOML override on every call
-// to keep behaviour identical between fresh and resumed runs without depending
-// on `~/.codex/config.toml`.
-const CODEX_SANDBOX_OVERRIDE = 'sandbox_permissions=["disk-full-write-access"]';
+// the equivalent policy via the dotted-path TOML override on every call to
+// keep behaviour identical between fresh and resumed runs without depending
+// on `~/.codex/config.toml`. `workspace-write` confines edits to the task
+// worktree (and conventionally writable system paths like /tmp); broader
+// `disk-full-write-access` is intentionally not used.
+const CODEX_SANDBOX_OVERRIDE = 'sandbox_mode="workspace-write"';
 
 export class CodexRunner implements AgentRunner {
   constructor(
