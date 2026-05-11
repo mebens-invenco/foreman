@@ -68,7 +68,11 @@ export function formatDuration(startedAt: string | null, finishedAt: string | nu
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
 }
 
-export function formatTokenCount(value: number | null | undefined) {
+// Compact "short-number" rendering: 950 -> "950", 1_400 -> "1.4k", 23_000 -> "23k",
+// 2_300_000 -> "2.3m", 45_000_000 -> "45m". One fraction digit while the magnitude
+// is single-digit, then drops to zero — keeps the column narrow without losing
+// signal at the small end.
+export function formatShortNumber(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return "-"
   }

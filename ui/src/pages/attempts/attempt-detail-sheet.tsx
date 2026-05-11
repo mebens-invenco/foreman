@@ -22,8 +22,8 @@ import {
 import {
   formatActionLabel,
   formatDuration,
+  formatShortNumber,
   formatTimestamp,
-  formatTokenCount,
 } from "@/lib/format"
 import {
   appendLogChunk,
@@ -535,15 +535,15 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
               />
               <DetailRow
                 label="Input tokens"
-                value={formatTokenCount(attempt.tokensUsed?.inputTokens ?? null)}
+                value={formatShortNumber(attempt.tokensUsed?.inputTokens ?? null)}
               />
               <DetailRow
                 label="Output tokens"
-                value={formatTokenCount(attempt.tokensUsed?.outputTokens ?? null)}
+                value={formatShortNumber(attempt.tokensUsed?.outputTokens ?? null)}
               />
               <DetailRow
                 label="Cache-read tokens"
-                value={formatTokenCount(
+                value={formatShortNumber(
                   attempt.tokensUsed?.cacheReadInputTokens ?? null
                 )}
               />

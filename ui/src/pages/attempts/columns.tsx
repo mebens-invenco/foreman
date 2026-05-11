@@ -14,8 +14,8 @@ import {
   abbreviateId,
   formatActionLabel,
   formatDuration,
+  formatShortNumber,
   formatTimestamp,
-  formatTokenCount,
 } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { AttemptRecord, TokenUsage } from "@/lib/api"
@@ -264,13 +264,13 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
       const tokens = row.original.tokensUsed
       const tooltip = tokens
         ? [
-            `Input: ${formatTokenCount(tokens.inputTokens)}`,
-            `Output: ${formatTokenCount(tokens.outputTokens)}`,
+            `Input: ${formatShortNumber(tokens.inputTokens)}`,
+            `Output: ${formatShortNumber(tokens.outputTokens)}`,
             tokens.cacheReadInputTokens !== undefined
-              ? `Cache read: ${formatTokenCount(tokens.cacheReadInputTokens)}`
+              ? `Cache read: ${formatShortNumber(tokens.cacheReadInputTokens)}`
               : null,
             tokens.cacheCreationInputTokens !== undefined
-              ? `Cache create: ${formatTokenCount(tokens.cacheCreationInputTokens)}`
+              ? `Cache create: ${formatShortNumber(tokens.cacheCreationInputTokens)}`
               : null,
           ]
             .filter(Boolean)
@@ -279,7 +279,7 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
 
       const label = (
         <span className="text-xs text-muted-foreground">
-          {formatTokenCount(total)}
+          {formatShortNumber(total)}
         </span>
       )
 
