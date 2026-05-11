@@ -209,6 +209,105 @@ describe("persistence repos", () => {
     }
   });
 
+  test("rejects unknown runner names on read and on write", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0];
+      expect(worker).toBeDefined();
+      const taskTarget = syncSingleTargetTask(db, { taskId: "TASK-RUNNER", repoKey: "repo-a", branchName: "task-runner" });
+      const job = db.jobs.createJob({
+        taskId: "TASK-RUNNER",
+        taskTargetId: taskTarget.id,
+        taskProvider: "file",
+        action: "execution",
+        priorityRank: priorityToRank("high"),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: "TASK-RUNNER:execution",
+        selectionReason: "test",
+      });
+
+      // Write-side guard: the boundary rejects unknown providers before they hit SQL.
+      expect(() =>
+        db.attempts.createAttempt({
+          jobId: job.id,
+          workerId: worker!.id,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          runnerName: "phantom-runner" as any,
+          runnerModel: "m",
+          runnerVariant: "v",
+        }),
+      ).toThrow(/Unknown runner provider/);
+      expect(() =>
+        db.runnerSessions.createSession({
+          taskTargetId: taskTarget.id,
+          role: "implementation",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          runnerName: "phantom-runner" as any,
+          runnerModel: "m",
+          runnerVariant: "v",
+          isActive: false,
+          nativeSessionId: null,
+        }),
+      ).toThrow(/Unknown runner provider/);
+
+      // Read-side guard: smuggle a bad row in via raw SQL (post-migration the DB lets it through)
+      // and confirm the boundary fails the read instead of leaking the string as RunnerProvider.
+      const attempt = db.attempts.createAttempt({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerName: "opencode",
+        runnerModel: "m",
+        runnerVariant: "v",
+      });
+      db.database.sqlite
+        .prepare("UPDATE execution_attempt SET runner_name = 'phantom-runner' WHERE id = ?")
+        .run(attempt.id);
+      expect(() => db.attempts.getAttempt(attempt.id)).toThrow(/Unknown runner provider/);
+
+      const session = db.runnerSessions.createSession({
+        taskTargetId: taskTarget.id,
+        role: "implementation",
+        runnerName: "opencode",
+        runnerModel: "m",
+        runnerVariant: "v",
+        isActive: true,
+        nativeSessionId: "smuggle-1",
+      });
+      db.database.sqlite
+        .prepare("UPDATE runner_session SET runner_name = 'phantom-runner' WHERE id = ?")
+        .run(session.id);
+      expect(() =>
+        db.runnerSessions.getActiveSession({
+          taskTargetId: taskTarget.id,
+          role: "implementation",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          runnerName: "phantom-runner" as any,
+          runnerModel: "m",
+          runnerVariant: "v",
+        }),
+      ).toThrow(/Unknown runner provider/);
+
+      // Every canonical provider is accepted post-migration.
+      for (const [index, runnerName] of (["opencode", "claude", "codex"] as const).entries()) {
+        const ok = db.attempts.createAttempt({
+          jobId: job.id,
+          workerId: worker!.id,
+          runnerName,
+          runnerModel: `model-${index}`,
+          runnerVariant: "v",
+        });
+        expect(ok.runnerName).toBe(runnerName);
+      }
+    } finally {
+      db.close();
+    }
+  });
+
   test("persists runner sessions by role and runner config", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);

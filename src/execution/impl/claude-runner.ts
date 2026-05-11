@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { AgentRunner, AgentRunnerInvokeRequest, CapturedAgentRunResult } from "../agent-runner.js";
-import { normalizeClaudeJsonOutput } from "./json-output.js";
+import { normalizeClaudeJsonOutput } from "./claude-output.js";
 import { runAgentProcess } from "./run-agent-process.js";
 
 export class ClaudeRunner implements AgentRunner {
@@ -35,7 +35,11 @@ export class ClaudeRunner implements AgentRunner {
       request: { ...request, nativeSessionId },
       normalizeStdout: (stdout) => {
         const normalized = normalizeClaudeJsonOutput(stdout);
-        return { stdout: normalized.stdout, nativeSessionId: normalized.nativeSessionId ?? nativeSessionId };
+        return {
+          ...normalized,
+          stdout: normalized.stdout,
+          nativeSessionId: normalized.nativeSessionId ?? nativeSessionId,
+        };
       },
     });
   }

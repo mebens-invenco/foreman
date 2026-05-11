@@ -2,10 +2,63 @@ import { ForemanError } from "../../lib/errors.js";
 import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
-import type { AttemptStatus, RunnerProvider } from "../../domain/index.js";
+import { isRunnerProvider, runnerProviders } from "../../domain/index.js";
+import type { AttemptStatus, RunnerProvider, TokenUsage } from "../../domain/index.js";
 import type { AttemptEventRecord, AttemptRecord, AttemptRepo, RecoveredAttemptRecord } from "../attempt-repo.js";
 import type { LeaseResourceType } from "../lease-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
+
+/**
+ * Boundary check enforcing the canonical {@link RunnerProvider} set on rows
+ * coming out of `execution_attempt`. DB no longer has a CHECK on `runner_name`
+ * (see migration 0020) so this is the only place where unknown providers
+ * surface — fail loudly instead of letting an opaque string flow into the rest
+ * of the system as if it were a typed `RunnerProvider`.
+ */
+const assertRunnerProvider = (value: unknown, context: string): RunnerProvider => {
+  if (!isRunnerProvider(value)) {
+    throw new ForemanError(
+      "unknown_runner_provider",
+      `Unknown runner provider in ${context}: ${String(value)}. Expected one of: ${runnerProviders.join(", ")}.`,
+      500,
+    );
+  }
+  return value;
+};
+
+const parseTokensUsed = (raw: unknown): TokenUsage | null => {
+  if (typeof raw !== "string" || raw.length === 0) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Partial<TokenUsage>;
+    if (typeof parsed.inputTokens !== "number" || typeof parsed.outputTokens !== "number") {
+      return null;
+    }
+
+    const tokens: TokenUsage = {
+      inputTokens: parsed.inputTokens,
+      outputTokens: parsed.outputTokens,
+    };
+    if (typeof parsed.cacheCreationInputTokens === "number") {
+      tokens.cacheCreationInputTokens = parsed.cacheCreationInputTokens;
+    }
+    if (typeof parsed.cacheReadInputTokens === "number") {
+      tokens.cacheReadInputTokens = parsed.cacheReadInputTokens;
+    }
+    if (typeof parsed.reasoningOutputTokens === "number") {
+      tokens.reasoningOutputTokens = parsed.reasoningOutputTokens;
+    }
+
+    return tokens;
+  } catch {
+    return null;
+  }
+};
+
+const serializeTokensUsed = (tokens: TokenUsage | null | undefined): string | null =>
+  tokens ? stableStringify(tokens as unknown as Record<string, unknown>) : null;
 
 const mapAttempt = (row: SqliteRow): AttemptRecord => ({
   id: String(row.id),
@@ -17,7 +70,7 @@ const mapAttempt = (row: SqliteRow): AttemptRecord => ({
   stage: (row.stage as string | null) ?? null,
   workerId: (row.worker_id as string | null) ?? null,
   attemptNumber: Number(row.attempt_number),
-  runnerName: row.runner_name as RunnerProvider,
+  runnerName: assertRunnerProvider(row.runner_name, `execution_attempt ${String(row.id)}`),
   runnerModel: String(row.runner_model),
   runnerVariant: String(row.runner_variant),
   runnerSessionId: (row.runner_session_id as string | null) ?? null,
@@ -29,6 +82,7 @@ const mapAttempt = (row: SqliteRow): AttemptRecord => ({
   signal: (row.signal as string | null) ?? null,
   summary: String(row.summary ?? ""),
   errorMessage: (row.error_message as string | null) ?? null,
+  tokensUsed: parseTokensUsed(row.tokens_used_json),
 });
 
 export class SqliteAttemptRepo implements AttemptRepo {
@@ -58,7 +112,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
       stage: null,
       workerId: input.workerId,
       attemptNumber: this.nextAttemptNumber(input.jobId),
-      runnerName: input.runnerName,
+      runnerName: assertRunnerProvider(input.runnerName, "createAttempt input"),
       runnerModel: input.runnerModel,
       runnerVariant: input.runnerVariant,
       runnerSessionId: null,
@@ -70,6 +124,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
       signal: null,
       summary: "",
       errorMessage: null,
+      tokensUsed: null,
     };
   }
 
@@ -164,6 +219,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
       signal?: string | null;
       summary?: string;
       errorMessage?: string | null;
+      tokensUsed?: TokenUsage | null;
     } = {},
   ): void {
     this.sqlite
@@ -174,7 +230,8 @@ export class SqliteAttemptRepo implements AttemptRepo {
                 exit_code = ?,
                 signal = ?,
                 summary = ?,
-                error_message = ?
+                error_message = ?,
+                tokens_used_json = ?
           WHERE id = ?`,
       )
       .run(
@@ -184,6 +241,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
         patch.signal ?? null,
         patch.summary ?? "",
         patch.errorMessage ?? null,
+        serializeTokensUsed(patch.tokensUsed ?? null),
         attemptId,
       );
   }
@@ -221,7 +279,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
         `SELECT ea.id, ea.job_id, job.job_kind, job.task_id, job.repo_key AS target, job.cron_job_id, job.action AS stage,
                 ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id,
                 rs.native_session_id, ea.status, ea.started_at,
-                ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
+                ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message, ea.tokens_used_json
            FROM execution_attempt ea
       LEFT JOIN job ON job.id = ea.job_id
       LEFT JOIN runner_session rs ON rs.id = ea.runner_session_id
@@ -238,7 +296,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
         `SELECT ea.id, ea.job_id, job.job_kind, job.task_id, job.repo_key AS target, job.cron_job_id, job.action AS stage,
                 ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id,
                 rs.native_session_id, ea.status, ea.started_at,
-                ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
+                ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message, ea.tokens_used_json
            FROM execution_attempt ea
       LEFT JOIN job ON job.id = ea.job_id
       LEFT JOIN runner_session rs ON rs.id = ea.runner_session_id
@@ -259,7 +317,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
         `SELECT ea.id, ea.job_id, job.job_kind, job.task_id, job.repo_key AS target, job.cron_job_id, job.action AS stage,
                 ea.worker_id, ea.attempt_number, ea.runner_name, ea.runner_model, ea.runner_variant, ea.runner_session_id,
                 rs.native_session_id, ea.status, ea.started_at,
-                ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message
+                ea.finished_at, ea.exit_code, ea.signal, ea.summary, ea.error_message, ea.tokens_used_json
            FROM execution_attempt ea
       LEFT JOIN job ON job.id = ea.job_id
       LEFT JOIN runner_session rs ON rs.id = ea.runner_session_id
@@ -294,7 +352,8 @@ export class SqliteAttemptRepo implements AttemptRepo {
                 execution_attempt.exit_code,
                 execution_attempt.signal,
                 execution_attempt.summary,
-                execution_attempt.error_message
+                execution_attempt.error_message,
+                execution_attempt.tokens_used_json
             FROM execution_attempt
             JOIN job ON job.id = execution_attempt.job_id
        LEFT JOIN runner_session ON runner_session.id = execution_attempt.runner_session_id

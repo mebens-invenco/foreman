@@ -3,8 +3,7 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { ClaudeRunner, OpenCodeRunner, createAgentRunner } from "../index.js";
-import { normalizeClaudeJsonOutput, normalizeOpenCodeJsonOutput } from "../impl/json-output.js";
+import { ClaudeRunner, CodexRunner, OpenCodeRunner, createAgentRunner } from "../index.js";
 import { runAgentProcess } from "../impl/run-agent-process.js";
 import { createTempDir } from "../../test-support/helpers.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
@@ -12,6 +11,7 @@ import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 const cleanupDirs: string[] = [];
 const originalOpencodeBin = process.env.FOREMAN_OPENCODE_BIN;
 const originalClaudeBin = process.env.FOREMAN_CLAUDE_BIN;
+const originalCodexBin = process.env.FOREMAN_CODEX_BIN;
 
 const writeExecutableScript = async (filePath: string, contents: string): Promise<void> => {
   await fs.writeFile(filePath, contents, { mode: 0o755 });
@@ -28,6 +28,12 @@ afterEach(async () => {
     delete process.env.FOREMAN_CLAUDE_BIN;
   } else {
     process.env.FOREMAN_CLAUDE_BIN = originalClaudeBin;
+  }
+
+  if (originalCodexBin === undefined) {
+    delete process.env.FOREMAN_CODEX_BIN;
+  } else {
+    process.env.FOREMAN_CODEX_BIN = originalCodexBin;
   }
 
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
@@ -90,6 +96,16 @@ describe("provider runners", () => {
         return new ClaudeRunner("claude-opus-4-6", "high");
       },
     },
+    {
+      label: "CodexRunner",
+      scriptName: "fake-codex.js",
+      setBin(scriptPath: string) {
+        process.env.FOREMAN_CODEX_BIN = scriptPath;
+      },
+      createRunner() {
+        return new CodexRunner("gpt-5.5", "high");
+      },
+    },
   ])("escalates to SIGKILL when $label ignores SIGTERM", async ({ scriptName, setBin, createRunner }) => {
     const tempDir = await createTempDir("foreman-runner-test-");
     cleanupDirs.push(tempDir);
@@ -149,6 +165,16 @@ describe("provider runners", () => {
       },
       createRunner() {
         return new ClaudeRunner("claude-opus-4-6", "high");
+      },
+    },
+    {
+      label: "CodexRunner",
+      scriptName: "fake-codex.js",
+      setBin(scriptPath: string) {
+        process.env.FOREMAN_CODEX_BIN = scriptPath;
+      },
+      createRunner() {
+        return new CodexRunner("gpt-5.5", "high");
       },
     },
   ])("kills descendant processes that keep stdio open after abort for $label", async ({ scriptName, setBin, createRunner }) => {
@@ -394,66 +420,5 @@ describe("provider runners", () => {
     expect(result.stdout).toBe("");
     expect(stderrLines).toContain("resume failed");
     expect(stderrLines.some((line) => line.includes("starting a fresh session"))).toBe(false);
-  });
-
-  test("reports JSON normalization warnings and only extracts Claude result records", () => {
-    expect(normalizeOpenCodeJsonOutput("{bad json")).toMatchObject({
-      stdout: "{bad json",
-      warning: expect.stringContaining("Failed to parse OpenCode JSON output"),
-    });
-    expect(normalizeClaudeJsonOutput("{bad json")).toMatchObject({
-      stdout: "{bad json",
-      warning: expect.stringContaining("Failed to parse Claude JSON output"),
-    });
-
-    const claudeOutput = [
-      JSON.stringify({ type: "assistant", text: "intermediate" }),
-      JSON.stringify({ type: "result", result: "final" }),
-    ].join("\n");
-    expect(normalizeClaudeJsonOutput(claudeOutput).stdout).toBe("final");
-
-    const opencodeOutput = JSON.stringify({
-      type: "text",
-      sessionID: "opencode-session",
-      part: {
-        type: "text",
-        text: '<agent-result>{"schemaVersion":1}</agent-result>',
-      },
-    });
-    expect(normalizeOpenCodeJsonOutput(opencodeOutput)).toMatchObject({
-      stdout: '<agent-result>{"schemaVersion":1}</agent-result>',
-      nativeSessionId: "opencode-session",
-    });
-
-    const opencodeFinalAnswerOutput = [
-      JSON.stringify({
-        type: "text",
-        part: {
-          type: "text",
-          text: "I will validate the required `<agent-result>` payload now.",
-          metadata: { openai: { phase: "commentary" } },
-        },
-      }),
-      JSON.stringify({
-        type: "text",
-        part: {
-          type: "text",
-          text: '<agent-result>{"schemaVersion":1}</agent-result>',
-          metadata: { openai: { phase: "final_answer" } },
-        },
-      }),
-    ].join("\n");
-    expect(normalizeOpenCodeJsonOutput(opencodeFinalAnswerOutput).stdout).toBe(
-      '<agent-result>{"schemaVersion":1}</agent-result>',
-    );
-
-    const opencodeProviderErrorOutput = [
-      JSON.stringify({ type: "text", text: "Implemented the change." }),
-      JSON.stringify({ type: "error", message: "JSON parsing failed: expected value" }),
-    ].join("\n");
-    expect(normalizeOpenCodeJsonOutput(opencodeProviderErrorOutput)).toMatchObject({
-      stdout: "Implemented the change.",
-      warning: expect.stringContaining("OpenCode JSON output contained error record(s): JSON parsing failed"),
-    });
   });
 });

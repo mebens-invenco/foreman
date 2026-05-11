@@ -1,6 +1,20 @@
 import type { TaskPriority } from "./task.js";
 
-export type RunnerProvider = "opencode" | "claude";
+/**
+ * Canonical set of runner provider identifiers persisted to the database.
+ *
+ * This is the single source of truth: the {@link RunnerProvider} type is
+ * derived from this array so adding a new runner is a single-edit change.
+ * Repos validate `runner_name` against this set on read and write — the
+ * `execution_attempt` and `runner_session` tables intentionally hold no
+ * DB-level CHECK on `runner_name` so the canonical set lives in one place.
+ */
+export const runnerProviders = ["opencode", "claude", "codex"] as const;
+
+export type RunnerProvider = (typeof runnerProviders)[number];
+
+export const isRunnerProvider = (value: unknown): value is RunnerProvider =>
+  typeof value === "string" && (runnerProviders as readonly string[]).includes(value);
 
 export type ActionType = "execution" | "review" | "reviewer" | "retry" | "deployment" | "consolidation" | "cron";
 
@@ -32,6 +46,30 @@ export type AgentRunRequest = {
   nativeSessionId?: string;
 };
 
+/**
+ * Per-API-call token usage, normalized across runners.
+ *
+ * `inputTokens` is always the count of NEW (non-cached) input tokens for the call.
+ * Codex emits `input_tokens` inclusive of `cached_input_tokens`; the Codex
+ * extractor subtracts the cached portion so this field has consistent semantics
+ * across Claude, Codex, and OpenCode. Summing per-attempt rows for a session
+ * therefore produces clean session-level deltas without double-counting.
+ *
+ * `cacheCreationInputTokens` and `cacheReadInputTokens` mirror the underlying
+ * provider semantics: cached portion served on the call, and tokens written
+ * into the provider's cache during the call. Not every runner emits both.
+ *
+ * `reasoningOutputTokens` covers the hidden reasoning trace that some
+ * providers (Codex, OpenCode) report alongside the visible output.
+ */
+export type TokenUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+  reasoningOutputTokens?: number;
+};
+
 export type AgentRunResult = {
   exitCode: number | null;
   signal: string | null;
@@ -42,6 +80,7 @@ export type AgentRunResult = {
   stdoutBytes: number;
   stderrBytes: number;
   nativeSessionId?: string;
+  tokensUsed?: TokenUsage;
 };
 
 export type TaskCreateMutation = {

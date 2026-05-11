@@ -68,6 +68,29 @@ export function formatDuration(startedAt: string | null, finishedAt: string | nu
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
 }
 
+// Compact "short-number" rendering: 950 -> "950", 1_400 -> "1.4k", 23_000 -> "23k",
+// 2_300_000 -> "2.3m", 45_000_000 -> "45m". One fraction digit while the magnitude
+// is single-digit, then drops to zero — keeps the column narrow without losing
+// signal at the small end.
+export function formatShortNumber(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "-"
+  }
+
+  const absolute = Math.abs(value)
+  if (absolute < 1_000) {
+    return `${value}`
+  }
+
+  if (absolute < 1_000_000) {
+    const thousands = value / 1_000
+    return `${thousands.toFixed(absolute < 10_000 ? 1 : 0)}k`
+  }
+
+  const millions = value / 1_000_000
+  return `${millions.toFixed(absolute < 10_000_000 ? 1 : 0)}m`
+}
+
 export function formatRelativeTime(value: string | null | undefined, now = Date.now()) {
   if (!value) {
     return "pending"
