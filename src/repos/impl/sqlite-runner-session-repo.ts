@@ -1,14 +1,34 @@
+import { ForemanError } from "../../lib/errors.js";
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
+import { isRunnerProvider, runnerProviders } from "../../domain/index.js";
 import type { RunnerProvider, RunnerSessionRole } from "../../domain/index.js";
 import type { RunnerSessionRecord, RunnerSessionRepo, RunnerSessionSelector } from "../runner-session-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
+
+/**
+ * Boundary check enforcing the canonical {@link RunnerProvider} set on rows
+ * coming out of `runner_session`. DB no longer has a CHECK on `runner_name`
+ * (see migration 0020) so this is the only place where unknown providers
+ * surface — fail loudly instead of letting an opaque string flow into the rest
+ * of the system as if it were a typed `RunnerProvider`.
+ */
+const assertRunnerProvider = (value: unknown, context: string): RunnerProvider => {
+  if (!isRunnerProvider(value)) {
+    throw new ForemanError(
+      "unknown_runner_provider",
+      `Unknown runner provider in ${context}: ${String(value)}. Expected one of: ${runnerProviders.join(", ")}.`,
+      500,
+    );
+  }
+  return value;
+};
 
 const mapRunnerSession = (row: SqliteRow): RunnerSessionRecord => ({
   id: String(row.id),
   taskTargetId: String(row.task_target_id),
   role: row.role as RunnerSessionRole,
-  runnerName: row.runner_name as RunnerProvider,
+  runnerName: assertRunnerProvider(row.runner_name, `runner_session ${String(row.id)}`),
   runnerModel: String(row.runner_model),
   runnerVariant: String(row.runner_variant),
   nativeSessionId: (row.native_session_id as string | null) ?? null,
@@ -49,7 +69,7 @@ export class SqliteRunnerSessionRepo implements RunnerSessionRepo {
       id: newId(),
       taskTargetId: input.taskTargetId,
       role: input.role,
-      runnerName: input.runnerName,
+      runnerName: assertRunnerProvider(input.runnerName, "createSession input"),
       runnerModel: input.runnerModel,
       runnerVariant: input.runnerVariant,
       nativeSessionId: input.nativeSessionId ?? null,

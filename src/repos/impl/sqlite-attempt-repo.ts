@@ -2,10 +2,29 @@ import { ForemanError } from "../../lib/errors.js";
 import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
+import { isRunnerProvider, runnerProviders } from "../../domain/index.js";
 import type { AttemptStatus, RunnerProvider, TokenUsage } from "../../domain/index.js";
 import type { AttemptEventRecord, AttemptRecord, AttemptRepo, RecoveredAttemptRecord } from "../attempt-repo.js";
 import type { LeaseResourceType } from "../lease-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
+
+/**
+ * Boundary check enforcing the canonical {@link RunnerProvider} set on rows
+ * coming out of `execution_attempt`. DB no longer has a CHECK on `runner_name`
+ * (see migration 0020) so this is the only place where unknown providers
+ * surface — fail loudly instead of letting an opaque string flow into the rest
+ * of the system as if it were a typed `RunnerProvider`.
+ */
+const assertRunnerProvider = (value: unknown, context: string): RunnerProvider => {
+  if (!isRunnerProvider(value)) {
+    throw new ForemanError(
+      "unknown_runner_provider",
+      `Unknown runner provider in ${context}: ${String(value)}. Expected one of: ${runnerProviders.join(", ")}.`,
+      500,
+    );
+  }
+  return value;
+};
 
 const parseTokensUsed = (raw: unknown): TokenUsage | null => {
   if (typeof raw !== "string" || raw.length === 0) {
@@ -51,7 +70,7 @@ const mapAttempt = (row: SqliteRow): AttemptRecord => ({
   stage: (row.stage as string | null) ?? null,
   workerId: (row.worker_id as string | null) ?? null,
   attemptNumber: Number(row.attempt_number),
-  runnerName: row.runner_name as RunnerProvider,
+  runnerName: assertRunnerProvider(row.runner_name, `execution_attempt ${String(row.id)}`),
   runnerModel: String(row.runner_model),
   runnerVariant: String(row.runner_variant),
   runnerSessionId: (row.runner_session_id as string | null) ?? null,
@@ -93,7 +112,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
       stage: null,
       workerId: input.workerId,
       attemptNumber: this.nextAttemptNumber(input.jobId),
-      runnerName: input.runnerName,
+      runnerName: assertRunnerProvider(input.runnerName, "createAttempt input"),
       runnerModel: input.runnerModel,
       runnerVariant: input.runnerVariant,
       runnerSessionId: null,

@@ -1,6 +1,20 @@
 import type { TaskPriority } from "./task.js";
 
-export type RunnerProvider = "opencode" | "claude" | "codex";
+/**
+ * Canonical set of runner provider identifiers persisted to the database.
+ *
+ * This is the single source of truth: the {@link RunnerProvider} type is
+ * derived from this array so adding a new runner is a single-edit change.
+ * Repos validate `runner_name` against this set on read and write — the
+ * `execution_attempt` and `runner_session` tables intentionally hold no
+ * DB-level CHECK on `runner_name` so the canonical set lives in one place.
+ */
+export const runnerProviders = ["opencode", "claude", "codex"] as const;
+
+export type RunnerProvider = (typeof runnerProviders)[number];
+
+export const isRunnerProvider = (value: unknown): value is RunnerProvider =>
+  typeof value === "string" && (runnerProviders as readonly string[]).includes(value);
 
 export type ActionType = "execution" | "review" | "reviewer" | "retry" | "deployment" | "consolidation" | "cron";
 
