@@ -23,6 +23,26 @@ afterEach(async () => {
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
+const echoArgvScript = [
+  "#!/usr/bin/env node",
+  "let stdin = '';",
+  "process.stdin.setEncoding('utf8');",
+  "process.stdin.on('data', (chunk) => { stdin += chunk; });",
+  "process.stdin.on('end', () => {",
+  "  const argv = process.argv.slice(2);",
+  "  process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'codex-thread-fresh' }) + '\\n');",
+  "  process.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\\n');",
+  "  process.stdout.write(JSON.stringify({",
+  "    type: 'item.completed',",
+  "    item: { id: 'item_0', type: 'agent_message', text: JSON.stringify({ argv, stdin }) },",
+  "  }) + '\\n');",
+  "  process.stdout.write(JSON.stringify({",
+  "    type: 'turn.completed',",
+  "    usage: { input_tokens: 20341, cached_input_tokens: 3456, output_tokens: 5, reasoning_output_tokens: 0 },",
+  "  }) + '\\n');",
+  "});",
+].join("\n");
+
 describe("CodexRunner", () => {
   test("passes the prompt over stdin and captures thread_id from thread.started events", async () => {
     const tempDir = await createTempDir("foreman-runner-test-");
@@ -32,28 +52,7 @@ describe("CodexRunner", () => {
     // Mirror codex's `--json` JSONL output: thread.started, turn.started,
     // item.completed (agent_message), turn.completed (with usage). Echo the
     // command-line args and stdin so the test can assert on argv layout.
-    await writeExecutableScript(
-      codexScriptPath,
-      [
-        "#!/usr/bin/env node",
-        "let stdin = '';",
-        "process.stdin.setEncoding('utf8');",
-        "process.stdin.on('data', (chunk) => { stdin += chunk; });",
-        "process.stdin.on('end', () => {",
-        "  const argv = process.argv.slice(2);",
-        "  process.stdout.write(JSON.stringify({ type: 'thread.started', thread_id: 'codex-thread-fresh' }) + '\\n');",
-        "  process.stdout.write(JSON.stringify({ type: 'turn.started' }) + '\\n');",
-        "  process.stdout.write(JSON.stringify({",
-        "    type: 'item.completed',",
-        "    item: { id: 'item_0', type: 'agent_message', text: JSON.stringify({ argv, stdin }) },",
-        "  }) + '\\n');",
-        "  process.stdout.write(JSON.stringify({",
-        "    type: 'turn.completed',",
-        "    usage: { input_tokens: 20341, cached_input_tokens: 3456, output_tokens: 5, reasoning_output_tokens: 0 },",
-        "  }) + '\\n');",
-        "});",
-      ].join("\n"),
-    );
+    await writeExecutableScript(codexScriptPath, echoArgvScript);
     process.env.FOREMAN_CODEX_BIN = codexScriptPath;
 
     const runner = new CodexRunner("gpt-5.5", "high");
@@ -115,5 +114,34 @@ describe("CodexRunner", () => {
     // Codex's thread.started fixture echoes the resumed thread id, so we expect
     // the runner to surface that same id back to the caller.
     expect(resumeResult.nativeSessionId).toBe("codex-thread-fresh");
+  });
+
+  test("TOML-escapes model and effort values via JSON.stringify so quotes and newlines do not break the -c payload", async () => {
+    const tempDir = await createTempDir("foreman-runner-test-");
+    cleanupDirs.push(tempDir);
+
+    const codexScriptPath = path.join(tempDir, "fake-codex.js");
+    await writeExecutableScript(codexScriptPath, echoArgvScript);
+    process.env.FOREMAN_CODEX_BIN = codexScriptPath;
+
+    // Adversarial inputs: model contains a quote (TOML basic-string delimiter)
+    // and effort contains a newline (TOML basic-strings forbid raw newlines).
+    // JSON.stringify escapes both correctly, producing a valid TOML basic string.
+    const runner = new CodexRunner('evil"model', "high\nbreak");
+    const result = await runner.invoke({
+      attemptId: "attempt-codex-escape",
+      action: "execution",
+      cwd: tempDir,
+      env: {},
+      prompt: "probe",
+      timeoutMs: 5_000,
+    });
+
+    const invocation = JSON.parse(result.stdout) as { argv: string[]; stdin: string };
+    // JSON.stringify('evil"model') === '"evil\\"model"' and
+    // JSON.stringify('high\nbreak') === '"high\\nbreak"' — both valid TOML
+    // basic strings that round-trip back to the original values when parsed.
+    expect(invocation.argv).toContain('model="evil\\"model"');
+    expect(invocation.argv).toContain('model_reasoning_effort="high\\nbreak"');
   });
 });

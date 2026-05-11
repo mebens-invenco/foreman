@@ -33,10 +33,19 @@ export class CodexRunner implements AgentRunner {
     // Codex CLI argument layout. The positional `-` tells codex to read the
     // prompt from stdin so the existing `runAgentProcess` plumbing (which pipes
     // `request.prompt` into stdin) keeps working unchanged. The model and effort
-    // are passed via `-c key="value"` overrides because codex parses each `-c`
-    // value as TOML.
+    // are passed via `-c key=value` overrides because codex parses each `-c`
+    // value as TOML. `JSON.stringify` produces a valid TOML basic string
+    // (correctly escaping embedded quotes, backslashes, and newlines) so the
+    // override stays well-formed even if the value contains TOML-special chars.
     const baseArgs = ["exec"];
-    const sharedConfigArgs = ["-c", CODEX_SANDBOX_OVERRIDE, "-c", `model="${this.model}"`, "-c", `model_reasoning_effort="${this.effort}"`];
+    const sharedConfigArgs = [
+      "-c",
+      CODEX_SANDBOX_OVERRIDE,
+      "-c",
+      `model=${JSON.stringify(this.model)}`,
+      "-c",
+      `model_reasoning_effort=${JSON.stringify(this.effort)}`,
+    ];
 
     const args = resume && nativeSessionId
       ? [...baseArgs, "resume", "--json", ...sharedConfigArgs, nativeSessionId, "-"]
