@@ -11,6 +11,15 @@ import { runAgentProcess } from "./run-agent-process.js";
 // `disk-full-write-access` is intentionally not used.
 const CODEX_SANDBOX_OVERRIDE = 'sandbox_mode="workspace-write"';
 
+// Codex thread ids are UUIDs (typically UUIDv7). Validating the shape before
+// passing as a positional arg prevents option-shaped strings (e.g. "--last",
+// "-c whatever") from being interpreted as flags by `codex exec resume`. The
+// regex matches the canonical 8-4-4-4-12 hex form with hyphens, case-insensitive.
+const CODEX_THREAD_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const isValidCodexThreadId = (value: unknown): value is string =>
+  typeof value === "string" && CODEX_THREAD_ID_PATTERN.test(value);
+
 export class CodexRunner implements AgentRunner {
   constructor(
     private readonly model: string,
@@ -19,6 +28,11 @@ export class CodexRunner implements AgentRunner {
 
   async invoke(request: AgentRunnerInvokeRequest): Promise<CapturedAgentRunResult> {
     if (request.nativeSessionId) {
+      if (!isValidCodexThreadId(request.nativeSessionId)) {
+        throw new Error(
+          `Invalid Codex thread id (expected UUID, got ${JSON.stringify(request.nativeSessionId)})`,
+        );
+      }
       return this.run(request, request.nativeSessionId, true);
     }
 
@@ -37,6 +51,10 @@ export class CodexRunner implements AgentRunner {
     // value as TOML. `JSON.stringify` produces a valid TOML basic string
     // (correctly escaping embedded quotes, backslashes, and newlines) so the
     // override stays well-formed even if the value contains TOML-special chars.
+    // On resume, we insert `--` before the [SESSION_ID] positional so a
+    // syntactically valid but option-shaped id can never be reinterpreted as a
+    // flag by clap; the upstream validator in `invoke()` is the primary guard,
+    // and `--` is defence in depth.
     const baseArgs = ["exec"];
     const sharedConfigArgs = [
       "-c",
@@ -48,7 +66,7 @@ export class CodexRunner implements AgentRunner {
     ];
 
     const args = resume && nativeSessionId
-      ? [...baseArgs, "resume", "--json", ...sharedConfigArgs, nativeSessionId, "-"]
+      ? [...baseArgs, "resume", "--json", ...sharedConfigArgs, "--", nativeSessionId, "-"]
       : [...baseArgs, "--json", ...sharedConfigArgs, "-"];
 
     return runAgentProcess({
