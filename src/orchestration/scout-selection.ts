@@ -188,6 +188,12 @@ export const actionConsumesBranchLease = (action: ActionType): boolean => action
 const resolvePersistedTaskTargets = (task: Task, foremanRepos: ForemanRepos): TaskTarget[] =>
   foremanRepos.taskMirror.getTargetsForTask(task.id);
 
+const configuredAgentLabel = (config: WorkspaceConfig): string =>
+  config.taskSystem.type === "linear" ? config.taskSystem.linear!.includeLabels[0]! : "Agent";
+
+const configuredConsolidatedLabel = (config: WorkspaceConfig): string | null =>
+  config.taskSystem.type === "linear" ? config.taskSystem.linear!.consolidatedLabel : null;
+
 const syncResolvedPullRequest = (input: {
   task: Task;
   target: TaskTarget;
@@ -942,14 +948,26 @@ export const runScoutSelection = async (input: {
     }
 
     if (!chosen) {
+      const agentLabel = configuredAgentLabel(input.config);
+      const consolidatedLabel = configuredConsolidatedLabel(input.config);
+
       for (const task of terminalCandidates) {
-        const agentLabel = input.config.taskSystem.type === "linear" ? input.config.taskSystem.linear!.includeLabels[0]! : "Agent";
         if (!task.labels.includes(agentLabel)) {
+          continue;
+        }
+        if (consolidatedLabel && task.labels.includes(consolidatedLabel)) {
           continue;
         }
 
         for (const target of resolvePersistedTaskTargets(task, input.foremanRepos)) {
           if (!canSchedule(task, target, "consolidation")) {
+            continue;
+          }
+
+          const previousConsolidation = input.foremanRepos.jobs.latestJobForDedupeKey(
+            dedupeKeyForAction(task.id, target.repoKey, "consolidation"),
+          );
+          if (previousConsolidation?.status === "completed") {
             continue;
           }
 

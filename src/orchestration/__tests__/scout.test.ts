@@ -456,6 +456,85 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test("does not schedule consolidation for tasks that already have the consolidated label", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+
+    const doneTask = task({
+      id: "TASK-5052M",
+      title: "Already consolidated task",
+      state: "done",
+      providerState: "done",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      labels: ["Agent", "Agent Consolidated"],
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([doneTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not reschedule consolidation after a completed consolidation job for the target", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const doneTask = task({
+      id: "TASK-5052N",
+      title: "Previously consolidated task",
+      state: "done",
+      providerState: "done",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      labels: ["Agent"],
+    });
+    db.taskMirror.saveTasks([doneTask]);
+    const target = db.taskMirror.getTaskTarget(doneTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    const consolidationJob = db.jobs.createJob({
+      taskId: doneTask.id,
+      taskTargetId: target!.id,
+      taskProvider: doneTask.provider,
+      action: "consolidation",
+      priorityRank: priorityToRank(doneTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${doneTask.id}:repo-a:consolidation`,
+      selectionReason: "test completed consolidation",
+    });
+    db.jobs.updateJobStatus(consolidationJob.id, "completed", { finishedAt: "2026-03-14T12:04:00Z" });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([doneTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
   test("promotes mixed done-on-merge multi-target tasks to deployable", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);
