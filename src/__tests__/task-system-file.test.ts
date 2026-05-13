@@ -90,6 +90,7 @@ targetDependencies:
   - taskTargetRepoKey: repo-b
     dependsOnRepoKey: repo-a
     position: 0
+baseBranch: release/base
 createdAt: 2026-03-14T12:00:00Z
 updatedAt: 2026-03-14T12:00:00Z
 ---
@@ -108,6 +109,7 @@ Task body
       { repoKey: "repo-b", branchName: "task-0003", position: 1 },
     ]);
     expect(task.targetDependencies).toEqual([{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a", position: 0 }]);
+    expect(task.baseBranch).toBe("release/base");
 
     await taskSystem.transition({ taskId: "TASK-0003", toState: "in_progress" });
 
@@ -115,6 +117,7 @@ Task body
     expect(rewritten).toContain("targets:");
     expect(rewritten).toContain("targetDependencies:");
     expect(rewritten).toContain("taskTargetRepoKey: repo-b");
+    expect(rewritten).toContain("baseBranch: release/base");
   });
 
   test("rejects deprecated dependsOnBranches metadata", async () => {
@@ -251,6 +254,7 @@ Task body
         dependencies: { taskIds: ["TASK-0007"], baseTaskId: "TASK-0006" },
         repoDependencies: [{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a" }],
         branchName: "follow-up-branch",
+        baseBranch: "release/base",
       },
     });
 
@@ -262,8 +266,10 @@ Task body
     ]);
     expect(task.targetDependencies).toEqual([{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a", position: 0 }]);
     expect(task.dependencies).toEqual({ taskIds: ["TASK-0007"], baseTaskId: "TASK-0006" });
+    expect(task.baseBranch).toBe("release/base");
     const contents = await fs.readFile(path.join(workspaceRoot, "tasks", "TASK-0008.md"), "utf8");
-    expect(contents).toContain("Agent:\n  Repos: repo-a, repo-b\n  Repo dependencies: repo-b<-repo-a\n  Depends on tasks: TASK-0007\n  Base from task: TASK-0006\n  Branch: follow-up-branch");
+    expect(contents).toContain("baseBranch: release/base");
+    expect(contents).toContain("Agent:\n  Repos: repo-a, repo-b\n  Repo dependencies: repo-b<-repo-a\n  Depends on tasks: TASK-0007\n  Base from task: TASK-0006\n  Base branch: release/base\n  Branch: follow-up-branch");
   });
 
   test("getTask still fails for unmapped provider states", async () => {

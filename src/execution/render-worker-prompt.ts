@@ -54,6 +54,7 @@ const resolveSelectedTaskContext = (task: Task, selectedTarget: TaskTargetRef | 
   assignee: task.assignee,
   selectedTarget,
   dependencies: task.dependencies,
+  baseBranch: task.baseBranch,
   targetDependencies: task.targetDependencies,
 });
 

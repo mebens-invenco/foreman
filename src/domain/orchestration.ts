@@ -99,6 +99,7 @@ export type TaskCreateMutation = {
     dependsOnRepoKey: string;
   }>;
   branchName?: string;
+  baseBranch?: string;
 };
 
 export type TaskMutation = { type: "add_comment"; body: string } | TaskCreateMutation;

@@ -459,21 +459,26 @@ export const resolveBaseBranch = async (input: {
     }
   }
 
-  let baseBranch = input.repo.defaultBranch;
+  const explicitBaseBranch = input.task.baseBranch?.trim() || null;
+  let baseBranch = explicitBaseBranch ?? input.repo.defaultBranch;
+
+  if (explicitBaseBranch) {
+    await ensureOriginBranch(explicitBaseBranch, `Explicit base branch ${explicitBaseBranch} does not exist on origin.`);
+  }
 
   if (dependencies.length === 1) {
     const resolved = await resolveDependencyBaseBranch(dependencies[0]!);
-    if (resolved.branch) {
+    if (!explicitBaseBranch && resolved.branch) {
       baseBranch = resolved.branch;
     }
   } else if (dependencies.length > 1) {
     const baseTaskId = input.task.dependencies.baseTaskId;
-    if (!baseTaskId) {
+    if (!baseTaskId && !explicitBaseBranch) {
       blockers.push("Base from task is required when Depends on tasks lists multiple tasks.");
       return { baseBranch, blockers };
     }
 
-    if (!dependencies.includes(baseTaskId)) {
+    if (baseTaskId && !dependencies.includes(baseTaskId)) {
       blockers.push("Base from task must be one of the listed task dependencies.");
       return { baseBranch, blockers };
     }
@@ -482,9 +487,11 @@ export const resolveBaseBranch = async (input: {
       await ensureMergedDependency(dependencyId);
     }
 
-    const resolved = await resolveDependencyBaseBranch(baseTaskId);
-    if (resolved.branch) {
-      baseBranch = resolved.branch;
+    if (baseTaskId) {
+      const resolved = await resolveDependencyBaseBranch(baseTaskId);
+      if (!explicitBaseBranch && resolved.branch) {
+        baseBranch = resolved.branch;
+      }
     }
   }
 

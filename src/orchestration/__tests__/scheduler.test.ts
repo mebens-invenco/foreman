@@ -22,6 +22,7 @@ const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   labels: ["Agent"],
   assignee: null,
   dependencies: { taskIds: [], baseTaskId: null },
+  baseBranch: null,
   pullRequests: [],
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
