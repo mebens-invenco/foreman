@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import { getProviderStateForNormalized, normalizeTaskState } from "../../tasking/task-state-mapping.js";
-import { createDefaultWorkspaceConfig, parseWorkspaceConfig, runnerForAction, stringifyWorkspaceConfig } from "../config.js";
+import { createDefaultWorkspaceConfig, parseWorkspaceConfig, runnerForAction, runnerSessionRoleForAction, stringifyWorkspaceConfig } from "../config.js";
 
 describe("workspace config", () => {
   test("round-trips default file task config", () => {
@@ -61,6 +61,10 @@ describe("workspace config", () => {
     expect(runnerForAction(config, "review")).toEqual(config.runner.execution);
     expect(runnerForAction(config, "deployment")).toEqual(config.runner.execution);
     expect(runnerForAction(config, "reviewer")).toEqual(config.runner.reviewer);
+    expect(runnerSessionRoleForAction("execution")).toBe("implementation");
+    expect(runnerSessionRoleForAction("review")).toBe("implementation");
+    expect(runnerSessionRoleForAction("deployment")).toBe("deployment");
+    expect(runnerSessionRoleForAction("reviewer")).toBe("reviewer");
   });
 
   test("persists cron and agent task creation settings", () => {

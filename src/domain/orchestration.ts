@@ -18,7 +18,7 @@ export const isRunnerProvider = (value: unknown): value is RunnerProvider =>
 
 export type ActionType = "execution" | "review" | "reviewer" | "retry" | "deployment" | "consolidation" | "cron";
 
-export type RunnerSessionRole = "implementation" | "reviewer";
+export type RunnerSessionRole = "implementation" | "reviewer" | "deployment";
 
 export type JobStatus =
   | "queued"

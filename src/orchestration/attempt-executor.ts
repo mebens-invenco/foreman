@@ -410,11 +410,12 @@ export class AttemptExecutor {
         const jobStatus = attemptStatus === "timed_out" ? "failed" : attemptStatus;
         const afterSha = await this.gitHead(worktreePath).catch(() => null);
         if (runnerSession) {
+          const keepSessionActive = attemptStatus === "completed" || (job.action === "deployment" && attemptStatus === "blocked");
           this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
             lastAttemptId: attempt.id,
             lastWorktreeHeadSha: afterSha,
             lastReviewHeadSha: reviewHeadSha,
-            ...(attemptStatus === "completed" ? { isActive: true } : {}),
+            ...(keepSessionActive ? { isActive: true } : {}),
           });
         }
         if (job.action === "retry" && attemptStatus === "completed") {

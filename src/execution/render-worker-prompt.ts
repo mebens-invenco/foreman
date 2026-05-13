@@ -196,7 +196,7 @@ const renderDeploymentInstructions = async (paths: WorkspacePaths, instructionBo
 const selectWorkerPromptTemplate = (input: {
   action: WorkerPromptTemplateName;
   continuation?: boolean;
-}): WorkerPromptTemplateName | "review-continuation" | "reviewer-continuation" => {
+}): WorkerPromptTemplateName | "review-continuation" | "reviewer-continuation" | "deployment-continuation" => {
   if (!input.continuation) {
     return input.action;
   }
@@ -205,6 +205,9 @@ const selectWorkerPromptTemplate = (input: {
   }
   if (input.action === "reviewer") {
     return "reviewer-continuation";
+  }
+  if (input.action === "deployment") {
+    return "deployment-continuation";
   }
   return input.action;
 };

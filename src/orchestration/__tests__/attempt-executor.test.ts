@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { RepoRef, Task, WorkerResult } from "../../domain/index.js";
+import type { ActionType, RepoRef, Task, WorkerResult } from "../../domain/index.js";
 import { priorityToRank } from "../../domain/index.js";
 import { ProviderRateLimitError } from "../../lib/errors.js";
 import { exec } from "../../lib/process.js";
@@ -91,7 +91,9 @@ const createWorkerResult = (overrides: Partial<WorkerResult> = {}): WorkerResult
   ...overrides,
 });
 
-const createExecutorContext = async () => {
+const createExecutorContext = async (options: { action?: ActionType; selectedTask?: Task; selectionContext?: Record<string, unknown> } = {}) => {
+  const selectedTask = options.selectedTask ?? task;
+  const action = options.action ?? "execution";
   const workspaceRoot = await createTempDir("foreman-attempt-executor-test-");
   cleanupDirs.push(workspaceRoot);
   const repoRoot = path.join(workspaceRoot, "repo");
@@ -102,25 +104,26 @@ const createExecutorContext = async () => {
   const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
   const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), testProjectRoot);
   db.workers.ensureWorkerSlots(1);
-  db.taskMirror.saveTasks([task]);
-  const target = db.taskMirror.getTaskTarget(task.id, "foreman")!;
+  db.taskMirror.saveTasks([selectedTask]);
+  const target = db.taskMirror.getTaskTarget(selectedTask.id, "foreman")!;
   const job = db.jobs.createJob({
-    taskId: task.id,
+    taskId: selectedTask.id,
     taskTargetId: target.id,
     taskProvider: "file",
-    action: "execution",
-    priorityRank: priorityToRank(task.priority),
+    action,
+    priorityRank: priorityToRank(selectedTask.priority),
     repoKey: "foreman",
     baseBranch: "master",
-    dedupeKey: `${task.id}:execution`,
+    dedupeKey: `${selectedTask.id}:${action}`,
     selectionReason: "test",
+    ...(options.selectionContext ? { selectionContext: options.selectionContext } : {}),
   });
   db.jobs.claimQueuedJobForWorker(job.id, db.workers.listWorkers()[0]!.id);
   const claimedJob = db.jobs.getJob(job.id);
   const taskSystem: TaskSystem = {
     getProvider: () => "file",
     listCandidates: vi.fn(async () => []),
-    getTask: vi.fn(async () => task),
+    getTask: vi.fn(async () => selectedTask),
     createTask: vi.fn(async () => ({ id: "TASK-NEW", providerId: "TASK-NEW", url: null })),
     listComments: vi.fn(async () => []),
     addComment: vi.fn(async () => undefined),
@@ -134,8 +137,9 @@ const createExecutorContext = async () => {
   const repo: RepoRef = { key: "foreman", rootPath: repoRoot, defaultBranch: "master" };
   const logger = LoggerService.create({ paths, stdout: nullWritable, minLevel: "info" });
   const applyWorkerResult = vi.fn(async () => null);
+  const config = createDefaultWorkspaceConfig("test-workspace", "file");
   const executor = new AttemptExecutor({
-    config: createDefaultWorkspaceConfig("test-workspace", "file"),
+    config,
     paths,
     foremanRepos: db,
     taskSystem,
@@ -149,7 +153,7 @@ const createExecutorContext = async () => {
     onWorkerFinished: vi.fn(),
   });
 
-  return { workspaceRoot, db, job, claimedJob, executor, logger, applyWorkerResult };
+  return { workspaceRoot, db, job, claimedJob, executor, logger, applyWorkerResult, target, config };
 };
 
 afterEach(async () => {
@@ -416,6 +420,116 @@ describe("AttemptExecutor", () => {
       expect(attempt.status).toBe("completed");
       expect(attempt.summary).toBe("Recovered timeout checkpoint.");
       expect(db.attempts.listAttemptEvents(attempt.id).map((event) => event.eventType)).toContain("worker_result_recovered");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("isolates deployment runner sessions and resumes blocked deployments", async () => {
+    const deploymentSelectionContext = {
+      deployment: { instructionHash: "deployment-instructions", instructionBody: "Check production once." },
+      pullRequestReference: {
+        provider: "github",
+        url: "https://github.com/acme/foreman/pull/10",
+        number: 10,
+        state: "merged",
+        headBranch: "eng-5047",
+        baseBranch: "master",
+      },
+    };
+    const { db, claimedJob, executor, logger, target, config } = await createExecutorContext({
+      action: "deployment",
+      selectedTask: { ...task, state: "deployable", providerState: "deployable" },
+      selectionContext: deploymentSelectionContext,
+    });
+
+    const runnerSelector = {
+      taskTargetId: target.id,
+      runnerName: config.runner.execution.type,
+      runnerModel: config.runner.execution.model,
+      runnerVariant: "high",
+    };
+    const implementationSession = db.runnerSessions.createSession({
+      ...runnerSelector,
+      role: "implementation",
+      isActive: true,
+      nativeSessionId: "implementation-native-session",
+    });
+    const createDeploymentResult = (outcome: "in_progress" | "blocked" | "succeeded", summary: string): WorkerResult =>
+      createWorkerResult({
+        action: "deployment",
+        outcome,
+        summary,
+        blockers: outcome === "blocked" ? ["Deployment status page was unavailable."] : [],
+      });
+    const createRunResult = (workerResult: WorkerResult) => ({
+      exitCode: 0,
+      signal: null,
+      startedAt: "2026-05-06T00:00:00.000Z",
+      finishedAt: "2026-05-06T00:01:00.000Z",
+      stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+      stderrBytes: 0,
+      stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+      stderr: "",
+      nativeSessionId: "deployment-native-session",
+    });
+
+    try {
+      runnerMocks.invoke.mockResolvedValueOnce(createRunResult(createDeploymentResult("in_progress", "Deployment is still rolling out.")));
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      expect(runnerMocks.invoke).toHaveBeenCalledTimes(1);
+      expect(runnerMocks.invoke.mock.calls[0]![0]).not.toHaveProperty("nativeSessionId");
+      expect(db.runnerSessions.getActiveSession({ ...runnerSelector, role: "implementation" })?.id).toBe(implementationSession.id);
+      expect(db.runnerSessions.getActiveSession({ ...runnerSelector, role: "deployment" })).toMatchObject({
+        nativeSessionId: "deployment-native-session",
+      });
+
+      const blockedJob = db.jobs.createJob({
+        taskId: task.id,
+        taskTargetId: target.id,
+        taskProvider: "file",
+        action: "deployment",
+        priorityRank: priorityToRank(task.priority),
+        repoKey: "foreman",
+        baseBranch: "master",
+        dedupeKey: `${task.id}:deployment:blocked`,
+        selectionReason: "test blocked deployment",
+        selectionContext: deploymentSelectionContext,
+      });
+      db.jobs.claimQueuedJobForWorker(blockedJob.id, db.workers.listWorkers()[0]!.id);
+      runnerMocks.invoke.mockResolvedValueOnce(createRunResult(createDeploymentResult("blocked", "Deployment could not be checked.")));
+
+      await executor.execute(db.workers.listWorkers()[0]!, db.jobs.getJob(blockedJob.id)!, new AbortController());
+      await logger.flush();
+
+      expect(runnerMocks.invoke.mock.calls[1]![0]).toMatchObject({ nativeSessionId: "deployment-native-session" });
+      expect(db.runnerSessions.getActiveSession({ ...runnerSelector, role: "deployment" })).toMatchObject({
+        nativeSessionId: "deployment-native-session",
+      });
+
+      const retryAfterBlockedJob = db.jobs.createJob({
+        taskId: task.id,
+        taskTargetId: target.id,
+        taskProvider: "file",
+        action: "deployment",
+        priorityRank: priorityToRank(task.priority),
+        repoKey: "foreman",
+        baseBranch: "master",
+        dedupeKey: `${task.id}:deployment:after-blocked`,
+        selectionReason: "test retry after blocked deployment",
+        selectionContext: deploymentSelectionContext,
+      });
+      db.jobs.claimQueuedJobForWorker(retryAfterBlockedJob.id, db.workers.listWorkers()[0]!.id);
+      runnerMocks.invoke.mockResolvedValueOnce(createRunResult(createDeploymentResult("succeeded", "Deployment verified.")));
+
+      await executor.execute(db.workers.listWorkers()[0]!, db.jobs.getJob(retryAfterBlockedJob.id)!, new AbortController());
+      await logger.flush();
+
+      expect(runnerMocks.invoke.mock.calls[2]![0]).toMatchObject({ nativeSessionId: "deployment-native-session" });
+      expect(runnerMocks.invoke).toHaveBeenCalledTimes(3);
     } finally {
       db.close();
     }

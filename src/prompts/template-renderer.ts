@@ -14,8 +14,12 @@ export type PromptTemplateName =
   | "cron"
   | "worker-result-recovery"
   | "review-continuation"
-  | "reviewer-continuation";
-export type WorkerPromptTemplateName = Exclude<PromptTemplateName, "plan" | "worker-result-recovery" | "review-continuation" | "reviewer-continuation">;
+  | "reviewer-continuation"
+  | "deployment-continuation";
+export type WorkerPromptTemplateName = Exclude<
+  PromptTemplateName,
+  "plan" | "worker-result-recovery" | "review-continuation" | "reviewer-continuation" | "deployment-continuation"
+>;
 
 const TEMPLATE_PATHS: Record<PromptTemplateName, string> = {
   plan: "prompts/templates/plan.md",
@@ -29,6 +33,7 @@ const TEMPLATE_PATHS: Record<PromptTemplateName, string> = {
   "worker-result-recovery": "prompts/templates/worker-result-recovery.md",
   "review-continuation": "prompts/templates/review-continuation.md",
   "reviewer-continuation": "prompts/templates/reviewer-continuation.md",
+  "deployment-continuation": "prompts/templates/deployment-continuation.md",
 };
 
 const FRAGMENTS_DIR = path.join("prompts", "fragments");
