@@ -485,6 +485,43 @@ describe("prompt rendering", () => {
     expect(result).toContain("Check the production dashboard once.");
     expect(result).toContain("https://github.com/acme/repo-a/pull/10");
     expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action deployment --help`);
+
+    const continuationResult = await renderWorkerPrompt({
+      action: "deployment",
+      config,
+      paths,
+      task: { ...sampleTask, state: "deployable", providerState: "deployable" },
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      continuation: true,
+      pullRequestReference: {
+        provider: "github",
+        url: "https://github.com/acme/repo-a/pull/10",
+        number: 10,
+        state: "merged",
+        headBranch: "task-0001",
+        baseBranch: "main",
+      },
+      gitState: {
+        worktreeHeadSha: "current-head",
+        reviewHeadSha: "review-head",
+        baseBranch: "main",
+        previousSessionHeadSha: "previous-deployment-head",
+      },
+    });
+    expect(continuationResult).toContain("Continue deployment tracking from the current deployment session.");
+    expect(continuationResult).toContain("Check deployment status once.");
+    expect(continuationResult).toContain("Return `in_progress` if rollout is still pending");
+    expect(continuationResult).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action deployment --help`);
+    expect(continuationResult).not.toContain("# Deployment Tracking Prompt");
+    expect(continuationResult).not.toContain("## Deployment Instructions");
+    expect(continuationResult).not.toContain("## Current Git State");
+    expect(continuationResult).not.toContain("## Pull Request Reference");
+    expect(continuationResult).not.toContain("previous-deployment-head");
+    expect(continuationResult).not.toContain("Ship plan notes");
+    expect(continuationResult).not.toContain("Check the production dashboard once.");
+    expect(continuationResult).not.toContain("https://github.com/acme/repo-a/pull/10");
   });
 
   test("renders deployment inactive context when deployment.md is missing", async () => {

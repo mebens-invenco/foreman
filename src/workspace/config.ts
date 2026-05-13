@@ -352,7 +352,7 @@ export const runnerRoleForAction = (action: ActionType): "execution" | "reviewer
   action === "reviewer" ? "reviewer" : "execution";
 
 export const runnerSessionRoleForAction = (action: ActionType): RunnerSessionRole =>
-  action === "reviewer" ? "reviewer" : "implementation";
+  action === "reviewer" ? "reviewer" : action === "deployment" ? "deployment" : "implementation";
 
 export const runnerForAction = (config: WorkspaceConfig, action: ActionType): WorkspaceRunnerConfig =>
   config.runner[runnerRoleForAction(action)];

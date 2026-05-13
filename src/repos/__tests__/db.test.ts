@@ -413,6 +413,17 @@ describe("persistence repos", () => {
       ).toBe(reviewer.id);
       expect(db.runnerSessions.getActiveSession({ ...selector, role: "reviewer" })).toBeNull();
 
+      const deployment = db.runnerSessions.createSession({
+        ...selector,
+        role: "deployment",
+        nativeSessionId: "deployment-1",
+        isActive: true,
+      });
+      expect(db.runnerSessions.getActiveSession({ ...selector, role: "deployment" })).toMatchObject({
+        id: deployment.id,
+        nativeSessionId: "deployment-1",
+      });
+
       const retrySession = db.runnerSessions.createSession({ ...selector, isActive: false, nativeSessionId: "impl-2" });
       expect(db.runnerSessions.getActiveSession(selector)?.id).toBe(implementation.id);
       db.runnerSessions.updateSession(retrySession.id, { isActive: true, lastAttemptId: attempt.id, lastWorktreeHeadSha: "head-2" });
