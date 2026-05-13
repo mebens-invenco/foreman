@@ -213,4 +213,39 @@ describe("ensureTaskWorktree", () => {
     expect(await git(retriedPath, ["rev-parse", "HEAD"])).toBe(latestBaseSha);
     expect(await git(retriedPath, ["status", "--short"])).toBe("");
   });
+
+  test("retargets retry worktrees when task branch metadata changes", async () => {
+    const fixture = await createFixture();
+    const paths = createWorkspacePaths("/project", fixture.workspaceRoot);
+    const worktreePath = await ensureTaskWorktree({
+      paths,
+      repo: fixture.repo,
+      task: fixture.task,
+      baseBranch: "main",
+      action: "execution",
+    });
+
+    await writeAndCommit(worktreePath, "task.txt", "task work\n", "Task commit");
+    await fs.writeFile(path.join(worktreePath, "scratch.txt"), "temp\n");
+
+    const latestBaseSha = await writeAndCommit(fixture.seedPath, "README.md", "retargeted retry base\n", "Retarget retry base update");
+    await pushMain(fixture.seedPath);
+
+    const retargetedTask: Task = {
+      ...fixture.task,
+      targets: [{ repoKey: "repo-a", branchName: "task-456", position: 0 }],
+    };
+    const retriedPath = await ensureTaskWorktree({
+      paths,
+      repo: fixture.repo,
+      task: retargetedTask,
+      baseBranch: "main",
+      action: "retry",
+    });
+
+    expect(retriedPath).toBe(worktreePath);
+    expect(await git(retriedPath, ["branch", "--show-current"])).toBe("task-456");
+    expect(await git(retriedPath, ["rev-parse", "HEAD"])).toBe(latestBaseSha);
+    expect(await git(retriedPath, ["status", "--short"])).toBe("");
+  });
 });

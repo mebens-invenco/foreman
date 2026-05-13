@@ -73,6 +73,14 @@ export const ensureTaskWorktree = async (input: {
 
   const currentBranch = await exec("git", ["branch", "--show-current"], { cwd: targetPath });
   if (currentBranch.stdout.trim() !== taskBranch) {
+    if (input.action === "retry") {
+      await exec("git", ["reset", "--hard"], { cwd: targetPath });
+      await exec("git", ["clean", "-fd"], { cwd: targetPath });
+      await exec("git", ["checkout", "-B", taskBranch, `origin/${input.baseBranch}`], { cwd: targetPath });
+      await exec("git", ["clean", "-fd"], { cwd: targetPath });
+      return targetPath;
+    }
+
     throw new ForemanError(
       "worktree_branch_mismatch",
       `Existing task worktree is on ${currentBranch.stdout.trim()} instead of ${taskBranch}`,
