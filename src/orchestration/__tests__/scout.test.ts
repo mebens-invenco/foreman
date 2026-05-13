@@ -140,6 +140,7 @@ const task = (input: Partial<Task> & Pick<Task, "id" | "title" | "state" | "prov
   labels: ["Agent"],
   assignee: null,
   dependencies: { taskIds: [], baseTaskId: null },
+  baseBranch: null,
   pullRequests: [],
   url: null,
   ...input,
@@ -1985,6 +1986,169 @@ describe("runScoutSelection", () => {
       expect(result.jobs[0]?.action).toBe("execution");
       expect(result.jobs[0]?.baseBranch).toBe("eng-4680");
       expect(taskSystem.comments.get("ENG-4681") ?? []).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("uses an explicit base branch instead of an inferred dependency pull request head", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    vi.spyOn(worktrees, "branchExistsOnOrigin").mockResolvedValue(true);
+
+    const dependencyTask = task({
+      id: "ENG-4680",
+      title: "Dependency in review",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/10", source: "provider" } satisfies TaskPullRequest],
+    });
+    const dependentTask = task({
+      id: "ENG-4681",
+      title: "Dependent task with explicit base",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      dependencies: { taskIds: ["ENG-4680"], baseTaskId: null },
+      baseBranch: "release/base",
+    });
+
+    const taskSystem = new FakeTaskSystem([dependencyTask, dependentTask]);
+    const dependencyReviewContext = reviewContext({
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/10",
+      pullRequestNumber: 10,
+      state: "open",
+      headBranch: "eng-4680",
+      baseBranch: "main",
+      pendingChecks: [{ name: "ci", state: "pending" }],
+    });
+    seedReviewerCheckpoint(db, dependencyTask, dependencyReviewContext);
+    const reviewService = new FakeReviewService({ [dependencyTask.id]: dependencyReviewContext });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.task.id).toBe("ENG-4681");
+      expect(result.jobs[0]?.baseBranch).toBe("release/base");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps unresolved dependencies blocking tasks with an explicit base branch", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    vi.spyOn(worktrees, "branchExistsOnOrigin").mockResolvedValue(true);
+
+    const dependencyTask = task({
+      id: "ENG-4680",
+      title: "Unresolved dependency",
+      state: "ready",
+      providerState: "ready",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:00:00Z",
+    });
+    const dependentTask = task({
+      id: "ENG-4681",
+      title: "Dependent task with explicit base",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      dependencies: { taskIds: ["ENG-4680"], baseTaskId: null },
+      baseBranch: "release/base",
+    });
+
+    const taskSystem = new FakeTaskSystem([dependencyTask, dependentTask]);
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.task.id).toBe("ENG-4680");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("allows explicit base branches with multiple completed dependencies and no base-from-task", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    vi.spyOn(worktrees, "branchExistsOnOrigin").mockResolvedValue(true);
+
+    const firstDependency = task({
+      id: "ENG-4690",
+      title: "First completed dependency",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:00:00Z",
+    });
+    const secondDependency = task({
+      id: "ENG-4691",
+      title: "Second completed dependency",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:01:00Z",
+    });
+    const dependentTask = task({
+      id: "ENG-4692",
+      title: "Multi dependency with explicit base",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      dependencies: { taskIds: ["ENG-4690", "ENG-4691"], baseTaskId: null },
+      baseBranch: "release/base",
+    });
+
+    seedCompletedExecution(db, firstDependency);
+    seedCompletedExecution(db, secondDependency);
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([firstDependency, secondDependency, dependentTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.task.id).toBe("ENG-4692");
+      expect(result.jobs[0]?.baseBranch).toBe("release/base");
     } finally {
       db.close();
     }

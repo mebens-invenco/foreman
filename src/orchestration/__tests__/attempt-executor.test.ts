@@ -62,6 +62,7 @@ const task: Task = {
   targets: [{ repoKey: "foreman", branchName: "eng-5047", position: 0 }],
   targetDependencies: [],
   dependencies: { taskIds: [], baseTaskId: null },
+  baseBranch: null,
   pullRequests: [],
   updatedAt: "2026-05-06T00:00:00.000Z",
   url: null,

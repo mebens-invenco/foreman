@@ -29,6 +29,7 @@ const sampleTask: Task = {
   targets: [{ repoKey: "repo-a", branchName: "task-0001", position: 0 }],
   targetDependencies: [],
   dependencies: { taskIds: [], baseTaskId: null },
+  baseBranch: null,
   pullRequests: [],
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
@@ -144,6 +145,7 @@ describe("prompt rendering", () => {
     );
     expect(result.markdown).toContain("## Relevant Learnings");
     expect(result.markdown).toContain("- <learning-id>: <learning title>");
+    expect(result.markdown).not.toContain("Base branch");
   });
 
   test("renders worker prompts with generated fragments and runtime context", async () => {

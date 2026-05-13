@@ -43,6 +43,7 @@ const taskMutationSchema = z.discriminatedUnion("type", [
       )
       .optional(),
     branchName: z.string().min(1).optional(),
+    baseBranch: z.string().min(1).optional(),
   }),
 ]).superRefine((mutation, ctx) => {
   if (mutation.type === "create_task" && !mutation.description && !mutation.body) {

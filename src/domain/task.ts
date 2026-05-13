@@ -45,6 +45,7 @@ export type Task = {
     taskIds: string[];
     baseTaskId: string | null;
   };
+  baseBranch: string | null;
   pullRequests: TaskPullRequest[];
   updatedAt: string;
   url: string | null;

@@ -129,7 +129,7 @@ const normalizeLinearTaskReference = (value: string): string => {
 export const parseLinearMetadata = (
   description: string,
   defaultBranchName?: string,
-): Pick<Task, "targets" | "targetDependencies" | "dependencies"> => {
+): Pick<Task, "targets" | "targetDependencies" | "dependencies" | "baseBranch"> => {
   const match = description.match(/(^|\n)Agent:\s*\n((?:\s{2,}.+\n?)*)/i);
   const lines =
     match?.[2]
@@ -157,6 +157,7 @@ export const parseLinearMetadata = (
     );
   }
   const branchName = values.get("branch") ?? null;
+  const baseBranch = values.get("base branch") ?? null;
   const effectiveBranchName = branchName ?? defaultBranchName ?? null;
   const repoKeys = uniqueValues(parseCsv(values.get("repos") ?? ""));
   const targetRepoKeys = repoKeys.length > 0 ? repoKeys : uniqueValues(parseCsv(values.get("repo") ?? ""));
@@ -175,6 +176,7 @@ export const parseLinearMetadata = (
       taskIds,
       baseTaskId: baseTaskIdValue ? normalizeLinearTaskReference(baseTaskIdValue) : null,
     },
+    baseBranch,
   };
 };
 
@@ -433,6 +435,7 @@ export class LinearTaskSystem implements TaskSystem {
       targets: metadata.targets,
       targetDependencies: metadata.targetDependencies,
       dependencies: metadata.dependencies,
+      baseBranch: metadata.baseBranch,
       pullRequests: await this.resolvePullRequests(node.attachments.nodes, metadata.targets),
       updatedAt: node.updatedAt,
       url: node.url,

@@ -28,6 +28,7 @@ const syncSingleTargetTask = (db: Awaited<ReturnType<typeof createMigratedDb>>, 
       targets: [{ repoKey: input.repoKey, branchName: input.branchName ?? input.taskId.toLowerCase(), position: 0 }],
       targetDependencies: [],
       dependencies: { taskIds: [], baseTaskId: null },
+      baseBranch: null,
       pullRequests: [],
       updatedAt: "2026-03-14T12:00:00Z",
       url: null,
@@ -137,7 +138,34 @@ describe("persistence repos", () => {
       db.workers.ensureWorkerSlots(1);
       const worker = db.workers.listWorkers()[0];
       expect(worker).toBeDefined();
-      const taskTarget = syncSingleTargetTask(db, { taskId: "TASK-0001", repoKey: "repo-a", branchName: "task-0001" });
+      db.database.sqlite
+        .prepare(
+          `INSERT INTO task(
+            id, provider, provider_id, title, description, state, provider_state, priority,
+            assignee, url, updated_at, synced_at, labels_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          "TASK-0001",
+          "file",
+          "TASK-0001",
+          "TASK-0001",
+          "",
+          "ready",
+          "ready",
+          "normal",
+          null,
+          null,
+          "2026-03-14T12:00:00Z",
+          "2026-03-14T12:00:00Z",
+          "[\"Agent\"]",
+        );
+      db.database.sqlite
+        .prepare(
+          `INSERT INTO task_target(id, task_id, repo_key, branch_name, position, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run("target-1", "TASK-0001", "repo-a", "task-0001", 0, "2026-03-14T12:00:00Z", "2026-03-14T12:00:00Z");
 
       const jobId = "legacy-job-1";
       db.database.sqlite
@@ -150,7 +178,7 @@ describe("persistence repos", () => {
         .run(
           jobId,
           "TASK-0001",
-          taskTarget.id,
+          "target-1",
           "file",
           "execution",
           priorityToRank("high"),
@@ -1117,6 +1145,7 @@ describe("persistence repos", () => {
           targets: [{ repoKey: "repo-a", branchName: "eng-4700", position: 0 }],
           targetDependencies: [],
           dependencies: { taskIds: [], baseTaskId: null },
+          baseBranch: null,
           pullRequests: [],
           updatedAt: "2026-03-18T12:00:00Z",
           url: "https://linear.app/acme/issue/ENG-4700",
@@ -1135,6 +1164,7 @@ describe("persistence repos", () => {
           targets: [{ repoKey: "repo-a", branchName: "eng-4701", position: 0 }],
           targetDependencies: [],
           dependencies: { taskIds: [], baseTaskId: "ENG-4700" },
+          baseBranch: "release/base",
           pullRequests: [],
           updatedAt: "2026-03-18T12:05:00Z",
           url: "https://linear.app/acme/issue/ENG-4701",
@@ -1153,6 +1183,7 @@ describe("persistence repos", () => {
           targets: [],
           targetDependencies: [],
           dependencies: { taskIds: [], baseTaskId: null },
+          baseBranch: null,
           pullRequests: [],
           updatedAt: "2026-03-18T12:10:00Z",
           url: "https://linear.app/acme/issue/ENG-4702",
@@ -1210,6 +1241,7 @@ describe("persistence repos", () => {
           taskIds: ["ENG-4700"],
           baseTaskId: "ENG-4700",
         },
+        baseBranch: "release/base",
       });
       expect(db.taskMirror.getTask("ENG-4702")).toMatchObject({ id: "ENG-4702", targets: [] });
     } finally {
@@ -1240,6 +1272,7 @@ describe("persistence repos", () => {
         ],
         targetDependencies: [],
         dependencies: { taskIds: [], baseTaskId: null },
+        baseBranch: null,
         pullRequests: [],
         updatedAt: "2026-03-18T12:00:00Z",
         url: "https://linear.app/acme/issue/ENG-4773",
@@ -1265,6 +1298,7 @@ describe("persistence repos", () => {
           { taskTargetRepoKey: "web-front-door", dependsOnRepoKey: "common", position: 1 },
         ],
         dependencies: { taskIds: ["ENG-4773"], baseTaskId: "ENG-4773" },
+        baseBranch: "release/base",
         pullRequests: [],
         updatedAt: "2026-03-18T12:05:00Z",
         url: "https://linear.app/acme/issue/ENG-4774",
@@ -1355,6 +1389,7 @@ describe("persistence repos", () => {
         ],
         targetDependencies: [],
         dependencies: { taskIds: [], baseTaskId: null },
+        baseBranch: null,
         pullRequests: [],
         updatedAt: "2026-03-18T12:05:00Z",
         url: "https://linear.app/acme/issue/ENG-4780",

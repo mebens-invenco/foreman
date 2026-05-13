@@ -198,6 +198,19 @@ describe("parseLinearMetadata", () => {
         taskIds: ["ENG-123"],
         baseTaskId: null,
       },
+      baseBranch: null,
+    });
+  });
+
+  test("parses explicit base branch metadata", () => {
+    expect(parseLinearMetadata("Agent:\n  Repo: repo-a\n  Base branch: release/2026-05\n")).toEqual({
+      targets: [],
+      targetDependencies: [],
+      dependencies: {
+        taskIds: [],
+        baseTaskId: null,
+      },
+      baseBranch: "release/2026-05",
     });
   });
 
@@ -219,6 +232,7 @@ describe("parseLinearMetadata", () => {
         taskIds: ["ENG-123", "ENG-124"],
         baseTaskId: "ENG-123",
       },
+      baseBranch: null,
     });
   });
 
@@ -234,6 +248,7 @@ describe("parseLinearMetadata", () => {
         taskIds: ["ENG-4773"],
         baseTaskId: "ENG-4772",
       },
+      baseBranch: null,
     });
   });
 
@@ -256,6 +271,7 @@ describe("parseLinearMetadata", () => {
         taskIds: [],
         baseTaskId: null,
       },
+      baseBranch: null,
     });
   });
 
@@ -446,6 +462,7 @@ describe("LinearTaskSystem.createTask", () => {
         dependencies: { taskIds: ["ENG-123"], baseTaskId: "ENG-122" },
         repoDependencies: [{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a" }],
         branchName: "eng-124",
+        baseBranch: "release/base",
       },
     });
 
@@ -457,7 +474,7 @@ describe("LinearTaskSystem.createTask", () => {
         parentId: "issue-parent",
         title: "Follow-up task",
         description:
-          "Do the follow-up work.\n\nAgent:\n  Repos: repo-a, repo-b\n  Repo dependencies: repo-b<-repo-a\n  Depends on tasks: ENG-123\n  Base from task: ENG-122\n  Branch: eng-124",
+          "Do the follow-up work.\n\nAgent:\n  Repos: repo-a, repo-b\n  Repo dependencies: repo-b<-repo-a\n  Depends on tasks: ENG-123\n  Base from task: ENG-122\n  Base branch: release/base\n  Branch: eng-124",
         stateId: "state-todo",
         labelIds: ["label-agent", "label-agent-created"],
         priority: 2,

@@ -8,7 +8,9 @@ export type CreatedTask = {
 
 export const taskCreateDescriptionBody = (mutation: TaskCreateMutation): string => mutation.description ?? mutation.body ?? "";
 
-export const renderTaskCreateAgentMetadata = (mutation: Pick<TaskCreateMutation, "repos" | "dependencies" | "repoDependencies" | "branchName">): string => {
+export const renderTaskCreateAgentMetadata = (
+  mutation: Pick<TaskCreateMutation, "repos" | "dependencies" | "repoDependencies" | "branchName" | "baseBranch">,
+): string => {
   const lines = ["Agent:", `  Repos: ${mutation.repos.join(", ")}`];
   const repoDependencies = mutation.repoDependencies ?? [];
   if (repoDependencies.length > 0) {
@@ -24,6 +26,9 @@ export const renderTaskCreateAgentMetadata = (mutation: Pick<TaskCreateMutation,
   }
   if (mutation.dependencies?.baseTaskId) {
     lines.push(`  Base from task: ${mutation.dependencies.baseTaskId}`);
+  }
+  if (mutation.baseBranch) {
+    lines.push(`  Base branch: ${mutation.baseBranch}`);
   }
   if (mutation.branchName) {
     lines.push(`  Branch: ${mutation.branchName}`);

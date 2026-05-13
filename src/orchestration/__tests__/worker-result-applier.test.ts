@@ -125,6 +125,7 @@ const task = (): Task => ({
   targets: [{ repoKey: "repo-a", branchName: "task-deploy-apply", position: 0 }],
   targetDependencies: [],
   dependencies: { taskIds: [], baseTaskId: null },
+  baseBranch: null,
   pullRequests: [],
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,

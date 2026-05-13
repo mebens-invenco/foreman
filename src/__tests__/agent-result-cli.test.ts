@@ -65,6 +65,7 @@ describe("agent-result cli", () => {
           dependencies: { taskIds: ["ENG-123"], baseTaskId: "ENG-122" },
           repoDependencies: [{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a" }],
           branchName: "eng-124",
+          baseBranch: "release/base",
         },
       ],
     };

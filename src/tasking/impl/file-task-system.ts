@@ -62,6 +62,7 @@ type FileTaskFrontmatter = {
   branchName?: string | null;
   dependsOnTasks?: string[];
   baseFromTask?: string | null;
+  baseBranch?: string | null;
   dependsOnBranches?: string[];
   pullRequests?: TaskPullRequest[];
   assignee?: string | null;
@@ -79,6 +80,7 @@ const fileFrontmatterOrder: Array<keyof FileTaskFrontmatter> = [
   "targetDependencies",
   "dependsOnTasks",
   "baseFromTask",
+  "baseBranch",
   "pullRequests",
   "assignee",
   "createdAt",
@@ -158,6 +160,7 @@ const parseFileTaskDocument = (config: WorkspaceConfig, filePath: string, conten
       taskIds: data.dependsOnTasks ?? [],
       baseTaskId: data.baseFromTask ?? null,
     },
+    baseBranch: data.baseBranch ?? null,
     pullRequests: data.pullRequests ?? [],
     updatedAt: data.updatedAt,
     url: null,
@@ -176,6 +179,7 @@ const toFileFrontmatter = (task: Task, createdAt: string): FileTaskFrontmatter =
     targetDependencies: task.targetDependencies,
     dependsOnTasks: task.dependencies.taskIds,
     baseFromTask: task.dependencies.baseTaskId,
+    baseBranch: task.baseBranch,
     pullRequests: task.pullRequests,
     assignee: task.assignee,
     createdAt,
@@ -293,6 +297,7 @@ export class FileTaskSystem implements TaskSystem {
       targetDependencies: (input.mutation.repoDependencies ?? []).map((dependency, position) => ({ ...dependency, position })),
       dependsOnTasks: input.mutation.dependencies?.taskIds ?? [],
       baseFromTask: input.mutation.dependencies?.baseTaskId ?? null,
+      baseBranch: input.mutation.baseBranch ?? null,
       pullRequests: [],
       assignee: null,
       createdAt: now,

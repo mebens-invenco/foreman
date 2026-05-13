@@ -20,6 +20,7 @@ type StoredTaskRecord = {
   providerState: string;
   priority: Task["priority"];
   assignee: string | null;
+  baseBranch: string | null;
   url: string | null;
   updatedAt: string;
   syncedAt: string;
@@ -36,6 +37,7 @@ const TASK_COLUMNS = [
   "provider_state",
   "priority",
   "assignee",
+  "base_branch",
   "url",
   "updated_at",
   "synced_at",
@@ -65,6 +67,7 @@ const mapStoredTask = (row: unknown): StoredTaskRecord => {
     providerState: String(mapped.provider_state),
     priority: mapped.priority as StoredTaskRecord["priority"],
     assignee: (mapped.assignee as string | null) ?? null,
+    baseBranch: (mapped.base_branch as string | null) ?? null,
     url: (mapped.url as string | null) ?? null,
     updatedAt: String(mapped.updated_at),
     syncedAt: String(mapped.synced_at),
@@ -305,6 +308,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
           taskIds: dependencies.map((dependency) => dependency.dependsOnTaskId),
           baseTaskId: dependencies.find((dependency) => dependency.isBaseDependency)?.dependsOnTaskId ?? null,
         },
+        baseBranch: storedTask.baseBranch,
         pullRequests: pullRequestsByTaskId.get(storedTask.id) ?? [],
         updatedAt: storedTask.updatedAt,
         url: storedTask.url,
@@ -359,18 +363,19 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     const upsertTask = this.sqlite.prepare(
       `INSERT INTO task(
          id, provider, provider_id, title, description, state, provider_state, priority,
-         assignee, url, updated_at, synced_at, labels_json
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET
+          assignee, base_branch, url, updated_at, synced_at, labels_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
          provider = excluded.provider,
          provider_id = excluded.provider_id,
          title = excluded.title,
          description = excluded.description,
          state = excluded.state,
          provider_state = excluded.provider_state,
-         priority = excluded.priority,
-         assignee = excluded.assignee,
-         url = excluded.url,
+          priority = excluded.priority,
+          assignee = excluded.assignee,
+          base_branch = excluded.base_branch,
+          url = excluded.url,
          updated_at = excluded.updated_at,
          synced_at = excluded.synced_at,
          labels_json = excluded.labels_json`,
@@ -428,6 +433,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
           task.providerState ?? task.state,
           task.priority,
           task.assignee ?? null,
+          task.baseBranch ?? null,
           task.url ?? null,
           normalizeTimestamp(task.updatedAt, syncedAt),
           syncedAt,
