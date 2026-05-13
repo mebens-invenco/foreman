@@ -127,23 +127,32 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
   },
   {
     accessorKey: "taskId",
-    cell: ({ row }) => (
-      <div className="space-y-1">
-        <TaskLink
-          taskUrl={row.original.jobKind === "cron" ? null : row.original.taskUrl}
-          className="block font-mono text-xs text-foreground"
-        >
-          {row.original.jobKind === "cron"
-            ? row.original.cronJobId ?? "-"
-            : row.original.taskId ?? "-"}
-        </TaskLink>
-        {row.original.jobKind === "cron" ? (
-          <span className="block text-xxs tracking-[0.18em] text-muted-foreground uppercase">
-            Cron
-          </span>
-        ) : null}
-      </div>
-    ),
+    cell: ({ row }) => {
+      const workItemId =
+        row.original.jobKind === "cron"
+          ? row.original.cronJobId ?? "-"
+          : row.original.taskId ?? "-"
+      return (
+        <div className="space-y-1">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <TaskLink
+                taskUrl={row.original.jobKind === "cron" ? null : row.original.taskUrl}
+                className="block max-w-40 truncate font-mono text-xs text-foreground"
+              >
+                {workItemId}
+              </TaskLink>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>{workItemId}</TooltipContent>
+          </Tooltip>
+          {row.original.jobKind === "cron" ? (
+            <span className="block text-xxs tracking-[0.18em] text-muted-foreground uppercase">
+              Cron
+            </span>
+          ) : null}
+        </div>
+      )
+    },
     enableGlobalFilter: false,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Work item" />
@@ -151,11 +160,20 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
   },
   {
     accessorKey: "target",
-    cell: ({ row }) => (
-      <span className="text-xs text-foreground">
-        {row.original.jobKind === "cron" ? "Workspace" : row.original.target ?? "-"}
-      </span>
-    ),
+    cell: ({ row }) => {
+      const target =
+        row.original.jobKind === "cron" ? "Workspace" : row.original.target ?? "-"
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="block max-w-40 truncate text-xs text-foreground">
+              {target}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={6}>{target}</TooltipContent>
+        </Tooltip>
+      )
+    },
     enableGlobalFilter: false,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Target" />
@@ -163,11 +181,19 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
   },
   {
     accessorKey: "stage",
-    cell: ({ row }) => (
-      <span className="text-xs text-foreground">
-        {formatActionLabel(row.original.stage)}
-      </span>
-    ),
+    cell: ({ row }) => {
+      const stage = formatActionLabel(row.original.stage)
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="block max-w-32 truncate text-xs text-foreground">
+              {stage}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={6}>{stage}</TooltipContent>
+        </Tooltip>
+      )
+    },
     enableGlobalFilter: false,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Stage" />
@@ -307,14 +333,21 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
   },
   {
     accessorKey: "summary",
-    cell: ({ row }) => (
-      <p
-        className="block max-w-60 truncate text-xs text-muted-foreground"
-        title={row.original.summary || row.original.errorMessage || "-"}
-      >
-        {row.original.summary || row.original.errorMessage || "-"}
-      </p>
-    ),
+    cell: ({ row }) => {
+      const summary = row.original.summary || row.original.errorMessage || "-"
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <p className="block max-w-60 truncate text-xs text-muted-foreground">
+              {summary}
+            </p>
+          </TooltipTrigger>
+          <TooltipContent sideOffset={6} className="max-w-md whitespace-pre-line">
+            {summary}
+          </TooltipContent>
+        </Tooltip>
+      )
+    },
     enableGlobalFilter: false,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Summary" />

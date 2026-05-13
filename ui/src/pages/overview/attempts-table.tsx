@@ -15,6 +15,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 function workItemLabel(attempt: AttemptRecord) {
   return attempt.jobKind === "cron" ? attempt.cronJobId ?? "-" : attempt.taskId ?? "-"
@@ -91,7 +96,7 @@ export function AttemptsTable({ now }: { now: number }) {
         <Table className="w-full table-fixed">
           <colgroup>
             <col className="w-28" />
-            <col className="w-36" />
+            <col className="w-44" />
             <col className="w-28" />
             <col className="w-28" />
             <col />
@@ -108,62 +113,82 @@ export function AttemptsTable({ now }: { now: number }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {attempts.map((attempt) => (
-              <TableRow
-                key={attempt.id}
-                role="button"
-                tabIndex={0}
-                className="cursor-pointer"
-                onClick={() => openAttempt(attempt.id)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault()
-                    openAttempt(attempt.id)
-                  }
-                }}
-              >
-                <TableCell className="px-4 font-mono text-xs text-foreground">
-                  <TaskLink
-                    taskUrl={attempt.jobKind === "cron" ? null : attempt.taskUrl}
-                    className="block max-w-full truncate"
-                    title={workItemLabel(attempt)}
-                  >
-                    {workItemLabel(attempt)}
-                  </TaskLink>
-                </TableCell>
-                <TableCell className="text-sm text-foreground">
-                  <span className="block max-w-full truncate" title={targetLabel(attempt)}>
-                    {targetLabel(attempt)}
-                  </span>
-                </TableCell>
-                <TableCell className="text-sm text-foreground">
-                  <span className="block max-w-full truncate" title={formatActionLabel(attempt.stage) ?? undefined}>
-                    {formatActionLabel(attempt.stage)}
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <span
-                    className={cn(
-                      "inline-flex rounded-none border px-2 py-1 text-xxs font-medium tracking-[0.18em] uppercase",
-                      statusTone(attempt.status)
-                    )}
-                  >
-                    {formatStatusLabel(attempt.status)}
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <p
-                    className="block max-w-full truncate text-sm text-muted-foreground"
-                    title={attempt.summary || attempt.errorMessage || "-"}
-                  >
-                    {attempt.summary || attempt.errorMessage || "-"}
-                  </p>
-                </TableCell>
-                <TableCell className="px-4 text-right text-xs text-muted-foreground">
-                  {timestampLabel(attempt, now)}
-                </TableCell>
-              </TableRow>
-            ))}
+            {attempts.map((attempt) => {
+              const workItem = workItemLabel(attempt)
+              const target = targetLabel(attempt)
+              const stage = formatActionLabel(attempt.stage)
+              const summary = attempt.summary || attempt.errorMessage || "-"
+              return (
+                <TableRow
+                  key={attempt.id}
+                  role="button"
+                  tabIndex={0}
+                  className="cursor-pointer"
+                  onClick={() => openAttempt(attempt.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault()
+                      openAttempt(attempt.id)
+                    }
+                  }}
+                >
+                  <TableCell className="overflow-hidden px-4 font-mono text-xs text-foreground">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <TaskLink
+                          taskUrl={attempt.jobKind === "cron" ? null : attempt.taskUrl}
+                          className="block max-w-full truncate"
+                        >
+                          {workItem}
+                        </TaskLink>
+                      </TooltipTrigger>
+                      <TooltipContent sideOffset={6}>{workItem}</TooltipContent>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell className="overflow-hidden text-sm text-foreground">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="block max-w-full truncate">{target}</span>
+                      </TooltipTrigger>
+                      <TooltipContent sideOffset={6}>{target}</TooltipContent>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell className="overflow-hidden text-sm text-foreground">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="block max-w-full truncate">{stage}</span>
+                      </TooltipTrigger>
+                      <TooltipContent sideOffset={6}>{stage}</TooltipContent>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell>
+                    <span
+                      className={cn(
+                        "inline-flex rounded-none border px-2 py-1 text-xxs font-medium tracking-[0.18em] uppercase",
+                        statusTone(attempt.status)
+                      )}
+                    >
+                      {formatStatusLabel(attempt.status)}
+                    </span>
+                  </TableCell>
+                  <TableCell className="overflow-hidden">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className="block max-w-full truncate text-sm text-muted-foreground">
+                          {summary}
+                        </p>
+                      </TooltipTrigger>
+                      <TooltipContent sideOffset={6} className="max-w-md whitespace-pre-line">
+                        {summary}
+                      </TooltipContent>
+                    </Tooltip>
+                  </TableCell>
+                  <TableCell className="px-4 text-right text-xs text-muted-foreground">
+                    {timestampLabel(attempt, now)}
+                  </TableCell>
+                </TableRow>
+              )
+            })}
           </TableBody>
         </Table>
       )}

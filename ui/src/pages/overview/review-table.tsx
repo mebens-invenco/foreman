@@ -12,6 +12,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 function TableSectionShell({
   title,
@@ -53,7 +58,7 @@ export function ReviewTable({ now }: { now: number }) {
         <Table className="w-full table-fixed">
           <colgroup>
             <col className="w-28" />
-            <col className="w-36" />
+            <col className="w-44" />
             <col />
             <col className="w-24" />
           </colgroup>
@@ -68,21 +73,40 @@ export function ReviewTable({ now }: { now: number }) {
           <TableBody>
             {rows.map((row) => (
               <TableRow key={`${row.taskId}:${row.target}:${row.pullRequestUrl}`}>
-                <TableCell className="px-4 font-mono text-xs text-foreground">
-                  <TaskLink taskUrl={row.taskUrl}>{row.taskId}</TaskLink>
+                <TableCell className="overflow-hidden px-4 font-mono text-xs text-foreground">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <TaskLink taskUrl={row.taskUrl} className="block max-w-full truncate">
+                        {row.taskId}
+                      </TaskLink>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{row.taskId}</TooltipContent>
+                  </Tooltip>
                 </TableCell>
-                <TableCell className="text-sm text-foreground">
-                  {row.target}
+                <TableCell className="overflow-hidden text-sm text-foreground">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="block max-w-full truncate">{row.target}</span>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6}>{row.target}</TooltipContent>
+                  </Tooltip>
                 </TableCell>
-                <TableCell>
-                  <a
-                    href={row.pullRequestUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block max-w-full truncate text-sm text-foreground underline-offset-4 hover:text-primary hover:underline"
-                  >
-                    {row.pullRequestLabel}
-                  </a>
+                <TableCell className="overflow-hidden">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <a
+                        href={row.pullRequestUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="block max-w-full truncate text-sm text-foreground underline-offset-4 hover:text-primary hover:underline"
+                      >
+                        {row.pullRequestLabel}
+                      </a>
+                    </TooltipTrigger>
+                    <TooltipContent sideOffset={6} className="max-w-md">
+                      {row.pullRequestLabel}
+                    </TooltipContent>
+                  </Tooltip>
                 </TableCell>
                 <TableCell className="px-4 text-right text-xs text-muted-foreground">
                   {formatRelativeTime(row.modifiedAt, now)}
