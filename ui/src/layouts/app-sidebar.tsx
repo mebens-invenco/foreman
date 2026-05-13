@@ -85,6 +85,18 @@ export function AppSidebar() {
             {status ? `${status.repos.count} repos` : "Inspecting workspace..."}
           </p>
           {status ? <p className="truncate">{status.workspace.root}</p> : null}
+          {status ? (
+            <p className="flex min-w-0 items-center gap-2">
+              <span className="truncate">
+                {status.version.shortCommit
+                  ? `Foreman ${status.version.shortCommit}`
+                  : "Version unknown"}
+              </span>
+              {status.version.updateAvailable ? (
+                <span className="shrink-0 text-destructive">Update available</span>
+              ) : null}
+            </p>
+          ) : null}
         </div>
       </SidebarFooter>
 

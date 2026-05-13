@@ -12,6 +12,7 @@ import {
   workerResultSchema,
   type WorkerResultAction,
 } from "./execution/worker-result.js";
+import { ForemanVersionMonitor } from "./foreman-version.js";
 import { createHttpServer } from "./http.js";
 import { LoggerService } from "./logger.js";
 import { SchedulerService } from "./orchestration/index.js";
@@ -184,8 +185,10 @@ program
       env: resolvedEnv,
       logger: logger.child({ component: "scheduler" }),
     });
+    const versionMonitor = new ForemanVersionMonitor(paths);
 
-    const server = createHttpServer({ config, paths, repoRefs, repos, taskSystem, reviewService, scheduler });
+    const server = createHttpServer({ config, paths, repoRefs, repos, taskSystem, reviewService, scheduler, versionMonitor });
+    versionMonitor.start();
     await server.listen({ host: config.http.host, port: config.http.port });
     logger.info("http server listening", { host: config.http.host, port: config.http.port });
     await scheduler.start();
@@ -201,6 +204,7 @@ program
 
       shutdownPromise = (async () => {
         logger.info("shutting down foreman service");
+        versionMonitor.stop();
         await scheduler.stop();
         await server.close();
         repos.close();

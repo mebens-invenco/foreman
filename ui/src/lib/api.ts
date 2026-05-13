@@ -143,6 +143,16 @@ export type StatusResponse = {
     count: number
     keys: string[]
   }
+  version: {
+    commit: string | null
+    shortCommit: string | null
+    upstreamRef: string | null
+    upstreamCommit: string | null
+    behindBy: number | null
+    updateAvailable: boolean
+    checkedAt: string | null
+    errorMessage: string | null
+  }
 }
 
 type SchedulerMutationResponse = {

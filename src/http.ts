@@ -4,6 +4,7 @@ import path from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 
+import { unavailableForemanVersionStatus, type ForemanVersionStatus } from "./foreman-version.js";
 import type { AttemptRecord, JobRecord } from "./repos/index.js";
 import type {
   RepoRef,
@@ -31,6 +32,7 @@ type HttpServerDeps = {
   taskSystem: TaskSystem;
   reviewService: ReviewService;
   scheduler: SchedulerService;
+  versionMonitor?: { getStatus(): ForemanVersionStatus };
 };
 
 const errorShape = (error: unknown): { error: { code: string; message: string } } => {
@@ -537,6 +539,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       count: deps.repoRefs.length,
       keys: deps.repoRefs.map((repo) => repo.key),
     },
+    version: deps.versionMonitor?.getStatus() ?? unavailableForemanVersionStatus(),
   }));
 
   server.get("/api/tasks", async (request) => {

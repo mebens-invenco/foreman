@@ -402,6 +402,19 @@ describe("HTTP query validation", () => {
     const db = await createMigratedDb(paths.dbPath, projectRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
 
+    const versionMonitor = {
+      getStatus: () => ({
+        commit: "0123456789abcdef0123456789abcdef01234567",
+        shortCommit: "0123456",
+        upstreamRef: "origin/main",
+        upstreamCommit: "0123456789abcdef0123456789abcdef01234567",
+        behindBy: 0,
+        updateAvailable: false,
+        checkedAt: "2026-03-16T00:00:00.000Z",
+        errorMessage: null,
+      }),
+    };
+
     const server = createHttpServer({
       config,
       paths,
@@ -422,6 +435,7 @@ describe("HTTP query validation", () => {
         stop: vi.fn(async () => undefined),
         triggerManualScout: vi.fn(),
       } as any,
+      versionMonitor,
     });
 
     try {
@@ -441,6 +455,10 @@ describe("HTTP query validation", () => {
               status: "ok",
             },
           },
+        },
+        version: {
+          shortCommit: "0123456",
+          updateAvailable: false,
         },
       });
     } finally {

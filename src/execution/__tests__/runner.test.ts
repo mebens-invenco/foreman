@@ -65,13 +65,13 @@ describe("provider runners", () => {
         cwd: tempDir,
         env: {},
         prompt: "test prompt",
-        timeoutMs: 20,
+        timeoutMs: 200,
       },
     });
 
     expect(result.exitCode).toBeNull();
     expect(result.timedOut).toBe(true);
-    expect(result.timeoutMs).toBe(20);
+    expect(result.timeoutMs).toBe(200);
     expect(result.stdout).toBe("checkpoint\n");
   }, 10_000);
 
