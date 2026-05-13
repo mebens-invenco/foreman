@@ -1,4 +1,5 @@
 import { renderAgentJsonLogLine } from "./agent-json-log-display"
+import { parseStructuredLogLine } from "./structured-log-display"
 
 type NamedAnsiColor =
   | "black"
@@ -431,6 +432,12 @@ export const appendLogChunk = (buffer: LogBuffer, chunk: string): LogBuffer => {
       continue
     }
 
+    const structuredSegments = parseStructuredLogLine(displayLine)
+    if (structuredSegments) {
+      renderedLines.push({ segments: structuredSegments })
+      continue
+    }
+
     const rendered = parseAnsiLine(displayLine, nextState)
     nextState = rendered.state
     renderedLines.push({ segments: rendered.segments })
@@ -449,6 +456,50 @@ export const appendLogChunk = (buffer: LogBuffer, chunk: string): LogBuffer => {
     parserState: cloneAnsiStyleState(nextState),
     pendingLineStartState,
   }
+}
+
+export const renderStaticLogContent = (content: string): RenderedLogLine[] => {
+  if (content.length === 0) {
+    return []
+  }
+
+  const normalized = normalizeLogChunk(content)
+  const { lines, remainder } = splitCompleteLines(normalized)
+  let nextState = createAnsiStyleState()
+  const renderedLines: RenderedLogLine[] = []
+
+  for (const line of lines) {
+    const displayLine = renderAgentJsonLogLine(line)
+    if (displayLine === null) {
+      continue
+    }
+
+    const structuredSegments = parseStructuredLogLine(displayLine)
+    if (structuredSegments) {
+      renderedLines.push({ segments: structuredSegments })
+      continue
+    }
+
+    const rendered = parseAnsiLine(displayLine, nextState)
+    nextState = rendered.state
+    renderedLines.push({ segments: rendered.segments })
+  }
+
+  if (remainder.length > 0) {
+    const displayLine = renderAgentJsonLogLine(remainder)
+    if (displayLine !== null) {
+      const structuredSegments = parseStructuredLogLine(displayLine)
+      if (structuredSegments) {
+        renderedLines.push({ segments: structuredSegments })
+      } else {
+        renderedLines.push({
+          segments: parseAnsiLine(displayLine, nextState).segments,
+        })
+      }
+    }
+  }
+
+  return renderedLines
 }
 
 export const appendSyntheticLogLine = (
