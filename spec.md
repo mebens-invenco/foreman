@@ -238,13 +238,13 @@ reviewSystem:
 runner:
   execution:
     type: opencode
-    model: openai/gpt-5.4
+    model: openai/gpt-5.5
     variant: high
     timeoutMs: 3600000
 
   reviewer:
     type: claude
-    model: claude-opus-4-6
+    model: claude-opus-4-7
     effort: high
     timeoutMs: 3600000
 
@@ -1414,8 +1414,8 @@ Returns:
     "taskSystem": {"type": "linear", "status": "ok"},
     "reviewSystem": {"type": "github", "status": "ok"},
     "runners": {
-      "execution": {"type": "opencode", "model": "openai/gpt-5.4", "status": "ok"},
-      "reviewer": {"type": "claude", "model": "claude-opus-4-6", "status": "ok"}
+      "execution": {"type": "opencode", "model": "openai/gpt-5.5", "status": "ok"},
+      "reviewer": {"type": "claude", "model": "claude-opus-4-7", "status": "ok"}
     }
   },
   "repos": {
@@ -1556,7 +1556,7 @@ Returns recent attempts newest-first:
       "workerId": "01H...",
       "attemptNumber": 1,
       "runnerName": "opencode",
-      "runnerModel": "openai/gpt-5.4",
+      "runnerModel": "openai/gpt-5.5",
       "runnerVariant": "high",
       "status": "running",
       "startedAt": "2026-03-14T12:00:10Z",
@@ -1579,7 +1579,7 @@ Returns one attempt, its ordered events, and its artifacts:
     "workerId": "01H...",
     "attemptNumber": 1,
     "runnerName": "opencode",
-    "runnerModel": "openai/gpt-5.4",
+    "runnerModel": "openai/gpt-5.5",
     "runnerVariant": "high",
     "status": "running",
     "startedAt": "2026-03-14T12:00:10Z",

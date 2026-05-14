@@ -269,12 +269,12 @@ describe("provider runners", () => {
 
     expect(JSON.parse(executionResult.stdout)).toEqual({
       provider: "opencode",
-      argv: ["run", "--model", "openai/gpt-5.4", "--variant", "high", "--format", "json"],
+      argv: ["run", "--model", "openai/gpt-5.5", "--variant", "high", "--format", "json"],
       stdin: "execution prompt",
     });
     expect(JSON.parse(reviewResult.stdout)).toEqual({
       provider: "opencode",
-      argv: ["run", "--model", "openai/gpt-5.4", "--variant", "high", "--format", "json"],
+      argv: ["run", "--model", "openai/gpt-5.5", "--variant", "high", "--format", "json"],
       stdin: "review prompt",
     });
     const reviewerInvocation = JSON.parse(reviewerResult.stdout) as { provider: string; argv: string[]; stdin: string };
@@ -286,7 +286,7 @@ describe("provider runners", () => {
       "-p",
       "--dangerously-skip-permissions",
       "--model",
-      "claude-opus-4-6",
+      "claude-opus-4-7",
       "--effort",
       "high",
       "--output-format",

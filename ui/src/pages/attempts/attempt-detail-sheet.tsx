@@ -80,6 +80,8 @@ function buildOpenSessionCommand(attempt: AttemptRecord) {
       return `${prefix}opencode -s ${sessionId}`
     case "claude":
       return `${prefix}claude --resume ${sessionId}`
+    case "codex":
+      return `${prefix}codex resume ${sessionId}`
   }
 }
 

@@ -446,12 +446,12 @@ describe("HTTP query validation", () => {
           runners: {
             execution: {
               type: "opencode",
-              model: "openai/gpt-5.4",
+              model: "openai/gpt-5.5",
               status: "ok",
             },
             reviewer: {
               type: "claude",
-              model: "claude-opus-4-6",
+              model: "claude-opus-4-7",
               status: "ok",
             },
           },
