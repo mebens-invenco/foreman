@@ -30,6 +30,19 @@ const isWorktreeClean = async (targetPath: string): Promise<boolean> => {
   return status.stdout.trim().length === 0;
 };
 
+const isHeadReachableFrom = async (targetPath: string, branchName: string): Promise<boolean> => {
+  try {
+    await exec(
+      "git",
+      ["merge-base", "--is-ancestor", "HEAD", `refs/heads/${branchName}`],
+      { cwd: targetPath },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const countUniqueCommitsSinceBase = async (targetPath: string, baseBranch: string): Promise<number> => {
   const output = await exec("git", ["rev-list", "--count", `origin/${baseBranch}..HEAD`], { cwd: targetPath });
   return Number.parseInt(output.stdout.trim() || "0", 10);
@@ -71,20 +84,23 @@ export const ensureTaskWorktree = async (input: {
     throw new ForemanError("invalid_worktree", `Existing worktree path is not a git worktree: ${targetPath}`);
   }
 
-  const currentBranch = await exec("git", ["branch", "--show-current"], { cwd: targetPath });
-  if (currentBranch.stdout.trim() !== taskBranch) {
-    if (input.action === "retry") {
+  const currentBranch = (await exec("git", ["branch", "--show-current"], { cwd: targetPath })).stdout.trim();
+  if (currentBranch !== taskBranch) {
+    if (currentBranch === "" && (await isHeadReachableFrom(targetPath, taskBranch))) {
+      await exec("git", ["checkout", taskBranch], { cwd: targetPath });
+    } else if (input.action === "retry") {
       await exec("git", ["reset", "--hard"], { cwd: targetPath });
       await exec("git", ["clean", "-fd"], { cwd: targetPath });
       await exec("git", ["checkout", "-B", taskBranch, `origin/${input.baseBranch}`], { cwd: targetPath });
       await exec("git", ["clean", "-fd"], { cwd: targetPath });
       return targetPath;
+    } else {
+      const observed = currentBranch === "" ? "detached HEAD" : currentBranch;
+      throw new ForemanError(
+        "worktree_branch_mismatch",
+        `Existing task worktree is on ${observed} instead of ${taskBranch}`,
+      );
     }
-
-    throw new ForemanError(
-      "worktree_branch_mismatch",
-      `Existing task worktree is on ${currentBranch.stdout.trim()} instead of ${taskBranch}`,
-    );
   }
 
   if (input.action === "retry") {

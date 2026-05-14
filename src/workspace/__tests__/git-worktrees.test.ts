@@ -214,6 +214,72 @@ describe("ensureTaskWorktree", () => {
     expect(await git(retriedPath, ["status", "--short"])).toBe("");
   });
 
+  test("reattaches detached HEAD when the commit is reachable from the task branch", async () => {
+    const fixture = await createFixture();
+    const paths = createWorkspacePaths("/project", fixture.workspaceRoot);
+    const worktreePath = await ensureTaskWorktree({
+      paths,
+      repo: fixture.repo,
+      task: fixture.task,
+      baseBranch: "main",
+      action: "execution",
+    });
+
+    const taskCommitSha = await writeAndCommit(worktreePath, "task.txt", "task work\n", "Task commit");
+
+    // Simulate the agent doing `git checkout <sha>` (detaches HEAD).
+    await git(worktreePath, ["checkout", taskCommitSha]);
+    expect(await git(worktreePath, ["branch", "--show-current"])).toBe("");
+
+    const reusedPath = await ensureTaskWorktree({
+      paths,
+      repo: fixture.repo,
+      task: fixture.task,
+      baseBranch: "main",
+      action: "review",
+    });
+
+    expect(reusedPath).toBe(worktreePath);
+    expect(await git(reusedPath, ["branch", "--show-current"])).toBe("task-123");
+    expect(await git(reusedPath, ["rev-parse", "HEAD"])).toBe(taskCommitSha);
+    expect(await git(reusedPath, ["status", "--short"])).toBe("");
+  });
+
+  test("throws when HEAD is detached at a commit not reachable from the task branch", async () => {
+    const fixture = await createFixture();
+    const paths = createWorkspacePaths("/project", fixture.workspaceRoot);
+    const worktreePath = await ensureTaskWorktree({
+      paths,
+      repo: fixture.repo,
+      task: fixture.task,
+      baseBranch: "main",
+      action: "execution",
+    });
+
+    const baseSha = await git(worktreePath, ["rev-parse", "HEAD"]);
+
+    // Create a commit on a throwaway branch the task branch does NOT contain.
+    await git(worktreePath, ["checkout", "-b", "throwaway"]);
+    const orphanSha = await writeAndCommit(worktreePath, "orphan.txt", "orphan\n", "Orphan commit");
+
+    // Detach onto the orphan commit, then delete the branch so HEAD is purely detached.
+    await git(worktreePath, ["checkout", orphanSha]);
+    await git(worktreePath, ["branch", "-D", "throwaway"]);
+    expect(await git(worktreePath, ["branch", "--show-current"])).toBe("");
+    expect(await git(worktreePath, ["rev-parse", "HEAD"])).toBe(orphanSha);
+    expect(orphanSha).not.toBe(baseSha);
+
+    await expect(
+      ensureTaskWorktree({
+        paths,
+        repo: fixture.repo,
+        task: fixture.task,
+        baseBranch: "main",
+        action: "review",
+      }),
+    ).rejects.toThrow(/detached HEAD/);
+  });
+
   test("retargets retry worktrees when task branch metadata changes", async () => {
     const fixture = await createFixture();
     const paths = createWorkspacePaths("/project", fixture.workspaceRoot);
