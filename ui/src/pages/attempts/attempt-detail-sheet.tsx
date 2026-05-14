@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react"
+import type { ReactNode } from "react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { useQuery } from "@tanstack/react-query"
@@ -11,6 +11,10 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { JsonView } from "@/components/json-view"
+import { LogLines, LogView } from "@/components/log-view"
+import { MarkdownView } from "@/components/markdown-view"
+import { RunnerOutputView } from "@/components/runner-output-view"
 import { TaskLink } from "@/components/task-link"
 import {
   getArtifactContent,
@@ -172,12 +176,43 @@ function formatBytes(value: number) {
   return `${(value / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function formatJsonContent(content: string) {
+type JsonParseResult = { ok: true; value: unknown } | { ok: false }
+
+function tryParseJson(content: string): JsonParseResult {
   try {
-    return JSON.stringify(JSON.parse(content), null, 2)
+    return { ok: true, value: JSON.parse(content) as unknown }
   } catch {
-    return content
+    return { ok: false }
   }
+}
+
+function isMarkdownArtifact(artifact: ArtifactRecord): boolean {
+  if (artifact.artifactType === "rendered_prompt") {
+    return true
+  }
+  if (artifact.mediaType.includes("markdown")) {
+    return true
+  }
+  return artifact.relativePath.toLowerCase().endsWith(".md")
+}
+
+function isJsonArtifact(artifact: ArtifactRecord): boolean {
+  if (artifact.artifactType === "parsed_result") {
+    return true
+  }
+  return artifact.mediaType.includes("json")
+}
+
+function isLogArtifact(artifact: ArtifactRecord): boolean {
+  if (artifact.artifactType === "log") {
+    return true
+  }
+  const path = artifact.relativePath.toLowerCase()
+  return path.endsWith(".log") || /\.log\.[0-9]+$/.test(path)
+}
+
+function isRunnerOutputArtifact(artifact: ArtifactRecord): boolean {
+  return artifact.artifactType === "runner_output"
 }
 
 function AttemptLogPanel({ attempt }: { attempt: AttemptRecord | null }) {
@@ -294,25 +329,7 @@ function AttemptLogPanel({ attempt }: { attempt: AttemptRecord | null }) {
         ) : lines.length === 0 ? (
           <p className="text-sm text-muted-foreground">No logs recorded for this attempt.</p>
         ) : (
-          <div className="m-0 whitespace-pre-wrap break-words">
-            {lines.map((line, index) => (
-              <div key={`attempt-log-line-${index}`}>
-                {line.segments.length === 0 ? (
-                  <span>&nbsp;</span>
-                ) : (
-                  line.segments.map((segment, segmentIndex) => (
-                    <span
-                      key={`attempt-log-segment-${index}-${segmentIndex}`}
-                      className={cn(segment.classes)}
-                      style={segment.style as CSSProperties}
-                    >
-                      {segment.text}
-                    </span>
-                  ))
-                )}
-              </div>
-            ))}
-          </div>
+          <LogLines lines={lines} keyPrefix="attempt-log" />
         )}
       </div>
     </div>
@@ -353,13 +370,52 @@ function ArtifactContent({ artifact }: { artifact: ArtifactRecord | null }) {
   }
 
   const content = query.data ?? ""
-  const isJson =
-    artifact.artifactType === "parsed_result" || artifact.mediaType.includes("json")
-  const displayContent = isJson ? formatJsonContent(content) : content
+
+  if (!content) {
+    return (
+      <pre className="max-h-[34rem] min-h-[18rem] overflow-auto border border-border/70 bg-muted/35 p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-words text-foreground">
+        Artifact file is empty.
+      </pre>
+    )
+  }
+
+  if (isJsonArtifact(artifact)) {
+    const parsed = tryParseJson(content)
+    if (parsed.ok) {
+      return (
+        <JsonView
+          value={parsed.value}
+          collapsed={2}
+          className="max-h-[34rem] min-h-[18rem] p-4 leading-6"
+        />
+      )
+    }
+  }
+
+  if (isRunnerOutputArtifact(artifact)) {
+    return (
+      <RunnerOutputView
+        content={content}
+        className="max-h-[34rem] min-h-[18rem]"
+      />
+    )
+  }
+
+  if (isLogArtifact(artifact)) {
+    return <LogView content={content} className="max-h-[34rem] min-h-[18rem]" />
+  }
+
+  if (isMarkdownArtifact(artifact)) {
+    return (
+      <div className="max-h-[34rem] min-h-[18rem] overflow-auto border border-border/70 bg-muted/35 p-4">
+        <MarkdownView>{content}</MarkdownView>
+      </div>
+    )
+  }
 
   return (
     <pre className="max-h-[34rem] min-h-[18rem] overflow-auto border border-border/70 bg-muted/35 p-4 font-mono text-xs leading-6 whitespace-pre-wrap break-words text-foreground">
-      {displayContent || "Artifact file is empty."}
+      {content}
     </pre>
   )
 }
@@ -460,9 +516,7 @@ function EventsPanel({ events }: { events: AttemptEventRecord[] }) {
             {event.message}
           </p>
           {Object.keys(event.payload).length > 0 ? (
-            <pre className="mt-3 overflow-auto bg-muted/35 p-3 font-mono text-xs leading-5 whitespace-pre-wrap text-muted-foreground">
-              {JSON.stringify(event.payload, null, 2)}
-            </pre>
+            <JsonView value={event.payload} collapsed={1} className="mt-3" />
           ) : null}
         </div>
       ))}
@@ -567,9 +621,9 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
                 <p className="text-xxs tracking-[0.28em] text-muted-foreground uppercase">
                   Summary
                 </p>
-                <p className="mt-2 text-sm leading-7 whitespace-pre-wrap text-foreground">
-                  {attempt.summary || attempt.errorMessage}
-                </p>
+                <MarkdownView className="mt-2">
+                  {attempt.summary || attempt.errorMessage || ""}
+                </MarkdownView>
               </section>
             ) : null}
 
