@@ -175,12 +175,12 @@ runner:
   execution:
     type: codex
     model: gpt-5.5
-    effort: max
+    effort: minimal
     timeoutMs: 1800000
   reviewer:
     type: claude
     model: claude-opus-4-7
-    effort: bogus
+    effort: xhigh
     timeoutMs: 600000
 scheduler:
   workerConcurrency: 4
@@ -196,9 +196,13 @@ http:
   port: 8765
 `);
 
-    // Codex never accepted "max" — coerced to "high".
+    // Codex's user-facing grade set is [low, medium, high, xhigh] — "minimal"
+    // (in the broader CLI schema but never surfaced in the model picker) is
+    // coerced to "high" so old configs still boot.
     expect(parsed.runner.execution).toMatchObject({ type: "codex", effort: "high" });
-    // Claude rejects "bogus" — coerced to "high".
+    // Claude's user-facing grade set is [low, medium, high, max] — "xhigh"
+    // (previously accepted by --effort but no longer in the curated set) is
+    // coerced to "high".
     expect(parsed.runner.reviewer).toMatchObject({ type: "claude", effort: "high" });
   });
 

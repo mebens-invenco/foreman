@@ -71,11 +71,14 @@ export const reviewSystemSchema = z.object({
 });
 
 // Stale workspace.json files may carry effort values that predate the enum
-// tightening (e.g. typos, or "max" once-accepted for codex). Coerce unknowns
-// to "high" at parse time so Foreman still boots; the UI then renders the
-// migrated value back on next save.
-const CLAUDE_EFFORT_VALUES = ["low", "medium", "high", "xhigh", "max"] as const;
-const CODEX_EFFORT_VALUES = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
+// tightening (e.g. typos, "xhigh" once accepted for claude, "none"/"minimal"
+// once accepted for codex). Coerce unknowns to "high" at parse time so
+// Foreman still boots; the UI then renders the migrated value back on next
+// save. The user-facing grade set per provider is intentionally trimmed to
+// what each provider's own model picker presents (4 grades each), not the
+// broader CLI-accepts surface.
+const CLAUDE_EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
+const CODEX_EFFORT_VALUES = ["low", "medium", "high", "xhigh"] as const;
 
 const coerceToKnown = <T extends readonly string[]>(known: T) =>
   (value: unknown): unknown =>

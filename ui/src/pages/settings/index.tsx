@@ -381,9 +381,9 @@ function runnerForType(type: RunnerProvider["type"], current: RunnerProvider): R
   }
 }
 
-const OPENCODE_VARIANT_SUGGESTIONS = ["low", "medium", "high", "xhigh", "max", "minimal"] as const
-const CLAUDE_EFFORT_VALUES = ["low", "medium", "high", "xhigh", "max"] as const
-const CODEX_EFFORT_VALUES = ["none", "minimal", "low", "medium", "high", "xhigh"] as const
+const OPENCODE_VARIANT_SUGGESTIONS = ["low", "medium", "high", "xhigh", "max"] as const
+const CLAUDE_EFFORT_VALUES = ["low", "medium", "high", "max"] as const
+const CODEX_EFFORT_VALUES = ["low", "medium", "high", "xhigh"] as const
 
 function RunnerTuningField({
   runner,
@@ -401,7 +401,7 @@ function RunnerTuningField({
       return (
         <TextField
           label="Variant"
-          help="OpenCode forwards this string to the underlying provider as reasoning effort. Common values: low, medium, high, xhigh, max, minimal. Anything is accepted — exact set depends on the model."
+          help="OpenCode forwards this string to the underlying provider as reasoning effort. Common values: low, medium, high, xhigh, max. Anything is accepted — exact set depends on the model."
           value={runner.variant}
           disabled={disabled}
           suggestions={OPENCODE_VARIANT_SUGGESTIONS}
@@ -412,7 +412,7 @@ function RunnerTuningField({
       return (
         <SelectField
           label="Effort"
-          help="Claude reasoning effort: low, medium, high, xhigh, or max."
+          help="Claude reasoning effort: low, medium, high, or max."
           value={runner.effort}
           values={[...CLAUDE_EFFORT_VALUES]}
           disabled={disabled}
@@ -423,7 +423,7 @@ function RunnerTuningField({
       return (
         <SelectField
           label="Effort"
-          help="Codex reasoning effort (model_reasoning_effort). Per-model availability varies — e.g. gpt-5.5 surfaces low, medium, high, xhigh."
+          help="Codex reasoning effort (model_reasoning_effort): low, medium, high, or xhigh."
           value={runner.effort}
           values={[...CODEX_EFFORT_VALUES]}
           disabled={disabled}
