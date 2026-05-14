@@ -29,6 +29,12 @@ export type RunnerProvider =
       effort: string
       timeoutMs: number
     }
+  | {
+      type: "codex"
+      model: string
+      effort: string
+      timeoutMs: number
+    }
 export type TaskProviderStates = {
   ready: string[]
   inProgress: string[]
@@ -212,7 +218,7 @@ export type AttemptRecord = {
   stage: ActionType | null
   workerId: string | null
   attemptNumber: number
-  runnerName: "opencode" | "claude"
+  runnerName: "opencode" | "claude" | "codex"
   runnerModel: string
   runnerVariant: string
   nativeSessionId: string | null

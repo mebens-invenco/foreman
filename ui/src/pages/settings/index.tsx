@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useId, useState, type ReactNode } from "react"
 
 import { CircleHelpIcon } from "lucide-react"
 
@@ -104,6 +104,7 @@ function TextField({
   disabled,
   placeholder,
   help,
+  suggestions,
 }: {
   label: string
   value: string
@@ -111,8 +112,11 @@ function TextField({
   disabled?: boolean
   placeholder?: string
   help: string
+  suggestions?: readonly string[]
 }) {
   const [draft, setDraft] = useState(value)
+  const reactId = useId()
+  const listId = suggestions && suggestions.length > 0 ? `${reactId}-list` : undefined
 
   useEffect(() => {
     setDraft(value)
@@ -135,6 +139,7 @@ function TextField({
         value={draft}
         placeholder={placeholder}
         disabled={disabled}
+        list={listId}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
@@ -143,6 +148,13 @@ function TextField({
           }
         }}
       />
+      {listId ? (
+        <datalist id={listId}>
+          {suggestions!.map((suggestion) => (
+            <option key={suggestion} value={suggestion} />
+          ))}
+        </datalist>
+      ) : null}
     </div>
   )
 }
@@ -340,19 +352,88 @@ function runnerPatch(role: RunnerRole, patch: Partial<RunnerProvider>): Settings
 }
 
 function runnerForType(type: RunnerProvider["type"], current: RunnerProvider): RunnerProvider {
-  if (type === "opencode") {
-    return {
-      type,
-      model: current.model || "openai/gpt-5.4",
-      variant: "high",
-      timeoutMs: current.timeoutMs,
+  switch (type) {
+    case "opencode":
+      return {
+        type,
+        model: current.model || "openai/gpt-5.5",
+        variant: "high",
+        timeoutMs: current.timeoutMs,
+      }
+    case "claude":
+      return {
+        type,
+        model: current.model || "claude-opus-4-7",
+        effort: "high",
+        timeoutMs: current.timeoutMs,
+      }
+    case "codex":
+      return {
+        type,
+        model: current.model || "gpt-5.5",
+        effort: "high",
+        timeoutMs: current.timeoutMs,
+      }
+    default: {
+      const _exhaustive: never = type
+      return _exhaustive
     }
   }
-  return {
-    type,
-    model: current.model || "claude-opus-4-6",
-    effort: "high",
-    timeoutMs: current.timeoutMs,
+}
+
+const OPENCODE_VARIANT_SUGGESTIONS = ["low", "medium", "high", "xhigh", "max", "minimal"] as const
+const CLAUDE_EFFORT_VALUES = ["low", "medium", "high", "xhigh", "max"] as const
+const CODEX_EFFORT_VALUES = ["none", "minimal", "low", "medium", "high", "xhigh"] as const
+
+function RunnerTuningField({
+  runner,
+  role,
+  disabled,
+  patch,
+}: {
+  runner: RunnerProvider
+  role: RunnerRole
+  disabled?: boolean
+  patch: (patch: SettingsPatch) => void
+}) {
+  switch (runner.type) {
+    case "opencode":
+      return (
+        <TextField
+          label="Variant"
+          help="OpenCode forwards this string to the underlying provider as reasoning effort. Common values: low, medium, high, xhigh, max, minimal. Anything is accepted — exact set depends on the model."
+          value={runner.variant}
+          disabled={disabled}
+          suggestions={OPENCODE_VARIANT_SUGGESTIONS}
+          onCommit={(variant) => patch(runnerPatch(role, { variant }))}
+        />
+      )
+    case "claude":
+      return (
+        <SelectField
+          label="Effort"
+          help="Claude reasoning effort: low, medium, high, xhigh, or max."
+          value={runner.effort}
+          values={[...CLAUDE_EFFORT_VALUES]}
+          disabled={disabled}
+          onCommit={(effort) => patch(runnerPatch(role, { effort }))}
+        />
+      )
+    case "codex":
+      return (
+        <SelectField
+          label="Effort"
+          help="Codex reasoning effort (model_reasoning_effort). Per-model availability varies — e.g. gpt-5.5 surfaces low, medium, high, xhigh."
+          value={runner.effort}
+          values={[...CODEX_EFFORT_VALUES]}
+          disabled={disabled}
+          onCommit={(effort) => patch(runnerPatch(role, { effort }))}
+        />
+      )
+    default: {
+      const _exhaustive: never = runner
+      return _exhaustive
+    }
   }
 }
 
@@ -375,7 +456,7 @@ function RunnerFields({
           label="Provider"
           help="Runner CLI/provider used for this role. Switching providers also resets the tuning field to that provider's default."
           value={runner.type}
-          values={["opencode", "claude"]}
+          values={["opencode", "claude", "codex"]}
           disabled={disabled}
           onCommit={(type) =>
             patch(runnerPatch(role, runnerForType(type as RunnerProvider["type"], runner)))
@@ -388,23 +469,7 @@ function RunnerFields({
           disabled={disabled}
           onCommit={(model) => patch(runnerPatch(role, { model }))}
         />
-        {runner.type === "opencode" ? (
-          <TextField
-            label="Variant"
-            help="OpenCode tuning variant used for this role, such as low, medium, or high."
-            value={runner.variant}
-            disabled={disabled}
-            onCommit={(variant) => patch(runnerPatch(role, { variant }))}
-          />
-        ) : (
-          <TextField
-            label="Effort"
-            help="Claude effort level used for this role, such as low, medium, high, or max."
-            value={runner.effort}
-            disabled={disabled}
-            onCommit={(effort) => patch(runnerPatch(role, { effort }))}
-          />
-        )}
+        <RunnerTuningField runner={runner} role={role} disabled={disabled} patch={patch} />
         <NumberField
           label="Timeout ms"
           help="Maximum runtime for one runner invocation before Foreman terminates it."

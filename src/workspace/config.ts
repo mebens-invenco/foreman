@@ -70,24 +70,35 @@ export const reviewSystemSchema = z.object({
   type: z.literal("github").default("github"),
 });
 
+// Stale workspace.json files may carry effort values that predate the enum
+// tightening (e.g. typos, or "max" once-accepted for codex). Coerce unknowns
+// to "high" at parse time so Foreman still boots; the UI then renders the
+// migrated value back on next save.
+const CLAUDE_EFFORT_VALUES = ["low", "medium", "high", "xhigh", "max"] as const;
+const CODEX_EFFORT_VALUES = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
+
+const coerceToKnown = <T extends readonly string[]>(known: T) =>
+  (value: unknown): unknown =>
+    typeof value === "string" && (known as readonly string[]).includes(value) ? value : "high";
+
 export const opencodeRunnerSchema = z.object({
   type: z.literal("opencode").default("opencode"),
-  model: z.string().min(1).default("openai/gpt-5.4"),
+  model: z.string().min(1).default("openai/gpt-5.5"),
   variant: z.string().min(1).default("high"),
   timeoutMs: z.number().int().positive().default(3_600_000),
 });
 
 export const claudeRunnerSchema = z.object({
   type: z.literal("claude"),
-  model: z.string().min(1).default("claude-opus-4-6"),
-  effort: z.string().min(1).default("high"),
+  model: z.string().min(1).default("claude-opus-4-7"),
+  effort: z.preprocess(coerceToKnown(CLAUDE_EFFORT_VALUES), z.enum(CLAUDE_EFFORT_VALUES).default("high")),
   timeoutMs: z.number().int().positive().default(3_600_000),
 });
 
 export const codexRunnerSchema = z.object({
   type: z.literal("codex"),
   model: z.string().min(1).default("gpt-5.5"),
-  effort: z.string().min(1).default("high"),
+  effort: z.preprocess(coerceToKnown(CODEX_EFFORT_VALUES), z.enum(CODEX_EFFORT_VALUES).default("high")),
   timeoutMs: z.number().int().positive().default(3_600_000),
 });
 
@@ -143,14 +154,14 @@ const normalizeLegacyWorkspaceRunnerConfig = (input: unknown): unknown => {
 
 const defaultExecutionRunner = {
   type: "opencode",
-  model: "openai/gpt-5.4",
+  model: "openai/gpt-5.5",
   variant: "high",
   timeoutMs: 3_600_000,
 } as const;
 
 const defaultReviewerRunner = {
   type: "claude",
-  model: "claude-opus-4-6",
+  model: "claude-opus-4-7",
   effort: "high",
   timeoutMs: 3_600_000,
 } as const;
