@@ -245,6 +245,101 @@ describe("ensureTaskWorktree", () => {
     expect(await git(reusedPath, ["status", "--short"])).toBe("");
   });
 
+  test("preserves uncommitted work when reattaching a dirty detached HEAD", async () => {
+    const fixture = await createFixture();
+    const paths = createWorkspacePaths("/project", fixture.workspaceRoot);
+    const worktreePath = await ensureTaskWorktree({
+      paths,
+      repo: fixture.repo,
+      task: fixture.task,
+      baseBranch: "main",
+      action: "execution",
+    });
+
+    const taskCommitSha = await writeAndCommit(worktreePath, "task.txt", "task work\n", "Task commit");
+
+    await git(worktreePath, ["checkout", taskCommitSha]);
+    await fs.writeFile(path.join(worktreePath, "uncommitted.txt"), "agent left this behind\n");
+
+    const reusedPath = await ensureTaskWorktree({
+      paths,
+      repo: fixture.repo,
+      task: fixture.task,
+      baseBranch: "main",
+      action: "review",
+    });
+
+    expect(reusedPath).toBe(worktreePath);
+    expect(await git(reusedPath, ["branch", "--show-current"])).toBe("task-123");
+    // Uncommitted file is carried forward (parity with the on-branch reuse path —
+    // we never silently delete agent work outside the retry action).
+    expect(await fs.readFile(path.join(reusedPath, "uncommitted.txt"), "utf8")).toBe(
+      "agent left this behind\n",
+    );
+  });
+
+  test("retry recovers a detached HEAD that is unreachable from the task branch", async () => {
+    const fixture = await createFixture();
+    const paths = createWorkspacePaths("/project", fixture.workspaceRoot);
+    const worktreePath = await ensureTaskWorktree({
+      paths,
+      repo: fixture.repo,
+      task: fixture.task,
+      baseBranch: "main",
+      action: "execution",
+    });
+
+    await git(worktreePath, ["checkout", "-b", "throwaway"]);
+    const orphanSha = await writeAndCommit(worktreePath, "orphan.txt", "orphan\n", "Orphan commit");
+    await git(worktreePath, ["checkout", orphanSha]);
+    await git(worktreePath, ["branch", "-D", "throwaway"]);
+
+    const latestBaseSha = await writeAndCommit(fixture.seedPath, "README.md", "retry base\n", "Retry base update");
+    await pushMain(fixture.seedPath);
+
+    const retriedPath = await ensureTaskWorktree({
+      paths,
+      repo: fixture.repo,
+      task: fixture.task,
+      baseBranch: "main",
+      action: "retry",
+    });
+
+    expect(retriedPath).toBe(worktreePath);
+    expect(await git(retriedPath, ["branch", "--show-current"])).toBe("task-123");
+    expect(await git(retriedPath, ["rev-parse", "HEAD"])).toBe(latestBaseSha);
+    expect(await git(retriedPath, ["status", "--short"])).toBe("");
+  });
+
+  test("throws when detached HEAD's task branch ref is missing locally", async () => {
+    const fixture = await createFixture();
+    const paths = createWorkspacePaths("/project", fixture.workspaceRoot);
+    const worktreePath = await ensureTaskWorktree({
+      paths,
+      repo: fixture.repo,
+      task: fixture.task,
+      baseBranch: "main",
+      action: "execution",
+    });
+
+    const taskCommitSha = await writeAndCommit(worktreePath, "task.txt", "task work\n", "Task commit");
+
+    // Detach onto the commit, then delete the local task branch ref so the
+    // ancestry check (`merge-base --is-ancestor HEAD refs/heads/task-123`) fails.
+    await git(worktreePath, ["checkout", taskCommitSha]);
+    await git(worktreePath, ["branch", "-D", "task-123"]);
+
+    await expect(
+      ensureTaskWorktree({
+        paths,
+        repo: fixture.repo,
+        task: fixture.task,
+        baseBranch: "main",
+        action: "review",
+      }),
+    ).rejects.toThrow(/detached HEAD/);
+  });
+
   test("throws when HEAD is detached at a commit not reachable from the task branch", async () => {
     const fixture = await createFixture();
     const paths = createWorkspacePaths("/project", fixture.workspaceRoot);
