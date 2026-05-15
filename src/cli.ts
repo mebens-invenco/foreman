@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import path from "node:path";
+
 import { Command, InvalidArgumentError } from "commander";
 import { z } from "zod";
 
@@ -20,6 +22,7 @@ import { renderWorkspacePlan } from "./planning/render-workspace-plan.js";
 import { createRepos } from "./repos/index.js";
 import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
 import { createReviewService, resolveGitHubAuthEnv } from "./review/index.js";
+import { createSelfRebootScheduler, runRebootSidecar } from "./system/reboot.js";
 import { createTaskSystem } from "./tasking/index.js";
 import { discoverGitRepos } from "./workspace/git-repo-discovery.js";
 import { initializeWorkspace, loadWorkspace } from "./workspace/index.js";
@@ -131,6 +134,8 @@ const parseLogLevel = (value: string): LoggerLevelName => {
   return normalized as LoggerLevelName;
 };
 
+const resolveEntrypointPath = (): string => (process.argv[1] ? path.resolve(process.argv[1]) : path.join(process.cwd(), "dist", "cli.js"));
+
 program.name("foreman").description("Workspace-scoped orchestration system");
 
 program
@@ -187,7 +192,23 @@ program
     });
     const versionMonitor = new ForemanVersionMonitor(paths);
 
-    const server = createHttpServer({ config, paths, repoRefs, repos, taskSystem, reviewService, scheduler, versionMonitor });
+    const server = createHttpServer({
+      config,
+      paths,
+      repoRefs,
+      repos,
+      taskSystem,
+      reviewService,
+      scheduler,
+      versionMonitor,
+      rebootScheduler: createSelfRebootScheduler({
+        config,
+        paths,
+        workspace,
+        logLevel: options.logLevel,
+        entrypointPath: resolveEntrypointPath(),
+      }),
+    });
     versionMonitor.start();
     await server.listen({ host: config.http.host, port: config.http.port });
     logger.info("http server listening", { host: config.http.host, port: config.http.port });
@@ -323,5 +344,27 @@ for (const action of ["start", "pause", "stop"] as const) {
     process.stdout.write(`${await response.text()}\n`);
   });
 }
+
+program
+  .command("reboot-sidecar", { hidden: true })
+  .description("Internal command used to restart Foreman after graceful shutdown")
+  .requiredOption("--workspace <workspace>")
+  .requiredOption("--log-level <level>", "Minimum log level", parseLogLevel)
+  .requiredOption("--host <host>")
+  .requiredOption("--port <port>", "HTTP port", parsePositiveInteger)
+  .requiredOption("--parent-pid <pid>", "Parent Foreman PID", parsePositiveInteger)
+  .requiredOption("--entrypoint <path>")
+  .action(async (options: { workspace: string; logLevel: LoggerLevelName; host: string; port: number; parentPid: number; entrypoint: string }) => {
+    const { paths } = await loadWorkspace(options.workspace);
+    await runRebootSidecar({
+      paths,
+      workspace: options.workspace,
+      logLevel: options.logLevel,
+      host: options.host,
+      port: options.port,
+      parentPid: options.parentPid,
+      entrypointPath: path.resolve(options.entrypoint),
+    });
+  });
 
 await program.parseAsync(process.argv);
