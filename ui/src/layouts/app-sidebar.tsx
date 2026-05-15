@@ -1,8 +1,9 @@
 import { Link, useLocation } from "react-router"
-import { OrbitIcon } from "lucide-react"
+import { OrbitIcon, RotateCcwIcon } from "lucide-react"
 
 import { getNavigationItem, navigationItems } from "@/app/navigation"
 import { useStatusQuery } from "@/hooks/use-status-query"
+import { useSystemRebootMutation } from "@/hooks/use-system-reboot-mutation"
 import {
   Sidebar,
   SidebarContent,
@@ -22,6 +23,21 @@ export function AppSidebar() {
   const location = useLocation()
   const activeItem = getNavigationItem(location.pathname)
   const { data: status, isLoading } = useStatusQuery()
+  const rebootMutation = useSystemRebootMutation()
+
+  const handleRestartClick = () => {
+    if (
+      !window.confirm(
+        "Restart Foreman now? The UI may disconnect briefly while the process restarts."
+      )
+    ) {
+      return
+    }
+
+    rebootMutation.mutate()
+  }
+
+  const isRestarting = rebootMutation.isPending || rebootMutation.isSuccess
 
   return (
     <Sidebar
@@ -80,6 +96,19 @@ export function AppSidebar() {
 
       <SidebarFooter className="gap-4 px-3 py-4">
         <SidebarSeparator />
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              className="text-sidebar-foreground/75 hover:text-sidebar-accent-foreground disabled:opacity-60"
+              disabled={isRestarting}
+              onClick={handleRestartClick}
+              tooltip="Restart Foreman"
+            >
+              <RotateCcwIcon className={isRestarting ? "animate-spin" : undefined} />
+              <span>{isRestarting ? "Restarting..." : "Restart Foreman"}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
         <div className="space-y-2 px-2 text-xs leading-5 text-sidebar-foreground/65 group-data-[collapsible=icon]:hidden">
           <p>
             {status ? `${status.repos.count} repos` : "Inspecting workspace..."}

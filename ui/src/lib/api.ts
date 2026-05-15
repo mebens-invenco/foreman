@@ -174,6 +174,12 @@ type ScoutMutationResponse = {
   }
 }
 
+export type RebootMutationResponse = {
+  reboot: {
+    status: "scheduled"
+  }
+}
+
 export type Worker = {
   id: string
   slot: number
@@ -505,6 +511,12 @@ export function stopScheduler() {
 
 export function runScout() {
   return requestJson<ScoutMutationResponse>("/api/scout/run", {
+    method: "POST",
+  })
+}
+
+export function rebootSystem() {
+  return requestJson<RebootMutationResponse>("/api/system/reboot", {
     method: "POST",
   })
 }

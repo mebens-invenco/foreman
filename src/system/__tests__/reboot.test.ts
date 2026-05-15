@@ -6,6 +6,10 @@ const result = (stdout = "", exitCode = 0, stderr = ""): CommandResult => ({ exi
 
 const commandKey = (command: string, args: string[]): string => [command, ...args].join(" ");
 
+const captureLog = (logs: string[]) => (message: string): void => {
+  logs.push(message);
+};
+
 const createCommandRunner = (responses: Record<string, CommandResult[]>) => {
   const calls: string[] = [];
   const runCommand: CommandRunner = async (command, args) => {
@@ -29,7 +33,7 @@ describe("runRebootUpdate", () => {
       "git rev-parse --abbrev-ref HEAD": [result("feature\n")],
     });
 
-    const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: (message) => logs.push(message) });
+    const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: captureLog(logs) });
 
     expect(outcome).toMatchObject({ branch: "feature", pullAttempted: false, installAttempted: false, buildAttempted: false });
     expect(calls).toEqual(["git rev-parse --abbrev-ref HEAD"]);
@@ -43,7 +47,7 @@ describe("runRebootUpdate", () => {
       "git status --porcelain": [result(" M src/http.ts\n")],
     });
 
-    const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: (message) => logs.push(message) });
+    const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: captureLog(logs) });
 
     expect(outcome).toMatchObject({ branch: "master", dirty: true, pullAttempted: false });
     expect(calls).toEqual(["git rev-parse --abbrev-ref HEAD", "git status --porcelain"]);
@@ -59,7 +63,7 @@ describe("runRebootUpdate", () => {
       "git pull --ff-only origin master": [result("", 1, "fatal: pull failed")],
     });
 
-    const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: (message) => logs.push(message) });
+    const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: captureLog(logs) });
 
     expect(outcome).toMatchObject({ pullAttempted: true, pulled: false, installAttempted: false, buildAttempted: false });
     expect(calls).not.toContain("yarn install");
@@ -76,7 +80,7 @@ describe("runRebootUpdate", () => {
       "git pull --ff-only origin master": [result("Already up to date.\n")],
     });
 
-    const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: (message) => logs.push(message) });
+    const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: captureLog(logs) });
 
     expect(outcome).toMatchObject({ pulled: true, headChanged: false, installAttempted: false, buildAttempted: false });
     expect(calls).not.toContain("yarn install");
@@ -95,7 +99,7 @@ describe("runRebootUpdate", () => {
       "yarn build": [result("", 1, "build failed")],
     });
 
-    const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: (message) => logs.push(message) });
+    const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: captureLog(logs) });
 
     expect(outcome).toMatchObject({ pulled: true, headChanged: true, installAttempted: true, buildAttempted: true });
     expect(calls.slice(-2)).toEqual(["yarn install", "yarn build"]);
