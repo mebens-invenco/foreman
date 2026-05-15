@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import path from "node:path";
 
 import { isoNow } from "../../lib/time.js";
 import type { AgentRunnerInvokeRequest, CapturedAgentRunResult } from "../agent-runner.js";
@@ -14,11 +15,15 @@ export const runAgentProcess = async (input: {
   normalizeStdout?: (stdout: string) => NormalizedJsonOutput;
 }): Promise<CapturedAgentRunResult> => {
   const startedAt = isoNow();
+  const env = { ...process.env, ...input.request.env };
+  if (process.platform !== "win32") {
+    env.PWD = path.resolve(input.request.cwd);
+  }
 
   const child = spawn(input.command, input.args, {
     cwd: input.request.cwd,
     detached: useProcessGroups,
-    env: { ...process.env, ...input.request.env },
+    env,
     stdio: "pipe",
   });
 
