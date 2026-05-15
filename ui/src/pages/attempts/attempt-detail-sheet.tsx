@@ -25,6 +25,11 @@ import {
   type AttemptRecord,
 } from "@/lib/api"
 import {
+  attemptDetailQueryKey,
+  useStopAttemptMutation,
+} from "@/hooks/use-attempts-query"
+import { useWorkersQuery } from "@/hooks/use-workers-query"
+import {
   formatActionLabel,
   formatDuration,
   formatShortNumber,
@@ -528,8 +533,10 @@ function EventsPanel({ events }: { events: AttemptEventRecord[] }) {
 
 export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
   const [detailTab, setDetailTab] = useState<AttemptDetailTab>("events")
+  const stopAttemptMutation = useStopAttemptMutation()
+  const { data: workers = [] } = useWorkersQuery()
   const query = useQuery({
-    queryKey: ["foreman", "attempt", attemptId],
+    queryKey: attemptDetailQueryKey(attemptId),
     queryFn: () => getAttempt(attemptId!),
     enabled: Boolean(attemptId),
     refetchInterval: 5_000,
@@ -544,6 +551,14 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
   const taskUrl = isCronAttempt ? null : attempt?.taskUrl ?? null
   const targetLabel = isCronAttempt ? "Scope" : "Target"
   const targetValue = isCronAttempt ? "Workspace" : attempt?.target
+  const attemptWorker = attempt
+    ? workers.find((worker) => worker.currentAttemptId === attempt.id)
+    : undefined
+  const canStopAttempt = attempt?.status === "running"
+  const isStopPending = stopAttemptMutation.isPending
+  const isStopDisabled = isStopPending || attemptWorker?.status === "stopping"
+  const stopButtonLabel =
+    isStopPending || attemptWorker?.status === "stopping" ? "Stopping" : "Stop"
 
   return (
     <SheetContent
@@ -558,7 +573,22 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
               {attemptId ?? "No attempt selected"}
             </SheetDescription>
           </div>
-          {attempt ? <AttemptStatusBadge status={attempt.status} /> : null}
+          {attempt ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {canStopAttempt ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={isStopDisabled}
+                  onClick={() => stopAttemptMutation.mutate(attempt.id)}
+                >
+                  {stopButtonLabel}
+                </Button>
+              ) : null}
+              <AttemptStatusBadge status={attempt.status} />
+            </div>
+          ) : null}
         </div>
       </SheetHeader>
 

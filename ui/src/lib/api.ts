@@ -174,6 +174,11 @@ type ScoutMutationResponse = {
   }
 }
 
+type StopAttemptResponse = {
+  attemptId: string
+  stopRequested: boolean
+}
+
 export type Worker = {
   id: string
   slot: number
@@ -440,6 +445,12 @@ export function getAttemptLogs(attemptId: string) {
 
 export function getAttempt(attemptId: string) {
   return requestJson<AttemptDetail>(`/api/attempts/${attemptId}`)
+}
+
+export function stopAttempt(attemptId: string) {
+  return requestJson<StopAttemptResponse>(`/api/attempts/${attemptId}/stop`, {
+    method: "POST",
+  })
 }
 
 export function getArtifactContent(artifactId: string) {
