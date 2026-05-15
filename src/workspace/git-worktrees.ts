@@ -21,8 +21,33 @@ const isGitWorktree = async (targetPath: string): Promise<boolean> => {
   }
 };
 
+const repoRootRefMutationQueues = new Map<string, Promise<void>>();
+
+const withRepoRootRefMutationLock = async <T>(repo: RepoRef, operation: () => Promise<T>): Promise<T> => {
+  const previous = repoRootRefMutationQueues.get(repo.rootPath) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const queued = previous.then(() => current);
+
+  repoRootRefMutationQueues.set(repo.rootPath, queued);
+  await previous;
+
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (repoRootRefMutationQueues.get(repo.rootPath) === queued) {
+      repoRootRefMutationQueues.delete(repo.rootPath);
+    }
+  }
+};
+
 const fetchOriginBranch = async (repo: RepoRef, branchName: string): Promise<void> => {
-  await exec("git", ["fetch", "origin", branchName], { cwd: repo.rootPath });
+  await withRepoRootRefMutationLock(repo, () =>
+    exec("git", ["fetch", "origin", branchName], { cwd: repo.rootPath }),
+  );
 };
 
 const isWorktreeClean = async (targetPath: string): Promise<boolean> => {
@@ -145,7 +170,9 @@ export const branchExistsOnOrigin = async (repo: RepoRef, branchName: string): P
 
 export const isAncestorOnOrigin = async (repo: RepoRef, ancestorBranch: string, descendantBranch: string): Promise<boolean> => {
   try {
-    await exec("git", ["fetch", "origin", ancestorBranch, descendantBranch], { cwd: repo.rootPath });
+    await withRepoRootRefMutationLock(repo, () =>
+      exec("git", ["fetch", "origin", ancestorBranch, descendantBranch], { cwd: repo.rootPath }),
+    );
     await exec("git", ["merge-base", "--is-ancestor", `origin/${ancestorBranch}`, `origin/${descendantBranch}`], {
       cwd: repo.rootPath,
     });
