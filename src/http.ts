@@ -646,6 +646,12 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     };
   });
 
+  server.post("/api/attempts/:attemptId/stop", async (request) => {
+    const params = request.params as { attemptId: string };
+    deps.scheduler.stopAttempt(params.attemptId);
+    return { attemptId: params.attemptId, stopRequested: true };
+  });
+
   server.get("/api/attempts/:attemptId/logs", async (request, reply) => {
     const params = request.params as { attemptId: string };
     const logPath = attemptLogPath(deps.paths, params.attemptId);

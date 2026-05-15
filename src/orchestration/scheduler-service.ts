@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 
 import { discoverCronJobs, type CronJobDefinition } from "../cron/index.js";
 import type { ActionType, RepoRef, ReviewContext, Task, TaskTarget, WorkerResult } from "../domain/index.js";
-import { isProviderRateLimitError, type ProviderRateLimitError } from "../lib/errors.js";
+import { ForemanError, isForemanError, isProviderRateLimitError, type ProviderRateLimitError } from "../lib/errors.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, RecoveredAttemptRecord, WorkerRecord } from "../repos/index.js";
@@ -253,6 +253,54 @@ export class SchedulerService extends EventEmitter {
     });
 
     await this.stopPromise;
+  }
+
+  stopAttempt(attemptId: string): void {
+    let attempt: AttemptRecord;
+    try {
+      attempt = this.deps.foremanRepos.attempts.getAttempt(attemptId);
+    } catch (error) {
+      if (isForemanError(error) && error.code === "attempt_not_found") {
+        throw new ForemanError(
+          "attempt_stop_conflict",
+          `Attempt ${attemptId} is not active in this scheduler process.`,
+          409,
+        );
+      }
+      throw error;
+    }
+
+    if (attempt.status !== "running") {
+      throw new ForemanError(
+        "attempt_stop_conflict",
+        `Attempt ${attemptId} is not running and cannot be stopped.`,
+        409,
+      );
+    }
+
+    const worker = this.deps.foremanRepos.workers.listWorkers().find((item) => item.currentAttemptId === attemptId);
+    const controller = worker ? this.workerAbortControllers.get(worker.id) : undefined;
+    if (!worker || !controller || !this.activeWorkerRuns.has(worker.id)) {
+      throw new ForemanError(
+        "attempt_stop_conflict",
+        `Attempt ${attemptId} is not active in this scheduler process.`,
+        409,
+      );
+    }
+
+    if (controller.signal.aborted) {
+      throw new ForemanError("attempt_stop_conflict", `Attempt ${attemptId} stop has already been requested.`, 409);
+    }
+
+    this.deps.foremanRepos.workers.updateWorkerStatus(worker.id, "stopping", attemptId);
+    this.deps.foremanRepos.attempts.addAttemptEvent(
+      attemptId,
+      "attempt_stop_requested",
+      `Stop requested for attempt ${attemptId}`,
+    );
+    this.emit("worker_updated", { workerId: worker.id, status: "stopping", attemptId });
+    this.logger.info("attempt stop requested", { workerId: worker.id, attemptId });
+    controller.abort();
   }
 
   triggerManualScout(): void {

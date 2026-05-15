@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createDefaultWorkspaceConfig } from "../workspace/config.js";
 import { createHttpServer } from "../http.js";
 import type { Task } from "../domain/index.js";
+import { ForemanError } from "../lib/errors.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
 
 const cleanupDirs: string[] = [];
@@ -703,6 +704,93 @@ describe("HTTP query validation", () => {
 });
 
 describe("HTTP scheduler control", () => {
+  test("stops an active attempt through the scheduler", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const stopAttempt = vi.fn();
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [sampleTask]),
+        getTask: vi.fn(async () => sampleTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        stopAttempt,
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({ method: "POST", url: "/api/attempts/attempt-1/stop" });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ attemptId: "attempt-1", stopRequested: true });
+      expect(stopAttempt).toHaveBeenCalledWith("attempt-1");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("returns conflict when attempt stop is rejected", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const stopAttempt = vi.fn(() => {
+      throw new ForemanError("attempt_stop_conflict", "Attempt attempt-1 is not active in this scheduler process.", 409);
+    });
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [sampleTask]),
+        getTask: vi.fn(async () => sampleTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        stopAttempt,
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({ method: "POST", url: "/api/attempts/attempt-1/stop" });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toEqual({
+        error: { code: "attempt_stop_conflict", message: "Attempt attempt-1 is not active in this scheduler process." },
+      });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
   test("returns stopping immediately while scheduler shutdown continues in background", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
     cleanupDirs.push(workspaceRoot);
