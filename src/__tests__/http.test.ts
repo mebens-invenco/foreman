@@ -738,7 +738,7 @@ describe("HTTP scheduler control", () => {
       const response = await server.inject({ method: "POST", url: "/api/attempts/attempt-1/stop" });
 
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ attempt: { id: "attempt-1", status: "stopping" } });
+      expect(response.json()).toEqual({ attemptId: "attempt-1", stopRequested: true });
       expect(stopAttempt).toHaveBeenCalledWith("attempt-1");
     } finally {
       await server.close();

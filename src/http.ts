@@ -649,7 +649,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   server.post("/api/attempts/:attemptId/stop", async (request) => {
     const params = request.params as { attemptId: string };
     deps.scheduler.stopAttempt(params.attemptId);
-    return { attempt: { id: params.attemptId, status: "stopping" } };
+    return { attemptId: params.attemptId, stopRequested: true };
   });
 
   server.get("/api/attempts/:attemptId/logs", async (request, reply) => {
