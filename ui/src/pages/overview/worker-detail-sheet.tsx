@@ -1,5 +1,7 @@
 import type { ReactNode } from "react"
 
+import { Button } from "@/components/ui/button"
+import { useStopAttemptMutation } from "@/hooks/use-attempts-query"
 import type { Worker } from "@/lib/api"
 import { formatActionLabel, formatRelativeTime, formatTimestamp } from "@/lib/format"
 
@@ -32,6 +34,7 @@ type WorkerDetailSheetProps = {
 }
 
 export function WorkerDetailSheet({ worker, now }: WorkerDetailSheetProps) {
+  const stopAttemptMutation = useStopAttemptMutation()
   const timingLabel = worker.currentAttempt?.startedAt
     ? `Started ${formatRelativeTime(worker.currentAttempt.startedAt, now)}`
     : `Idle since ${formatRelativeTime(worker.lastHeartbeatAt, now)}`
@@ -43,6 +46,14 @@ export function WorkerDetailSheet({ worker, now }: WorkerDetailSheetProps) {
   const taskUrl = isCronJob ? null : worker.currentJob?.taskUrl ?? null
   const targetLabel = isCronJob ? "Scope" : "Repo target"
   const targetValue = isCronJob ? "Workspace" : worker.currentJob?.repoKey
+  const currentAttemptId = worker.currentAttempt?.id ?? worker.currentAttemptId
+  const canStopAttempt = Boolean(
+    currentAttemptId && worker.currentAttempt?.status === "running"
+  )
+  const isStopPending = stopAttemptMutation.isPending
+  const isStopDisabled = isStopPending || worker.status === "stopping"
+  const stopButtonLabel =
+    isStopPending || worker.status === "stopping" ? "Stopping" : "Stop"
 
   return (
     <SheetContent
@@ -57,7 +68,24 @@ export function WorkerDetailSheet({ worker, now }: WorkerDetailSheetProps) {
               {worker.id}
             </SheetDescription>
           </div>
-          <WorkerStatusBadge status={worker.status} />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {canStopAttempt ? (
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={isStopDisabled}
+                onClick={() => {
+                  if (currentAttemptId) {
+                    stopAttemptMutation.mutate(currentAttemptId)
+                  }
+                }}
+              >
+                {stopButtonLabel}
+              </Button>
+            ) : null}
+            <WorkerStatusBadge status={worker.status} />
+          </div>
         </div>
       </SheetHeader>
 

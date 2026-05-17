@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../../domain/index.js";
-import { ProviderRateLimitError } from "../../lib/errors.js";
+import { ForemanError, ProviderRateLimitError } from "../../lib/errors.js";
 import { SchedulerService } from "../index.js";
 import * as worktrees from "../../workspace/git-worktrees.js";
 import { createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
@@ -1457,6 +1457,240 @@ describe("SchedulerService applyWorkerResult", () => {
     resolveRun();
     await stopPromise;
     expect(scheduler.getStatus().status).toBe("stopped");
+  });
+
+  test("stops one active attempt without aborting other workers", () => {
+    const updateWorkerStatus = vi.fn();
+    const addAttemptEvent = vi.fn();
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({
+        attempts: {
+          getAttempt: vi.fn(() => ({ id: "attempt-4", status: "running" })),
+          addAttemptEvent,
+        },
+        workers: {
+          listWorkers: vi.fn(() => [
+            {
+              id: "worker-1",
+              slot: 1,
+              status: "running",
+              currentAttemptId: "attempt-4",
+              lastHeartbeatAt: "2026-03-16T00:00:00Z",
+            },
+            {
+              id: "worker-2",
+              slot: 2,
+              status: "running",
+              currentAttemptId: "attempt-5",
+              lastHeartbeatAt: "2026-03-16T00:00:00Z",
+            },
+          ]),
+          updateWorkerStatus,
+        },
+      }),
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const targetController = new AbortController();
+    const otherController = new AbortController();
+    const workerUpdated = vi.fn();
+    scheduler.on("worker_updated", workerUpdated);
+    (scheduler as any).workerAbortControllers.set("worker-1", targetController);
+    (scheduler as any).workerAbortControllers.set("worker-2", otherController);
+    (scheduler as any).activeWorkerRuns.set("worker-1", Promise.resolve());
+    (scheduler as any).activeWorkerRuns.set("worker-2", Promise.resolve());
+
+    scheduler.stopAttempt("attempt-4");
+
+    expect(targetController.signal.aborted).toBe(true);
+    expect(otherController.signal.aborted).toBe(false);
+    expect(updateWorkerStatus).toHaveBeenCalledWith("worker-1", "stopping", "attempt-4");
+    expect(addAttemptEvent).toHaveBeenCalledWith(
+      "attempt-4",
+      "attempt_stop_requested",
+      "Stop requested for attempt attempt-4",
+    );
+    expect(workerUpdated).toHaveBeenCalledWith({ workerId: "worker-1", status: "stopping", attemptId: "attempt-4" });
+  });
+
+  test("rejects repeated stop requests without duplicate side effects", () => {
+    const updateWorkerStatus = vi.fn();
+    const addAttemptEvent = vi.fn();
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({
+        attempts: {
+          getAttempt: vi.fn(() => ({ id: "attempt-4", status: "running" })),
+          addAttemptEvent,
+        },
+        workers: {
+          listWorkers: vi.fn(() => [
+            {
+              id: "worker-1",
+              slot: 1,
+              status: "stopping",
+              currentAttemptId: "attempt-4",
+              lastHeartbeatAt: "2026-03-16T00:00:00Z",
+            },
+          ]),
+          updateWorkerStatus,
+        },
+      }),
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    const controller = new AbortController();
+    const workerUpdated = vi.fn();
+    scheduler.on("worker_updated", workerUpdated);
+    (scheduler as any).workerAbortControllers.set("worker-1", controller);
+    (scheduler as any).activeWorkerRuns.set("worker-1", Promise.resolve());
+
+    scheduler.stopAttempt("attempt-4");
+    updateWorkerStatus.mockClear();
+    addAttemptEvent.mockClear();
+    workerUpdated.mockClear();
+
+    expect(() => scheduler.stopAttempt("attempt-4")).toThrow("Attempt attempt-4 stop has already been requested.");
+    expect(updateWorkerStatus).not.toHaveBeenCalled();
+    expect(addAttemptEvent).not.toHaveBeenCalled();
+    expect(workerUpdated).not.toHaveBeenCalled();
+  });
+
+  test("rejects stopping a non-running attempt", () => {
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({
+        attempts: {
+          getAttempt: vi.fn(() => ({ id: "attempt-4", status: "completed" })),
+        },
+      }),
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    expect(() => scheduler.stopAttempt("attempt-4")).toThrow("Attempt attempt-4 is not running and cannot be stopped.");
+  });
+
+  test("rejects stopping a running attempt that is inactive in this scheduler", () => {
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({
+        attempts: {
+          getAttempt: vi.fn(() => ({ id: "attempt-4", status: "running" })),
+        },
+        workers: {
+          listWorkers: vi.fn(() => []),
+        },
+      }),
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    expect(() => scheduler.stopAttempt("attempt-4")).toThrow(
+      "Attempt attempt-4 is not active in this scheduler process.",
+    );
+  });
+
+  test("rejects stopping a missing attempt as inactive in this scheduler", () => {
+    const scheduler = new SchedulerService({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos({
+        attempts: {
+          getAttempt: vi.fn(() => {
+            throw new ForemanError("attempt_not_found", "Attempt not found: attempt-4", 404);
+          }),
+        },
+      }),
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    expect(() => scheduler.stopAttempt("attempt-4")).toThrow(
+      "Attempt attempt-4 is not active in this scheduler process.",
+    );
   });
 
   test("does not redispatch workers that already have an in-flight run", async () => {

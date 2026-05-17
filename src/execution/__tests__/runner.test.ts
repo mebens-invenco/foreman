@@ -75,6 +75,38 @@ describe("provider runners", () => {
     expect(result.stdout).toBe("checkpoint\n");
   }, 10_000);
 
+  test("sets PWD to the requested cwd for spawned runners", async () => {
+    const tempDir = await createTempDir("foreman-runner-test-");
+    cleanupDirs.push(tempDir);
+
+    const scriptPath = path.join(tempDir, "fake-runner.js");
+    await writeExecutableScript(
+      scriptPath,
+      [
+        "#!/usr/bin/env node",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => {",
+        "  process.stdout.write(JSON.stringify({ cwd: process.cwd(), pwd: process.env.PWD }));",
+        "});",
+      ].join("\n"),
+    );
+
+    const result = await runAgentProcess({
+      command: scriptPath,
+      args: [],
+      request: {
+        attemptId: "attempt-pwd",
+        action: "execution",
+        cwd: tempDir,
+        env: { PWD: "/stale-parent" },
+        prompt: "test prompt",
+        timeoutMs: 5_000,
+      },
+    });
+
+    expect(JSON.parse(result.stdout)).toEqual({ cwd: tempDir, pwd: tempDir });
+  });
+
   test.each([
     {
       label: "OpenCodeRunner",
