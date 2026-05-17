@@ -19,6 +19,7 @@ import { ForemanError, isForemanError } from "./lib/errors.js";
 import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
 import type { ReviewService } from "./review/index.js";
+import type { RebootScheduler } from "./system/reboot.js";
 import type { TaskSystem } from "./tasking/index.js";
 import { stringifyWorkspaceConfig, workspaceConfigSchema, type WorkspaceConfig } from "./workspace/config.js";
 import { resolveDeploymentInstructions } from "./workspace/deployment.js";
@@ -33,6 +34,8 @@ type HttpServerDeps = {
   reviewService: ReviewService;
   scheduler: SchedulerService;
   versionMonitor?: { getStatus(): ForemanVersionStatus };
+  // Optional so injected/test servers can expose the API surface without wiring process-level reboot side effects.
+  rebootScheduler?: RebootScheduler;
 };
 
 const errorShape = (error: unknown): { error: { code: string; message: string } } => {
@@ -863,6 +866,14 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   server.post("/api/scout/run", async () => {
     deps.scheduler.triggerManualScout();
     return { scout: { status: "scheduled", trigger: "manual" } };
+  });
+
+  server.post("/api/system/reboot", async () => {
+    if (!deps.rebootScheduler) {
+      throw new ForemanError("reboot_unavailable", "System reboot is unavailable for this server.", 503);
+    }
+
+    return { reboot: deps.rebootScheduler.scheduleReboot() };
   });
 
   if (hasUiBuild) {

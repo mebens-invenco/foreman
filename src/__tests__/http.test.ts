@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../workspace/config.js";
 import { createHttpServer } from "../http.js";
+import { createSelfRebootScheduler } from "../system/reboot.js";
 import type { Task } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
@@ -839,6 +840,61 @@ describe("HTTP scheduler control", () => {
       expect(stop).toHaveBeenCalledTimes(1);
     } finally {
       releaseStop();
+      await server.close();
+      db.close();
+    }
+  });
+});
+
+describe("HTTP system reboot", () => {
+  test("schedules reboot once and returns the scheduled state for repeated requests", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-reboot-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const spawnSidecar = vi.fn(() => true);
+    const signalShutdown = vi.fn();
+    const timer = vi.fn(() => ({ unref: vi.fn() })) as any;
+
+    const server = createHttpServer({
+      config,
+      paths,
+      repoRefs: [],
+      repos: db,
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+      rebootScheduler: createSelfRebootScheduler({
+        config,
+        paths,
+        workspace: "foo",
+        logLevel: "info",
+        entrypointPath: "/foreman/dist/cli.js",
+        spawnSidecar,
+        signalShutdown,
+        setTimeout: timer,
+      }),
+    });
+
+    try {
+      const firstResponse = await server.inject({ method: "POST", url: "/api/system/reboot" });
+      const secondResponse = await server.inject({ method: "POST", url: "/api/system/reboot" });
+
+      expect(firstResponse.statusCode).toBe(200);
+      expect(secondResponse.statusCode).toBe(200);
+      expect(firstResponse.json()).toEqual({ reboot: { status: "scheduled" } });
+      expect(secondResponse.json()).toEqual({ reboot: { status: "scheduled" } });
+      expect(spawnSidecar).toHaveBeenCalledTimes(1);
+      expect(timer).toHaveBeenCalledTimes(1);
+      expect(signalShutdown).not.toHaveBeenCalled();
+    } finally {
       await server.close();
       db.close();
     }
