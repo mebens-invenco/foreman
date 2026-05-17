@@ -5,6 +5,17 @@ import { getNavigationItem, navigationItems } from "@/app/navigation"
 import { useStatusQuery } from "@/hooks/use-status-query"
 import { useSystemRebootMutation } from "@/hooks/use-system-reboot-mutation"
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
+import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
@@ -24,18 +35,6 @@ export function AppSidebar() {
   const activeItem = getNavigationItem(location.pathname)
   const { data: status, isLoading } = useStatusQuery()
   const rebootMutation = useSystemRebootMutation()
-
-  const handleRestartClick = () => {
-    if (
-      !window.confirm(
-        "Restart Foreman now? The UI may disconnect briefly while the process restarts."
-      )
-    ) {
-      return
-    }
-
-    rebootMutation.mutate()
-  }
 
   const isRestarting = rebootMutation.isPending || rebootMutation.isSuccess
 
@@ -98,15 +97,35 @@ export function AppSidebar() {
         <SidebarSeparator />
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton
-              className="text-sidebar-foreground/75 hover:text-sidebar-accent-foreground disabled:opacity-60"
-              disabled={isRestarting}
-              onClick={handleRestartClick}
-              tooltip="Restart Foreman"
-            >
-              <RotateCcwIcon className={isRestarting ? "animate-spin" : undefined} />
-              <span>{isRestarting ? "Restarting..." : "Restart Foreman"}</span>
-            </SidebarMenuButton>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <SidebarMenuButton
+                  className="text-sidebar-foreground/75 hover:text-sidebar-accent-foreground disabled:opacity-60"
+                  disabled={isRestarting}
+                  tooltip="Restart Foreman"
+                >
+                  <RotateCcwIcon
+                    className={isRestarting ? "animate-spin" : undefined}
+                  />
+                  <span>{isRestarting ? "Restarting..." : "Restart"}</span>
+                </SidebarMenuButton>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Restart Foreman?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will reboot the current Foreman process. The UI may
+                    disconnect briefly while Foreman restarts.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => rebootMutation.mutate()}>
+                    Restart
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </SidebarMenuItem>
         </SidebarMenu>
         <div className="space-y-2 px-2 text-xs leading-5 text-sidebar-foreground/65 group-data-[collapsible=icon]:hidden">
