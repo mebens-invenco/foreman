@@ -34,6 +34,7 @@ type HttpServerDeps = {
   reviewService: ReviewService;
   scheduler: SchedulerService;
   versionMonitor?: { getStatus(): ForemanVersionStatus };
+  // Optional so injected/test servers can expose the API surface without wiring process-level reboot side effects.
   rebootScheduler?: RebootScheduler;
 };
 

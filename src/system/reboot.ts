@@ -20,11 +20,12 @@ export type CommandResult = {
   stderr: string;
 };
 
-export type CommandRunner = (command: string, args: string[], options: { cwd: string }) => Promise<CommandResult>;
+export type CommandRunner = (command: string, args: string[], options: { cwd: string; timeoutMs?: number }) => Promise<CommandResult>;
 
 type RebootLog = (message: string) => Promise<void> | void;
 
 const scheduledState: RebootScheduleState = { status: "scheduled" };
+const rebootCommandTimeoutMs = 5 * 60 * 1_000;
 
 const rebootLogPath = (paths: WorkspacePaths): string => path.join(paths.logsDir, "reboot.log");
 
@@ -38,6 +39,11 @@ const appendRebootLog = async (paths: WorkspacePaths, message: string): Promise<
 const appendRebootLogSync = (paths: WorkspacePaths, message: string): void => {
   mkdirSync(paths.logsDir, { recursive: true });
   const logPath = rebootLogPath(paths);
+  appendLogFileSync(logPath, message);
+};
+
+const appendLogFileSync = (logPath: string, message: string): void => {
+  mkdirSync(path.dirname(logPath), { recursive: true });
   const fd = openSync(logPath, "a");
   try {
     appendFileSync(fd, formatLogLine(message), "utf8");
@@ -47,10 +53,33 @@ const appendRebootLogSync = (paths: WorkspacePaths, message: string): void => {
 };
 
 const runProcessCommand: CommandRunner = (command, args, options) =>
-  new Promise((resolve, reject) => {
+  new Promise((resolve) => {
     const child = spawn(command, args, { cwd: options.cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      child.kill("SIGTERM");
+      const suffix = `${command} ${args.join(" ")} timed out after ${options.timeoutMs ?? rebootCommandTimeoutMs}ms`;
+      resolve({ exitCode: 124, stdout, stderr: stderr ? `${stderr}\n${suffix}` : suffix });
+    }, options.timeoutMs ?? rebootCommandTimeoutMs);
+    timeout.unref();
+
+    const finish = (result: CommandResult): void => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      clearTimeout(timeout);
+      resolve(result);
+    };
+
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
@@ -59,8 +88,8 @@ const runProcessCommand: CommandRunner = (command, args, options) =>
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
     });
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ exitCode: code ?? 1, stdout, stderr }));
+    child.on("error", (error) => finish({ exitCode: 1, stdout, stderr: stderr ? `${stderr}\n${error.message}` : error.message }));
+    child.on("close", (code) => finish({ exitCode: code ?? 1, stdout, stderr }));
   });
 
 const logCommandFailure = async (log: RebootLog, command: string, result: CommandResult): Promise<void> => {
@@ -82,9 +111,11 @@ export const runRebootUpdate = async (input: {
   projectRoot: string;
   runCommand?: CommandRunner;
   log?: RebootLog;
+  commandTimeoutMs?: number;
 }): Promise<RebootUpdateOutcome> => {
   const runCommand = input.runCommand ?? runProcessCommand;
   const log = input.log ?? (() => undefined);
+  const commandOptions = { cwd: input.projectRoot, timeoutMs: input.commandTimeoutMs ?? rebootCommandTimeoutMs };
   const outcome: RebootUpdateOutcome = {
     branch: null,
     dirty: false,
@@ -95,7 +126,7 @@ export const runRebootUpdate = async (input: {
     buildAttempted: false,
   };
 
-  const branch = await runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: input.projectRoot });
+  const branch = await runCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"], commandOptions);
   if (branch.exitCode !== 0) {
     await logCommandFailure(log, "git rev-parse --abbrev-ref HEAD", branch);
     return outcome;
@@ -107,7 +138,7 @@ export const runRebootUpdate = async (input: {
     return outcome;
   }
 
-  const status = await runCommand("git", ["status", "--porcelain"], { cwd: input.projectRoot });
+  const status = await runCommand("git", ["status", "--porcelain"], commandOptions);
   if (status.exitCode !== 0) {
     await logCommandFailure(log, "git status --porcelain", status);
     return outcome;
@@ -119,21 +150,21 @@ export const runRebootUpdate = async (input: {
     return outcome;
   }
 
-  const beforeHead = await runCommand("git", ["rev-parse", "HEAD"], { cwd: input.projectRoot });
+  const beforeHead = await runCommand("git", ["rev-parse", "HEAD"], commandOptions);
   if (beforeHead.exitCode !== 0) {
     await logCommandFailure(log, "git rev-parse HEAD", beforeHead);
     return outcome;
   }
 
   outcome.pullAttempted = true;
-  const pull = await runCommand("git", ["pull", "--ff-only", "origin", "master"], { cwd: input.projectRoot });
+  const pull = await runCommand("git", ["pull", "--ff-only", "origin", "master"], commandOptions);
   if (pull.exitCode !== 0) {
     await logCommandFailure(log, "git pull --ff-only origin master", pull);
     return outcome;
   }
   outcome.pulled = true;
 
-  const afterHead = await runCommand("git", ["rev-parse", "HEAD"], { cwd: input.projectRoot });
+  const afterHead = await runCommand("git", ["rev-parse", "HEAD"], commandOptions);
   if (afterHead.exitCode !== 0) {
     await logCommandFailure(log, "git rev-parse HEAD", afterHead);
     return outcome;
@@ -146,13 +177,13 @@ export const runRebootUpdate = async (input: {
   }
 
   outcome.installAttempted = true;
-  const install = await runCommand("yarn", ["install"], { cwd: input.projectRoot });
+  const install = await runCommand("yarn", ["install"], commandOptions);
   if (install.exitCode !== 0) {
     await logCommandFailure(log, "yarn install", install);
   }
 
   outcome.buildAttempted = true;
-  const build = await runCommand("yarn", ["build"], { cwd: input.projectRoot });
+  const build = await runCommand("yarn", ["build"], commandOptions);
   if (build.exitCode !== 0) {
     await logCommandFailure(log, "yarn build", build);
   }
@@ -174,7 +205,8 @@ const waitForParentExit = async (parentPid: number, log: RebootLog): Promise<voi
 };
 
 const waitForHttpUnavailable = async (host: string, port: number, log: RebootLog): Promise<void> => {
-  const url = `http://${host}:${port}/api/status`;
+  const probeHost = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
+  const url = `http://${probeHost}:${port}/api/status`;
   await log(`waiting for ${url} to stop serving`);
   while (true) {
     try {
@@ -187,7 +219,9 @@ const waitForHttpUnavailable = async (host: string, port: number, log: RebootLog
   }
 };
 
-const spawnDetached = (command: string, args: string[], cwd: string, logPath: string): void => {
+type DetachedSpawner = (command: string, args: string[], cwd: string, logPath: string) => boolean;
+
+const spawnDetached: DetachedSpawner = (command, args, cwd, logPath) => {
   mkdirSync(path.dirname(logPath), { recursive: true });
   const fd = openSync(logPath, "a");
   try {
@@ -196,7 +230,14 @@ const spawnDetached = (command: string, args: string[], cwd: string, logPath: st
       detached: true,
       stdio: ["ignore", fd, fd],
     });
+    child.on("error", (error) => appendLogFileSync(logPath, `failed to spawn ${command}: ${error.message}`));
+    if (child.pid === undefined) {
+      appendLogFileSync(logPath, `failed to spawn ${command}: child pid was not assigned`);
+      return false;
+    }
+
     child.unref();
+    return true;
   } finally {
     closeSync(fd);
   }
@@ -211,7 +252,7 @@ export const runRebootSidecar = async (input: {
   parentPid: number;
   entrypointPath: string;
   runCommand?: CommandRunner;
-  restart?: (command: string, args: string[], cwd: string, logPath: string) => void;
+  restart?: DetachedSpawner;
 }): Promise<void> => {
   const log = (message: string): Promise<void> => appendRebootLog(input.paths, message);
   await log("reboot sidecar started");
@@ -220,7 +261,10 @@ export const runRebootSidecar = async (input: {
   await runRebootUpdate({ projectRoot: input.paths.projectRoot, runCommand: input.runCommand, log });
   await log("restarting foreman service");
   const args = [input.entrypointPath, "serve", input.workspace, "--log-level", input.logLevel];
-  (input.restart ?? spawnDetached)(process.execPath, args, input.paths.projectRoot, rebootLogPath(input.paths));
+  const restarted = (input.restart ?? spawnDetached)(process.execPath, args, input.paths.projectRoot, rebootLogPath(input.paths));
+  if (!restarted) {
+    await log("failed to restart foreman service");
+  }
 };
 
 export const createSelfRebootScheduler = (input: {
@@ -229,7 +273,7 @@ export const createSelfRebootScheduler = (input: {
   workspace: string;
   logLevel: LoggerLevelName;
   entrypointPath: string;
-  spawnSidecar?: (command: string, args: string[], cwd: string, logPath: string) => void;
+  spawnSidecar?: DetachedSpawner;
   signalShutdown?: () => void;
   setTimeout?: typeof setTimeout;
 }): RebootScheduler => {
@@ -262,9 +306,22 @@ export const createSelfRebootScheduler = (input: {
         "--entrypoint",
         input.entrypointPath,
       ];
-      spawnSidecar(process.execPath, args, input.paths.projectRoot, rebootLogPath(input.paths));
+      let sidecarStarted = false;
+      try {
+        sidecarStarted = spawnSidecar(process.execPath, args, input.paths.projectRoot, rebootLogPath(input.paths));
+      } catch (error) {
+        scheduled = false;
+        appendRebootLogSync(input.paths, `failed to spawn reboot sidecar: ${error instanceof Error ? error.message : String(error)}`);
+        throw error;
+      }
+
+      if (!sidecarStarted) {
+        scheduled = false;
+        throw new Error("Failed to spawn reboot sidecar.");
+      }
+
       const handle = timer(() => signalShutdown(), 100);
-      handle.unref?.();
+      handle.unref();
       return scheduledState;
     },
   };

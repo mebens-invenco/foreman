@@ -134,7 +134,14 @@ const parseLogLevel = (value: string): LoggerLevelName => {
   return normalized as LoggerLevelName;
 };
 
-const resolveEntrypointPath = (): string => (process.argv[1] ? path.resolve(process.argv[1]) : path.join(process.cwd(), "dist", "cli.js"));
+const resolveEntrypointPath = (): string => {
+  if (process.argv[1]) {
+    return path.resolve(process.argv[1]);
+  }
+
+  // Preserve a runnable built CLI path for embedders that do not set argv[1].
+  return path.join(process.cwd(), "dist", "cli.js");
+};
 
 program.name("foreman").description("Workspace-scoped orchestration system");
 

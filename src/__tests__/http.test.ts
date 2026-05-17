@@ -765,7 +765,7 @@ describe("HTTP system reboot", () => {
     const paths = createWorkspacePaths(projectRoot, workspaceRoot);
     const db = await createMigratedDb(paths.dbPath, projectRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
-    const spawnSidecar = vi.fn();
+    const spawnSidecar = vi.fn(() => true);
     const signalShutdown = vi.fn();
     const timer = vi.fn(() => ({ unref: vi.fn() })) as any;
 
