@@ -1,8 +1,20 @@
 import { Link, useLocation } from "react-router"
-import { OrbitIcon } from "lucide-react"
+import { OrbitIcon, RotateCcwIcon } from "lucide-react"
 
 import { getNavigationItem, navigationItems } from "@/app/navigation"
 import { useStatusQuery } from "@/hooks/use-status-query"
+import { useSystemRebootMutation } from "@/hooks/use-system-reboot-mutation"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import {
   Sidebar,
   SidebarContent,
@@ -22,6 +34,9 @@ export function AppSidebar() {
   const location = useLocation()
   const activeItem = getNavigationItem(location.pathname)
   const { data: status, isLoading } = useStatusQuery()
+  const rebootMutation = useSystemRebootMutation()
+
+  const isRestarting = rebootMutation.isPending || rebootMutation.isSuccess
 
   return (
     <Sidebar
@@ -80,6 +95,39 @@ export function AppSidebar() {
 
       <SidebarFooter className="gap-4 px-3 py-4">
         <SidebarSeparator />
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <SidebarMenuButton
+                  className="text-sidebar-foreground/75 hover:text-sidebar-accent-foreground disabled:opacity-60"
+                  disabled={isRestarting}
+                  tooltip="Restart Foreman"
+                >
+                  <RotateCcwIcon
+                    className={isRestarting ? "animate-spin" : undefined}
+                  />
+                  <span>{isRestarting ? "Restarting..." : "Restart"}</span>
+                </SidebarMenuButton>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Restart Foreman?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will reboot the current Foreman process. The UI may
+                    disconnect briefly while Foreman restarts.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={() => rebootMutation.mutate()}>
+                    Restart
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </SidebarMenuItem>
+        </SidebarMenu>
         <div className="space-y-2 px-2 text-xs leading-5 text-sidebar-foreground/65 group-data-[collapsible=icon]:hidden">
           <p>
             {status ? `${status.repos.count} repos` : "Inspecting workspace..."}

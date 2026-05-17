@@ -258,7 +258,11 @@ export const runRebootSidecar = async (input: {
   await log("reboot sidecar started");
   await waitForParentExit(input.parentPid, log);
   await waitForHttpUnavailable(input.host, input.port, log);
-  await runRebootUpdate({ projectRoot: input.paths.projectRoot, runCommand: input.runCommand, log });
+  await runRebootUpdate({
+    projectRoot: input.paths.projectRoot,
+    ...(input.runCommand ? { runCommand: input.runCommand } : {}),
+    log,
+  });
   await log("restarting foreman service");
   const args = [input.entrypointPath, "serve", input.workspace, "--log-level", input.logLevel];
   const restarted = (input.restart ?? spawnDetached)(process.execPath, args, input.paths.projectRoot, rebootLogPath(input.paths));
