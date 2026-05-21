@@ -1,5 +1,15 @@
 Foreman is agentic work orchestrator that scouts for incoming work from task and review systems and schedules the work amongst an agent worker pool.
 
+## Skill bundle
+
+Workers rely on the shared [`invenco/invenco-skills`](https://github.com/invenco/invenco-skills) bundle for planning, implementing, reviewing, verifying, and learning skills. On a new machine, install once before serving any workspace:
+
+```bash
+yarn setup:skills
+```
+
+This installs the [`skills`](https://www.npmjs.com/package/skills) CLI if needed, then registers every skill in the bundle globally for Claude Code under `~/.agents/skills/`. Re-run anytime to pick up new skills. Requires SSH access to `github.com:invenco/*`.
+
 ## Planning
 
 If a user asks to plan a task, ascertain the intended workspace if they have not specified, and then

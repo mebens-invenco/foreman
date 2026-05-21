@@ -19,7 +19,8 @@
     "build:ui": "yarn workspace @foreman/ui build",
     "check": "tsc -p tsconfig.build.json --noEmit && tsc -p tsconfig.json && yarn workspace @foreman/ui typecheck",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "setup:skills": "./scripts/install-skills.sh"
   },
   "dependencies": {
     "@fastify/static": "^8.3.0",
