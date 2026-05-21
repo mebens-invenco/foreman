@@ -17,6 +17,7 @@ The review system is GitHub.
 - Only submitted review thread comments are actionable; unsubmitted or pending review comments are drafts and must not be addressed or resolved.
 - Only PR conversation comments created after the current head became current are actionable; use `Pull Request Reference.headIntroducedAt` as the cutoff when filtering post-head conversation comments.
 - Failing checks and merge conflicts may require code changes or operational responses.
+- Check remote CI/check status once per pass; do not poll, sleep, wait, or loop for pending checks to finish. If checks are still pending and there is no other actionable work, return `no_action_needed`.
 - If the PR has merge conflicts, first inspect the relevant commit messages and diffs on both the task branch and the base branch so you understand the intent of each side before editing.
 - Do not default to keeping the task branch version of conflicted code. Preserve the selected task's objective while also preserving valid incoming changes from the base branch unless they are truly incompatible.
 - For each conflicted file, identify what the task branch changed, what the base branch changed, and adapt the merged code so both intents are carried forward where possible.
