@@ -18,8 +18,24 @@ const fakeLogger = {
   flush: async () => undefined,
 };
 
+const createSpyingLogger = () => ({
+  child() {
+    return this;
+  },
+  debug: vi.fn(),
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  line: vi.fn(),
+  runnerLine: vi.fn(),
+  flush: async () => undefined,
+});
+
+const timeoutError = (): Error => Object.assign(new Error("Timed out"), { name: "TimeoutError" });
+
 afterEach(() => {
   global.fetch = originalFetch;
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -116,6 +132,88 @@ describe("LinearTaskSystem.listCandidates", () => {
       labels: ["Agent"],
       assigneeName: "Jane Doe",
     });
+  });
+
+  test("retries a transient candidate query timeout and returns candidates", async () => {
+    vi.useFakeTimers();
+    const logger = createSpyingLogger();
+    global.fetch = vi
+      .fn()
+      .mockRejectedValueOnce(timeoutError())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: linearIssue([], "Jane Doe") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], logger as any);
+
+    const tasksPromise = taskSystem.listCandidates();
+    await vi.advanceTimersByTimeAsync(250);
+    const tasks = await tasksPromise;
+
+    expect(tasks.map((task) => task.id)).toEqual(["ENG-123"]);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Linear GraphQL request timed out; retrying",
+      expect.objectContaining({
+        operationName: "ForemanIssueCandidates",
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 250,
+        timeoutMs: 60_000,
+      }),
+    );
+  });
+
+  test("surfaces candidate query timeout after bounded retries", async () => {
+    vi.useFakeTimers();
+    const logger = createSpyingLogger();
+    global.fetch = vi.fn().mockRejectedValue(timeoutError()) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], logger as any);
+
+    const tasksPromise = taskSystem.listCandidates();
+    const expectation = expect(tasksPromise).rejects.toMatchObject({ code: "linear_request_timeout" });
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expectation;
+
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+    expect(logger.error).toHaveBeenCalledWith(
+      "Linear GraphQL request timed out",
+      expect.objectContaining({
+        operationName: "ForemanIssueCandidates",
+        attempt: 3,
+        maxAttempts: 3,
+        timeoutMs: 60_000,
+      }),
+    );
+  });
+
+  test("does not retry GraphQL errors from candidate queries", async () => {
+    const logger = createSpyingLogger();
+    global.fetch = vi.fn(async () =>
+      new Response(JSON.stringify({ errors: [{ message: "Cannot query field \"bad\"" }] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    ) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], logger as any);
+
+    await expect(taskSystem.listCandidates()).rejects.toThrow('Cannot query field "bad"');
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 
   test("skips unmapped provider states and logs the skipped issue", async () => {
