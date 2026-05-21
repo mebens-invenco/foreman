@@ -348,6 +348,9 @@ describe("prompt rendering", () => {
     expect(reviewerPrompt).toContain("submit_pull_request_review");
     expect(reviewerPrompt).toContain("ignore comments whose review metadata is missing");
     expect(reviewerPrompt).toContain("include image links or uploaded assets");
+    expect(reviewerPrompt).toContain("## Consumer Context");
+    expect(reviewerPrompt).toContain("### Examples");
+    expect(reviewerPrompt).toContain("Hard-coded 5000ms timeout");
     expect(reviewerPrompt).not.toContain("### Actionable Now");
 
     const continuationPrompt = await renderWorkerPrompt({
