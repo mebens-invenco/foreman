@@ -8,7 +8,7 @@ Workers rely on the shared [`invenco/invenco-skills`](https://github.com/invenco
 yarn setup:skills
 ```
 
-This installs the [`skills`](https://www.npmjs.com/package/skills) CLI if needed, then registers every skill in the bundle globally for Claude Code under `~/.agents/skills/`. Re-run anytime to pick up new skills. Requires SSH access to `github.com:invenco/*`.
+This installs the [`skills`](https://www.npmjs.com/package/skills) CLI if needed, then registers every skill in the bundle globally for each runner Foreman supports — Claude Code (under `~/.claude/skills/`), Codex, and Opencode (both via the shared `~/.agents/skills/` path). Re-run anytime to pick up new skills. Requires SSH access to `github.com:invenco/*`.
 
 ## Planning
 
