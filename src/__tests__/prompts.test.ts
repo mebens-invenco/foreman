@@ -413,8 +413,9 @@ describe("prompt rendering", () => {
       },
       continuation: true,
     });
-    expect(reviewerContinuationPrompt).toContain("Review the latest PR changes.");
-    expect(reviewerContinuationPrompt).toContain("ignore comments whose review metadata is missing");
+    expect(reviewerContinuationPrompt).toContain("continuing a reviewer session");
+    expect(reviewerContinuationPrompt).toContain("what is new since the prior reviewer pass");
+    expect(reviewerContinuationPrompt).toContain("narrower and cheaper than the initial review");
     expect(reviewerContinuationPrompt).toContain("## Current Git State");
     expect(reviewerContinuationPrompt).toContain("previous-reviewer-head");
     expect(reviewerContinuationPrompt).not.toContain("## Continuation Worker Rules");
