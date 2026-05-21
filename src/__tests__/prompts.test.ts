@@ -413,13 +413,17 @@ describe("prompt rendering", () => {
       },
       continuation: true,
     });
-    expect(reviewerContinuationPrompt).toContain("Review the latest PR changes.");
-    expect(reviewerContinuationPrompt).toContain("ignore comments whose review metadata is missing");
+    expect(reviewerContinuationPrompt).toContain("continuing a reviewer session");
+    expect(reviewerContinuationPrompt).toContain("what is new since the prior reviewer pass");
+    expect(reviewerContinuationPrompt).toContain("narrower and cheaper than the initial review");
     expect(reviewerContinuationPrompt).toContain("## Current Git State");
     expect(reviewerContinuationPrompt).toContain("previous-reviewer-head");
+    expect(reviewerContinuationPrompt).toContain("## Common Worker Rules");
+    expect(reviewerContinuationPrompt).toContain("## GitHub Provider Access");
+    expect(reviewerContinuationPrompt).toContain("## Consumer Context");
+    expect(reviewerContinuationPrompt).toContain("include image links or uploaded assets");
     expect(reviewerContinuationPrompt).not.toContain("## Continuation Worker Rules");
     expect(reviewerContinuationPrompt).not.toContain("## GitHub Continuation Access");
-    expect(reviewerContinuationPrompt).not.toContain("include image links or uploaded assets");
     expect(reviewerContinuationPrompt).not.toContain("## Reviewer Continuation Rules");
     expect(reviewerContinuationPrompt).not.toContain("## Continuation Context");
     expect(reviewerContinuationPrompt).toContain("## Required Output");
@@ -427,9 +431,7 @@ describe("prompt rendering", () => {
     expect(reviewerContinuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action reviewer --help`);
     expect(reviewerContinuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action reviewer`);
     expect(reviewerContinuationPrompt).not.toContain("submit_pull_request_review");
-    expect(reviewerContinuationPrompt).not.toContain("## Common Worker Rules");
     expect(reviewerContinuationPrompt).not.toContain("## Selected Task");
-    expect(reviewerContinuationPrompt).not.toContain("## GitHub Provider Access");
     expect(reviewerContinuationPrompt).not.toContain("## Latest Review Activity");
 
     const retryPrompt = await renderWorkerPrompt({
