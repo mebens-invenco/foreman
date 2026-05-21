@@ -1,6 +1,20 @@
-Continue addressing current PR feedback, failing checks, and merge conflicts. Check remote CI/check status once; do not poll, sleep, wait, or loop for pending checks to finish. When reading GitHub review threads, request `pullRequestReview { state submittedAt commit { oid } }` and ignore comments whose review metadata is missing, whose review state is `PENDING`, or whose review has no `submittedAt`.
+You are continuing a review session on the same selected PR. A prior review action has already addressed feedback (or returned `no_action_needed`).
 
-If you make code changes, run the relevant automated checks for the affected scope, then commit and push the task branch before returning `completed`.
+{{fragment:worker-common}}
+
+{{fragment:review-github}}
+
+## Scope
+
+Restrict this pass to what is new since the prior review action:
+
+- Maintainer replies, new review threads, or new top-level comments created after the previous review checkpoint.
+- Failing checks or merge conflicts that have appeared since the previous review checkpoint.
+- Review summaries on the current PR head that were not present at the previous checkpoint.
+
+Do not re-address feedback that was already handled in the prior pass unless newer activity explicitly revisits it. A continuation pass should be narrower and cheaper than the initial review action.
+
+If you make code changes, run the relevant automated checks for the affected scope, then commit and push the task branch before returning `completed`. If nothing is new and actionable, return `no_action_needed`.
 
 {{fragment:output-validator}}
 

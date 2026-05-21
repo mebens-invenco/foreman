@@ -367,16 +367,19 @@ describe("prompt rendering", () => {
       },
       continuation: true,
     });
-    expect(continuationPrompt).toContain("Continue addressing current PR feedback, failing checks, and merge conflicts.");
+    expect(continuationPrompt).toContain("continuing a review session");
+    expect(continuationPrompt).toContain("what is new since the prior review action");
+    expect(continuationPrompt).toContain("commit and push the task branch");
     expect(continuationPrompt).toContain("do not poll, sleep, wait");
     expect(continuationPrompt).toContain("ignore comments whose review metadata is missing");
+    expect(continuationPrompt).toContain("## Common Worker Rules");
+    expect(continuationPrompt).toContain("## GitHub Provider Access");
+    expect(continuationPrompt).toContain("include image links or uploaded assets");
     expect(continuationPrompt).toContain("## Current Git State");
     expect(continuationPrompt).toContain("previousSessionHeadSha");
     expect(continuationPrompt).toContain("previous-head");
     expect(continuationPrompt).not.toContain("## Continuation Worker Rules");
     expect(continuationPrompt).not.toContain("## GitHub Continuation Access");
-    expect(continuationPrompt).not.toContain("include image links or uploaded assets");
-    expect(continuationPrompt).not.toContain("verify the response is an actual image file");
     expect(continuationPrompt).not.toContain("## Review Continuation Rules");
     expect(continuationPrompt).not.toContain("## Continuation Context");
     expect(continuationPrompt).toContain("## Required Output");
@@ -384,10 +387,8 @@ describe("prompt rendering", () => {
     expect(continuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action review --help`);
     expect(continuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action review`);
     expect(continuationPrompt).not.toContain("Do not assume every actionable review item requires a code change.");
-    expect(continuationPrompt).not.toContain("## Common Worker Rules");
     expect(continuationPrompt).not.toContain("## Selected Task");
     expect(continuationPrompt).not.toContain("## Task Provider Context");
-    expect(continuationPrompt).not.toContain("## GitHub Provider Access");
     expect(continuationPrompt).not.toContain("create_pull_request");
     expect(continuationPrompt).not.toContain("Allowed learning mutation types");
     expect(continuationPrompt).not.toContain("## Latest Review Activity");

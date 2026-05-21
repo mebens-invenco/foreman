@@ -44,7 +44,6 @@ Priority order inside this action:
 - Only address review summaries on the current PR head.
 - Only address review-thread comments attached to submitted reviews; ignore unsubmitted or pending review comments even if GitHub exposes them in `reviewThreads`.
 - Only address conversation comments created after the current PR head became current.
-- Check remote CI/check status once for the current PR state; do not poll, sleep, wait, or loop for pending checks to finish. If checks are still pending and there is no other actionable work, return `no_action_needed`.
 - Do not assume every actionable review item requires a code change.
 - If a conversation comment or review summary asks a question, do your best to answer it within your
   reply.
