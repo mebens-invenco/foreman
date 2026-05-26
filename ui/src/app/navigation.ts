@@ -2,6 +2,7 @@ import {
   ActivityIcon,
   BookOpenTextIcon,
   ChartColumnIncreasingIcon,
+  DollarSignIcon,
   SlidersHorizontalIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -31,6 +32,12 @@ export const navigationItems: NavigationItem[] = [
     href: "/learnings",
     description: "Captured findings, recurring issues, and operational memory.",
     icon: BookOpenTextIcon,
+  },
+  {
+    title: "Usage",
+    href: "/usage",
+    description: "Token usage and USD cost across attempts, by day, runner, or model.",
+    icon: DollarSignIcon,
   },
   {
     title: "Settings",

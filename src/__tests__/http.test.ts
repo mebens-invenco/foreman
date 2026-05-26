@@ -704,6 +704,124 @@ describe("HTTP query validation", () => {
   });
 });
 
+describe("HTTP usage rollup", () => {
+  test("aggregates attempts in a window into per-day buckets with computed USD cost", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+
+    db.taskMirror.saveTasks([sampleTask]);
+    const target = db.taskMirror.getTaskTarget(sampleTask.id, "repo-a");
+    db.workers.ensureWorkerSlots(1);
+    const worker = db.workers.listWorkers()[0];
+    const seed = (input: {
+      id: string;
+      startedAt: string;
+      tokens: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number };
+    }): void => {
+      const job = db.jobs.createJob({
+        taskId: sampleTask.id,
+        taskTargetId: target!.id,
+        taskProvider: "file",
+        action: "execution",
+        priorityRank: 3,
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: `${sampleTask.id}:${input.id}`,
+        selectionReason: "test",
+      });
+      db.database.sqlite
+        .prepare(
+          `INSERT INTO execution_attempt(
+            id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, runner_session_id,
+            status, started_at, finished_at, exit_code, signal, summary, error_message, tokens_used_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.id,
+          job.id,
+          worker!.id,
+          1,
+          "claude",
+          "claude-opus-4-7",
+          "default",
+          null,
+          "completed",
+          input.startedAt,
+          input.startedAt,
+          0,
+          null,
+          "",
+          null,
+          JSON.stringify(input.tokens),
+        );
+    };
+
+    seed({
+      id: "att-1",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      tokens: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    seed({
+      id: "att-2",
+      startedAt: "2026-05-20T18:00:00.000Z",
+      tokens: { inputTokens: 0, outputTokens: 1_000_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    seed({
+      id: "att-3",
+      startedAt: "2026-05-21T09:00:00.000Z",
+      tokens: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 1_000_000, cacheCreationInputTokens: 0 },
+    });
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: { listCandidates: vi.fn(async () => []), getTask: vi.fn(async () => sampleTask), listComments: vi.fn(async () => []) } as any,
+      reviewService: { resolvePullRequest: vi.fn(async () => null) } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/usage?from=2026-05-20&to=2026-05-21&groupBy=day",
+      });
+      expect(response.statusCode).toBe(200);
+      const payload = response.json();
+      expect(payload.fromDate).toBe("2026-05-20");
+      expect(payload.toDate).toBe("2026-05-21");
+      expect(payload.buckets).toHaveLength(2);
+      expect(payload.buckets[0]).toMatchObject({ groupKey: "2026-05-20", attemptsCount: 2 });
+      expect(payload.buckets[0].cost.totalUsd).toBeCloseTo(15 + 75);
+      expect(payload.buckets[1]).toMatchObject({ groupKey: "2026-05-21", attemptsCount: 1 });
+      expect(payload.buckets[1].cost.totalUsd).toBeCloseTo(1.5);
+      expect(payload.totals.attemptsCount).toBe(3);
+      expect(payload.totals.cost.totalUsd).toBeCloseTo(15 + 75 + 1.5);
+      expect(Array.isArray(payload.rates)).toBe(true);
+
+      const rejected = await server.inject({ method: "GET", url: "/api/usage?from=2026-5-1" });
+      expect(rejected.statusCode).toBe(400);
+      expect(rejected.json().error.code).toBe("invalid_request");
+
+      const rejectedGroup = await server.inject({ method: "GET", url: "/api/usage?groupBy=team" });
+      expect(rejectedGroup.statusCode).toBe(400);
+      expect(rejectedGroup.json().error.code).toBe("invalid_request");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+});
+
 describe("HTTP scheduler control", () => {
   test("stops an active attempt through the scheduler", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");

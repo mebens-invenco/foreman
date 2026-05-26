@@ -19,15 +19,8 @@ import {
   formatTimestamp,
 } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import type { AttemptRecord, TokenUsage } from "@/lib/api"
-
-function totalTokens(tokens: TokenUsage | null) {
-  if (!tokens) {
-    return null
-  }
-
-  return tokens.inputTokens + tokens.outputTokens
-}
+import { estimateCost, formatUsd, totalAllTokenBuckets } from "@/lib/cost"
+import type { AttemptRecord } from "@/lib/api"
 
 const attemptStatusValues = [
   "running",
@@ -287,11 +280,11 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
     ),
   },
   {
-    accessorFn: (row) => totalTokens(row.tokensUsed) ?? -1,
+    accessorFn: (row) => totalAllTokenBuckets(row.tokensUsed) ?? -1,
     id: "tokens",
     cell: ({ row }) => {
-      const total = totalTokens(row.original.tokensUsed)
       const tokens = row.original.tokensUsed
+      const total = totalAllTokenBuckets(tokens)
       const tooltip = tokens
         ? [
             `Input: ${formatShortNumber(tokens.inputTokens)}`,
@@ -301,6 +294,9 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
               : null,
             tokens.cacheCreationInputTokens !== undefined
               ? `Cache create: ${formatShortNumber(tokens.cacheCreationInputTokens)}`
+              : null,
+            tokens.reasoningOutputTokens !== undefined
+              ? `Reasoning: ${formatShortNumber(tokens.reasoningOutputTokens)}`
               : null,
           ]
             .filter(Boolean)
@@ -328,7 +324,62 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
     },
     enableGlobalFilter: false,
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title="Tokens" />
+      <DataTableColumnHeader column={column} title="Tokens (all)" />
+    ),
+  },
+  {
+    accessorFn: (row) =>
+      estimateCost(row.tokensUsed, row.runnerName, row.runnerModel, row.runnerVariant)
+        .totalUsd,
+    id: "cost",
+    cell: ({ row }) => {
+      const estimate = estimateCost(
+        row.original.tokensUsed,
+        row.original.runnerName,
+        row.original.runnerModel,
+        row.original.runnerVariant
+      )
+      const label = (
+        <span className="text-xs text-foreground">{formatUsd(estimate.totalUsd)}</span>
+      )
+
+      if (!estimate.rateApplied) {
+        return (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-xs text-muted-foreground">$0.00</span>
+            </TooltipTrigger>
+            <TooltipContent sideOffset={6}>
+              No rate entry for {row.original.runnerName}/{row.original.runnerModel}
+            </TooltipContent>
+          </Tooltip>
+        )
+      }
+
+      const tooltip = [
+        `Input: ${formatUsd(estimate.breakdown.input)}`,
+        `Output: ${formatUsd(estimate.breakdown.output)}`,
+        `Cache read: ${formatUsd(estimate.breakdown.cacheRead)}`,
+        `Cache write: ${formatUsd(estimate.breakdown.cacheCreate)}`,
+        estimate.breakdown.reasoning > 0
+          ? `Reasoning: ${formatUsd(estimate.breakdown.reasoning)}`
+          : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>{label}</TooltipTrigger>
+          <TooltipContent sideOffset={6} className="whitespace-pre-line">
+            {tooltip}
+          </TooltipContent>
+        </Tooltip>
+      )
+    },
+    enableGlobalFilter: false,
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Cost" />
     ),
   },
   {
