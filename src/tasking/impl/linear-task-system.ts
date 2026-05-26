@@ -259,7 +259,9 @@ export class LinearClient {
   }
 }
 
-const linearPriorityToNormalized = (label: string | null): Task["priority"] => {
+// Linear's API returns the label "Medium" for priority value 3; "Normal" is retained as a
+// legacy synonym so older fixtures and any non-Linear callers still resolve to the same slot.
+export const linearPriorityToNormalized = (label: string | null): Task["priority"] => {
   switch ((label ?? "").toLowerCase()) {
     case "urgent":
       return "urgent";
@@ -267,6 +269,7 @@ const linearPriorityToNormalized = (label: string | null): Task["priority"] => {
       return "high";
     case "low":
       return "low";
+    case "medium":
     case "normal":
       return "normal";
     default:
@@ -274,7 +277,7 @@ const linearPriorityToNormalized = (label: string | null): Task["priority"] => {
   }
 };
 
-const normalizedPriorityToLinear = (priority: Task["priority"] | undefined): number => {
+export const normalizedPriorityToLinear = (priority: Task["priority"] | undefined): number => {
   switch (priority ?? "none") {
     case "urgent":
       return 1;
