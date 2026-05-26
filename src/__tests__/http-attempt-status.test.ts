@@ -197,6 +197,25 @@ describe("attempt activity HTTP", () => {
       db.close();
     }
   });
+
+  test("latest=true rejects combined kind filter", async () => {
+    const { server, db } = await buildServer();
+
+    try {
+      const { attemptId } = seedRunningAttempt(db);
+
+      const response = await server.inject({
+        method: "GET",
+        url: `/api/attempts/${attemptId}/activity?latest=true&kind=error`,
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("invalid_request");
+      expect(response.json().error.message).toMatch(/latest and kind/);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
 });
 
 describe("attempt status HTTP", () => {

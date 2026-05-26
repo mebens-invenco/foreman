@@ -716,6 +716,18 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       throw new ForemanError("invalid_request", "Query parameters latest and afterSeq cannot be combined.", 400);
     }
 
+    if (latest && kinds.length > 0) {
+      // Tail offset is computed from the unfiltered count, so combining with
+      // `kind` would return wrong/empty pages whenever the filtered rows fall
+      // outside the tail window. Reject explicitly until repo-level tail-by-
+      // filter support lands.
+      throw new ForemanError(
+        "invalid_request",
+        "Query parameters latest and kind cannot be combined.",
+        400,
+      );
+    }
+
     const totalActivities = deps.repos.attemptActivities.countActivities(params.attemptId);
 
     const options: { afterSeq?: number; limit?: number; kinds?: AttemptActivityKind[] } = {};
