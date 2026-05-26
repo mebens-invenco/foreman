@@ -1,5 +1,5 @@
 import type { AgentRunner, AgentRunnerInvokeRequest, CapturedAgentRunResult } from "../agent-runner.js";
-import { normalizeOpenCodeJsonOutput } from "./opencode-output.js";
+import { normalizeOpenCodeActivityLine, normalizeOpenCodeJsonOutput } from "./opencode-output.js";
 import { runAgentProcess } from "./run-agent-process.js";
 
 export class OpenCodeRunner implements AgentRunner {
@@ -31,6 +31,7 @@ export class OpenCodeRunner implements AgentRunner {
       ],
       request,
       normalizeStdout: normalizeOpenCodeJsonOutput,
+      normalizeStdoutLine: normalizeOpenCodeActivityLine,
     });
   }
 }

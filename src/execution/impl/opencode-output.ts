@@ -10,6 +10,7 @@
  * totals are obtained by summing across step_finish events.
  */
 import type { TokenUsage } from "../../domain/index.js";
+import type { NormalizedRunnerActivity } from "../../repos/attempt-activity-repo.js";
 import {
   type JsonRecord,
   type NormalizedJsonOutput,
@@ -98,6 +99,149 @@ export const extractOpenCodeStepUsage = (stepFinishRecord: JsonRecord): TokenUsa
     ...(cacheCreationInputTokens !== undefined ? { cacheCreationInputTokens } : {}),
     ...(cacheReadInputTokens !== undefined ? { cacheReadInputTokens } : {}),
     ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
+  };
+};
+
+const partType = (record: JsonRecord): string | null => {
+  const part = isRecord(record.part) ? record.part : null;
+  return part && typeof part.type === "string" ? part.type : null;
+};
+
+const partText = (record: JsonRecord): string | null => {
+  const part = isRecord(record.part) ? record.part : null;
+  const direct = stringField(record, ["text", "content", "result", "output"]);
+  if (direct) {
+    return direct;
+  }
+  return part ? stringField(part, ["text", "content", "result", "output"]) : null;
+};
+
+const sessionIdField = (record: JsonRecord): string | null =>
+  stringField(record, ["sessionID", "sessionId", "session_id"]);
+
+/**
+ * Per-line activity normalizer for OpenCode's `run --format json` stream.
+ *
+ * OpenCode emits one JSON value per line covering its session lifecycle,
+ * agent steps, message text, errors, and (in some configurations) tool /
+ * command parts. We translate each line into a Foreman-shape
+ * {@link NormalizedRunnerActivity} so the live activity feed has a uniform
+ * vocabulary across runners.
+ *
+ * Coverage is intentionally conservative — only shapes verified by
+ * captured fixtures (session, step_start, step_finish, text, message,
+ * final, error) are mapped to specific kinds. Anything else with a `type`
+ * (notably tool/command/patch variants whose shape varies by opencode
+ * version) yields a kind: "unknown" record carrying the original type +
+ * `part.type`, so the feed still surfaces the activity for inspection
+ * without making up unverified semantics. Parse failures return `null`
+ * (non-fatal upstream).
+ */
+export const normalizeOpenCodeActivityLine = (
+  line: string,
+): NormalizedRunnerActivity | NormalizedRunnerActivity[] | null => {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(parsed)) {
+    return null;
+  }
+
+  const type = typeof parsed.type === "string" ? parsed.type : null;
+  if (!type) {
+    return null;
+  }
+
+  const sessionId = sessionIdField(parsed);
+  const phase = openCodePhase(parsed);
+  const subPartType = partType(parsed);
+  const basePayload: Record<string, unknown> = { opencodeType: type };
+  if (subPartType) {
+    basePayload.partType = subPartType;
+  }
+  if (phase) {
+    basePayload.phase = phase;
+  }
+  if (sessionId) {
+    basePayload.sessionId = sessionId;
+  }
+
+  if (type === "session" || type === "session_start" || type === "session_started") {
+    return {
+      kind: "operation_started",
+      message: "OpenCode session started",
+      payload: basePayload,
+    };
+  }
+
+  if (type === "step_start") {
+    return {
+      kind: "operation_started",
+      message: "OpenCode step started",
+      payload: basePayload,
+    };
+  }
+
+  if (type === "step_finish") {
+    const usage = extractOpenCodeStepUsage(parsed);
+    const activities: NormalizedRunnerActivity[] = [];
+    if (usage) {
+      activities.push({
+        kind: "token_usage",
+        message: "OpenCode step usage reported",
+        payload: { ...basePayload, tokensUsed: usage },
+      });
+    }
+    activities.push({
+      kind: "operation_finished",
+      message: "OpenCode step finished",
+      payload: basePayload,
+    });
+    return activities;
+  }
+
+  if (type === "error" || subPartType === "error") {
+    const errorText = openCodeErrorSummary(parsed) ?? stringField(parsed, ["message", "error", "detail", "text"]);
+    return {
+      kind: "error",
+      message: errorText ?? "OpenCode error",
+      payload: basePayload,
+    };
+  }
+
+  if (type === "text" || type === "message" || type === "final") {
+    const text = partText(parsed);
+    if (!text) {
+      return null;
+    }
+    // Commentary phase carries OpenCode's thinking; surface as reasoning so it
+    // doesn't crowd assistant_message counts. Final-answer / unannotated text
+    // is the assistant's reply.
+    const kind: NormalizedRunnerActivity["kind"] = phase === "commentary" ? "reasoning" : "assistant_message";
+    return {
+      kind,
+      message: text,
+      payload: basePayload,
+    };
+  }
+
+  // Tool / command / patch / other shape variants: surface as "unknown" with
+  // the partType in the payload so the feed still records the activity. A
+  // follow-up ticket can promote these to tool_started/command_started/etc.
+  // once a real fixture for the current opencode version is captured.
+  return {
+    kind: "unknown",
+    message: subPartType ? `OpenCode ${type}:${subPartType}` : `OpenCode ${type}`,
+    payload: basePayload,
   };
 };
 
