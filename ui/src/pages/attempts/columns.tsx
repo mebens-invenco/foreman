@@ -20,7 +20,7 @@ import {
 } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { estimateCost, formatUsd, totalAllTokenBuckets } from "@/lib/cost"
-import type { AttemptRecord } from "@/lib/api"
+import type { AttemptRecord, UsageRate } from "@/lib/api"
 
 const attemptStatusValues = [
   "running",
@@ -93,7 +93,7 @@ export const attemptsGlobalFilter: FilterFn<AttemptRecord> = (
   return buildAttemptSearchText(row.original).includes(search)
 }
 
-export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
+export const createAttemptColumns = (rates: UsageRate[] | undefined): ColumnDef<AttemptRecord>[] => [
   {
     accessorKey: "id",
     cell: ({ row }) => (
@@ -329,7 +329,7 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
   },
   {
     accessorFn: (row) =>
-      estimateCost(row.tokensUsed, row.runnerName, row.runnerModel, row.runnerVariant)
+      estimateCost(row.tokensUsed, row.runnerName, row.runnerModel, row.runnerVariant, rates)
         .totalUsd,
     id: "cost",
     cell: ({ row }) => {
@@ -337,7 +337,8 @@ export const createAttemptColumns = (): ColumnDef<AttemptRecord>[] => [
         row.original.tokensUsed,
         row.original.runnerName,
         row.original.runnerModel,
-        row.original.runnerVariant
+        row.original.runnerVariant,
+        rates
       )
       const label = (
         <span className="text-xs text-foreground">{formatUsd(estimate.totalUsd)}</span>

@@ -41,6 +41,7 @@ import {
   getDisplayLines,
 } from "@/lib/log-display"
 import { estimateCost, formatUsd } from "@/lib/cost"
+import { useRatesQuery } from "@/hooks/use-rates-query"
 import { cn } from "@/lib/utils"
 
 type AttemptDetailSheetProps = {
@@ -92,11 +93,13 @@ function buildOpenSessionCommand(attempt: AttemptRecord) {
 }
 
 function CostSummaryPanel({ attempt }: { attempt: AttemptRecord }) {
+  const { data: rates } = useRatesQuery()
   const estimate = estimateCost(
     attempt.tokensUsed,
     attempt.runnerName,
     attempt.runnerModel,
-    attempt.runnerVariant
+    attempt.runnerVariant,
+    rates
   )
 
   return (
@@ -156,10 +159,9 @@ function CostSummaryPanel({ attempt }: { attempt: AttemptRecord }) {
         </>
       ) : (
         <p className="mt-3 text-xs text-muted-foreground">
-          No rate entry for {attempt.runnerName}/{attempt.runnerModel} (
-          {attempt.runnerVariant}). Add it to{" "}
-          <code className="font-mono">src/execution/cost/rates.ts</code> and{" "}
-          <code className="font-mono">ui/src/lib/cost.ts</code> to show a cost here.
+          {rates === undefined
+            ? "Loading rate table…"
+            : `No rate entry for ${attempt.runnerName}/${attempt.runnerModel} (${attempt.runnerVariant}). Add it to src/execution/cost/rates.ts to surface a cost here.`}
         </p>
       )}
     </section>

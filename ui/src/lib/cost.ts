@@ -1,56 +1,16 @@
-import type { TokenUsage } from "@/lib/api"
+import type { TokenUsage, UsageRate } from "@/lib/api"
 
 /**
- * Mirror of the server-side `rates.ts` table. Kept in sync by hand — both
- * files reference the same vendor pricing pages and should be updated
- * together. Last verified 2026-05-26.
- *
- * The UI computes a cost client-side so the attempts table can show a Cost
- * column without the API round-trip / pagination dance of fetching a
- * per-attempt rollup. Server-side `/api/usage` remains authoritative for
- * rollups (which respect server-side rate updates immediately).
+ * Client-side cost helper. The rate table itself lives on the server
+ * (`src/execution/cost/rates.ts`) and is fetched via `useRatesQuery` so
+ * the UI cannot drift from `/api/usage`. Callers pass the hydrated
+ * `rates` array in; this module only does lookup + arithmetic.
  */
-type RunnerRate = {
-  inputPerMtok: number
-  outputPerMtok: number
-  cacheReadPerMtok: number
-  cacheWriteFiveMinPerMtok: number
-}
 
 const TOKENS_PER_MTOK = 1_000_000
 
-const rateTable: Record<string, RunnerRate> = {
-  "claude|claude-opus-4-7|default": {
-    inputPerMtok: 15,
-    outputPerMtok: 75,
-    cacheReadPerMtok: 1.5,
-    cacheWriteFiveMinPerMtok: 18.75,
-  },
-  "claude|claude-sonnet-4-6|default": {
-    inputPerMtok: 3,
-    outputPerMtok: 15,
-    cacheReadPerMtok: 0.3,
-    cacheWriteFiveMinPerMtok: 3.75,
-  },
-  "claude|claude-haiku-4-5-20251001|default": {
-    inputPerMtok: 1,
-    outputPerMtok: 5,
-    cacheReadPerMtok: 0.1,
-    cacheWriteFiveMinPerMtok: 1.25,
-  },
-  "codex|gpt-5.4|default": {
-    inputPerMtok: 1.25,
-    outputPerMtok: 10,
-    cacheReadPerMtok: 0.125,
-    cacheWriteFiveMinPerMtok: 1.25,
-  },
-  "opencode|default|default": {
-    inputPerMtok: 3,
-    outputPerMtok: 15,
-    cacheReadPerMtok: 0.3,
-    cacheWriteFiveMinPerMtok: 3.75,
-  },
-}
+const buildKey = (runnerName: string, runnerModel: string, runnerVariant: string): string =>
+  `${runnerName}|${runnerModel}|${runnerVariant}`
 
 export type CostBreakdown = {
   input: number
@@ -63,22 +23,44 @@ export type CostBreakdown = {
 export type CostEstimate = {
   totalUsd: number
   breakdown: CostBreakdown
-  rateApplied: RunnerRate | null
+  rateApplied: UsageRate | null
 }
 
-const zeroEstimate = (rateApplied: RunnerRate | null): CostEstimate => ({
+const zeroBreakdown = (): CostBreakdown => ({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheCreate: 0,
+  reasoning: 0,
+})
+
+const zeroEstimate = (rateApplied: UsageRate | null): CostEstimate => ({
   totalUsd: 0,
-  breakdown: { input: 0, output: 0, cacheRead: 0, cacheCreate: 0, reasoning: 0 },
+  breakdown: zeroBreakdown(),
   rateApplied,
 })
+
+export function lookupRate(
+  rates: UsageRate[] | undefined,
+  runnerName: string,
+  runnerModel: string,
+  runnerVariant: string
+): UsageRate | null {
+  if (!rates) {
+    return null
+  }
+  const key = buildKey(runnerName, runnerModel, runnerVariant)
+  return rates.find((rate) => buildKey(rate.runnerName, rate.runnerModel, rate.runnerVariant) === key) ?? null
+}
 
 export function estimateCost(
   tokens: TokenUsage | null,
   runnerName: string,
   runnerModel: string,
-  runnerVariant: string
+  runnerVariant: string,
+  rates: UsageRate[] | undefined
 ): CostEstimate {
-  const rate = rateTable[`${runnerName}|${runnerModel}|${runnerVariant}`] ?? null
+  const rate = lookupRate(rates, runnerName, runnerModel, runnerVariant)
 
   if (!tokens || !rate) {
     return zeroEstimate(rate)

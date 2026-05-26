@@ -30,11 +30,9 @@ const defaultWindow = () => {
 
 function UsageRow({
   bucket,
-  columnLabel,
   emphasize,
 }: {
   bucket: UsageBucket
-  columnLabel: string
   emphasize?: boolean
 }) {
   return (
@@ -62,10 +60,6 @@ function UsageRow({
       </td>
     </tr>
   )
-  // The column label argument is passed through so a future per-grouping
-  // column header tweak (e.g. badge instead of plain text) only needs to
-  // change this component, not its caller.
-  void columnLabel
 }
 
 export function UsagePage() {
@@ -160,11 +154,11 @@ export function UsagePage() {
                 </tr>
               ) : (
                 data.buckets.map((bucket) => (
-                  <UsageRow key={bucket.groupKey} bucket={bucket} columnLabel={columnLabel} />
+                  <UsageRow key={bucket.groupKey} bucket={bucket} />
                 ))
               )}
               {data.buckets.length > 0 ? (
-                <UsageRow bucket={data.totals} columnLabel={columnLabel} emphasize />
+                <UsageRow bucket={data.totals} emphasize />
               ) : null}
             </tbody>
           </table>

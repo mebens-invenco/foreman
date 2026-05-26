@@ -545,6 +545,10 @@ export function getUsage(params: { from?: string; to?: string; groupBy?: UsageGr
   return requestJson<UsageRollupResponse>(`/api/usage${buildSearch(params)}`)
 }
 
+export function getRates() {
+  return requestJson<{ rates: UsageRate[] }>("/api/rates").then((payload) => payload.rates)
+}
+
 export function listScoutRuns() {
   return requestJson<{ runs: ScoutRun[] }>("/api/scout/runs").then(
     (payload) => payload.runs

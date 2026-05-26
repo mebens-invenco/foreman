@@ -10,6 +10,7 @@ import {
 } from "@/components/data-table"
 import { Sheet } from "@/components/ui/sheet"
 import { useAttemptsQuery } from "@/hooks/use-attempts-query"
+import { useRatesQuery } from "@/hooks/use-rates-query"
 import {
   attemptFilterOptions,
   attemptsGlobalFilter,
@@ -22,6 +23,7 @@ export function AttemptsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedAttemptId = searchParams.get("attemptId")
   const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery()
+  const { data: rates } = useRatesQuery()
   const tableState = useAttemptsTableState()
   const setSelectedAttemptId = (attemptId: string | null) => {
     const nextSearchParams = new URLSearchParams(searchParams)
@@ -33,7 +35,7 @@ export function AttemptsPage() {
     setSearchParams(nextSearchParams, { replace: true })
   }
   const table = useDataTable({
-    columns: createAttemptColumns(),
+    columns: createAttemptColumns(rates),
     columnFilters: tableState.columnFilters,
     data: attempts,
     getRowId: (row) => row.id,

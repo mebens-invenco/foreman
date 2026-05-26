@@ -815,6 +815,8 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     });
   });
 
+  server.get("/api/rates", async () => ({ rates: listRunnerRates() }));
+
   server.get("/api/usage", async (request) => {
     const query = request.query as { from?: string; to?: string; groupBy?: string };
     if (query.from !== undefined && !isIsoDate(query.from)) {

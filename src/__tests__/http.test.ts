@@ -704,6 +704,52 @@ describe("HTTP query validation", () => {
   });
 });
 
+describe("HTTP rates", () => {
+  test("returns the runner rate table so the UI can hydrate without duplicating it", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [],
+      repos: db,
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+        syncConfigUpdate: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({ method: "GET", url: "/api/rates" });
+      expect(response.statusCode).toBe(200);
+      const payload = response.json();
+      expect(Array.isArray(payload.rates)).toBe(true);
+      expect(payload.rates.length).toBeGreaterThan(0);
+      const opus = payload.rates.find(
+        (rate: any) => rate.runnerName === "claude" && rate.runnerModel === "claude-opus-4-7",
+      );
+      expect(opus).toMatchObject({
+        runnerVariant: "default",
+        inputPerMtok: 15,
+        outputPerMtok: 75,
+        cacheReadPerMtok: 1.5,
+        cacheWriteFiveMinPerMtok: 18.75,
+      });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+});
+
 describe("HTTP usage rollup", () => {
   test("aggregates attempts in a window into per-day buckets with computed USD cost", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
