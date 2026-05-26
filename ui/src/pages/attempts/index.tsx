@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router"
 
 import {
@@ -25,6 +26,12 @@ export function AttemptsPage() {
   const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery()
   const { data: rates } = useRatesQuery()
   const tableState = useAttemptsTableState()
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 5_000)
+    return () => window.clearInterval(interval)
+  }, [])
+  const columns = useMemo(() => createAttemptColumns(rates, { now }), [rates, now])
   const setSelectedAttemptId = (attemptId: string | null) => {
     const nextSearchParams = new URLSearchParams(searchParams)
     if (attemptId) {
@@ -35,7 +42,7 @@ export function AttemptsPage() {
     setSearchParams(nextSearchParams, { replace: true })
   }
   const table = useDataTable({
-    columns: createAttemptColumns(rates),
+    columns,
     columnFilters: tableState.columnFilters,
     data: attempts,
     getRowId: (row) => row.id,

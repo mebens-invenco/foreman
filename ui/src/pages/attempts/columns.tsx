@@ -11,6 +11,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { TaskLink } from "@/components/task-link"
+import { AttemptActivityCell } from "@/pages/attempts/attempt-activity-cell"
 import {
   abbreviateId,
   formatActionLabel,
@@ -93,7 +94,10 @@ export const attemptsGlobalFilter: FilterFn<AttemptRecord> = (
   return buildAttemptSearchText(row.original).includes(search)
 }
 
-export const createAttemptColumns = (rates: UsageRate[] | undefined): ColumnDef<AttemptRecord>[] => [
+export const createAttemptColumns = (
+  rates: UsageRate[] | undefined,
+  options: { now?: number } = {},
+): ColumnDef<AttemptRecord>[] => [
   {
     accessorKey: "id",
     cell: ({ row }) => (
@@ -220,6 +224,20 @@ export const createAttemptColumns = (rates: UsageRate[] | undefined): ColumnDef<
     filterFn: matchesStringFilter,
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title="Status" />
+    ),
+  },
+  {
+    id: "activity",
+    cell: ({ row }) => (
+      <AttemptActivityCell
+        attempt={row.original}
+        now={options.now ?? Date.now()}
+      />
+    ),
+    enableGlobalFilter: false,
+    enableSorting: false,
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title="Activity" />
     ),
   },
   {

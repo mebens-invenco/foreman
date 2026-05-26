@@ -1,7 +1,9 @@
 import type { ReactNode } from "react"
 
+import { AttemptStatusSummary } from "@/components/attempt-status-summary"
 import { Button } from "@/components/ui/button"
 import { useStopAttemptMutation } from "@/hooks/use-attempts-query"
+import { useWorkerStatusQuery } from "@/hooks/use-attempt-status-query"
 import type { Worker } from "@/lib/api"
 import { formatActionLabel, formatRelativeTime, formatTimestamp } from "@/lib/format"
 
@@ -35,6 +37,10 @@ type WorkerDetailSheetProps = {
 
 export function WorkerDetailSheet({ worker, now }: WorkerDetailSheetProps) {
   const stopAttemptMutation = useStopAttemptMutation()
+  const workerStatusQuery = useWorkerStatusQuery(worker.id, {
+    refetchInterval: worker.currentAttemptId ? 5_000 : false,
+  })
+  const snapshot = workerStatusQuery.data?.snapshot ?? worker.currentAttemptStatus ?? null
   const timingLabel = worker.currentAttempt?.startedAt
     ? `Started ${formatRelativeTime(worker.currentAttempt.startedAt, now)}`
     : `Idle since ${formatRelativeTime(worker.lastHeartbeatAt, now)}`
@@ -118,6 +124,26 @@ export function WorkerDetailSheet({ worker, now }: WorkerDetailSheetProps) {
             value={formatTimestamp(worker.lastHeartbeatAt)}
           />
           <DetailRow label="Timing" value={timingLabel} />
+        </section>
+
+        <section className="space-y-3">
+          <p className="text-xxs tracking-[0.32em] text-muted-foreground uppercase">
+            Deterministic status
+          </p>
+          <div className="border border-border/70 bg-background/70 p-4">
+            <AttemptStatusSummary
+              snapshot={snapshot}
+              isLoading={workerStatusQuery.isLoading && snapshot === null}
+              isError={workerStatusQuery.isError}
+              error={workerStatusQuery.error}
+              now={now}
+              emptyCopy={
+                worker.currentAttemptId
+                  ? "Awaiting first activity."
+                  : "Worker is idle."
+              }
+            />
+          </div>
         </section>
 
         <section className="space-y-3">

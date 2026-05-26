@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 
 import { useQuery } from "@tanstack/react-query"
 
+import { AttemptStatusSummary } from "@/components/attempt-status-summary"
 import { Button } from "@/components/ui/button"
 import {
   SheetContent,
@@ -19,11 +20,17 @@ import { TaskLink } from "@/components/task-link"
 import {
   getArtifactContent,
   getAttempt,
+  getAttemptActivity,
   getAttemptLogs,
   type ArtifactRecord,
+  type AttemptActivityRecord,
   type AttemptEventRecord,
   type AttemptRecord,
 } from "@/lib/api"
+import {
+  attemptActivityQueryKey,
+  useAttemptStatusQuery,
+} from "@/hooks/use-attempt-status-query"
 import {
   attemptDetailQueryKey,
   useStopAttemptMutation,
@@ -48,7 +55,14 @@ type AttemptDetailSheetProps = {
   attemptId: string | null
 }
 
-type AttemptDetailTab = "events" | "logs" | "artifacts"
+type AttemptDetailTab =
+  | "status"
+  | "activity"
+  | "events"
+  | "logs"
+  | "artifacts"
+
+const ACTIVITY_PAGE_SIZE = 100
 
 function formatStatusLabel(status: string) {
   return status.replace(/_/g, " ")
@@ -572,6 +586,124 @@ function ArtifactsPanel({ artifacts }: { artifacts: ArtifactRecord[] }) {
   )
 }
 
+function formatActivityKind(value: string) {
+  return value.replace(/_/g, " ")
+}
+
+function StatusPanel({
+  attemptId,
+  isLive,
+  now,
+}: {
+  attemptId: string
+  isLive: boolean
+  now: number
+}) {
+  const statusQuery = useAttemptStatusQuery(attemptId, {
+    refetchInterval: isLive ? 5_000 : false,
+  })
+  const snapshot = statusQuery.data?.snapshot ?? null
+
+  return (
+    <div className="border border-border/70 bg-background/70 p-4">
+      <AttemptStatusSummary
+        snapshot={snapshot}
+        isLoading={statusQuery.isLoading}
+        isError={statusQuery.isError}
+        error={statusQuery.error}
+        now={now}
+        emptyCopy="No status snapshot available yet."
+      />
+    </div>
+  )
+}
+
+function ActivityPanel({
+  attemptId,
+  isLive,
+}: {
+  attemptId: string
+  isLive: boolean
+}) {
+  const [pageSize, setPageSize] = useState(ACTIVITY_PAGE_SIZE)
+  const query = useQuery({
+    queryKey: attemptActivityQueryKey(attemptId, { limit: pageSize }),
+    queryFn: () => getAttemptActivity(attemptId, { limit: pageSize }),
+    refetchInterval: isLive ? 5_000 : false,
+  })
+
+  if (query.isLoading) {
+    return (
+      <div className="border border-border/70 bg-background/65 px-4 py-6 text-sm text-muted-foreground">
+        Loading activity...
+      </div>
+    )
+  }
+
+  if (query.isError) {
+    return (
+      <div className="border border-rose-500/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-700 dark:text-rose-300">
+        {query.error instanceof Error ? query.error.message : "Failed to load activity."}
+      </div>
+    )
+  }
+
+  const activities: AttemptActivityRecord[] = query.data?.activities ?? []
+  const total = query.data?.totalActivities ?? activities.length
+
+  if (activities.length === 0) {
+    return (
+      <div className="border border-dashed border-border/70 bg-background/65 px-4 py-6 text-sm text-muted-foreground">
+        No activity recorded for this attempt.
+      </div>
+    )
+  }
+
+  const canShowMore = total > activities.length
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between text-xxs tracking-[0.22em] text-muted-foreground uppercase">
+        <span>{`${activities.length} of ${total} rows`}</span>
+        {canShowMore ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            className="font-sans"
+            onClick={() => setPageSize((current) => current + ACTIVITY_PAGE_SIZE)}
+          >
+            Show more
+          </Button>
+        ) : null}
+      </div>
+      <div className="space-y-2">
+        {activities.map((activity) => (
+          <div
+            key={activity.id}
+            className="border border-border/70 bg-background/70 px-4 py-3"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs tracking-[0.22em] text-foreground uppercase">
+                {`#${activity.seq} · ${formatActivityKind(activity.kind)}`}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {formatTimestamp(activity.createdAt)}
+              </p>
+            </div>
+            <p className="mt-2 text-sm leading-6 break-all text-foreground">
+              {activity.message || "—"}
+            </p>
+            {Object.keys(activity.payload).length > 0 ? (
+              <JsonView value={activity.payload} collapsed={1} className="mt-3" />
+            ) : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function EventsPanel({ events }: { events: AttemptEventRecord[] }) {
   if (events.length === 0) {
     return (
@@ -609,7 +741,12 @@ function EventsPanel({ events }: { events: AttemptEventRecord[] }) {
 }
 
 export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
-  const [detailTab, setDetailTab] = useState<AttemptDetailTab>("events")
+  const [detailTab, setDetailTab] = useState<AttemptDetailTab>("status")
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 5_000)
+    return () => window.clearInterval(interval)
+  }, [])
   const stopAttemptMutation = useStopAttemptMutation()
   const { data: workers = [] } = useWorkersQuery()
   const query = useQuery({
@@ -744,11 +881,26 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
               className="min-h-0"
             >
               <TabsList className="w-full justify-start" variant="line">
+                <TabsTrigger value="status">Status</TabsTrigger>
+                <TabsTrigger value="activity">Activity</TabsTrigger>
                 <TabsTrigger value="events">Events</TabsTrigger>
                 <TabsTrigger value="logs">Logs</TabsTrigger>
                 <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
               </TabsList>
 
+              <TabsContent value="status" className="mt-4">
+                <StatusPanel
+                  attemptId={attempt.id}
+                  isLive={attempt.status === "running"}
+                  now={now}
+                />
+              </TabsContent>
+              <TabsContent value="activity" className="mt-4">
+                <ActivityPanel
+                  attemptId={attempt.id}
+                  isLive={attempt.status === "running"}
+                />
+              </TabsContent>
               <TabsContent value="events" className="mt-4">
                 <EventsPanel events={events} />
               </TabsContent>

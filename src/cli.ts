@@ -26,8 +26,10 @@ import {
 import { ForemanVersionMonitor } from "./foreman-version.js";
 import { createHttpServer } from "./http.js";
 import { LoggerService } from "./logger.js";
+import { buildAttemptStatusSnapshot } from "./orchestration/attempt-status-snapshot.js";
 import { SchedulerService } from "./orchestration/index.js";
 import { renderWorkspacePlan } from "./planning/render-workspace-plan.js";
+import { attemptActivityKinds, type AttemptActivityKind } from "./repos/attempt-activity-repo.js";
 import { createRepos } from "./repos/index.js";
 import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
 import { createReviewService, resolveGitHubAuthEnv } from "./review/index.js";
@@ -438,6 +440,133 @@ program
           totals: rollup.totals,
         })}\n`,
       );
+    });
+  });
+
+const parseAttemptActivityKind = (value: string): AttemptActivityKind => {
+  if (!(attemptActivityKinds as readonly string[]).includes(value)) {
+    throw new InvalidArgumentError(`--kind must be one of: ${attemptActivityKinds.join(", ")}`);
+  }
+  return value as AttemptActivityKind;
+};
+
+const parseNonNegativeInteger = (value: string): number => {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new InvalidArgumentError("Value must be a non-negative integer.");
+  }
+  return parsed;
+};
+
+const requireExactlyOne = (
+  options: { attempt?: string; worker?: string },
+): { kind: "attempt" | "worker"; id: string } => {
+  const provided = [options.attempt && { kind: "attempt" as const, id: options.attempt }, options.worker && { kind: "worker" as const, id: options.worker }]
+    .filter((entry): entry is { kind: "attempt" | "worker"; id: string } => Boolean(entry));
+  if (provided.length !== 1) {
+    throw new InvalidArgumentError("Specify exactly one of --attempt or --worker.");
+  }
+  return provided[0]!;
+};
+
+program
+  .command("status")
+  .description("Inspect deterministic status for an attempt or worker (read-only)")
+  .argument("<workspace>")
+  .option("--attempt <attemptId>", "Inspect status for this attempt")
+  .option("--worker <workerId>", "Inspect status for this worker")
+  .action(async (workspace: string, options: { attempt?: string; worker?: string }) => {
+    const target = requireExactlyOne(options);
+
+    await withWorkspaceRepos(workspace, async (repos) => {
+      if (target.kind === "attempt") {
+        const snapshot = buildAttemptStatusSnapshot(repos, target.id);
+        writeJson({ workspace, attemptId: target.id, snapshot });
+        return;
+      }
+
+      const worker = repos.workers.listWorkers().find((candidate) => candidate.id === target.id);
+      if (!worker) {
+        throw new InvalidArgumentError(`Worker not found: ${target.id}`);
+      }
+
+      const snapshot = worker.currentAttemptId
+        ? buildAttemptStatusSnapshot(repos, worker.currentAttemptId)
+        : null;
+      writeJson({
+        workspace,
+        worker: {
+          id: worker.id,
+          slot: worker.slot,
+          status: worker.status,
+          currentAttemptId: worker.currentAttemptId,
+          lastHeartbeatAt: worker.lastHeartbeatAt,
+        },
+        snapshot,
+      });
+    });
+  });
+
+program
+  .command("tail")
+  .description("Tail attempt activity rows (read-only)")
+  .argument("<workspace>")
+  .requiredOption("--attempt <attemptId>", "Attempt id to tail")
+  .option("--activity", "Tail the activity feed", false)
+  .option("--after-seq <seq>", "Return only rows with seq greater than this", parseNonNegativeInteger)
+  .option("--limit <count>", "Maximum rows to return", parsePositiveInteger)
+  .option("--kind <kind>", "Filter to a specific activity kind (repeatable)", (value, previous: AttemptActivityKind[] = []) => [
+    ...previous,
+    parseAttemptActivityKind(value),
+  ], [] as AttemptActivityKind[])
+  .action(async (
+    workspace: string,
+    options: { attempt: string; activity: boolean; afterSeq?: number; limit?: number; kind: AttemptActivityKind[] },
+  ) => {
+    if (!options.activity) {
+      throw new InvalidArgumentError("Only --activity tailing is supported. Use --activity.");
+    }
+
+    await withWorkspaceRepos(workspace, async (repos) => {
+      repos.attempts.getAttempt(options.attempt);
+      const listOptions: { afterSeq?: number; limit?: number; kinds?: AttemptActivityKind[] } = {};
+      if (options.afterSeq !== undefined) {
+        listOptions.afterSeq = options.afterSeq;
+      }
+      if (options.limit !== undefined) {
+        listOptions.limit = options.limit;
+      }
+      if (options.kind.length > 0) {
+        listOptions.kinds = options.kind;
+      }
+      const activities = repos.attemptActivities.listActivities(options.attempt, listOptions);
+      writeJson({
+        workspace,
+        attemptId: options.attempt,
+        activities,
+        latestSeq: activities.length > 0 ? activities[activities.length - 1]!.seq : (options.afterSeq ?? 0),
+      });
+    });
+  });
+
+program
+  .command("stuck")
+  .description("Report whether an attempt is stuck or needs human attention (read-only)")
+  .argument("<workspace>")
+  .requiredOption("--attempt <attemptId>", "Attempt id to inspect")
+  .action(async (workspace: string, options: { attempt: string }) => {
+    await withWorkspaceRepos(workspace, async (repos) => {
+      const snapshot = buildAttemptStatusSnapshot(repos, options.attempt);
+      writeJson({
+        workspace,
+        attemptId: options.attempt,
+        phase: snapshot.phase,
+        stuck: snapshot.stuck,
+        needsHuman: snapshot.needsHuman,
+        repeatedFailureCandidates: snapshot.repeatedFailureCandidates,
+        progressSummary: snapshot.progressSummary,
+        currentOperation: snapshot.currentOperation,
+      });
     });
   });
 

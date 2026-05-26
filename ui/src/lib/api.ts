@@ -185,6 +185,93 @@ type StopAttemptResponse = {
   stopRequested: boolean
 }
 
+export type AttemptActivityKind =
+  | "foreman_milestone"
+  | "operation_started"
+  | "operation_finished"
+  | "command_started"
+  | "command_finished"
+  | "tool_started"
+  | "tool_finished"
+  | "assistant_message"
+  | "reasoning"
+  | "diff"
+  | "progress"
+  | "warning"
+  | "error"
+  | "token_usage"
+  | "unknown"
+
+export type AttemptActivityRecord = {
+  id: string
+  executionAttemptId: string
+  seq: number
+  kind: AttemptActivityKind
+  message: string
+  payload: Record<string, unknown>
+  createdAt: string
+}
+
+export type AttemptStatusPhase =
+  | "not_started"
+  | "starting"
+  | "progressing"
+  | "suspicious"
+  | "stuck"
+  | "needs_human"
+  | "finished"
+
+export type AttemptStatusSnapshot = {
+  attemptId: string
+  attemptStatus: AttemptStatus
+  jobStatus:
+    | "queued"
+    | "leased"
+    | "running"
+    | "completed"
+    | "failed"
+    | "skipped"
+    | null
+  workerStatus: WorkerStatus | null
+  phase: AttemptStatusPhase
+  currentOperation: {
+    kind: AttemptActivityKind
+    message: string
+    startedAt: string
+    payload: Record<string, unknown>
+  } | null
+  counts: {
+    activities: number
+    assistantMessages: number
+    commands: number
+    tools: number
+    errors: number
+    warnings: number
+    diffs: number
+  }
+  progressSummary: {
+    latestMeaningfulMessage: string | null
+    latestMeaningfulAt: string | null
+    latestMeaningfulKind: AttemptActivityKind | null
+  }
+  stuck: {
+    isStuck: boolean
+    reason: "no_activity" | "no_progress" | null
+    sinceSeconds: number | null
+  }
+  needsHuman: {
+    isNeeded: boolean
+    reasons: string[]
+  }
+  repeatedFailureCandidates: Array<{
+    signature: string
+    count: number
+    latestAt: string
+  }>
+  displayWindow: AttemptActivityRecord[]
+  generatedAt: string
+}
+
 export type Worker = {
   id: string
   slot: number
@@ -208,6 +295,29 @@ export type Worker = {
     repoKey: string | null
     status: string
   } | null
+  currentAttemptStatus: AttemptStatusSnapshot | null
+}
+
+export type WorkerStatusResponse = {
+  worker: {
+    id: string
+    slot: number
+    status: WorkerStatus
+    currentAttemptId: string | null
+    lastHeartbeatAt: string
+  }
+  snapshot: AttemptStatusSnapshot | null
+}
+
+export type AttemptActivityResponse = {
+  attemptId: string
+  activities: AttemptActivityRecord[]
+  latestSeq: number
+  totalActivities: number
+}
+
+export type AttemptStatusResponse = {
+  snapshot: AttemptStatusSnapshot
 }
 
 export type TokenUsage = {
@@ -451,6 +561,23 @@ export function getAttemptLogs(attemptId: string) {
 
 export function getAttempt(attemptId: string) {
   return requestJson<AttemptDetail>(`/api/attempts/${attemptId}`)
+}
+
+export function getAttemptStatus(attemptId: string) {
+  return requestJson<AttemptStatusResponse>(`/api/attempts/${attemptId}/status`)
+}
+
+export function getAttemptActivity(
+  attemptId: string,
+  params: { afterSeq?: number; limit?: number } = {},
+) {
+  return requestJson<AttemptActivityResponse>(
+    `/api/attempts/${attemptId}/activity${buildSearch(params)}`,
+  )
+}
+
+export function getWorkerStatus(workerId: string) {
+  return requestJson<WorkerStatusResponse>(`/api/workers/${workerId}/status`)
 }
 
 export function stopAttempt(attemptId: string) {

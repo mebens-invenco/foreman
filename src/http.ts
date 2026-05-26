@@ -13,6 +13,7 @@ import {
 } from "./execution/cost/usage-rollup.js";
 import { isIsoDate, resolveUsageRange } from "./execution/cost/usage-range.js";
 import { unavailableForemanVersionStatus, type ForemanVersionStatus } from "./foreman-version.js";
+import { attemptActivityKinds, type AttemptActivityKind } from "./repos/attempt-activity-repo.js";
 import type { AttemptRecord, JobRecord } from "./repos/index.js";
 import type {
   RepoRef,
@@ -24,6 +25,7 @@ import type {
   TaskTargetStatus,
 } from "./domain/index.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
+import { buildAttemptStatusSnapshot, type AttemptStatusSnapshot } from "./orchestration/attempt-status-snapshot.js";
 import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
 import type { ReviewService } from "./review/index.js";
@@ -150,6 +152,35 @@ const parseNonNegativeIntegerQuery = (name: string, value: string | undefined): 
 
   const parsed = Number.parseInt(value, 10);
   return parsed;
+};
+
+const parseActivityKindsQuery = (value: string | string[] | undefined): AttemptActivityKind[] => {
+  if (value === undefined) {
+    return [];
+  }
+
+  const values = Array.isArray(value) ? value : [value];
+  const tokens = values.flatMap((entry) => entry.split(",")).map((entry) => entry.trim()).filter(Boolean);
+  const kinds: AttemptActivityKind[] = [];
+  for (const token of tokens) {
+    if (!(attemptActivityKinds as readonly string[]).includes(token)) {
+      throw new ForemanError(
+        "invalid_request",
+        `Query parameter kind must be one of: ${attemptActivityKinds.join(", ")}.`,
+        400,
+      );
+    }
+    kinds.push(token as AttemptActivityKind);
+  }
+  return kinds;
+};
+
+const safeBuildSnapshot = (repos: ForemanRepos, attemptId: string): AttemptStatusSnapshot | null => {
+  try {
+    return buildAttemptStatusSnapshot(repos, attemptId);
+  } catch {
+    return null;
+  }
 };
 
 const parseEnumQuery = <T extends string>(name: string, value: string | undefined, allowed: readonly T[]): T | undefined => {
@@ -663,6 +694,66 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     return { attemptId: params.attemptId, stopRequested: true };
   });
 
+  server.get("/api/attempts/:attemptId/activity", async (request) => {
+    const params = request.params as { attemptId: string };
+    const query = request.query as { afterSeq?: string; limit?: string; kind?: string | string[] };
+    deps.repos.attempts.getAttempt(params.attemptId);
+
+    const afterSeq = parseNonNegativeIntegerQuery("afterSeq", query.afterSeq);
+    const limit = parsePositiveIntegerQuery("limit", query.limit);
+    const kinds = parseActivityKindsQuery(query.kind);
+
+    const options: { afterSeq?: number; limit?: number; kinds?: AttemptActivityKind[] } = {};
+    if (afterSeq !== undefined) {
+      options.afterSeq = afterSeq;
+    }
+    if (limit !== undefined) {
+      options.limit = limit;
+    }
+    if (kinds.length > 0) {
+      options.kinds = kinds;
+    }
+
+    const activities = deps.repos.attemptActivities.listActivities(params.attemptId, options);
+    const latestSeq = activities.length > 0 ? activities[activities.length - 1]!.seq : (afterSeq ?? 0);
+
+    return {
+      attemptId: params.attemptId,
+      activities,
+      latestSeq,
+      totalActivities: deps.repos.attemptActivities.countActivities(params.attemptId),
+    };
+  });
+
+  server.get("/api/attempts/:attemptId/status", async (request) => {
+    const params = request.params as { attemptId: string };
+    const snapshot = buildAttemptStatusSnapshot(deps.repos, params.attemptId);
+    return { snapshot };
+  });
+
+  server.get("/api/workers/:workerId/status", async (request) => {
+    const params = request.params as { workerId: string };
+    const worker = deps.repos.workers.listWorkers().find((candidate) => candidate.id === params.workerId);
+    if (!worker) {
+      throw new ForemanError("worker_not_found", `Worker not found: ${params.workerId}`, 404);
+    }
+
+    const snapshot = worker.currentAttemptId
+      ? safeBuildSnapshot(deps.repos, worker.currentAttemptId)
+      : null;
+
+    return {
+      worker: {
+        id: worker.id,
+        slot: worker.slot,
+        status: worker.status,
+        currentAttemptId: worker.currentAttemptId,
+        lastHeartbeatAt: worker.lastHeartbeatAt,
+      },
+      snapshot,
+    };
+  });
+
   server.get("/api/attempts/:attemptId/logs", async (request, reply) => {
     const params = request.params as { attemptId: string };
     const logPath = attemptLogPath(deps.paths, params.attemptId);
@@ -735,6 +826,10 @@ export const createHttpServer = (deps: HttpServerDeps) => {
           })()
         : null;
 
+      const currentAttemptStatus = currentAttempt
+        ? safeBuildSnapshot(deps.repos, currentAttempt.id)
+        : null;
+
       return {
         id: worker.id,
         slot: worker.slot,
@@ -764,6 +859,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
                 repoKey: currentJob.repoKey,
                 status: currentJob.status,
               },
+        currentAttemptStatus,
       };
     }),
   }));

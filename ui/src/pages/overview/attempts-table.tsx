@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { useAttemptsQuery } from "@/hooks/use-attempts-query"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TaskLink } from "@/components/task-link"
+import { AttemptActivityCell } from "@/pages/attempts/attempt-activity-cell"
 import {
   Table,
   TableBody,
@@ -99,6 +100,7 @@ export function AttemptsTable({ now }: { now: number }) {
             <col className="w-44" />
             <col className="w-28" />
             <col className="w-28" />
+            <col className="w-56" />
             <col />
             <col className="w-24" />
           </colgroup>
@@ -108,6 +110,7 @@ export function AttemptsTable({ now }: { now: number }) {
               <TableHead>Target</TableHead>
               <TableHead>Stage</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead>Activity</TableHead>
               <TableHead>Summary</TableHead>
               <TableHead className="px-4 text-right">Time</TableHead>
             </TableRow>
@@ -170,6 +173,9 @@ export function AttemptsTable({ now }: { now: number }) {
                     >
                       {formatStatusLabel(attempt.status)}
                     </span>
+                  </TableCell>
+                  <TableCell className="overflow-hidden">
+                    <AttemptActivityCell attempt={attempt} now={now} />
                   </TableCell>
                   <TableCell className="overflow-hidden">
                     <Tooltip>

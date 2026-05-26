@@ -4,6 +4,7 @@ import type { Worker } from "@/lib/api"
 import { formatActionLabel, formatRelativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
+import { AttemptStatusSummary } from "@/components/attempt-status-summary"
 import { Sheet, SheetTrigger } from "@/components/ui/sheet"
 import { TaskLink } from "@/components/task-link"
 import { WorkerDetailSheet } from "@/pages/overview/worker-detail-sheet"
@@ -81,6 +82,13 @@ export function WorkerCard({ worker, now }: WorkerCardProps) {
                     </p>
                   </div>
                 </div>
+
+                <AttemptStatusSummary
+                  snapshot={worker.currentAttemptStatus}
+                  variant="card"
+                  now={now}
+                  emptyCopy="Awaiting first activity"
+                />
               </>
             ) : (
               <p className="mt-2 tracking-tight text-foreground">Idle</p>
