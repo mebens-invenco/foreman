@@ -737,12 +737,14 @@ describe("HTTP rates", () => {
         (rate: any) => rate.runnerName === "claude" && rate.runnerModel === "claude-opus-4-7",
       );
       expect(opus).toMatchObject({
-        runnerVariant: "default",
         inputPerMtok: 15,
         outputPerMtok: 75,
         cacheReadPerMtok: 1.5,
         cacheWriteFiveMinPerMtok: 18.75,
       });
+      // Lookup key intentionally has no runnerVariant — attempts persist the
+      // configured effort/variant, but pricing is model-level today.
+      expect(opus).not.toHaveProperty("runnerVariant");
     } finally {
       await server.close();
       db.close();
@@ -791,7 +793,9 @@ describe("HTTP usage rollup", () => {
           1,
           "claude",
           "claude-opus-4-7",
-          "default",
+          // Use the real persisted variant ("high") so the rollup proves the
+          // model-only rate key works for default-config attempts.
+          "high",
           null,
           "completed",
           input.startedAt,

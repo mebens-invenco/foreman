@@ -98,7 +98,6 @@ function CostSummaryPanel({ attempt }: { attempt: AttemptRecord }) {
     attempt.tokensUsed,
     attempt.runnerName,
     attempt.runnerModel,
-    attempt.runnerVariant,
     rates
   )
 
@@ -161,7 +160,7 @@ function CostSummaryPanel({ attempt }: { attempt: AttemptRecord }) {
         <p className="mt-3 text-xs text-muted-foreground">
           {rates === undefined
             ? "Loading rate table…"
-            : `No rate entry for ${attempt.runnerName}/${attempt.runnerModel} (${attempt.runnerVariant}). Add it to src/execution/cost/rates.ts to surface a cost here.`}
+            : `No rate entry for ${attempt.runnerName}/${attempt.runnerModel}. Add it to src/execution/cost/rates.ts to surface a cost here.`}
         </p>
       )}
     </section>

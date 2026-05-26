@@ -91,7 +91,7 @@ const accumulate = (bucket: UsageBucket, row: AttemptUsageRow): void => {
   // rate depends on the row's runner/model triple, which can differ between
   // rows even inside one bucket — e.g. day buckets mix every runner that ran
   // that day. Summing per-row preserves the right rate per row.
-  const estimate = estimateCost(tokens, row.runnerName, row.runnerModel, row.runnerVariant);
+  const estimate = estimateCost(tokens, row.runnerName, row.runnerModel);
   bucket.cost.totalUsd += estimate.totalUsd;
   bucket.cost.breakdown.input += estimate.breakdown.input;
   bucket.cost.breakdown.output += estimate.breakdown.output;

@@ -18,6 +18,14 @@
  * underlying model's API pricing — the value is in the consistency of the
  * cost surface, not the bill. Override when these runners gain per-token
  * billing surfaces.
+ *
+ * Why no variant in the key:
+ * Foreman persists `runnerVariant` as the configured effort/variant
+ * ("high", "max", "xhigh", …). For Claude, Codex, and OpenCode today, the
+ * effort knob steers behavior but not per-token billing — the rate is
+ * model-level. Keying on `runnerName + runnerModel` keeps the table from
+ * silently missing on every default-config attempt. If a future runner
+ * gains variant-priced tiers, extend the key shape then.
  */
 
 import type { RunnerProvider } from "../../domain/index.js";
@@ -36,19 +44,18 @@ export type RunnerRate = {
 export type RunnerRateKey = {
   runnerName: RunnerProvider;
   runnerModel: string;
-  runnerVariant: string;
 };
 
 const buildKey = (key: RunnerRateKey): string =>
-  `${key.runnerName}|${key.runnerModel}|${key.runnerVariant}`;
+  `${key.runnerName}|${key.runnerModel}`;
 
-// Each entry keys on runnerName|runnerModel|runnerVariant. Variant defaults
-// to "default" for runners that do not parameterize further (codex/opencode).
+// Each entry keys on runnerName|runnerModel. Model strings must match what
+// Foreman persists on the attempt row — see `runnerForAction(config).model`
+// in `src/workspace/config.ts` for the configured defaults.
 const rateEntries: ReadonlyArray<RunnerRateKey & RunnerRate> = [
   {
     runnerName: "claude",
     runnerModel: "claude-opus-4-7",
-    runnerVariant: "default",
     inputPerMtok: 15,
     outputPerMtok: 75,
     cacheReadPerMtok: 1.5,
@@ -57,7 +64,6 @@ const rateEntries: ReadonlyArray<RunnerRateKey & RunnerRate> = [
   {
     runnerName: "claude",
     runnerModel: "claude-sonnet-4-6",
-    runnerVariant: "default",
     inputPerMtok: 3,
     outputPerMtok: 15,
     cacheReadPerMtok: 0.3,
@@ -66,7 +72,6 @@ const rateEntries: ReadonlyArray<RunnerRateKey & RunnerRate> = [
   {
     runnerName: "claude",
     runnerModel: "claude-haiku-4-5-20251001",
-    runnerVariant: "default",
     inputPerMtok: 1,
     outputPerMtok: 5,
     cacheReadPerMtok: 0.1,
@@ -74,8 +79,7 @@ const rateEntries: ReadonlyArray<RunnerRateKey & RunnerRate> = [
   },
   {
     runnerName: "codex",
-    runnerModel: "gpt-5.4",
-    runnerVariant: "default",
+    runnerModel: "gpt-5.5",
     inputPerMtok: 1.25,
     outputPerMtok: 10,
     cacheReadPerMtok: 0.125,
@@ -83,19 +87,18 @@ const rateEntries: ReadonlyArray<RunnerRateKey & RunnerRate> = [
   },
   {
     runnerName: "opencode",
-    runnerModel: "default",
-    runnerVariant: "default",
-    inputPerMtok: 3,
-    outputPerMtok: 15,
-    cacheReadPerMtok: 0.3,
-    cacheWriteFiveMinPerMtok: 3.75,
+    runnerModel: "openai/gpt-5.5",
+    inputPerMtok: 1.25,
+    outputPerMtok: 10,
+    cacheReadPerMtok: 0.125,
+    cacheWriteFiveMinPerMtok: 1.25,
   },
 ];
 
 const rateLookup: ReadonlyMap<string, RunnerRate> = new Map(
   rateEntries.map((entry) => {
-    const { runnerName, runnerModel, runnerVariant, ...rate } = entry;
-    return [buildKey({ runnerName, runnerModel, runnerVariant }), rate];
+    const { runnerName, runnerModel, ...rate } = entry;
+    return [buildKey({ runnerName, runnerModel }), rate];
   }),
 );
 

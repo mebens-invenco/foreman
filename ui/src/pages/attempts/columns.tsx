@@ -329,15 +329,13 @@ export const createAttemptColumns = (rates: UsageRate[] | undefined): ColumnDef<
   },
   {
     accessorFn: (row) =>
-      estimateCost(row.tokensUsed, row.runnerName, row.runnerModel, row.runnerVariant, rates)
-        .totalUsd,
+      estimateCost(row.tokensUsed, row.runnerName, row.runnerModel, rates).totalUsd,
     id: "cost",
     cell: ({ row }) => {
       const estimate = estimateCost(
         row.original.tokensUsed,
         row.original.runnerName,
         row.original.runnerModel,
-        row.original.runnerVariant,
         rates
       )
       const label = (

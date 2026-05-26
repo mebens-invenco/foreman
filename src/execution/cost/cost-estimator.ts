@@ -3,10 +3,15 @@
  * produced it, return a USD breakdown using the hardcoded {@link RunnerRate}
  * table.
  *
- * Unknown runner/model/variant returns an all-zero result rather than throwing,
- * so callers (HTTP, CLI, UI rollups) never crash on a runner not yet wired
- * into the rate table. A single `console.warn` per unknown key per process
- * keeps the visibility without spamming logs.
+ * Unknown runner/model returns an all-zero result rather than throwing, so
+ * callers (HTTP, CLI, UI rollups) never crash on a runner not yet wired into
+ * the rate table. A single `console.warn` per unknown key per process keeps
+ * the visibility without spamming logs.
+ *
+ * Note on runnerVariant: attempts persist the configured effort/variant
+ * ("high", "max", "xhigh", …), but vendor pricing today is model-level for
+ * every runner Foreman speaks to, so the lookup intentionally ignores it.
+ * See `src/execution/cost/rates.ts` for the rationale.
  *
  * Costs are computed independently per bucket:
  *   - fresh input:     inputPerMtok          x inputTokens
@@ -48,13 +53,13 @@ const zeroBreakdown = (): CostBreakdown => ({
 const zeroEstimate = (): CostEstimate => ({ totalUsd: 0, breakdown: zeroBreakdown() });
 
 const warnUnknownOnce = (key: RunnerRateKey): void => {
-  const cacheKey = `${key.runnerName}|${key.runnerModel}|${key.runnerVariant}`;
+  const cacheKey = `${key.runnerName}|${key.runnerModel}`;
   if (warnedKeys.has(cacheKey)) {
     return;
   }
   warnedKeys.add(cacheKey);
   console.warn(
-    `[cost-estimator] No rate entry for runner=${key.runnerName} model=${key.runnerModel} variant=${key.runnerVariant} — reporting zero cost.`,
+    `[cost-estimator] No rate entry for runner=${key.runnerName} model=${key.runnerModel} — reporting zero cost.`,
   );
 };
 
@@ -62,15 +67,14 @@ export const estimateCost = (
   tokens: TokenUsage | null | undefined,
   runnerName: RunnerRateKey["runnerName"],
   runnerModel: string,
-  runnerVariant: string,
 ): CostEstimate => {
   if (!tokens) {
     return zeroEstimate();
   }
 
-  const rate = lookupRunnerRate({ runnerName, runnerModel, runnerVariant });
+  const rate = lookupRunnerRate({ runnerName, runnerModel });
   if (!rate) {
-    warnUnknownOnce({ runnerName, runnerModel, runnerVariant });
+    warnUnknownOnce({ runnerName, runnerModel });
     return zeroEstimate();
   }
 

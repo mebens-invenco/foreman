@@ -501,7 +501,6 @@ export type UsageGroupBy = "day" | "runner" | "model"
 export type UsageRate = {
   runnerName: "claude" | "codex" | "opencode"
   runnerModel: string
-  runnerVariant: string
   inputPerMtok: number
   outputPerMtok: number
   cacheReadPerMtok: number

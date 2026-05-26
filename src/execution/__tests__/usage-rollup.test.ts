@@ -12,7 +12,7 @@ const opusRow = (overrides: {
 }) => ({
   runnerName: "claude" as const,
   runnerModel: "claude-opus-4-7",
-  runnerVariant: "default",
+  runnerVariant: "high",
   startedAt: overrides.startedAt,
   tokensUsed: {
     inputTokens: overrides.inputTokens ?? 0,
@@ -25,7 +25,7 @@ const opusRow = (overrides: {
 const sonnetRow = (overrides: { startedAt: string; outputTokens?: number }) => ({
   runnerName: "claude" as const,
   runnerModel: "claude-sonnet-4-6",
-  runnerVariant: "default",
+  runnerVariant: "high",
   startedAt: overrides.startedAt,
   tokensUsed: {
     inputTokens: 0,
@@ -84,7 +84,7 @@ describe("rollupUsage", () => {
         {
           runnerName: "claude",
           runnerModel: "claude-opus-4-7",
-          runnerVariant: "default",
+          runnerVariant: "high",
           startedAt: "2026-05-20T10:00:00Z",
           tokensUsed: null,
         },

@@ -9,8 +9,8 @@ import type { TokenUsage, UsageRate } from "@/lib/api"
 
 const TOKENS_PER_MTOK = 1_000_000
 
-const buildKey = (runnerName: string, runnerModel: string, runnerVariant: string): string =>
-  `${runnerName}|${runnerModel}|${runnerVariant}`
+const buildKey = (runnerName: string, runnerModel: string): string =>
+  `${runnerName}|${runnerModel}`
 
 export type CostBreakdown = {
   input: number
@@ -43,24 +43,22 @@ const zeroEstimate = (rateApplied: UsageRate | null): CostEstimate => ({
 export function lookupRate(
   rates: UsageRate[] | undefined,
   runnerName: string,
-  runnerModel: string,
-  runnerVariant: string
+  runnerModel: string
 ): UsageRate | null {
   if (!rates) {
     return null
   }
-  const key = buildKey(runnerName, runnerModel, runnerVariant)
-  return rates.find((rate) => buildKey(rate.runnerName, rate.runnerModel, rate.runnerVariant) === key) ?? null
+  const key = buildKey(runnerName, runnerModel)
+  return rates.find((rate) => buildKey(rate.runnerName, rate.runnerModel) === key) ?? null
 }
 
 export function estimateCost(
   tokens: TokenUsage | null,
   runnerName: string,
   runnerModel: string,
-  runnerVariant: string,
   rates: UsageRate[] | undefined
 ): CostEstimate {
-  const rate = lookupRate(rates, runnerName, runnerModel, runnerVariant)
+  const rate = lookupRate(rates, runnerName, runnerModel)
 
   if (!tokens || !rate) {
     return zeroEstimate(rate)

@@ -13,7 +13,6 @@ describe("estimateCost", () => {
       const rate = lookupRunnerRate({
         runnerName: "claude",
         runnerModel: "claude-opus-4-7",
-        runnerVariant: "default",
       });
       expect(rate).not.toBeNull();
 
@@ -27,7 +26,6 @@ describe("estimateCost", () => {
         },
         "claude",
         "claude-opus-4-7",
-        "default",
       );
 
       // Per-1M token rates for Opus 4.7 — fresh in, output, cache read, cache write.
@@ -50,7 +48,6 @@ describe("estimateCost", () => {
         },
         "claude",
         "claude-opus-4-7",
-        "default",
       );
 
       // Sanity range — at Opus 4.7 rates and these token counts the day
@@ -58,6 +55,24 @@ describe("estimateCost", () => {
       // the rate-table to the audit so a future bad rate edit fails here.
       expect(result.totalUsd).toBeGreaterThan(300);
       expect(result.totalUsd).toBeLessThan(500);
+    });
+
+    test("matches a Claude attempt regardless of persisted runnerVariant (effort)", () => {
+      // Regression guard: attempts persist `runnerVariant` as the configured
+      // effort ("high"/"max"/etc.), not "default". Pricing is model-level, so
+      // the lookup must succeed for the real default-config row.
+      const tokens = { inputTokens: 1_000_000, outputTokens: 0 };
+      const withHigh = estimateCost(tokens, "claude", "claude-opus-4-7");
+      expect(withHigh.totalUsd).toBeCloseTo(15);
+    });
+
+    test("matches the OpenCode default-config model (openai/gpt-5.5)", () => {
+      const result = estimateCost(
+        { inputTokens: 1_000_000, outputTokens: 1_000_000 },
+        "opencode",
+        "openai/gpt-5.5",
+      );
+      expect(result.totalUsd).toBeGreaterThan(0);
     });
   });
 
@@ -69,13 +84,11 @@ describe("estimateCost", () => {
         { inputTokens: 100, outputTokens: 100 },
         "claude",
         "claude-experimental-x",
-        "default",
       );
       const second = estimateCost(
         { inputTokens: 100, outputTokens: 100 },
         "claude",
         "claude-experimental-x",
-        "default",
       );
 
       expect(first.totalUsd).toBe(0);
@@ -92,7 +105,6 @@ describe("estimateCost", () => {
         { inputTokens: 1_000_000, outputTokens: 1_000_000 },
         "claude",
         "claude-opus-4-7",
-        "default",
       );
 
       expect(result.breakdown.cacheRead).toBe(0);
@@ -110,7 +122,6 @@ describe("estimateCost", () => {
         { inputTokens: 0, outputTokens: 0 },
         "claude",
         "claude-opus-4-7",
-        "default",
       );
 
       expect(result.totalUsd).toBe(0);
@@ -127,8 +138,8 @@ describe("estimateCost", () => {
     });
 
     test("returns zero when tokens are null/undefined", () => {
-      expect(estimateCost(null, "claude", "claude-opus-4-7", "default").totalUsd).toBe(0);
-      expect(estimateCost(undefined, "claude", "claude-opus-4-7", "default").totalUsd).toBe(0);
+      expect(estimateCost(null, "claude", "claude-opus-4-7").totalUsd).toBe(0);
+      expect(estimateCost(undefined, "claude", "claude-opus-4-7").totalUsd).toBe(0);
     });
   });
 
@@ -140,7 +151,7 @@ describe("estimateCost", () => {
         cacheReadInputTokens: 1_000_000_000,
         cacheCreationInputTokens: 1_000_000_000,
       };
-      const result = estimateCost(tokens, "claude", "claude-opus-4-7", "default");
+      const result = estimateCost(tokens, "claude", "claude-opus-4-7");
 
       // Each bucket = 1000 * per-MTok rate.
       expect(result.breakdown.input).toBeCloseTo(15_000);
