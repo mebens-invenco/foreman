@@ -19,6 +19,7 @@
  * for aggregation rather than dropping the row entirely.
  */
 import type { TokenUsage } from "../../domain/index.js";
+import type { NormalizedRunnerActivity } from "../../repos/attempt-activity-repo.js";
 import {
   type JsonRecord,
   type NormalizedJsonOutput,
@@ -67,6 +68,150 @@ export const extractCodexUsage = (usage: JsonRecord): TokenUsage | undefined => 
     outputTokens: outputTokens ?? 0,
     ...(cacheReadInputTokens !== undefined ? { cacheReadInputTokens } : {}),
     ...(reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
+  };
+};
+
+/**
+ * Per-line activity normalizer for Codex's `--json` stream.
+ *
+ * Codex emits one JSON value per line on stdout. We translate each line into a
+ * Foreman-shape {@link NormalizedRunnerActivity} so the live activity feed
+ * has a uniform vocabulary across runners. Lines that don't map (parse
+ * failure, unrecognised type, missing item.type) yield `null`/`undefined` or
+ * a single `unknown` record — the runner's `onActivity` drain treats parse
+ * failures as non-fatal.
+ *
+ * The shape we emit is intentionally coarse — `kind` + `message` + payload
+ * with the original line context — so downstream snapshot rules can pattern-
+ * match without needing to know every Codex item variant.
+ */
+export const normalizeCodexActivityLine = (
+  line: string,
+): NormalizedRunnerActivity | null => {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+
+  if (!isRecord(parsed)) {
+    return null;
+  }
+
+  const type = typeof parsed.type === "string" ? parsed.type : null;
+  if (!type) {
+    return null;
+  }
+
+  if (type === "thread.started") {
+    const threadId = stringField(parsed, ["thread_id", "threadId", "session_id", "sessionId"]);
+    return {
+      kind: "operation_started",
+      message: "Codex thread started",
+      payload: { codexType: type, ...(threadId ? { threadId } : {}) },
+    };
+  }
+
+  if (type === "turn.started") {
+    return { kind: "operation_started", message: "Codex turn started", payload: { codexType: type } };
+  }
+
+  if (type === "turn.completed") {
+    const usage = isRecord(parsed.usage) ? extractCodexUsage(parsed.usage) : undefined;
+    return {
+      kind: "token_usage",
+      message: "Codex turn completed",
+      payload: { codexType: type, ...(usage ? { tokensUsed: usage } : {}) },
+    };
+  }
+
+  if (type === "item.started" || type === "item.completed") {
+    const item = isRecord(parsed.item) ? parsed.item : null;
+    const itemType = item && typeof item.type === "string" ? item.type : null;
+    const text = item ? stringField(item, ["text", "content", "result", "output", "command"]) : null;
+    const isCompleted = type === "item.completed";
+    const basePayload: Record<string, unknown> = { codexType: type };
+    if (itemType) {
+      basePayload.itemType = itemType;
+    }
+    if (item && typeof item.id === "string") {
+      basePayload.itemId = item.id;
+    }
+
+    if (itemType === "agent_message") {
+      return {
+        kind: "assistant_message",
+        message: text ?? "Codex assistant message",
+        payload: basePayload,
+      };
+    }
+
+    if (itemType === "reasoning") {
+      return {
+        kind: "reasoning",
+        message: text ?? "Codex reasoning",
+        payload: basePayload,
+      };
+    }
+
+    if (itemType === "command_execution" || itemType === "shell") {
+      return {
+        kind: isCompleted ? "command_finished" : "command_started",
+        message: text ?? (isCompleted ? "Command finished" : "Command started"),
+        payload: basePayload,
+      };
+    }
+
+    if (itemType === "tool_call" || itemType === "tool_use") {
+      return {
+        kind: isCompleted ? "tool_finished" : "tool_started",
+        message: text ?? (isCompleted ? "Tool finished" : "Tool started"),
+        payload: basePayload,
+      };
+    }
+
+    if (itemType === "file_change" || itemType === "patch") {
+      return {
+        kind: "diff",
+        message: text ?? "File change",
+        payload: basePayload,
+      };
+    }
+
+    if (itemType === "error") {
+      return {
+        kind: "error",
+        message: text ?? "Codex error",
+        payload: basePayload,
+      };
+    }
+
+    return {
+      kind: "unknown",
+      message: text ?? `Codex ${type}`,
+      payload: basePayload,
+    };
+  }
+
+  if (type === "error") {
+    const errorText = stringField(parsed, ["message", "error", "detail"]);
+    return {
+      kind: "error",
+      message: errorText ?? "Codex error",
+      payload: { codexType: type },
+    };
+  }
+
+  return {
+    kind: "unknown",
+    message: `Codex ${type}`,
+    payload: { codexType: type },
   };
 };
 

@@ -4,8 +4,10 @@ import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import { isRunnerProvider, runnerProviders } from "../../domain/index.js";
 import type { AttemptStatus, RunnerProvider, TokenUsage } from "../../domain/index.js";
+import type { AttemptActivityKind, AttemptActivityRepo } from "../attempt-activity-repo.js";
 import type {
   AttemptEventRecord,
+  AttemptMilestoneTarget,
   AttemptRecord,
   AttemptRepo,
   AttemptUsageRow,
@@ -92,7 +94,10 @@ const mapAttempt = (row: SqliteRow): AttemptRecord => ({
 });
 
 export class SqliteAttemptRepo implements AttemptRepo {
-  constructor(private readonly sqlite: SqliteDatabase) {}
+  constructor(
+    private readonly sqlite: SqliteDatabase,
+    private readonly activityRepo: AttemptActivityRepo,
+  ) {}
 
   private nextAttemptNumber(jobId: string): number {
     const row = this.sqlite
@@ -400,6 +405,35 @@ export class SqliteAttemptRepo implements AttemptRepo {
         "INSERT INTO execution_attempt_event(id, execution_attempt_id, event_type, message, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       )
       .run(newId(), attemptId, eventType, message, stableStringify(payload), isoNow());
+  }
+
+  recordAttemptMilestone(
+    attemptId: string,
+    name: string,
+    message: string,
+    payload: Record<string, unknown>,
+    options: { writeTo: AttemptMilestoneTarget[] },
+  ): void {
+    const writeTo = new Set<AttemptMilestoneTarget>(options.writeTo);
+    if (writeTo.size === 0) {
+      throw new ForemanError(
+        "milestone_routing_required",
+        `recordAttemptMilestone(${JSON.stringify(name)}) was called without writeTo targets.`,
+        500,
+      );
+    }
+    if (writeTo.has("event")) {
+      this.addAttemptEvent(attemptId, name, message, payload);
+    }
+    if (writeTo.has("activity")) {
+      const kind: AttemptActivityKind = "foreman_milestone";
+      this.activityRepo.appendActivity({
+        executionAttemptId: attemptId,
+        kind,
+        message,
+        payload: { name, ...payload },
+      });
+    }
   }
 
   listAttemptEvents(attemptId: string): AttemptEventRecord[] {

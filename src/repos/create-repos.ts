@@ -1,6 +1,7 @@
 import type { ForemanRepos } from "./foreman-repos.js";
 import type { SqliteForemanDatabase } from "./impl/sqlite-database.js";
 import { SqliteArtifactRepo } from "./impl/sqlite-artifact-repo.js";
+import { SqliteAttemptActivityRepo } from "./impl/sqlite-attempt-activity-repo.js";
 import { SqliteAttemptRepo } from "./impl/sqlite-attempt-repo.js";
 import { SqliteDeploymentTrackingRepo } from "./impl/sqlite-deployment-tracking-repo.js";
 import { SqliteJobRepo } from "./impl/sqlite-job-repo.js";
@@ -16,11 +17,13 @@ import { SqliteWorkerRepo } from "./impl/sqlite-worker-repo.js";
 
 export const createRepos = (database: SqliteForemanDatabase): ForemanRepos => {
   const sqlite = database.sqlite;
+  const attemptActivities = new SqliteAttemptActivityRepo(sqlite);
   return {
     database,
     migrationRunner: new SqliteMigrationRunner(sqlite),
     jobs: new SqliteJobRepo(sqlite),
-    attempts: new SqliteAttemptRepo(sqlite),
+    attempts: new SqliteAttemptRepo(sqlite, attemptActivities),
+    attemptActivities,
     workers: new SqliteWorkerRepo(sqlite),
     leases: new SqliteLeaseRepo(sqlite),
     scoutRuns: new SqliteScoutRunRepo(sqlite),

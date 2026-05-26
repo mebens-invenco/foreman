@@ -3,6 +3,18 @@ import { z } from "zod";
 
 import type { ActionType, RunnerSessionRole } from "../domain/index.js";
 
+// Observability defaults — feed both the live activity stream's retention and
+// the deterministic snapshot service in `attempt-status-snapshot.ts`. Stuck
+// thresholds are in seconds since the latest activity row of the relevant
+// shape; `summaryActivityLimit` caps the display window the snapshot returns.
+export const observabilitySchema = z.object({
+  maxActivityRowsPerAttempt: z.number().int().positive().default(2_000),
+  summaryActivityLimit: z.number().int().positive().default(20),
+  stuckNoProgressSeconds: z.number().int().positive().default(180),
+  stuckNoActivitySeconds: z.number().int().positive().default(120),
+  repeatedFailureWindow: z.number().int().positive().default(3),
+});
+
 export const schedulerSchema = z.object({
   workerConcurrency: z.number().int().positive().default(4),
   scoutPollIntervalSeconds: z.number().int().positive().default(60),
@@ -242,6 +254,13 @@ export const workspaceConfigSchema = z.preprocess(
       cron: cronSchema.default({ enabled: false, jobsDir: "cron" }),
       agentTaskCreation: agentTaskCreationSchema.default({ enabled: false }),
       deployment: deploymentSchema.default({ minRetryIntervalMinutes: 10, maxRetryIntervalMinutes: 180 }),
+      observability: observabilitySchema.default({
+        maxActivityRowsPerAttempt: 2_000,
+        summaryActivityLimit: 20,
+        stuckNoProgressSeconds: 180,
+        stuckNoActivitySeconds: 120,
+        repeatedFailureWindow: 3,
+      }),
       scheduler: schedulerSchema.default({
         workerConcurrency: 4,
         scoutPollIntervalSeconds: 60,
@@ -342,6 +361,13 @@ export const createDefaultWorkspaceConfig = (
   deployment: {
     minRetryIntervalMinutes: 10,
     maxRetryIntervalMinutes: 180,
+  },
+  observability: {
+    maxActivityRowsPerAttempt: 2_000,
+    summaryActivityLimit: 20,
+    stuckNoProgressSeconds: 180,
+    stuckNoActivitySeconds: 120,
+    repeatedFailureWindow: 3,
   },
   scheduler: {
     workerConcurrency: 4,

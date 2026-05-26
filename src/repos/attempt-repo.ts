@@ -1,6 +1,14 @@
 import type { AttemptStatus, RunnerProvider, TokenUsage } from "../domain/index.js";
 import type { LeaseResourceType } from "./lease-repo.js";
 
+/**
+ * Routing for {@link AttemptRepo.recordAttemptMilestone}. Foreman-owned
+ * lifecycle milestones currently double-write to `event` (durable audit) and
+ * `activity` (live snapshot feed). Callers MUST be explicit so future audits
+ * can grep for sites that diverge from the canonical pair.
+ */
+export type AttemptMilestoneTarget = "event" | "activity";
+
 export type AttemptRecord = {
   id: string;
   jobId: string;
@@ -85,5 +93,17 @@ export interface AttemptRepo {
   latestAttemptForTaskTarget(taskTargetId: string): AttemptRecord | null;
   addAttemptEvent(attemptId: string, eventType: string, message: string, payload?: Record<string, unknown>): void;
   listAttemptEvents(attemptId: string): AttemptEventRecord[];
+  /**
+   * Records a Foreman-owned milestone, routing it explicitly to the durable
+   * `event` stream, the live `activity` stream, or both. Callers always pass
+   * `writeTo` to keep duplication intentional.
+   */
+  recordAttemptMilestone(
+    attemptId: string,
+    name: string,
+    message: string,
+    payload: Record<string, unknown>,
+    options: { writeTo: AttemptMilestoneTarget[] },
+  ): void;
   recoverOrphanedRunningAttempts(reason: string, options?: { excludeWorkerIds?: string[] }): RecoveredAttemptRecord[];
 }

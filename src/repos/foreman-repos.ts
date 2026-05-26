@@ -1,6 +1,7 @@
 import type { Database } from "./database.js";
 import type { DeploymentTrackingRepo } from "./deployment-tracking-repo.js";
 import type { ArtifactRepo } from "./artifact-repo.js";
+import type { AttemptActivityRepo } from "./attempt-activity-repo.js";
 import type { AttemptRepo } from "./attempt-repo.js";
 import type { JobRepo } from "./job-repo.js";
 import type { LearningRepo } from "./learning-repo.js";
@@ -18,6 +19,7 @@ export type ForemanRepos = {
   migrationRunner: MigrationRunner;
   jobs: JobRepo;
   attempts: AttemptRepo;
+  attemptActivities: AttemptActivityRepo;
   workers: WorkerRepo;
   leases: LeaseRepo;
   scoutRuns: ScoutRunRepo;

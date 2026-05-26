@@ -1,4 +1,5 @@
 export * from "./artifact-repo.js";
+export * from "./attempt-activity-repo.js";
 export * from "./attempt-repo.js";
 export * from "./create-repos.js";
 export * from "./database.js";

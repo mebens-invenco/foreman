@@ -3,16 +3,30 @@ import path from "node:path";
 
 import { isoNow } from "../../lib/time.js";
 import type { AgentRunnerInvokeRequest, CapturedAgentRunResult } from "../agent-runner.js";
+import type { NormalizedRunnerActivity } from "../../repos/attempt-activity-repo.js";
 import type { NormalizedJsonOutput } from "./json-output.js";
 
 const forceKillAfterMs = 1_000;
 const useProcessGroups = process.platform !== "win32";
+
+/**
+ * Per-line normalizer. Runners pass one of these so a raw JSON line can be
+ * turned into zero or more {@link NormalizedRunnerActivity}s; the activity
+ * callback drains them in line order. Returning `null`/`undefined` means
+ * the line carried no activity; throwing is **not** fatal — the line is
+ * dropped and processing continues (live observability is best-effort).
+ */
+export type LineActivityNormalizer = (
+  line: string,
+) => NormalizedRunnerActivity | NormalizedRunnerActivity[] | null | undefined;
 
 export const runAgentProcess = async (input: {
   command: string;
   args: string[];
   request: AgentRunnerInvokeRequest;
   normalizeStdout?: (stdout: string) => NormalizedJsonOutput;
+  normalizeStdoutLine?: LineActivityNormalizer;
+  normalizeStderrLine?: LineActivityNormalizer;
 }): Promise<CapturedAgentRunResult> => {
   const startedAt = isoNow();
   const env = { ...process.env, ...input.request.env };
@@ -85,14 +99,45 @@ export const runAgentProcess = async (input: {
 
   child.stdin.end(input.request.prompt);
 
-  const emitLines = (chunk: string, buffer: string, callback?: (line: string) => void): string => {
+  const emitActivities = (line: string, normalizer?: LineActivityNormalizer): void => {
+    if (!normalizer || !input.request.onActivity) {
+      return;
+    }
+    // Best-effort: a normalizer that throws on a malformed line must not
+    // crash the runner. Live observability is non-fatal by design.
+    let result: NormalizedRunnerActivity | NormalizedRunnerActivity[] | null | undefined;
+    try {
+      result = normalizer(line);
+    } catch {
+      return;
+    }
+    if (!result) {
+      return;
+    }
+    const activities = Array.isArray(result) ? result : [result];
+    for (const activity of activities) {
+      try {
+        input.request.onActivity(activity);
+      } catch {
+        // ignore — observer failures cannot abort the runner
+      }
+    }
+  };
+
+  const emitLines = (
+    chunk: string,
+    buffer: string,
+    callback?: (line: string) => void,
+    normalizer?: LineActivityNormalizer,
+  ): string => {
     const combined = `${buffer}${chunk}`;
     const parts = combined.split(/\r?\n/);
     const remainder = parts.pop() ?? "";
-    if (callback) {
-      for (const part of parts) {
+    for (const part of parts) {
+      if (callback) {
         callback(part);
       }
+      emitActivities(part, normalizer);
     }
     return remainder;
   };
@@ -100,12 +145,12 @@ export const runAgentProcess = async (input: {
   child.stdout.on("data", (chunk) => {
     const text = String(chunk);
     stdout += text;
-    stdoutLineBuffer = emitLines(text, stdoutLineBuffer, input.request.onStdoutLine);
+    stdoutLineBuffer = emitLines(text, stdoutLineBuffer, input.request.onStdoutLine, input.normalizeStdoutLine);
   });
   child.stderr.on("data", (chunk) => {
     const text = String(chunk);
     stderr += text;
-    stderrLineBuffer = emitLines(text, stderrLineBuffer, input.request.onStderrLine);
+    stderrLineBuffer = emitLines(text, stderrLineBuffer, input.request.onStderrLine, input.normalizeStderrLine);
   });
 
   if (input.request.timeoutMs > 0) {
@@ -132,9 +177,11 @@ export const runAgentProcess = async (input: {
     input.request.abortSignal?.removeEventListener("abort", abortHandler);
     if (stdoutLineBuffer) {
       input.request.onStdoutLine?.(stdoutLineBuffer);
+      emitActivities(stdoutLineBuffer, input.normalizeStdoutLine);
     }
     if (stderrLineBuffer) {
       input.request.onStderrLine?.(stderrLineBuffer);
+      emitActivities(stderrLineBuffer, input.normalizeStderrLine);
     }
   });
 

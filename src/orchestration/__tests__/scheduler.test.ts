@@ -135,8 +135,18 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     linkRunnerSession: vi.fn(),
     addAttemptEvent: vi.fn(),
     listAttemptEvents: vi.fn(() => []),
+    recordAttemptMilestone: vi.fn(),
     recoverOrphanedRunningAttempts: vi.fn(() => []),
     ...((overrides.attempts as object | undefined) ?? {}),
+  },
+  attemptActivities: {
+    appendActivity: vi.fn(),
+    listActivities: vi.fn(() => []),
+    latestActivity: vi.fn(() => null),
+    latestActivityOfKind: vi.fn(() => null),
+    countActivities: vi.fn(() => 0),
+    trimRetention: vi.fn(() => 0),
+    ...((overrides.attemptActivities as object | undefined) ?? {}),
   },
   workers: {
     ensureWorkerSlots: vi.fn(),
@@ -1885,7 +1895,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const finalizeAttempt = vi.fn();
     const updateJobStatus = vi.fn();
     const releaseLeasesForAttempt = vi.fn();
-    const addAttemptEvent = vi.fn();
+    const recordAttemptMilestone = vi.fn();
     const updateWorkerStatus = vi.fn();
     const scheduler = new SchedulerService({
       config: createDefaultWorkspaceConfig("foo", "file"),
@@ -1909,7 +1919,7 @@ describe("SchedulerService applyWorkerResult", () => {
             attemptNumber: 1,
             startedAt: "2026-03-16T00:00:00Z",
           })),
-          addAttemptEvent,
+          recordAttemptMilestone,
           finalizeAttempt,
         },
         workers: { updateWorkerStatus },
@@ -1945,8 +1955,20 @@ describe("SchedulerService applyWorkerResult", () => {
     );
 
     expect(transition).not.toHaveBeenCalled();
-    expect(addAttemptEvent).toHaveBeenCalledWith("attempt-5", "attempt_started", "Started execution for TASK-0001");
-    expect(addAttemptEvent).toHaveBeenCalledWith("attempt-5", "attempt_failed", "worktree setup failed");
+    expect(recordAttemptMilestone).toHaveBeenCalledWith(
+      "attempt-5",
+      "attempt_started",
+      "Started execution for TASK-0001",
+      expect.any(Object),
+      { writeTo: ["event", "activity"] },
+    );
+    expect(recordAttemptMilestone).toHaveBeenCalledWith(
+      "attempt-5",
+      "attempt_failed",
+      "worktree setup failed",
+      expect.any(Object),
+      { writeTo: ["event", "activity"] },
+    );
     expect(finalizeAttempt).toHaveBeenCalledWith(
       "attempt-5",
       "failed",
@@ -2208,7 +2230,7 @@ describe("SchedulerService applyWorkerResult", () => {
       );
       process.env.FOREMAN_OPENCODE_BIN = fakeRunnerPath;
 
-      const addAttemptEvent = vi.fn();
+      const recordAttemptMilestone = vi.fn();
       const finalizeAttempt = vi.fn();
       const updateJobStatus = vi.fn();
       const releaseLeasesForAttempt = vi.fn();
@@ -2231,7 +2253,7 @@ describe("SchedulerService applyWorkerResult", () => {
               attemptNumber: 1,
               startedAt: "2026-03-16T00:00:00Z",
             })),
-            addAttemptEvent,
+            recordAttemptMilestone,
             finalizeAttempt,
           },
           workers: { updateWorkerStatus },
@@ -2267,22 +2289,28 @@ describe("SchedulerService applyWorkerResult", () => {
         },
       );
 
-      expect(addAttemptEvent).toHaveBeenCalledWith(
+      expect(recordAttemptMilestone).toHaveBeenCalledWith(
         "attempt-runner-failure",
         "attempt_failed",
         expect.stringContaining("Runner exited with exit code 1"),
+        expect.any(Object),
+        { writeTo: ["event", "activity"] },
       );
       expect(transition).toHaveBeenNthCalledWith(1, { taskId: "TASK-0001", toState: "in_progress" });
       expect(transition).toHaveBeenNthCalledWith(2, { taskId: "TASK-0001", toState: "ready" });
-      expect(addAttemptEvent).toHaveBeenCalledWith(
+      expect(recordAttemptMilestone).toHaveBeenCalledWith(
         "attempt-runner-failure",
         "attempt_failed",
         expect.stringContaining("selected model"),
+        expect.any(Object),
+        { writeTo: ["event", "activity"] },
       );
-      expect(addAttemptEvent).not.toHaveBeenCalledWith(
+      expect(recordAttemptMilestone).not.toHaveBeenCalledWith(
         "attempt-runner-failure",
         "attempt_failed",
         expect.stringContaining("<agent-result>"),
+        expect.any(Object),
+        expect.any(Object),
       );
       expect(finalizeAttempt).toHaveBeenCalledWith(
         "attempt-runner-failure",

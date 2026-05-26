@@ -4,6 +4,7 @@ import path from "node:path";
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskState, type TaskTarget, type TokenUsage, type WorkerResult } from "../domain/index.js";
 import { sumTokenUsage } from "../execution/impl/token-usage.js";
 import { createAgentRunner, parseWorkerResult, resolveRunnerConfigForAction, validateWorkerResult, type AgentRunner, type CapturedAgentRunResult, type WorkerResultAction } from "../execution/index.js";
+import type { NormalizedRunnerActivity } from "../repos/attempt-activity-repo.js";
 import { parseWorkerPromptPullRequestReference, renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
 import { ForemanError, isForemanError, isProviderRateLimitError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
@@ -196,7 +197,13 @@ export class AttemptExecutor {
 
       this.deps.foremanRepos.workers.updateWorkerStatus(workerId, "running", attempt.id);
       this.deps.foremanRepos.jobs.updateJobStatus(job.id, "running", { startedAt: attempt.startedAt });
-      this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "attempt_started", `Started ${job.action} for ${task.id}`);
+      this.deps.foremanRepos.attempts.recordAttemptMilestone(
+        attempt.id,
+        "attempt_started",
+        `Started ${job.action} for ${task.id}`,
+        { taskId: task.id, action: job.action },
+        { writeTo: ["event", "activity"] },
+      );
       attemptLogger.info("worker leased and job marked running");
       this.deps.onWorkerUpdated({ workerId, status: "running", attemptId: attempt.id });
       this.deps.onAttemptChanged({ attemptId: attempt.id, status: "running" });
@@ -320,6 +327,7 @@ export class AttemptExecutor {
           onStderrLine: (line: string) => {
             attemptLogger.runnerLine(line);
           },
+          onActivity: this.makeActivityAppender(attempt.id),
         });
         attemptLogger.info("runner invocation completed", {
           exitCode: runResult.exitCode,
@@ -339,9 +347,13 @@ export class AttemptExecutor {
         }
 
         const runnerOutputRelativePath = await this.writeRunnerOutputArtifact(attempt.id, runResult.stdout, "runner-output");
-        this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "runner_output_recorded", "Recorded normalized runner stdout", {
-          artifactPath: runnerOutputRelativePath,
-        });
+        this.deps.foremanRepos.attempts.recordAttemptMilestone(
+          attempt.id,
+          "runner_output_recorded",
+          "Recorded normalized runner stdout",
+          { artifactPath: runnerOutputRelativePath },
+          { writeTo: ["event", "activity"] },
+        );
 
         const logRelativePath = path.join("logs", "attempts", `${attempt.id}.log`);
         const logAbsolutePath = path.join(this.deps.paths.workspaceRoot, logRelativePath);
@@ -389,9 +401,13 @@ export class AttemptExecutor {
           sizeBytes: resultStat.size,
           sha256: await sha256File(resultAbsolutePath),
         });
-        this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "worker_result_parsed", workerResult.summary, {
-          outcome: workerResult.outcome,
-        });
+        this.deps.foremanRepos.attempts.recordAttemptMilestone(
+          attempt.id,
+          "worker_result_parsed",
+          workerResult.summary,
+          { outcome: workerResult.outcome },
+          { writeTo: ["event", "activity"] },
+        );
         attemptLogger.info("wrote parsed worker result artifact", { resultPath: resultAbsolutePath, sizeBytes: resultStat.size });
 
         const currentPrUrl = await this.deps.applyWorkerResult({
@@ -498,7 +514,13 @@ export class AttemptExecutor {
             });
           }
         }
-        this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, interruptedByProviderRateLimit ? "attempt_blocked" : "attempt_failed", message);
+        this.deps.foremanRepos.attempts.recordAttemptMilestone(
+          attempt.id,
+          interruptedByProviderRateLimit ? "attempt_blocked" : "attempt_failed",
+          message,
+          { provider: interruptedByProviderRateLimit ? error.provider : undefined, aborted: controller.signal.aborted },
+          { writeTo: ["event", "activity"] },
+        );
         this.deps.foremanRepos.attempts.finalizeAttempt(attempt.id, interruptedStatus, {
           finishedAt: isoNow(),
           summary: message,
@@ -532,6 +554,32 @@ export class AttemptExecutor {
       jobLogger.info("worker returned to idle");
       this.deps.onWorkerFinished();
     }
+  }
+
+  /**
+   * Returns an `onActivity` drain that appends each normalized runner
+   * activity to the attempt's live activity feed and trims to the configured
+   * retention. Parse failures upstream already drop the line; per-row write
+   * failures here are swallowed because live observability must never abort
+   * the runner.
+   */
+  private makeActivityAppender(attemptId: string): (activity: NormalizedRunnerActivity) => void {
+    const maxRows = this.deps.config.observability?.maxActivityRowsPerAttempt;
+    return (activity) => {
+      try {
+        this.deps.foremanRepos.attemptActivities.appendActivity({
+          executionAttemptId: attemptId,
+          kind: activity.kind,
+          message: activity.message,
+          payload: activity.payload ?? {},
+        });
+        if (maxRows && maxRows > 0) {
+          this.deps.foremanRepos.attemptActivities.trimRetention(attemptId, maxRows);
+        }
+      } catch {
+        // ignore — observability writes are best-effort
+      }
+    };
   }
 
   private async gitHead(cwd: string): Promise<string> {
@@ -581,11 +629,17 @@ export class AttemptExecutor {
           timedOut: input.runResult.timedOut === true,
         },
       );
-      this.deps.foremanRepos.attempts.addAttemptEvent(input.attempt.id, "worker_result_recovery_started", "Requesting recovered worker result", {
-        parseError: parseError instanceof Error ? parseError.message : String(parseError),
-        runnerOutputPath: input.runnerOutputRelativePath,
-        timedOut: input.runResult.timedOut === true,
-      });
+      this.deps.foremanRepos.attempts.recordAttemptMilestone(
+        input.attempt.id,
+        "worker_result_recovery_started",
+        "Requesting recovered worker result",
+        {
+          parseError: parseError instanceof Error ? parseError.message : String(parseError),
+          runnerOutputPath: input.runnerOutputRelativePath,
+          timedOut: input.runResult.timedOut === true,
+        },
+        { writeTo: ["event", "activity"] },
+      );
 
       return this.recoverWorkerResult({ ...input, parseError });
     }
@@ -630,6 +684,7 @@ export class AttemptExecutor {
       onStderrLine: (line: string) => {
         input.attemptLogger.runnerLine(line);
       },
+      onActivity: this.makeActivityAppender(input.attempt.id),
     });
     input.attemptLogger.info("worker result recovery invocation completed", {
       exitCode: recoveryResult.exitCode,
@@ -655,9 +710,13 @@ export class AttemptExecutor {
       }
 
       const workerResult = validateWorkerResult(parseWorkerResult(recoveryResult.stdout));
-      this.deps.foremanRepos.attempts.addAttemptEvent(input.attempt.id, "worker_result_recovered", workerResult.summary, {
-        recoveryOutputPath: recoveryOutputRelativePath,
-      });
+      this.deps.foremanRepos.attempts.recordAttemptMilestone(
+        input.attempt.id,
+        "worker_result_recovered",
+        workerResult.summary,
+        { recoveryOutputPath: recoveryOutputRelativePath },
+        { writeTo: ["event", "activity"] },
+      );
 
       return {
         workerResult,
