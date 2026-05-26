@@ -569,7 +569,7 @@ export function getAttemptStatus(attemptId: string) {
 
 export function getAttemptActivity(
   attemptId: string,
-  params: { afterSeq?: number; limit?: number } = {},
+  params: { afterSeq?: number; limit?: number; latest?: boolean } = {},
 ) {
   return requestJson<AttemptActivityResponse>(
     `/api/attempts/${attemptId}/activity${buildSearch(params)}`,

@@ -76,9 +76,11 @@ function stuckBadgeLabel(snapshot: AttemptStatusSnapshot) {
 
 export function AttemptPhaseBadge({
   phase,
+  label,
   className,
 }: {
   phase: AttemptStatusPhase
+  label?: string
   className?: string
 }) {
   return (
@@ -89,7 +91,7 @@ export function AttemptPhaseBadge({
         className,
       )}
     >
-      {phaseLabels[phase]}
+      {label ?? phaseLabels[phase]}
     </span>
   )
 }

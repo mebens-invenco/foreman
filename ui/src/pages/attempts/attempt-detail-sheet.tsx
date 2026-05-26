@@ -627,8 +627,8 @@ function ActivityPanel({
 }) {
   const [pageSize, setPageSize] = useState(ACTIVITY_PAGE_SIZE)
   const query = useQuery({
-    queryKey: attemptActivityQueryKey(attemptId, { limit: pageSize }),
-    queryFn: () => getAttemptActivity(attemptId, { limit: pageSize }),
+    queryKey: attemptActivityQueryKey(attemptId, { limit: pageSize, latest: true }),
+    queryFn: () => getAttemptActivity(attemptId, { limit: pageSize, latest: true }),
     refetchInterval: isLive ? 5_000 : false,
   })
 
@@ -673,7 +673,7 @@ function ActivityPanel({
             className="font-sans"
             onClick={() => setPageSize((current) => current + ACTIVITY_PAGE_SIZE)}
           >
-            Show more
+            Show older
           </Button>
         ) : null}
       </div>

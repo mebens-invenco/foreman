@@ -12,7 +12,7 @@ export function attemptStatusQueryKey(attemptId: string | null) {
 
 export function attemptActivityQueryKey(
   attemptId: string | null,
-  params: { afterSeq?: number; limit?: number } = {},
+  params: { afterSeq?: number; limit?: number; latest?: boolean } = {},
 ) {
   return ["foreman", "attempt-activity", attemptId, params] as const
 }
@@ -35,7 +35,7 @@ export function useAttemptStatusQuery(
 
 export function useAttemptActivityQuery(
   attemptId: string | null,
-  params: { afterSeq?: number; limit?: number } = {},
+  params: { afterSeq?: number; limit?: number; latest?: boolean } = {},
   options: { refetchInterval?: number | false; enabled?: boolean } = {},
 ) {
   return useQuery({

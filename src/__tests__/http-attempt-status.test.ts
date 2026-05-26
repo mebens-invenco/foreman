@@ -151,6 +151,52 @@ describe("attempt activity HTTP", () => {
       db.close();
     }
   });
+
+  test("latest=true returns the tail rows", async () => {
+    const { server, db } = await buildServer();
+
+    try {
+      const { attemptId } = seedRunningAttempt(db);
+      for (let index = 0; index < 12; index += 1) {
+        db.attemptActivities.appendActivity({
+          executionAttemptId: attemptId,
+          kind: "assistant_message",
+          message: `message ${index}`,
+        });
+      }
+
+      const response = await server.inject({
+        method: "GET",
+        url: `/api/attempts/${attemptId}/activity?latest=true&limit=3`,
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.activities.map((row: { seq: number }) => row.seq)).toEqual([10, 11, 12]);
+      expect(body.latestSeq).toBe(12);
+      expect(body.totalActivities).toBe(12);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("latest=true rejects combined afterSeq", async () => {
+    const { server, db } = await buildServer();
+
+    try {
+      const { attemptId } = seedRunningAttempt(db);
+
+      const response = await server.inject({
+        method: "GET",
+        url: `/api/attempts/${attemptId}/activity?latest=true&afterSeq=1`,
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("invalid_request");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
 });
 
 describe("attempt status HTTP", () => {
@@ -250,6 +296,26 @@ describe("worker status HTTP", () => {
       const response = await server.inject({ method: "GET", url: "/api/workers/missing/status" });
       expect(response.statusCode).toBe(404);
       expect(response.json().error.code).toBe("worker_not_found");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("propagates attempt_not_found like the singular attempt endpoint", async () => {
+    const { server, db } = await buildServer();
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0]!;
+      db.workers.updateWorkerStatus(worker.id, "running", "missing-attempt-id");
+
+      const response = await server.inject({
+        method: "GET",
+        url: `/api/workers/${worker.id}/status`,
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error.code).toBe("attempt_not_found");
     } finally {
       await server.close();
       db.close();

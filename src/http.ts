@@ -2,7 +2,7 @@ import { existsSync, promises as fs } from "node:fs";
 import path from "node:path";
 
 import fastifyStatic from "@fastify/static";
-import Fastify from "fastify";
+import Fastify, { type FastifyBaseLogger } from "fastify";
 
 import { listRunnerRates } from "./execution/cost/rates.js";
 import {
@@ -175,10 +175,18 @@ const parseActivityKindsQuery = (value: string | string[] | undefined): AttemptA
   return kinds;
 };
 
-const safeBuildSnapshot = (repos: ForemanRepos, attemptId: string): AttemptStatusSnapshot | null => {
+const safeBuildSnapshot = (
+  repos: ForemanRepos,
+  attemptId: string,
+  log: FastifyBaseLogger,
+): AttemptStatusSnapshot | null => {
   try {
     return buildAttemptStatusSnapshot(repos, attemptId);
-  } catch {
+  } catch (error) {
+    if (isForemanError(error) && error.code === "attempt_not_found") {
+      return null;
+    }
+    log.error({ err: error, attemptId }, "failed to build attempt status snapshot");
     return null;
   }
 };
@@ -696,19 +704,34 @@ export const createHttpServer = (deps: HttpServerDeps) => {
 
   server.get("/api/attempts/:attemptId/activity", async (request) => {
     const params = request.params as { attemptId: string };
-    const query = request.query as { afterSeq?: string; limit?: string; kind?: string | string[] };
+    const query = request.query as { afterSeq?: string; limit?: string; kind?: string | string[]; latest?: string };
     deps.repos.attempts.getAttempt(params.attemptId);
 
     const afterSeq = parseNonNegativeIntegerQuery("afterSeq", query.afterSeq);
     const limit = parsePositiveIntegerQuery("limit", query.limit);
     const kinds = parseActivityKindsQuery(query.kind);
+    const latest = parseBooleanQuery("latest", query.latest);
+
+    if (latest && afterSeq !== undefined) {
+      throw new ForemanError("invalid_request", "Query parameters latest and afterSeq cannot be combined.", 400);
+    }
+
+    const totalActivities = deps.repos.attemptActivities.countActivities(params.attemptId);
 
     const options: { afterSeq?: number; limit?: number; kinds?: AttemptActivityKind[] } = {};
-    if (afterSeq !== undefined) {
-      options.afterSeq = afterSeq;
-    }
-    if (limit !== undefined) {
-      options.limit = limit;
+    if (latest) {
+      const tailLimit = limit ?? totalActivities;
+      options.afterSeq = Math.max(0, totalActivities - tailLimit);
+      if (limit !== undefined) {
+        options.limit = limit;
+      }
+    } else {
+      if (afterSeq !== undefined) {
+        options.afterSeq = afterSeq;
+      }
+      if (limit !== undefined) {
+        options.limit = limit;
+      }
     }
     if (kinds.length > 0) {
       options.kinds = kinds;
@@ -721,7 +744,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       attemptId: params.attemptId,
       activities,
       latestSeq,
-      totalActivities: deps.repos.attemptActivities.countActivities(params.attemptId),
+      totalActivities,
     };
   });
 
@@ -739,7 +762,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     }
 
     const snapshot = worker.currentAttemptId
-      ? safeBuildSnapshot(deps.repos, worker.currentAttemptId)
+      ? buildAttemptStatusSnapshot(deps.repos, worker.currentAttemptId)
       : null;
 
     return {
@@ -804,7 +827,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     return fs.readFile(artifactPath, "utf8");
   });
 
-  server.get("/api/workers", async () => ({
+  server.get("/api/workers", async (request) => ({
     workers: deps.repos.workers.listWorkers().map((worker) => {
       const currentAttempt = worker.currentAttemptId
         ? (() => {
@@ -827,7 +850,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
         : null;
 
       const currentAttemptStatus = currentAttempt
-        ? safeBuildSnapshot(deps.repos, currentAttempt.id)
+        ? safeBuildSnapshot(deps.repos, currentAttempt.id, request.log)
         : null;
 
       return {
