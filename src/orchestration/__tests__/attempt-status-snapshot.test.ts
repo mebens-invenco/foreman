@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { priorityToRank } from "../../domain/index.js";
+import { normalizeCodexActivityLine } from "../../execution/impl/codex-output.js";
 import { addSeconds } from "../../lib/time.js";
 import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
 import { buildAttemptStatusSnapshot } from "../attempt-status-snapshot.js";
@@ -218,6 +219,41 @@ describe("buildAttemptStatusSnapshot", () => {
       expect(snapshot.repeatedFailureCandidates).toHaveLength(1);
       expect(snapshot.repeatedFailureCandidates[0]?.count).toBe(3);
       expect(snapshot.needsHuman.isNeeded).toBe(true);
+      expect(snapshot.needsHuman.reasons).toContain("repeated_command_failure");
+      expect(snapshot.phase).toBe("needs_human");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("end-to-end: Codex command_execution failures flow normalizer → activity repo → snapshot", async () => {
+    // Integration test for the wiring between layers — guards against
+    // payload-key drift between the Codex normalizer and the snapshot's
+    // repeated-failure rule (which keys on `payload.exitCode ?? payload.exit_code`).
+    const { db, attemptId } = await setupAttempt();
+    try {
+      const codexLine = (itemId: string) =>
+        JSON.stringify({
+          type: "item.completed",
+          item: { id: itemId, type: "command_execution", command: "yarn test", text: "yarn test", exit_code: 1 },
+        });
+
+      for (let idx = 0; idx < 3; idx += 1) {
+        const activity = normalizeCodexActivityLine(codexLine(`item_${idx}`));
+        expect(activity).not.toBeNull();
+        expect(activity?.kind).toBe("command_finished");
+        expect(activity?.payload?.exit_code).toBe(1);
+        db.attemptActivities.appendActivity({
+          executionAttemptId: attemptId,
+          kind: activity!.kind,
+          message: activity!.message,
+          payload: activity!.payload ?? {},
+        });
+      }
+
+      const snapshot = buildAttemptStatusSnapshot(db, attemptId, { repeatedFailureWindow: 3 });
+      expect(snapshot.repeatedFailureCandidates).toHaveLength(1);
+      expect(snapshot.repeatedFailureCandidates[0]?.count).toBe(3);
       expect(snapshot.needsHuman.reasons).toContain("repeated_command_failure");
       expect(snapshot.phase).toBe("needs_human");
     } finally {

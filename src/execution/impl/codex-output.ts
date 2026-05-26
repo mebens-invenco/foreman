@@ -161,18 +161,28 @@ export const normalizeCodexActivityLine = (
     }
 
     if (itemType === "command_execution" || itemType === "shell") {
+      const exitCode = item && typeof item.exit_code === "number" ? item.exit_code : undefined;
+      const command = item && typeof item.command === "string" ? item.command : undefined;
       return {
         kind: isCompleted ? "command_finished" : "command_started",
         message: text ?? (isCompleted ? "Command finished" : "Command started"),
-        payload: basePayload,
+        payload: {
+          ...basePayload,
+          ...(command !== undefined ? { command } : {}),
+          ...(exitCode !== undefined ? { exit_code: exitCode } : {}),
+        },
       };
     }
 
     if (itemType === "tool_call" || itemType === "tool_use") {
+      const exitCode = item && typeof item.exit_code === "number" ? item.exit_code : undefined;
       return {
         kind: isCompleted ? "tool_finished" : "tool_started",
         message: text ?? (isCompleted ? "Tool finished" : "Tool started"),
-        payload: basePayload,
+        payload: {
+          ...basePayload,
+          ...(exitCode !== undefined ? { exit_code: exitCode } : {}),
+        },
       };
     }
 

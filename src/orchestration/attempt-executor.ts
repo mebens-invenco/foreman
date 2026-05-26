@@ -560,11 +560,14 @@ export class AttemptExecutor {
    * Returns an `onActivity` drain that appends each normalized runner
    * activity to the attempt's live activity feed and trims to the configured
    * retention. Parse failures upstream already drop the line; per-row write
-   * failures here are swallowed because live observability must never abort
-   * the runner.
+   * failures here are non-fatal because live observability must never abort
+   * the runner — but they still emit a logger warning so a stuck/no_activity
+   * snapshot phase has a corresponding operator-visible breadcrumb instead of
+   * a silently-dead feed.
    */
   private makeActivityAppender(attemptId: string): (activity: NormalizedRunnerActivity) => void {
     const maxRows = this.deps.config.observability?.maxActivityRowsPerAttempt;
+    const appenderLogger = this.logger.child({ attemptId, component: "activity-appender" });
     return (activity) => {
       try {
         this.deps.foremanRepos.attemptActivities.appendActivity({
@@ -573,11 +576,22 @@ export class AttemptExecutor {
           message: activity.message,
           payload: activity.payload ?? {},
         });
-        if (maxRows && maxRows > 0) {
+      } catch (error) {
+        appenderLogger.warn("failed to append attempt activity", {
+          kind: activity.kind,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return;
+      }
+      if (maxRows && maxRows > 0) {
+        try {
           this.deps.foremanRepos.attemptActivities.trimRetention(attemptId, maxRows);
+        } catch (error) {
+          appenderLogger.warn("failed to trim attempt activity retention", {
+            maxRows,
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
-      } catch {
-        // ignore — observability writes are best-effort
       }
     };
   }

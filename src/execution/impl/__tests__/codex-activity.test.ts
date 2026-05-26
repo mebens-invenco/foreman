@@ -93,15 +93,23 @@ describe("normalizeCodexActivityLine — known Codex event shapes", () => {
     });
   });
 
-  test("command_execution start/finish produce paired kinds", () => {
+  test("command_execution start/finish produce paired kinds and surface command + exit_code", () => {
     expect(normalizeCodexActivityLine(codexFixtures.commandStarted)).toMatchObject({
       kind: "command_started",
-      payload: expect.objectContaining({ itemType: "command_execution" }),
+      payload: expect.objectContaining({ itemType: "command_execution", command: "yarn test" }),
     });
+    // exit_code only flows when the item is completed and the field is numeric;
+    // this is the key wiring point for the snapshot's repeated-failure rule.
     expect(normalizeCodexActivityLine(codexFixtures.commandCompleted)).toMatchObject({
       kind: "command_finished",
-      payload: expect.objectContaining({ itemType: "command_execution" }),
+      payload: expect.objectContaining({ itemType: "command_execution", exit_code: 0 }),
     });
+
+    const failed = JSON.stringify({
+      type: "item.completed",
+      item: { id: "item_x", type: "command_execution", command: "yarn test", text: "yarn test", exit_code: 1 },
+    });
+    expect(normalizeCodexActivityLine(failed)?.payload).toMatchObject({ exit_code: 1, command: "yarn test" });
   });
 
   test("tool calls produce tool_started/tool_finished", () => {
