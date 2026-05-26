@@ -226,6 +226,82 @@ describe("buildAttemptStatusSnapshot", () => {
     }
   });
 
+  test("interleaved diff rows reset the repeated-failure counter (normal repair loop is not needsHuman)", async () => {
+    // Regression: a "test fails → diff → test fails → diff → test fails"
+    // repair loop is healthy progress, not a needs-human signal. The
+    // repeated-failure rule must reset its per-signature count whenever a
+    // file-change/`diff` activity appears between failures.
+    const { db, attemptId } = await setupAttempt();
+    try {
+      const appendFailure = () =>
+        db.attemptActivities.appendActivity({
+          executionAttemptId: attemptId,
+          kind: "command_finished",
+          message: "yarn test",
+          payload: { itemType: "command_execution", command: "yarn test", exit_code: 1 },
+        });
+      const appendDiff = () =>
+        db.attemptActivities.appendActivity({
+          executionAttemptId: attemptId,
+          kind: "diff",
+          message: "patched src/foo.ts",
+          payload: { itemType: "file_change" },
+        });
+
+      appendFailure();
+      appendDiff();
+      appendFailure();
+      appendDiff();
+      appendFailure();
+
+      const snapshot = buildAttemptStatusSnapshot(db, attemptId, { repeatedFailureWindow: 3 });
+      expect(snapshot.repeatedFailureCandidates).toEqual([]);
+      expect(snapshot.needsHuman.isNeeded).toBe(false);
+      expect(snapshot.needsHuman.reasons).not.toContain("repeated_command_failure");
+      // With one error and no other progress signal, the phase falls through
+      // to suspicious (counts.errors === 0 here, but failed command_finished
+      // rows still leave the attempt non-progressing); verify the salient
+      // bit — that it is NOT needs_human or stuck for repeated failures.
+      expect(snapshot.phase).not.toBe("needs_human");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("repeated failures still trigger after a single diff if the post-diff run crosses the window", async () => {
+    // Counter-case for the reset rule: a diff resets, but then three more
+    // identical failures after that diff still qualify.
+    const { db, attemptId } = await setupAttempt();
+    try {
+      const appendFailure = () =>
+        db.attemptActivities.appendActivity({
+          executionAttemptId: attemptId,
+          kind: "command_finished",
+          message: "yarn test",
+          payload: { itemType: "command_execution", command: "yarn test", exit_code: 1 },
+        });
+
+      appendFailure();
+      appendFailure();
+      db.attemptActivities.appendActivity({
+        executionAttemptId: attemptId,
+        kind: "diff",
+        message: "patched src/foo.ts",
+        payload: { itemType: "file_change" },
+      });
+      appendFailure();
+      appendFailure();
+      appendFailure();
+
+      const snapshot = buildAttemptStatusSnapshot(db, attemptId, { repeatedFailureWindow: 3 });
+      expect(snapshot.repeatedFailureCandidates).toHaveLength(1);
+      expect(snapshot.repeatedFailureCandidates[0]?.count).toBe(3);
+      expect(snapshot.needsHuman.reasons).toContain("repeated_command_failure");
+    } finally {
+      db.close();
+    }
+  });
+
   test("end-to-end: Codex command_execution failures flow normalizer → activity repo → snapshot", async () => {
     // Integration test for the wiring between layers — guards against
     // payload-key drift between the Codex normalizer and the snapshot's

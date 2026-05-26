@@ -181,26 +181,37 @@ export const buildAttemptStatusSnapshot = (
   }
   const currentOperationActivity = startStack.length > 0 ? startStack[startStack.length - 1]! : null;
 
-  // Targeted query: repeated command failure candidates. Group failed-finish
-  // rows (those whose payload signals non-zero exit) by signature and keep
-  // any group whose count crosses the window threshold.
-  const failedFinishes = latestActivities.filter((activity) => {
+  // Targeted query: repeated command failure candidates. Walk activities
+  // chronologically, counting failed `command_finished` rows by signature.
+  // A `diff` row resets all in-progress counts — a normal repair loop
+  // (test fails → diff → test fails → diff → test fails) is not a
+  // `needsHuman` signal; only repeated identical failures with no
+  // intervening file change qualify. Any signature whose post-reset run
+  // crosses `repeatedFailureWindow` becomes a candidate.
+  const isFailedFinish = (activity: AttemptActivityRecord): boolean => {
     if (activity.kind !== "command_finished") return false;
     const exit = activity.payload.exitCode ?? activity.payload.exit_code;
     if (typeof exit === "number" && exit !== 0) return true;
     return activity.payload.failed === true || activity.payload.success === false;
-  });
+  };
   const failureGroups = new Map<string, { count: number; latestAt: string }>();
-  for (const failure of failedFinishes) {
-    const signature = commandSignature(failure);
+  for (const activity of latestActivities) {
+    if (activity.kind === "diff") {
+      failureGroups.clear();
+      continue;
+    }
+    if (!isFailedFinish(activity)) {
+      continue;
+    }
+    const signature = commandSignature(activity);
     const previous = failureGroups.get(signature);
     if (previous) {
       previous.count += 1;
-      if (failure.createdAt > previous.latestAt) {
-        previous.latestAt = failure.createdAt;
+      if (activity.createdAt > previous.latestAt) {
+        previous.latestAt = activity.createdAt;
       }
     } else {
-      failureGroups.set(signature, { count: 1, latestAt: failure.createdAt });
+      failureGroups.set(signature, { count: 1, latestAt: activity.createdAt });
     }
   }
   const repeatedFailureCandidates = [...failureGroups.entries()]
