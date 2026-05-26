@@ -28,6 +28,17 @@ export type TaskPullRequest = {
   source: "local" | "provider" | "provider_inferred" | "branch_inferred";
 };
 
+export type TaskRunnerRoleOverride = {
+  model?: string;
+  effort?: string;
+  variant?: string;
+};
+
+export type TaskRunnerOverride = {
+  execution?: TaskRunnerRoleOverride;
+  reviewer?: TaskRunnerRoleOverride;
+};
+
 export type Task = {
   id: string;
   provider: TaskProvider;
@@ -47,6 +58,7 @@ export type Task = {
   };
   baseBranch: string | null;
   pullRequests: TaskPullRequest[];
+  runnerOverride: TaskRunnerOverride | null;
   updatedAt: string;
   url: string | null;
 };

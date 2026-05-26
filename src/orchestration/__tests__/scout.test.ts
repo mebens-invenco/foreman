@@ -142,6 +142,7 @@ const task = (input: Partial<Task> & Pick<Task, "id" | "title" | "state" | "prov
   dependencies: { taskIds: [], baseTaskId: null },
   baseBranch: null,
   pullRequests: [],
+  runnerOverride: null,
   url: null,
   ...input,
   targets:

@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskState, type TaskTarget, type TokenUsage, type WorkerResult } from "../domain/index.js";
 import { sumTokenUsage } from "../execution/impl/token-usage.js";
-import { createAgentRunner, parseWorkerResult, validateWorkerResult, type AgentRunner, type CapturedAgentRunResult, type WorkerResultAction } from "../execution/index.js";
+import { createAgentRunner, parseWorkerResult, resolveRunnerConfigForAction, validateWorkerResult, type AgentRunner, type CapturedAgentRunResult, type WorkerResultAction } from "../execution/index.js";
 import { parseWorkerPromptPullRequestReference, renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
 import { ForemanError, isForemanError, isProviderRateLimitError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
@@ -12,7 +12,7 @@ import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, RunnerSessionRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
-import { runnerForAction, runnerSessionRoleForAction, runnerTuningValue, type WorkspaceConfig, type WorkspaceRunnerConfig } from "../workspace/config.js";
+import { runnerSessionRoleForAction, runnerTuningValue, type WorkspaceConfig, type WorkspaceRunnerConfig } from "../workspace/config.js";
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { nextLeaseConflictEligibleAt } from "./lease-conflict.js";
@@ -161,7 +161,7 @@ export class AttemptExecutor {
       const actionableTarget = assertTaskActionableTarget(task, this.deps.repos, persistedTarget);
       const target: TaskTarget = actionableTarget.target;
       repo = actionableTarget.repo;
-      const runnerConfig = runnerForAction(this.deps.config, job.action);
+      const runnerConfig = resolveRunnerConfigForAction(this.deps.config, job.action, task);
       const runnerSessionSelector = {
         taskTargetId,
         role: runnerSessionRoleForAction(job.action),
@@ -173,7 +173,7 @@ export class AttemptExecutor {
       jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
       jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
-      const runner = createAgentRunner({ config: this.deps.config, action: job.action });
+      const runner = createAgentRunner({ config: this.deps.config, action: job.action, task });
 
       attempt = this.deps.foremanRepos.attempts.createAttemptWithLeases({
         jobId: job.id,
@@ -419,7 +419,7 @@ export class AttemptExecutor {
           });
         }
         if (job.action === "retry" && attemptStatus === "completed") {
-          const reviewerRunnerConfig = runnerForAction(this.deps.config, "reviewer");
+          const reviewerRunnerConfig = resolveRunnerConfigForAction(this.deps.config, "reviewer", task);
           const activeReviewerSession = this.deps.foremanRepos.runnerSessions.getActiveSession({
             taskTargetId,
             role: "reviewer",

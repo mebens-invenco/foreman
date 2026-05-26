@@ -199,6 +199,7 @@ describe("parseLinearMetadata", () => {
         baseTaskId: null,
       },
       baseBranch: null,
+      runnerOverride: null,
     });
   });
 
@@ -211,7 +212,33 @@ describe("parseLinearMetadata", () => {
         baseTaskId: null,
       },
       baseBranch: "release/2026-05",
+      runnerOverride: null,
     });
+  });
+
+  test("parses nested Runner.execution and Runner.reviewer dot-path keys", () => {
+    expect(
+      parseLinearMetadata(
+        "Agent:\n  Repos: foreman\n  Runner.execution.model: gpt-5.5\n  Runner.execution.effort: xhigh\n  Runner.reviewer.model: claude-opus-4-7\n  Runner.reviewer.effort: max\n",
+      ).runnerOverride,
+    ).toEqual({
+      execution: { model: "gpt-5.5", effort: "xhigh" },
+      reviewer: { model: "claude-opus-4-7", effort: "max" },
+    });
+  });
+
+  test("parses shorthand Runner.model and Runner.effort into the execution override", () => {
+    expect(
+      parseLinearMetadata("Agent:\n  Repos: foreman\n  Runner.model: gpt-5.5\n  Runner.effort: xhigh\n").runnerOverride,
+    ).toEqual({
+      execution: { model: "gpt-5.5", effort: "xhigh" },
+    });
+  });
+
+  test("normalizes runner dot-path keys case-insensitively", () => {
+    expect(
+      parseLinearMetadata("Agent:\n  Repos: foreman\n  RUNNER.EXECUTION.MODEL: gpt-5.5\n").runnerOverride,
+    ).toEqual({ execution: { model: "gpt-5.5" } });
   });
 
   test("rejects deprecated branch dependency metadata", () => {
@@ -233,6 +260,7 @@ describe("parseLinearMetadata", () => {
         baseTaskId: "ENG-123",
       },
       baseBranch: null,
+      runnerOverride: null,
     });
   });
 
@@ -249,6 +277,7 @@ describe("parseLinearMetadata", () => {
         baseTaskId: "ENG-4772",
       },
       baseBranch: null,
+      runnerOverride: null,
     });
   });
 
@@ -272,6 +301,7 @@ describe("parseLinearMetadata", () => {
         baseTaskId: null,
       },
       baseBranch: null,
+      runnerOverride: null,
     });
   });
 

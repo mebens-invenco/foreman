@@ -29,6 +29,7 @@ const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   dependencies: { taskIds: [], baseTaskId: null },
   baseBranch: null,
   pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo/pull/946", title: "PR 946", source: "provider" }],
+  runnerOverride: null,
   updatedAt: "2026-03-16T04:19:52Z",
   url: null,
   ...overrides,

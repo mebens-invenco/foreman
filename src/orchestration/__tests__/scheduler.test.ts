@@ -24,6 +24,7 @@ const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   dependencies: { taskIds: [], baseTaskId: null },
   baseBranch: null,
   pullRequests: [],
+  runnerOverride: null,
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
   ...overrides,

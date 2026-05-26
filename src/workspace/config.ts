@@ -77,8 +77,8 @@ export const reviewSystemSchema = z.object({
 // save. The user-facing grade set per provider is intentionally trimmed to
 // what each provider's own model picker presents (4 grades each), not the
 // broader CLI-accepts surface.
-const CLAUDE_EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
-const CODEX_EFFORT_VALUES = ["low", "medium", "high", "xhigh"] as const;
+export const CLAUDE_EFFORT_VALUES = ["low", "medium", "high", "max"] as const;
+export const CODEX_EFFORT_VALUES = ["low", "medium", "high", "xhigh"] as const;
 
 const coerceToKnown = <T extends readonly string[]>(known: T) =>
   (value: unknown): unknown =>
