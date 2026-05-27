@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../../../workspace/config.js";
-import { LinearTaskSystem, parseLinearMetadata } from "../../index.js";
+import { LinearTaskSystem, linearPriorityToNormalized, normalizedPriorityToLinear, parseLinearMetadata } from "../../index.js";
 
 const originalFetch = global.fetch;
 const fakeLogger = {
@@ -156,7 +156,7 @@ describe("LinearTaskSystem.listCandidates", () => {
                     branchName: "eng-124",
                     updatedAt: "2026-03-14T12:01:00Z",
                     url: "https://linear.app/acme/issue/ENG-124/task",
-                    priorityLabel: "normal",
+                    priorityLabel: "Medium",
                     state: { id: "state-2", name: "Blocked" },
                     assignee: { name: "Test User" },
                     labels: { nodes: [{ id: "label-1", name: "Agent" }] },
@@ -953,5 +953,40 @@ describe("LinearTaskSystem.upsertPullRequest", () => {
       source: "local",
       error: "Linear request failed: 502 Bad Gateway",
     });
+  });
+});
+
+describe("priority mapping", () => {
+  test.each([
+    ["Urgent", "urgent"],
+    ["High", "high"],
+    ["Medium", "normal"],
+    ["Normal", "normal"],
+    ["Low", "low"],
+    ["No priority", "none"],
+    ["", "none"],
+    [null, "none"],
+  ] as const)("linearPriorityToNormalized(%j) -> %j", (label, expected) => {
+    expect(linearPriorityToNormalized(label)).toBe(expected);
+  });
+
+  test.each([
+    ["urgent", 1],
+    ["high", 2],
+    ["normal", 3],
+    ["low", 4],
+    ["none", 0],
+  ] as const)("normalizedPriorityToLinear(%j) -> %d", (priority, expected) => {
+    expect(normalizedPriorityToLinear(priority)).toBe(expected);
+  });
+
+  test.each([
+    ["urgent", "Urgent"],
+    ["high", "High"],
+    ["normal", "Medium"],
+    ["low", "Low"],
+    ["none", "No priority"],
+  ] as const)("round-trips Foreman %j through Linear label %j", (priority, linearLabel) => {
+    expect(linearPriorityToNormalized(linearLabel)).toBe(priority);
   });
 });
