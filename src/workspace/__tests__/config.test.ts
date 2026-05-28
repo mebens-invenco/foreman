@@ -486,6 +486,132 @@ http:
     });
   });
 
+  test("parses optional claude maxBudgetUsd on execution and reviewer runners", () => {
+    const parsed = parseWorkspaceConfig(`
+version: 1
+workspace:
+  name: foo
+repos:
+  explicit: []
+  roots: []
+  ignore: []
+taskSystem:
+  type: file
+  file:
+    tasksDir: tasks
+    idPrefix: TASK
+    states:
+      ready: [ready]
+      inProgress: [in_progress]
+      inReview: [in_review]
+      done: [done]
+      canceled: [canceled]
+reviewSystem:
+  type: github
+runner:
+  execution:
+    type: claude
+    model: claude-opus-4-7
+    effort: max
+    timeoutMs: 3600000
+    maxBudgetUsd: 100
+  reviewer:
+    type: claude
+    model: claude-opus-4-7
+    effort: high
+    timeoutMs: 3600000
+    maxBudgetUsd: 50
+scheduler:
+  workerConcurrency: 4
+  scoutPollIntervalSeconds: 60
+  scoutRerunDebounceMs: 1000
+  leaseTtlSeconds: 120
+  workerHeartbeatSeconds: 15
+  staleLeaseReapIntervalSeconds: 15
+  schedulerLoopIntervalMs: 1000
+  shutdownGracePeriodSeconds: 10
+http:
+  host: 127.0.0.1
+  port: 8765
+`);
+
+    expect(parsed.runner.execution).toEqual({
+      type: "claude",
+      model: "claude-opus-4-7",
+      effort: "max",
+      timeoutMs: 3_600_000,
+      maxBudgetUsd: 100,
+    });
+    expect(parsed.runner.reviewer).toEqual({
+      type: "claude",
+      model: "claude-opus-4-7",
+      effort: "high",
+      timeoutMs: 3_600_000,
+      maxBudgetUsd: 50,
+    });
+  });
+
+  test("omits maxBudgetUsd when not configured", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const parsed = parseWorkspaceConfig(stringifyWorkspaceConfig(config));
+
+    expect(parsed.runner.execution).not.toHaveProperty("maxBudgetUsd");
+    expect(parsed.runner.reviewer).not.toHaveProperty("maxBudgetUsd");
+  });
+
+  test("rejects non-positive maxBudgetUsd values", () => {
+    const yamlWithBudget = (budget: string) => `
+version: 1
+workspace:
+  name: foo
+repos:
+  explicit: []
+  roots: []
+  ignore: []
+taskSystem:
+  type: file
+  file:
+    tasksDir: tasks
+    idPrefix: TASK
+    states:
+      ready: [ready]
+      inProgress: [in_progress]
+      inReview: [in_review]
+      done: [done]
+      canceled: [canceled]
+reviewSystem:
+  type: github
+runner:
+  execution:
+    type: claude
+    model: claude-opus-4-7
+    effort: high
+    timeoutMs: 3600000
+    maxBudgetUsd: ${budget}
+  reviewer:
+    type: claude
+    model: claude-opus-4-7
+    effort: high
+    timeoutMs: 3600000
+scheduler:
+  workerConcurrency: 4
+  scoutPollIntervalSeconds: 60
+  scoutRerunDebounceMs: 1000
+  leaseTtlSeconds: 120
+  workerHeartbeatSeconds: 15
+  staleLeaseReapIntervalSeconds: 15
+  schedulerLoopIntervalMs: 1000
+  shutdownGracePeriodSeconds: 10
+http:
+  host: 127.0.0.1
+  port: 8765
+`;
+
+    expect(() => parseWorkspaceConfig(yamlWithBudget("-1"))).toThrow(/maxBudgetUsd/);
+    expect(() => parseWorkspaceConfig(yamlWithBudget("0"))).toThrow(/maxBudgetUsd/);
+    expect(() => parseWorkspaceConfig(yamlWithBudget('"not-a-number"'))).toThrow(/maxBudgetUsd/);
+  });
+
   test("rejects mismatched task system blocks", () => {
     expect(() =>
       parseWorkspaceConfig(`

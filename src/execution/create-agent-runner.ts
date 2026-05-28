@@ -12,7 +12,7 @@ const createProviderRunner = (config: WorkspaceRunnerConfig): AgentRunner => {
   }
 
   if (config.type === "claude") {
-    return new ClaudeRunner(config.model, config.effort);
+    return new ClaudeRunner(config.model, config.effort, config.maxBudgetUsd);
   }
 
   if (config.type === "codex") {

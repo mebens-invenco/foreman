@@ -8,6 +8,7 @@ export class ClaudeRunner implements AgentRunner {
   constructor(
     private readonly model: string,
     private readonly effort: string,
+    private readonly maxBudgetUsd?: number,
   ) {}
 
   async invoke(request: AgentRunnerInvokeRequest): Promise<CapturedAgentRunResult> {
@@ -33,6 +34,7 @@ export class ClaudeRunner implements AgentRunner {
         this.effort,
         "--output-format",
         "json",
+        ...(this.maxBudgetUsd !== undefined ? ["--max-budget-usd", String(this.maxBudgetUsd)] : []),
         ...(resume ? ["--resume", nativeSessionId] : ["--session-id", nativeSessionId]),
       ],
       request: { ...request, nativeSessionId },

@@ -44,14 +44,18 @@ const echoArgvScript = [
   "});",
 ].join("\n");
 
+const setUpFakeClaude = async (): Promise<string> => {
+  const tempDir = await createTempDir("foreman-runner-test-");
+  cleanupDirs.push(tempDir);
+  const claudeScriptPath = path.join(tempDir, "fake-claude.js");
+  await writeExecutableScript(claudeScriptPath, echoArgvScript);
+  process.env.FOREMAN_CLAUDE_BIN = claudeScriptPath;
+  return tempDir;
+};
+
 describe("ClaudeRunner", () => {
   test("spawns claude with --exclude-dynamic-system-prompt-sections for fresh sessions", async () => {
-    const tempDir = await createTempDir("foreman-runner-test-");
-    cleanupDirs.push(tempDir);
-
-    const claudeScriptPath = path.join(tempDir, "fake-claude.js");
-    await writeExecutableScript(claudeScriptPath, echoArgvScript);
-    process.env.FOREMAN_CLAUDE_BIN = claudeScriptPath;
+    const tempDir = await setUpFakeClaude();
 
     const runner = new ClaudeRunner("opus-4.7", "high");
     const result = await runner.invoke({
@@ -89,12 +93,7 @@ describe("ClaudeRunner", () => {
   });
 
   test("spawns claude with --exclude-dynamic-system-prompt-sections for resumed sessions", async () => {
-    const tempDir = await createTempDir("foreman-runner-test-");
-    cleanupDirs.push(tempDir);
-
-    const claudeScriptPath = path.join(tempDir, "fake-claude.js");
-    await writeExecutableScript(claudeScriptPath, echoArgvScript);
-    process.env.FOREMAN_CLAUDE_BIN = claudeScriptPath;
+    const tempDir = await setUpFakeClaude();
 
     const runner = new ClaudeRunner("opus-4.7", "high");
     const resumedSessionId = "abcd1234-1111-2222-3333-444455556666";
@@ -124,5 +123,61 @@ describe("ClaudeRunner", () => {
     ]);
     expect(invocation.stdin).toBe("resume prompt");
     expect(result.nativeSessionId).toBe(resumedSessionId);
+  });
+
+  test("passes --max-budget-usd when maxBudgetUsd is configured", async () => {
+    const tempDir = await setUpFakeClaude();
+
+    const runner = new ClaudeRunner("claude-opus-4-7", "high", 100);
+    const result = await runner.invoke({
+      attemptId: "attempt-claude-budget",
+      action: "execution",
+      cwd: tempDir,
+      env: {},
+      prompt: "probe",
+      timeoutMs: 5_000,
+    });
+
+    const invocation = JSON.parse(result.stdout) as { argv: string[]; stdin: string };
+    const flagIndex = invocation.argv.indexOf("--max-budget-usd");
+    expect(flagIndex).toBeGreaterThanOrEqual(0);
+    expect(invocation.argv[flagIndex + 1]).toBe("100");
+    expect(invocation.stdin).toBe("probe");
+  });
+
+  test("omits --max-budget-usd when maxBudgetUsd is not configured", async () => {
+    const tempDir = await setUpFakeClaude();
+
+    const runner = new ClaudeRunner("claude-opus-4-7", "high");
+    const result = await runner.invoke({
+      attemptId: "attempt-claude-no-budget",
+      action: "execution",
+      cwd: tempDir,
+      env: {},
+      prompt: "probe",
+      timeoutMs: 5_000,
+    });
+
+    const invocation = JSON.parse(result.stdout) as { argv: string[]; stdin: string };
+    expect(invocation.argv).not.toContain("--max-budget-usd");
+  });
+
+  test("stringifies fractional maxBudgetUsd values for the CLI", async () => {
+    const tempDir = await setUpFakeClaude();
+
+    const runner = new ClaudeRunner("claude-opus-4-7", "high", 12.5);
+    const result = await runner.invoke({
+      attemptId: "attempt-claude-budget-fractional",
+      action: "execution",
+      cwd: tempDir,
+      env: {},
+      prompt: "probe",
+      timeoutMs: 5_000,
+    });
+
+    const invocation = JSON.parse(result.stdout) as { argv: string[]; stdin: string };
+    const flagIndex = invocation.argv.indexOf("--max-budget-usd");
+    expect(flagIndex).toBeGreaterThanOrEqual(0);
+    expect(invocation.argv[flagIndex + 1]).toBe("12.5");
   });
 });

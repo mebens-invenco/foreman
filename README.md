@@ -91,3 +91,25 @@ Tickets become Foreman candidates when they satisfy the task-system filter and m
 - Tracks GitHub pull requests, review comments, checks, merge state, and deployment follow-up work.
 - Supports file and Linear task systems, GitHub review context, and `opencode`, `claude`, or `codex` runners.
 - Exposes an HTTP UI/API while `foreman serve <workspace>` is running.
+
+## Capping Claude Spend Per Attempt
+
+For `claude` runner blocks (either `runner.execution` or `runner.reviewer`), set the optional `maxBudgetUsd` field to forward Claude's `--max-budget-usd <amount>` cap on every invocation:
+
+```yaml
+runner:
+  execution:
+    type: claude
+    model: claude-opus-4-7
+    effort: max
+    timeoutMs: 3600000
+    maxBudgetUsd: 100   # optional; omit to leave spend uncapped
+  reviewer:
+    type: claude
+    model: claude-opus-4-7
+    effort: high
+    timeoutMs: 3600000
+    maxBudgetUsd: 50
+```
+
+The cap is a **per-invocation** safety net, not an aggregate budget: each attempt and each reviewer run starts a fresh `claude` process with its own cap. The cap and `timeoutMs` are independent guards — whichever fires first terminates the run. Use it to bound runaway attempts; pick the value from observed normal spend plus headroom, not from cost-estimation rates. Omitting the field preserves current behavior (no cap).

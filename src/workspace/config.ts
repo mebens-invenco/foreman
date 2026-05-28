@@ -96,6 +96,11 @@ export const claudeRunnerSchema = z.object({
   model: z.string().min(1).default("claude-opus-4-7"),
   effort: z.preprocess(coerceToKnown(CLAUDE_EFFORT_VALUES), z.enum(CLAUDE_EFFORT_VALUES).default("high")),
   timeoutMs: z.number().int().positive().default(3_600_000),
+  // Optional per-invocation USD budget cap forwarded to claude as
+  // `--max-budget-usd <amount>`. Omit to leave spend uncapped (current
+  // behavior). Acts as a coarse safety net against runaway attempts; the
+  // operator sets it explicitly rather than deriving from cost estimates.
+  maxBudgetUsd: z.number().positive().optional(),
 });
 
 export const codexRunnerSchema = z.object({
