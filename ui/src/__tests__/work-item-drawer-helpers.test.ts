@@ -1,10 +1,45 @@
 import { describe, expect, test } from "vitest"
 
-import type { AttemptRecord } from "../lib/api"
+import type { AttemptRecord, WorkItemBucket } from "../lib/api"
 import {
   attemptsPagePath,
+  bucketTokensTotal,
   sortAttemptsNewestFirst,
 } from "../pages/work-items/work-item-drawer-helpers"
+
+function makeBucket(
+  tokens: Partial<WorkItemBucket["tokens"]> = {}
+): WorkItemBucket {
+  return {
+    taskId: "ENG-5260",
+    taskUrl: null,
+    targets: ["foreman"],
+    perTargetLatestStatus: [],
+    effectiveStatus: "completed",
+    attemptsCount: 1,
+    firstSeenInWindow: "2026-05-28T08:00:00Z",
+    lastStartedAt: "2026-05-28T08:00:00Z",
+    lastFinishedAt: "2026-05-28T08:10:00Z",
+    tokens: {
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheCreationInputTokens: 0,
+      cacheReadInputTokens: 0,
+      reasoningOutputTokens: 0,
+      ...tokens,
+    },
+    cost: {
+      totalUsd: 0,
+      breakdown: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheCreate: 0,
+        reasoning: 0,
+      },
+    },
+  }
+}
 
 function makeAttempt(overrides: Partial<AttemptRecord>): AttemptRecord {
   return {
@@ -67,6 +102,24 @@ describe("sortAttemptsNewestFirst", () => {
     sortAttemptsNewestFirst(input)
 
     expect(input).toEqual([a, b])
+  })
+})
+
+describe("bucketTokensTotal", () => {
+  test("sums all five token buckets", () => {
+    const bucket = makeBucket({
+      inputTokens: 10,
+      outputTokens: 20,
+      cacheReadInputTokens: 30,
+      cacheCreationInputTokens: 40,
+      reasoningOutputTokens: 50,
+    })
+
+    expect(bucketTokensTotal(bucket)).toBe(150)
+  })
+
+  test("returns 0 when all buckets are zero", () => {
+    expect(bucketTokensTotal(makeBucket())).toBe(0)
   })
 })
 

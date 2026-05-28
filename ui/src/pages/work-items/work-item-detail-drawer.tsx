@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils"
 import type { AttemptRecord, WorkItemBucket } from "@/lib/api"
 import {
   attemptsPagePath,
+  bucketTokensTotal,
   sortAttemptsNewestFirst,
 } from "@/pages/work-items/work-item-drawer-helpers"
 
@@ -97,9 +98,10 @@ export function WorkItemDetailDrawer({
   bucket,
 }: WorkItemDetailDrawerProps) {
   const navigate = useNavigate()
-  const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery(
-    taskId ? { taskId } : undefined
-  )
+  const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery({
+    taskId: taskId ?? undefined,
+    enabled: taskId !== null,
+  })
   const { data: rates } = useRatesQuery()
 
   const orderedAttempts = useMemo(
@@ -110,15 +112,7 @@ export function WorkItemDetailDrawer({
   const taskUrl = bucket?.taskUrl ?? null
   const targets = bucket?.targets ?? []
   const perTargetLatestStatus = bucket?.perTargetLatestStatus ?? []
-  const tokensTotal = bucket
-    ? totalAllTokenBuckets({
-        inputTokens: bucket.tokens.inputTokens,
-        outputTokens: bucket.tokens.outputTokens,
-        cacheReadInputTokens: bucket.tokens.cacheReadInputTokens,
-        cacheCreationInputTokens: bucket.tokens.cacheCreationInputTokens,
-        reasoningOutputTokens: bucket.tokens.reasoningOutputTokens,
-      }) ?? 0
-    : null
+  const tokensTotal = bucket ? bucketTokensTotal(bucket) : null
   const tokensTooltip = bucket
     ? [
         `Input: ${formatShortNumber(bucket.tokens.inputTokens)}`,

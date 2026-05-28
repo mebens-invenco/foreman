@@ -1,4 +1,15 @@
-import type { AttemptRecord } from "@/lib/api"
+import type { AttemptRecord, WorkItemBucket } from "@/lib/api"
+
+export function bucketTokensTotal(bucket: WorkItemBucket): number {
+  const { tokens } = bucket
+  return (
+    tokens.inputTokens +
+    tokens.outputTokens +
+    tokens.cacheReadInputTokens +
+    tokens.cacheCreationInputTokens +
+    tokens.reasoningOutputTokens
+  )
+}
 
 export function sortAttemptsNewestFirst(
   attempts: AttemptRecord[]

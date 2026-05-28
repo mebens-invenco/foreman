@@ -12,8 +12,9 @@ import {
 import { TaskLink } from "@/components/task-link"
 import { formatDuration, formatShortNumber, formatTimestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { formatUsd, totalAllTokenBuckets } from "@/lib/cost"
+import { formatUsd } from "@/lib/cost"
 import { formatStatusLabel, statusTone } from "@/lib/attempt-status"
+import { bucketTokensTotal } from "@/pages/work-items/work-item-drawer-helpers"
 import type { WorkItemBucket } from "@/lib/api"
 
 const attemptStatusValues = [
@@ -47,15 +48,6 @@ export const workItemsGlobalFilter: FilterFn<WorkItemBucket> = (
   }
   return row.original.taskId.toLowerCase().includes(search)
 }
-
-const tokensTotal = (tokens: WorkItemBucket["tokens"]): number =>
-  totalAllTokenBuckets({
-    inputTokens: tokens.inputTokens,
-    outputTokens: tokens.outputTokens,
-    cacheReadInputTokens: tokens.cacheReadInputTokens,
-    cacheCreationInputTokens: tokens.cacheCreationInputTokens,
-    reasoningOutputTokens: tokens.reasoningOutputTokens,
-  }) ?? 0
 
 export const workItemColumns: ColumnDef<WorkItemBucket>[] = [
   {
@@ -113,10 +105,10 @@ export const workItemColumns: ColumnDef<WorkItemBucket>[] = [
   },
   {
     id: "tokens",
-    accessorFn: (row) => tokensTotal(row.tokens),
+    accessorFn: (row) => bucketTokensTotal(row),
     cell: ({ row }) => (
       <span className="text-xs text-muted-foreground">
-        {formatShortNumber(tokensTotal(row.original.tokens))}
+        {formatShortNumber(bucketTokensTotal(row.original))}
       </span>
     ),
     enableGlobalFilter: false,
