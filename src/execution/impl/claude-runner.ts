@@ -25,6 +25,9 @@ export class ClaudeRunner implements AgentRunner {
       args: [
         "-p",
         "--dangerously-skip-permissions",
+        // Move per-machine sections (cwd, env, git status) out of the cached system
+        // prompt prefix to improve cross-attempt cache reuse.
+        "--exclude-dynamic-system-prompt-sections",
         "--model",
         this.model,
         "--effort",

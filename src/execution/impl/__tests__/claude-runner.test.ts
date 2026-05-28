@@ -23,9 +23,10 @@ afterEach(async () => {
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
-// Mirror claude's JSON-mode output: a single JSON object with `session_id` and
-// `result`. Echo argv inside `result` so the test can assert on the spawned
-// flag layout.
+// Fake claude binary that echoes its argv and stdin back through `result.result`
+// so the test can assert on what the runner actually spawned. session_id mirrors
+// the --session-id / --resume value from argv so the runner round-trips a
+// matching native session id back to the caller.
 const echoArgvScript = [
   "#!/usr/bin/env node",
   "let stdin = '';",
@@ -33,12 +34,18 @@ const echoArgvScript = [
   "process.stdin.on('data', (chunk) => { stdin += chunk; });",
   "process.stdin.on('end', () => {",
   "  const argv = process.argv.slice(2);",
-  "  process.stdout.write(JSON.stringify({ session_id: 'claude-session', result: JSON.stringify({ argv, stdin }) }));",
+  "  const sessionIdIdx = Math.max(argv.indexOf('--session-id'), argv.indexOf('--resume'));",
+  "  const sessionId = sessionIdIdx >= 0 ? argv[sessionIdIdx + 1] : '';",
+  "  process.stdout.write(JSON.stringify({",
+  "    type: 'result',",
+  "    result: JSON.stringify({ argv, stdin }),",
+  "    session_id: sessionId,",
+  "  }) + '\\n');",
   "});",
 ].join("\n");
 
 const setUpFakeClaude = async (): Promise<string> => {
-  const tempDir = await createTempDir("foreman-claude-runner-test-");
+  const tempDir = await createTempDir("foreman-runner-test-");
   cleanupDirs.push(tempDir);
   const claudeScriptPath = path.join(tempDir, "fake-claude.js");
   await writeExecutableScript(claudeScriptPath, echoArgvScript);
@@ -47,6 +54,77 @@ const setUpFakeClaude = async (): Promise<string> => {
 };
 
 describe("ClaudeRunner", () => {
+  test("spawns claude with --exclude-dynamic-system-prompt-sections for fresh sessions", async () => {
+    const tempDir = await setUpFakeClaude();
+
+    const runner = new ClaudeRunner("opus-4.7", "high");
+    const result = await runner.invoke({
+      attemptId: "attempt-claude-fresh",
+      action: "execution",
+      cwd: tempDir,
+      env: {},
+      prompt: "fresh prompt",
+      timeoutMs: 5_000,
+    });
+
+    const invocation = JSON.parse(result.stdout) as { argv: string[]; stdin: string };
+    const sessionIdIdx = invocation.argv.indexOf("--session-id");
+    expect(sessionIdIdx).toBeGreaterThanOrEqual(0);
+    // randomUUID produced the session id for fresh runs, so we extract and
+    // assert on shape rather than a fixed value.
+    const generatedSessionId = invocation.argv[sessionIdIdx + 1] ?? "";
+    expect(generatedSessionId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+
+    expect(invocation.argv).toEqual([
+      "-p",
+      "--dangerously-skip-permissions",
+      "--exclude-dynamic-system-prompt-sections",
+      "--model",
+      "opus-4.7",
+      "--effort",
+      "high",
+      "--output-format",
+      "json",
+      "--session-id",
+      generatedSessionId,
+    ]);
+    expect(invocation.stdin).toBe("fresh prompt");
+    expect(result.nativeSessionId).toBe(generatedSessionId);
+  });
+
+  test("spawns claude with --exclude-dynamic-system-prompt-sections for resumed sessions", async () => {
+    const tempDir = await setUpFakeClaude();
+
+    const runner = new ClaudeRunner("opus-4.7", "high");
+    const resumedSessionId = "abcd1234-1111-2222-3333-444455556666";
+    const result = await runner.invoke({
+      attemptId: "attempt-claude-resume",
+      action: "execution",
+      cwd: tempDir,
+      env: {},
+      prompt: "resume prompt",
+      timeoutMs: 5_000,
+      nativeSessionId: resumedSessionId,
+    });
+
+    const invocation = JSON.parse(result.stdout) as { argv: string[]; stdin: string };
+    expect(invocation.argv).toEqual([
+      "-p",
+      "--dangerously-skip-permissions",
+      "--exclude-dynamic-system-prompt-sections",
+      "--model",
+      "opus-4.7",
+      "--effort",
+      "high",
+      "--output-format",
+      "json",
+      "--resume",
+      resumedSessionId,
+    ]);
+    expect(invocation.stdin).toBe("resume prompt");
+    expect(result.nativeSessionId).toBe(resumedSessionId);
+  });
+
   test("passes --max-budget-usd when maxBudgetUsd is configured", async () => {
     const tempDir = await setUpFakeClaude();
 
@@ -61,8 +139,8 @@ describe("ClaudeRunner", () => {
     });
 
     const invocation = JSON.parse(result.stdout) as { argv: string[]; stdin: string };
-    expect(invocation.argv).toContain("--max-budget-usd");
     const flagIndex = invocation.argv.indexOf("--max-budget-usd");
+    expect(flagIndex).toBeGreaterThanOrEqual(0);
     expect(invocation.argv[flagIndex + 1]).toBe("100");
     expect(invocation.stdin).toBe("probe");
   });

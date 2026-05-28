@@ -40,6 +40,14 @@ export type RecoveredAttemptRecord = {
   workerId: string | null;
 };
 
+export type AttemptUsageRow = {
+  runnerName: RunnerProvider;
+  runnerModel: string;
+  runnerVariant: string;
+  startedAt: string;
+  tokensUsed: TokenUsage | null;
+};
+
 export interface AttemptRepo {
   createAttempt(input: {
     jobId: string;
@@ -71,6 +79,7 @@ export interface AttemptRepo {
     },
   ): void;
   listAttempts(filters?: { status?: AttemptStatus; jobId?: string; limit?: number; offset?: number }): AttemptRecord[];
+  listUsageRows(filters: { fromInclusive: string; toExclusive: string }): AttemptUsageRow[];
   getAttempt(attemptId: string): AttemptRecord;
   latestAttemptForJob(jobId: string): AttemptRecord | null;
   latestAttemptForTaskTarget(taskTargetId: string): AttemptRecord | null;

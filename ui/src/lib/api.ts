@@ -496,6 +496,58 @@ export function listLearnings(params: {
   ).then((payload) => payload.learnings)
 }
 
+export type UsageGroupBy = "day" | "runner" | "model"
+
+export type UsageRate = {
+  runnerName: "claude" | "codex" | "opencode"
+  runnerModel: string
+  inputPerMtok: number
+  outputPerMtok: number
+  cacheReadPerMtok: number
+  cacheWriteFiveMinPerMtok: number
+}
+
+export type UsageBucket = {
+  groupKey: string
+  attemptsCount: number
+  tokens: {
+    inputTokens: number
+    outputTokens: number
+    cacheCreationInputTokens: number
+    cacheReadInputTokens: number
+    reasoningOutputTokens: number
+  }
+  cost: {
+    totalUsd: number
+    breakdown: {
+      input: number
+      output: number
+      cacheRead: number
+      cacheCreate: number
+      reasoning: number
+    }
+  }
+}
+
+export type UsageRollupResponse = {
+  groupBy: UsageGroupBy
+  fromDate: string
+  toDate: string
+  fromInclusive: string
+  toExclusive: string
+  buckets: UsageBucket[]
+  totals: UsageBucket
+  rates: UsageRate[]
+}
+
+export function getUsage(params: { from?: string; to?: string; groupBy?: UsageGroupBy }) {
+  return requestJson<UsageRollupResponse>(`/api/usage${buildSearch(params)}`)
+}
+
+export function getRates() {
+  return requestJson<{ rates: UsageRate[] }>("/api/rates").then((payload) => payload.rates)
+}
+
 export function listScoutRuns() {
   return requestJson<{ runs: ScoutRun[] }>("/api/scout/runs").then(
     (payload) => payload.runs
