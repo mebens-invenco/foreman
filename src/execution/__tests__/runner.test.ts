@@ -314,9 +314,10 @@ describe("provider runners", () => {
       provider: "claude",
       stdin: "reviewer prompt",
     });
-    expect(reviewerInvocation.argv.slice(0, 10)).toEqual([
+    expect(reviewerInvocation.argv.slice(0, 11)).toEqual([
       "-p",
       "--dangerously-skip-permissions",
+      "--exclude-dynamic-system-prompt-sections",
       "--model",
       "claude-opus-4-7",
       "--effort",
@@ -324,9 +325,9 @@ describe("provider runners", () => {
       "--output-format",
       "json",
       "--session-id",
-      reviewerInvocation.argv[9],
+      reviewerInvocation.argv[10],
     ]);
-    expect(reviewerResult.nativeSessionId).toBe(reviewerInvocation.argv[9]);
+    expect(reviewerResult.nativeSessionId).toBe(reviewerInvocation.argv[10]);
   });
 
   test("resumes native provider sessions and normalizes JSON-mode output", async () => {
