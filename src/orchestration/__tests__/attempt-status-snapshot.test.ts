@@ -42,6 +42,7 @@ const setupAttempt = async (overrides: { startedAtIso?: string } = {}) => {
       dependencies: { taskIds: [], baseTaskId: null },
       baseBranch: null,
       pullRequests: [],
+      runnerOverride: null,
       updatedAt: "2026-05-26T00:00:00Z",
       url: null,
     },
