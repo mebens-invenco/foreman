@@ -30,8 +30,7 @@ export type TaskPullRequest = {
 
 export type TaskRunnerRoleOverride = {
   model?: string;
-  effort?: string;
-  variant?: string;
+  tuning?: string;
 };
 
 export type TaskRunnerOverride = {

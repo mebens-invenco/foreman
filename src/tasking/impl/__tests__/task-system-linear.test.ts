@@ -219,19 +219,19 @@ describe("parseLinearMetadata", () => {
   test("parses nested Runner.execution and Runner.reviewer dot-path keys", () => {
     expect(
       parseLinearMetadata(
-        "Agent:\n  Repos: foreman\n  Runner.execution.model: gpt-5.5\n  Runner.execution.effort: xhigh\n  Runner.reviewer.model: claude-opus-4-7\n  Runner.reviewer.effort: max\n",
+        "Agent:\n  Repos: foreman\n  Runner.execution.model: gpt-5.5\n  Runner.execution.tuning: xhigh\n  Runner.reviewer.model: claude-opus-4-7\n  Runner.reviewer.tuning: max\n",
       ).runnerOverride,
     ).toEqual({
-      execution: { model: "gpt-5.5", effort: "xhigh" },
-      reviewer: { model: "claude-opus-4-7", effort: "max" },
+      execution: { model: "gpt-5.5", tuning: "xhigh" },
+      reviewer: { model: "claude-opus-4-7", tuning: "max" },
     });
   });
 
-  test("parses shorthand Runner.model and Runner.effort into the execution override", () => {
+  test("parses shorthand Runner.model and Runner.tuning into the execution override", () => {
     expect(
-      parseLinearMetadata("Agent:\n  Repos: foreman\n  Runner.model: gpt-5.5\n  Runner.effort: xhigh\n").runnerOverride,
+      parseLinearMetadata("Agent:\n  Repos: foreman\n  Runner.model: gpt-5.5\n  Runner.tuning: xhigh\n").runnerOverride,
     ).toEqual({
-      execution: { model: "gpt-5.5", effort: "xhigh" },
+      execution: { model: "gpt-5.5", tuning: "xhigh" },
     });
   });
 

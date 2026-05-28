@@ -12,35 +12,47 @@ describe("normalizeTaskRunnerOverride", () => {
   test("normalizes nested execution and reviewer overrides", () => {
     expect(
       normalizeTaskRunnerOverride({
-        execution: { model: "gpt-5.5", effort: "xhigh" },
-        reviewer: { model: "claude-opus-4-7", effort: "max" },
+        execution: { model: "gpt-5.5", tuning: "xhigh" },
+        reviewer: { model: "claude-opus-4-7", tuning: "max" },
       }),
     ).toEqual({
-      execution: { model: "gpt-5.5", effort: "xhigh" },
-      reviewer: { model: "claude-opus-4-7", effort: "max" },
+      execution: { model: "gpt-5.5", tuning: "xhigh" },
+      reviewer: { model: "claude-opus-4-7", tuning: "max" },
     });
   });
 
   test("expands shorthand into execution", () => {
-    expect(normalizeTaskRunnerOverride({ model: "gpt-5.5", effort: "xhigh" })).toEqual({
-      execution: { model: "gpt-5.5", effort: "xhigh" },
+    expect(normalizeTaskRunnerOverride({ model: "gpt-5.5", tuning: "xhigh" })).toEqual({
+      execution: { model: "gpt-5.5", tuning: "xhigh" },
+    });
+  });
+
+  test("accepts effort and variant as input aliases for tuning", () => {
+    expect(
+      normalizeTaskRunnerOverride({
+        execution: { model: "gpt-5.5", effort: "xhigh" },
+        reviewer: { model: "claude-opus-4-7", variant: "max" },
+      }),
+    ).toEqual({
+      execution: { model: "gpt-5.5", tuning: "xhigh" },
+      reviewer: { model: "claude-opus-4-7", tuning: "max" },
     });
   });
 
   test("merges shorthand with explicit execution override", () => {
     expect(
       normalizeTaskRunnerOverride({
-        execution: { effort: "high" },
+        execution: { tuning: "high" },
         model: "gpt-5.5",
       }),
     ).toEqual({
-      execution: { effort: "high", model: "gpt-5.5" },
+      execution: { tuning: "high", model: "gpt-5.5" },
     });
   });
 
   test("ignores blank string fields", () => {
-    expect(normalizeTaskRunnerOverride({ execution: { model: "  ", effort: "high" } })).toEqual({
-      execution: { effort: "high" },
+    expect(normalizeTaskRunnerOverride({ execution: { model: "  ", tuning: "high" } })).toEqual({
+      execution: { tuning: "high" },
     });
   });
 });
@@ -50,29 +62,41 @@ describe("parseDotPathRunnerOverride", () => {
     expect(parseDotPathRunnerOverride(new Map([["repos", "foreman"]]))).toBeNull();
   });
 
-  test("parses Runner.execution.* and Runner.reviewer.* keys", () => {
+  test("parses runner.execution.* and runner.reviewer.* keys", () => {
     const entries = new Map([
       ["repos", "foreman"],
       ["runner.execution.model", "gpt-5.5"],
-      ["runner.execution.effort", "xhigh"],
+      ["runner.execution.tuning", "xhigh"],
       ["runner.reviewer.model", "claude-opus-4-7"],
-      ["runner.reviewer.effort", "max"],
+      ["runner.reviewer.tuning", "max"],
     ]);
 
     expect(parseDotPathRunnerOverride(entries)).toEqual({
-      execution: { model: "gpt-5.5", effort: "xhigh" },
-      reviewer: { model: "claude-opus-4-7", effort: "max" },
+      execution: { model: "gpt-5.5", tuning: "xhigh" },
+      reviewer: { model: "claude-opus-4-7", tuning: "max" },
     });
   });
 
-  test("expands shorthand Runner.* keys into execution override", () => {
+  test("expands shorthand runner.* keys into execution override", () => {
     const entries = new Map([
       ["runner.model", "gpt-5.5"],
-      ["runner.effort", "xhigh"],
+      ["runner.tuning", "xhigh"],
     ]);
 
     expect(parseDotPathRunnerOverride(entries)).toEqual({
-      execution: { model: "gpt-5.5", effort: "xhigh" },
+      execution: { model: "gpt-5.5", tuning: "xhigh" },
+    });
+  });
+
+  test("parses effort and variant dot-path aliases as tuning", () => {
+    const entries = new Map([
+      ["runner.execution.effort", "xhigh"],
+      ["runner.reviewer.variant", "max"],
+    ]);
+
+    expect(parseDotPathRunnerOverride(entries)).toEqual({
+      execution: { tuning: "xhigh" },
+      reviewer: { tuning: "max" },
     });
   });
 
@@ -96,11 +120,11 @@ describe("serializeTaskRunnerOverride", () => {
   test("serializes nested overrides into a plain object", () => {
     expect(
       serializeTaskRunnerOverride({
-        execution: { model: "gpt-5.5", effort: "xhigh" },
+        execution: { model: "gpt-5.5", tuning: "xhigh" },
         reviewer: { model: "claude-opus-4-7" },
       }),
     ).toEqual({
-      execution: { model: "gpt-5.5", effort: "xhigh" },
+      execution: { model: "gpt-5.5", tuning: "xhigh" },
       reviewer: { model: "claude-opus-4-7" },
     });
   });

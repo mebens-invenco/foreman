@@ -2,6 +2,7 @@ import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import { getTaskTargetRefsFromTask, type Task, type TaskPullRequest, type TaskRunnerOverride, type TaskTarget, type TaskTargetRef } from "../../domain/index.js";
+import { normalizeTaskRunnerOverride } from "../../tasking/task-runner-override.js";
 import type {
   GetTasksOptions,
   TaskDependencyRecord,
@@ -67,7 +68,7 @@ const parseStoredRunnerOverride = (raw: unknown): TaskRunnerOverride | null => {
   }
   try {
     const parsed = JSON.parse(text);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as TaskRunnerOverride) : null;
+    return normalizeTaskRunnerOverride(parsed);
   } catch {
     return null;
   }

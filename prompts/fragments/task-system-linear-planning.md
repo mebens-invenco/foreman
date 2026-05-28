@@ -21,9 +21,9 @@ Agent:
   Repo dependencies: <repo-b<-repo-a>
   Branch: <task-branch-name>
   Runner.execution.model: <model>
-  Runner.execution.effort: <low|medium|high|xhigh|max>
+  Runner.execution.tuning: <low|medium|high|xhigh|max>
   Runner.reviewer.model: <model>
-  Runner.reviewer.effort: <low|medium|high|xhigh|max>
+  Runner.reviewer.tuning: <low|medium|high|xhigh|max>
 ```
 
 - Prefer a single repo in `Repos` unless the work truly spans multiple repos.
@@ -32,5 +32,5 @@ Agent:
 - `Base from task` is required when there is more than one task dependency.
 - `Branch` is optional. Only use when overriding the default branch naming convention for the task system/executor is needed.
 - Cross-task dependencies still belong in `Depends on tasks` and `Base from task`.
-- `Runner.execution.*` / `Runner.reviewer.*` are optional per-task overrides on the workspace runner config. Use only when this task warrants a stronger or cheaper model than the workspace default. The shorthand `Runner.model` / `Runner.effort` / `Runner.variant` applies to the execution role. Provider type stays as configured in the workspace; only `model` and the active provider's tuning (`effort` for Claude/Codex, `variant` for OpenCode) can be overridden.
+- `Runner.execution.*` / `Runner.reviewer.*` are optional per-task overrides on the workspace runner config. Use only when this task warrants a stronger or cheaper model than the workspace default. The shorthand `Runner.model` / `Runner.tuning` applies to the execution role. Provider type stays as configured in the workspace; only `model` and `tuning` can be overridden. `tuning` maps to the active provider's tuning knob (`effort` for Claude/Codex, `variant` for OpenCode).
 - Omit dependency keys entirely when they are not needed.

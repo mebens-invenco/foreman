@@ -1,7 +1,7 @@
 import type { TaskRunnerOverride, TaskRunnerRoleOverride } from "../domain/index.js";
 
-const RUNNER_ROLE_FIELDS = ["model", "effort", "variant"] as const;
-type RunnerRoleField = (typeof RUNNER_ROLE_FIELDS)[number];
+const RUNNER_ROLE_FIELDS = ["model", "tuning"] as const;
+const RUNNER_TUNING_ALIASES = ["tuning", "effort", "variant"] as const;
 
 const trimOrUndefined = (value: unknown): string | undefined => {
   if (typeof value !== "string") {
@@ -17,24 +17,30 @@ const normalizeRoleOverride = (input: unknown): TaskRunnerRoleOverride | undefin
   }
   const record = input as Record<string, unknown>;
   const role: TaskRunnerRoleOverride = {};
-  for (const field of RUNNER_ROLE_FIELDS) {
-    const value = trimOrUndefined(record[field]);
-    if (value !== undefined) {
-      role[field] = value;
+  const model = trimOrUndefined(record.model);
+  if (model !== undefined) {
+    role.model = model;
+  }
+  for (const field of RUNNER_TUNING_ALIASES) {
+    const tuning = trimOrUndefined(record[field]);
+    if (tuning !== undefined) {
+      role.tuning = tuning;
+      break;
     }
   }
   return Object.keys(role).length > 0 ? role : undefined;
 };
 
-const isRunnerRoleField = (value: string): value is RunnerRoleField =>
-  (RUNNER_ROLE_FIELDS as readonly string[]).includes(value);
+const isRunnerRoleInputField = (value: string): boolean =>
+  (RUNNER_ROLE_FIELDS as readonly string[]).includes(value) || (RUNNER_TUNING_ALIASES as readonly string[]).includes(value);
 
 /**
  * Normalize a `runner` value from front matter or task metadata into a
  * `TaskRunnerOverride`. Accepts both the nested shape
  * (`runner.execution.*`, `runner.reviewer.*`) and the execution shorthand
- * (`runner.model`, `runner.effort`, `runner.variant`) which expands to an
- * `execution` override.
+ * (`runner.model`, `runner.tuning`) which expands to an `execution` override.
+ * The parser also accepts `effort` and `variant` as input aliases for
+ * `tuning`, but normalized task data serializes back to `tuning`.
  */
 export const normalizeTaskRunnerOverride = (input: unknown): TaskRunnerOverride | null => {
   if (!input || typeof input !== "object") {
@@ -54,7 +60,7 @@ export const normalizeTaskRunnerOverride = (input: unknown): TaskRunnerOverride 
   }
 
   const shorthand: Record<string, unknown> = {};
-  for (const field of RUNNER_ROLE_FIELDS) {
+  for (const field of [...RUNNER_ROLE_FIELDS, "effort", "variant"] as const) {
     if (field in record) {
       shorthand[field] = record[field];
     }
@@ -71,9 +77,11 @@ export const normalizeTaskRunnerOverride = (input: unknown): TaskRunnerOverride 
  * Parse dot-path runner metadata of the form used in Linear's `Agent:` block.
  * Keys are case-insensitive at the source; the surrounding metadata parser
  * already lowercases them, so this function matches lowercase forms:
- *   runner.execution.{model,effort,variant}
- *   runner.reviewer.{model,effort,variant}
- *   runner.{model,effort,variant} (shorthand → execution)
+ *   runner.execution.{model,tuning}
+ *   runner.reviewer.{model,tuning}
+ *   runner.{model,tuning} (shorthand → execution)
+ *
+ * `effort` and `variant` are accepted as aliases for `tuning`.
  *
  * `entries` is an iterable of [key, value] tuples where keys are the raw
  * already-lowercased keys from the surrounding metadata parser.
@@ -92,7 +100,7 @@ export const parseDotPathRunnerOverride = (entries: Iterable<readonly [string, s
     const parts = rawKey.split(".");
     if (parts.length === 2) {
       const field = parts[1]!;
-      if (!isRunnerRoleField(field)) {
+      if (!isRunnerRoleInputField(field)) {
         continue;
       }
       const bucket = (accumulated.execution ??= {});
@@ -100,7 +108,7 @@ export const parseDotPathRunnerOverride = (entries: Iterable<readonly [string, s
     } else if (parts.length === 3) {
       const role = parts[1]!;
       const field = parts[2]!;
-      if ((role !== "execution" && role !== "reviewer") || !isRunnerRoleField(field)) {
+      if ((role !== "execution" && role !== "reviewer") || !isRunnerRoleInputField(field)) {
         continue;
       }
       const bucket = (accumulated[role] ??= {});

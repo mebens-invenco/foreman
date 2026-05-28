@@ -52,27 +52,27 @@ describe("FileTaskSystem runner override", () => {
     const taskPath = path.join(taskDir, "TASK-0001.md");
     await fs.writeFile(
       taskPath,
-      `---\n${baseFrontmatter}\nrunner:\n  execution:\n    model: gpt-5.5\n    effort: xhigh\n  reviewer:\n    model: claude-opus-4-7\n    effort: max\n---\n\nBody\n`,
+      `---\n${baseFrontmatter}\nrunner:\n  execution:\n    model: gpt-5.5\n    tuning: xhigh\n  reviewer:\n    model: claude-opus-4-7\n    tuning: max\n---\n\nBody\n`,
     );
 
     const task = await taskSystem.getTask("TASK-0001");
     expect(task.runnerOverride).toEqual({
-      execution: { model: "gpt-5.5", effort: "xhigh" },
-      reviewer: { model: "claude-opus-4-7", effort: "max" },
+      execution: { model: "gpt-5.5", tuning: "xhigh" },
+      reviewer: { model: "claude-opus-4-7", tuning: "max" },
     });
   });
 
-  test("parses shorthand runner.model / runner.effort into execution override", async () => {
+  test("parses shorthand runner.model / runner.tuning into execution override", async () => {
     const { taskSystem, taskDir } = await createFileTaskSystem();
     const taskPath = path.join(taskDir, "TASK-0001.md");
     await fs.writeFile(
       taskPath,
-      `---\n${baseFrontmatter}\nrunner:\n  model: gpt-5.5\n  effort: xhigh\n---\n\nBody\n`,
+      `---\n${baseFrontmatter}\nrunner:\n  model: gpt-5.5\n  tuning: xhigh\n---\n\nBody\n`,
     );
 
     const task = await taskSystem.getTask("TASK-0001");
     expect(task.runnerOverride).toEqual({
-      execution: { model: "gpt-5.5", effort: "xhigh" },
+      execution: { model: "gpt-5.5", tuning: "xhigh" },
     });
   });
 
@@ -90,7 +90,7 @@ describe("FileTaskSystem runner override", () => {
     const taskPath = path.join(taskDir, "TASK-0001.md");
     await fs.writeFile(
       taskPath,
-      `---\n${baseFrontmatter}\nrunner:\n  execution:\n    model: gpt-5.5\n    effort: xhigh\n---\n\nBody\n`,
+      `---\n${baseFrontmatter}\nrunner:\n  execution:\n    model: gpt-5.5\n    tuning: xhigh\n---\n\nBody\n`,
     );
 
     await taskSystem.transition({ taskId: "TASK-0001", toState: "in_progress" });
@@ -98,9 +98,9 @@ describe("FileTaskSystem runner override", () => {
     const rewritten = await fs.readFile(taskPath, "utf8");
     expect(rewritten).toContain("runner:");
     expect(rewritten).toContain("model: gpt-5.5");
-    expect(rewritten).toContain("effort: xhigh");
+    expect(rewritten).toContain("tuning: xhigh");
     const reloaded = await taskSystem.getTask("TASK-0001");
-    expect(reloaded.runnerOverride).toEqual({ execution: { model: "gpt-5.5", effort: "xhigh" } });
+    expect(reloaded.runnerOverride).toEqual({ execution: { model: "gpt-5.5", tuning: "xhigh" } });
     expect(reloaded.state).toBe("in_progress");
   });
 
@@ -109,13 +109,13 @@ describe("FileTaskSystem runner override", () => {
     const taskPath = path.join(taskDir, "TASK-0001.md");
     await fs.writeFile(
       taskPath,
-      `---\n${baseFrontmatter}\nrunner:\n  reviewer:\n    model: claude-opus-4-7\n    effort: max\n---\n\nBody\n`,
+      `---\n${baseFrontmatter}\nrunner:\n  reviewer:\n    model: claude-opus-4-7\n    tuning: max\n---\n\nBody\n`,
     );
 
     await taskSystem.updateLabels({ taskId: "TASK-0001", add: ["Extra"], remove: [] });
 
     const reloaded = await taskSystem.getTask("TASK-0001");
-    expect(reloaded.runnerOverride).toEqual({ reviewer: { model: "claude-opus-4-7", effort: "max" } });
+    expect(reloaded.runnerOverride).toEqual({ reviewer: { model: "claude-opus-4-7", tuning: "max" } });
     expect(reloaded.labels).toContain("Extra");
   });
 

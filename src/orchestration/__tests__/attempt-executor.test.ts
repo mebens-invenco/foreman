@@ -601,7 +601,7 @@ describe("AttemptExecutor", () => {
   test("uses the task's execution override on the attempt record and runner session", async () => {
     const overrideTask: Task = {
       ...task,
-      runnerOverride: { execution: { model: "openai/gpt-5.5-pro", variant: "max" } },
+      runnerOverride: { execution: { model: "openai/gpt-5.5-pro", tuning: "max" } },
     };
     const { db, claimedJob, executor, logger, target } = await createExecutorContext({ selectedTask: overrideTask });
 
@@ -654,7 +654,7 @@ describe("AttemptExecutor", () => {
   test("rejects an attempt whose override is invalid for the active provider", async () => {
     const overrideTask: Task = {
       ...task,
-      runnerOverride: { execution: { effort: "ultra" } },
+      runnerOverride: { execution: { tuning: "ultra" } },
     };
     const { db, claimedJob, executor, logger, config } = await createExecutorContext({ selectedTask: overrideTask });
     config.runner.execution = { type: "codex", model: "gpt-5.5", effort: "high", timeoutMs: 3_600_000 };
@@ -673,7 +673,7 @@ describe("AttemptExecutor", () => {
   test("does not fail a completed retry when the reviewer override is invalid for the workspace reviewer provider", async () => {
     const overrideTask: Task = {
       ...task,
-      runnerOverride: { reviewer: { effort: "ultra" } },
+      runnerOverride: { reviewer: { tuning: "ultra" } },
     };
     const { db, claimedJob, executor, logger } = await createExecutorContext({
       action: "retry",

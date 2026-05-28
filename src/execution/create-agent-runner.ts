@@ -55,22 +55,22 @@ const applyRoleOverride = (
     overridden.model = override.model;
   }
 
-  if (baseConfig.type === "opencode" && override.variant !== undefined) {
-    if (override.variant.trim().length === 0) {
-      throw new ForemanError("invalid_runner_override", "Runner override variant must not be empty for opencode.");
+  if (baseConfig.type === "opencode" && override.tuning !== undefined) {
+    if (override.tuning.trim().length === 0) {
+      throw new ForemanError("invalid_runner_override", "Runner override tuning must not be empty for opencode.");
     }
-    (overridden as Extract<WorkspaceRunnerConfig, { type: "opencode" }>).variant = override.variant;
+    (overridden as Extract<WorkspaceRunnerConfig, { type: "opencode" }>).variant = override.tuning;
   }
 
-  if ((baseConfig.type === "claude" || baseConfig.type === "codex") && override.effort !== undefined) {
-    if (!isAllowedTuning(baseConfig.type, override.effort)) {
+  if ((baseConfig.type === "claude" || baseConfig.type === "codex") && override.tuning !== undefined) {
+    if (!isAllowedTuning(baseConfig.type, override.tuning)) {
       const allowed = baseConfig.type === "claude" ? CLAUDE_EFFORT_VALUES.join(", ") : CODEX_EFFORT_VALUES.join(", ");
       throw new ForemanError(
         "invalid_runner_override",
-        `Invalid runner override effort '${override.effort}' for ${baseConfig.type}. Allowed: ${allowed}.`,
+        `Invalid runner override tuning '${override.tuning}' for ${baseConfig.type}. Allowed: ${allowed}.`,
       );
     }
-    (overridden as Extract<WorkspaceRunnerConfig, { type: "claude" | "codex" }>).effort = override.effort as never;
+    (overridden as Extract<WorkspaceRunnerConfig, { type: "claude" | "codex" }>).effort = override.tuning as never;
   }
 
   return overridden;
