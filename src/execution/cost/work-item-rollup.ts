@@ -74,6 +74,33 @@ const emptyTotals = (): WorkItemTotals => ({
   cost: { totalUsd: 0, breakdown: emptyBreakdown() },
 });
 
+/**
+ * Re-compute totals from a (possibly filtered) bucket list. Used when the
+ * HTTP layer applies `status`/`search` filters after rollup — totals must
+ * stay aligned with the buckets actually returned, otherwise totals and
+ * the sum of buckets diverge for any non-empty filter.
+ */
+export const sumWorkItemTotals = (
+  buckets: readonly Pick<WorkItemBucket, "attemptsCount" | "tokens" | "cost">[],
+): WorkItemTotals => {
+  const totals = emptyTotals();
+  for (const bucket of buckets) {
+    totals.attemptsCount += bucket.attemptsCount;
+    totals.tokens.inputTokens += bucket.tokens.inputTokens;
+    totals.tokens.outputTokens += bucket.tokens.outputTokens;
+    totals.tokens.cacheCreationInputTokens += bucket.tokens.cacheCreationInputTokens;
+    totals.tokens.cacheReadInputTokens += bucket.tokens.cacheReadInputTokens;
+    totals.tokens.reasoningOutputTokens += bucket.tokens.reasoningOutputTokens;
+    totals.cost.totalUsd += bucket.cost.totalUsd;
+    totals.cost.breakdown.input += bucket.cost.breakdown.input;
+    totals.cost.breakdown.output += bucket.cost.breakdown.output;
+    totals.cost.breakdown.cacheRead += bucket.cost.breakdown.cacheRead;
+    totals.cost.breakdown.cacheCreate += bucket.cost.breakdown.cacheCreate;
+    totals.cost.breakdown.reasoning += bucket.cost.breakdown.reasoning;
+  }
+  return totals;
+};
+
 type Aggregator = {
   taskId: string;
   rows: AttemptWorkItemRow[];

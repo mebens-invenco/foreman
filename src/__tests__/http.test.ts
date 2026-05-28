@@ -1537,6 +1537,49 @@ describe("HTTP work-items rollup", () => {
     }
   });
 
+  test("totals stay aligned with returned buckets when status filter is applied", async () => {
+    const { db, server, seedAttempt } = await setupWorkItemsServer();
+
+    seedAttempt({
+      id: "att-running",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      status: "running",
+      tokens: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    seedAttempt({
+      id: "att-other",
+      taskId: "ENG-2",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T11:00:00.000Z",
+      finishedAt: "2026-05-20T11:30:00.000Z",
+      status: "completed",
+      tokens: { inputTokens: 0, outputTokens: 1_000_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/work-items?from=2026-05-20&to=2026-05-20&status=running",
+      });
+      const payload = response.json();
+      const bucketSum = payload.buckets.reduce(
+        (acc: number, bucket: { attemptsCount: number }) => acc + bucket.attemptsCount,
+        0,
+      );
+      expect(payload.totals.attemptsCount).toBe(bucketSum);
+      expect(payload.totals.attemptsCount).toBe(1);
+      // ENG-1 contributed 1M input tokens; ENG-2 (completed, excluded by the
+      // filter) must not leak its 1M output tokens into the totals.
+      expect(payload.totals.tokens.outputTokens).toBe(0);
+      expect(payload.totals.tokens.inputTokens).toBe(1_000_000);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
   test("returns empty buckets but still reports rates when the window has no attempts", async () => {
     const { db, server } = await setupWorkItemsServer();
     try {

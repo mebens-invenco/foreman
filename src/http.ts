@@ -12,7 +12,7 @@ import {
   type UsageGroupBy,
 } from "./execution/cost/usage-rollup.js";
 import { isIsoDate, resolveUsageRange } from "./execution/cost/usage-range.js";
-import { rollupWorkItems } from "./execution/cost/work-item-rollup.js";
+import { rollupWorkItems, sumWorkItemTotals } from "./execution/cost/work-item-rollup.js";
 import { unavailableForemanVersionStatus, type ForemanVersionStatus } from "./foreman-version.js";
 import type { AttemptRecord, JobRecord } from "./repos/index.js";
 import type {
@@ -934,13 +934,21 @@ export const createHttpServer = (deps: HttpServerDeps) => {
         taskUrl: resolveTaskUrl(deps, bucket.taskId),
       }));
 
+    // Totals must match what we actually return in buckets; rollup.totals
+    // covers the unfiltered window, so a non-empty status/search filter would
+    // make the two diverge for any totals-footer or KPI-card consumer.
+    const totals =
+      statusFilter === undefined && searchTerm === ""
+        ? rollup.totals
+        : sumWorkItemTotals(filteredBuckets);
+
     return {
       fromDate: range.fromDate,
       toDate: range.toDate,
       fromInclusive: rollup.fromInclusive,
       toExclusive: rollup.toExclusive,
       buckets: filteredBuckets,
-      totals: rollup.totals,
+      totals,
       rates: listRunnerRates(),
     };
   });
