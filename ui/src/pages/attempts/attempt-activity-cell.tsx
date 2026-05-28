@@ -39,7 +39,7 @@ export function AttemptActivityCell({
     enabled: isLive,
   })
 
-  if (!isLive) {
+  if (attempt.status !== "running") {
     const meta = terminalAttemptBadge(attempt.status)
     return <AttemptPhaseBadge phase={meta.phase} label={meta.label} />
   }
