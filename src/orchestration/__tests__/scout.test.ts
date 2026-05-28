@@ -3,7 +3,16 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewContext, type Task, type TaskComment, type TaskPullRequest } from "../../domain/index.js";
+import {
+  priorityToRank,
+  type ActionType,
+  type RepoRef,
+  type ResolvedPullRequest,
+  type ReviewContext,
+  type Task,
+  type TaskComment,
+  type TaskPullRequest,
+} from "../../domain/index.js";
 import { runScoutSelection } from "../index.js";
 import type { ReviewService } from "../../review/index.js";
 import { FileTaskSystem } from "../../tasking/index.js";
@@ -199,6 +208,43 @@ const seedCompletedExecution = (
   });
   expect(attempt).not.toBeNull();
   db.attempts.finalizeAttempt(attempt!.id, "completed", { finishedAt: "2026-03-14T12:04:00Z" });
+};
+
+const seedBlockedOrdinaryJob = (
+  db: Awaited<ReturnType<typeof createMigratedDb>>,
+  blockedTask: Task,
+  action: Extract<ActionType, "execution" | "retry">,
+): void => {
+  db.workers.ensureWorkerSlots(1);
+  const worker = db.workers.listWorkers()[0];
+  expect(worker).toBeDefined();
+  db.taskMirror.saveTasks([blockedTask]);
+  const target = db.taskMirror.getTaskTarget(blockedTask.id, blockedTask.targets[0]?.repoKey ?? "repo-a");
+  expect(target).not.toBeNull();
+
+  const job = db.jobs.createJob({
+    taskId: blockedTask.id,
+    taskTargetId: target!.id,
+    taskProvider: blockedTask.provider,
+    action,
+    priorityRank: priorityToRank(blockedTask.priority),
+    repoKey: target!.repoKey,
+    baseBranch: "main",
+    dedupeKey: `${blockedTask.id}:${target!.repoKey}:${action}`,
+    selectionReason: "test blocked ordinary work",
+  });
+  const attempt = db.attempts.createAttemptWithLeases({
+    jobId: job.id,
+    workerId: worker!.id,
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-5.4",
+    runnerVariant: "high",
+    expiresAt: "2026-03-14T12:05:00Z",
+    leases: [],
+  });
+  expect(attempt).not.toBeNull();
+  db.attempts.finalizeAttempt(attempt!.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
+  db.jobs.updateJobStatus(job.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
 };
 
 const seedReviewerCheckpoint = (
@@ -867,6 +913,108 @@ describe("runScoutSelection", () => {
       expect(result.jobs).toHaveLength(1);
       expect(result.jobs[0]?.action).toBe("review");
       expect(result.jobs[0]?.task.id).toBe("TASK-0003");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not resume blocked in-progress execution targets until the task is updated", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-execution-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const blockedTask = task({
+      id: "TASK-BLOCKED-EXECUTION",
+      title: "Blocked execution task",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    seedBlockedOrdinaryJob(db, blockedTask, "execution");
+    const taskSystem = new FakeTaskSystem([blockedTask]);
+
+    try {
+      const blocked = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(blocked.jobs).toHaveLength(0);
+
+      blockedTask.updatedAt = "2999-01-01T00:00:00.000Z";
+      const unblocked = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(unblocked.jobs).toHaveLength(1);
+      expect(unblocked.jobs[0]?.action).toBe("execution");
+      expect(unblocked.jobs[0]?.task.id).toBe(blockedTask.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not retry blocked ordinary retry targets until the task is updated", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-retry-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const retryTask = task({
+      id: "TASK-BLOCKED-RETRY",
+      title: "Blocked retry task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/3", source: "provider" } satisfies TaskPullRequest],
+    });
+    seedBlockedOrdinaryJob(db, retryTask, "retry");
+    const reviewService = new FakeReviewService({
+      [retryTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/3",
+        pullRequestNumber: 3,
+        state: "closed",
+        headBranch: "task-blocked-retry",
+        baseBranch: "main",
+      }),
+    });
+    const taskSystem = new FakeTaskSystem([retryTask]);
+
+    try {
+      const blocked = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(blocked.jobs).toHaveLength(0);
+
+      retryTask.updatedAt = "2999-01-01T00:00:00.000Z";
+      const unblocked = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(unblocked.jobs).toHaveLength(1);
+      expect(unblocked.jobs[0]?.action).toBe("retry");
+      expect(unblocked.jobs[0]?.task.id).toBe(retryTask.id);
     } finally {
       db.close();
     }

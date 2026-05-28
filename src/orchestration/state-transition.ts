@@ -5,7 +5,7 @@ import type { AttemptRecord, ForemanRepos, JobRecord } from "../repos/index.js";
 import { getProviderStateForNormalized, type TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 
-type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable";
+type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable" | "blocked";
 
 export type StateTransitionTargetProgress = {
   latestJob: JobRecord | null;

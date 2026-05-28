@@ -38,7 +38,7 @@ type Selection = {
   selectionContext: Record<string, unknown>;
 };
 
-type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable";
+type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable" | "blocked";
 
 type TargetProgress = {
   latestJob: JobRecord | null;
@@ -49,6 +49,17 @@ type TargetProgress = {
 
 const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
 const stopIntentPhrases = ["abandon", "do not continue", "do not retry"];
+
+const isBlockedOrdinaryWorkPendingUnblock = (task: Task, latestJob: JobRecord | null, latestAttempt: AttemptRecord | null): boolean => {
+  if (!latestJob || (latestJob.action !== "execution" && latestJob.action !== "retry") || latestJob.status !== "blocked") {
+    return false;
+  }
+  if (latestAttempt && latestAttempt.status !== "blocked") {
+    return false;
+  }
+
+  return new Date(task.updatedAt).getTime() <= new Date(latestJob.updatedAt).getTime();
+};
 
 const reviewPriorityReason = (context: ReviewContext): string | null => {
   if (actionableReviewThreads(context).length > 0) {
@@ -251,6 +262,9 @@ const resolveTargetProgress = async (input: {
   }
   if (pullRequest?.state === "merged") {
     return { latestJob, latestAttempt, pullRequest, state: "merged" };
+  }
+  if (isBlockedOrdinaryWorkPendingUnblock(input.task, latestJob, latestAttempt)) {
+    return { latestJob, latestAttempt, pullRequest, state: "blocked" };
   }
   if (pullRequest?.state === "closed") {
     return { latestJob, latestAttempt, pullRequest, state: "retryable" };
@@ -723,6 +737,16 @@ export const runScoutSelection = async (input: {
 
           const reviewContext = await getReviewContext(task, target, repo);
           if (!reviewContext || reviewContext.state !== "closed") {
+            continue;
+          }
+
+          const progress = await getTargetProgress(
+            task,
+            target,
+            repo,
+            new Set(jobs.map((job) => targetKey(job.task.id, job.target.repoKey))),
+          );
+          if (progress.state === "blocked") {
             continue;
           }
 
