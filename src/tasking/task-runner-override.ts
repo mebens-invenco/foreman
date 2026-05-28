@@ -69,10 +69,11 @@ export const normalizeTaskRunnerOverride = (input: unknown): TaskRunnerOverride 
 
 /**
  * Parse dot-path runner metadata of the form used in Linear's `Agent:` block.
- * Keys are case-insensitive. Supported keys are:
- *   Runner.execution.{model,effort,variant}
- *   Runner.reviewer.{model,effort,variant}
- *   Runner.{model,effort,variant} (shorthand → execution)
+ * Keys are case-insensitive at the source; the surrounding metadata parser
+ * already lowercases them, so this function matches lowercase forms:
+ *   runner.execution.{model,effort,variant}
+ *   runner.reviewer.{model,effort,variant}
+ *   runner.{model,effort,variant} (shorthand → execution)
  *
  * `entries` is an iterable of [key, value] tuples where keys are the raw
  * already-lowercased keys from the surrounding metadata parser.
