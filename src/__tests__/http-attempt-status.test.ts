@@ -198,6 +198,39 @@ describe("attempt activity HTTP", () => {
     }
   });
 
+  test("latest=true returns tail rows in seq coordinates after retention trim", async () => {
+    const { server, db } = await buildServer();
+
+    try {
+      const { attemptId } = seedRunningAttempt(db);
+      // Append 50 activities (seq 1..50), then trim down to the latest 10
+      // (seq 41..50). totalActivities is 10 but the latest seq is 50, so the
+      // count-based cutoff would compute afterSeq = 10 - 5 = 5 and return
+      // rows 41..45 (the oldest retained) instead of 46..50 (the newest).
+      for (let index = 0; index < 50; index += 1) {
+        db.attemptActivities.appendActivity({
+          executionAttemptId: attemptId,
+          kind: "assistant_message",
+          message: `message ${index}`,
+        });
+      }
+      db.attemptActivities.trimRetention(attemptId, 10);
+
+      const response = await server.inject({
+        method: "GET",
+        url: `/api/attempts/${attemptId}/activity?latest=true&limit=5`,
+      });
+      expect(response.statusCode).toBe(200);
+      const body = response.json();
+      expect(body.activities.map((row: { seq: number }) => row.seq)).toEqual([46, 47, 48, 49, 50]);
+      expect(body.latestSeq).toBe(50);
+      expect(body.totalActivities).toBe(10);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
   test("latest=true rejects combined kind filter", async () => {
     const { server, db } = await buildServer();
 

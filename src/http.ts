@@ -732,8 +732,16 @@ export const createHttpServer = (deps: HttpServerDeps) => {
 
     const options: { afterSeq?: number; limit?: number; kinds?: AttemptActivityKind[] } = {};
     if (latest) {
-      const tailLimit = limit ?? totalActivities;
-      options.afterSeq = Math.max(0, totalActivities - tailLimit);
+      // `seq` keeps increasing past retention trimming, so the cutoff has to be
+      // derived from the latest retained seq, not the row count. Using the
+      // count here would return the oldest retained rows once any trimming has
+      // happened (e.g. retained seq=1001..2000 with totalActivities=1000 would
+      // compute afterSeq=900, matching every retained row).
+      const latestRow = deps.repos.attemptActivities.latestActivity(params.attemptId);
+      if (latestRow) {
+        const tailLimit = limit ?? totalActivities;
+        options.afterSeq = Math.max(0, latestRow.seq - tailLimit);
+      }
       if (limit !== undefined) {
         options.limit = limit;
       }
