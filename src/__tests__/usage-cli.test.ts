@@ -45,6 +45,7 @@ const createCliWorkspace = async () => {
       targetDependencies: [],
       dependencies: { taskIds: [], baseTaskId: null },
       baseBranch: null,
+      runnerOverride: null,
       pullRequests: [],
       updatedAt: "2026-05-20T00:00:00Z",
       url: null,

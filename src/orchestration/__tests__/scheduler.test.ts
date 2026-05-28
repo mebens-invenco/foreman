@@ -2131,7 +2131,7 @@ describe("SchedulerService applyWorkerResult", () => {
       });
 
       expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).toContain("implementation-native-session");
-      expect(await fs.readFile(promptOut, "utf8")).toContain("Continue addressing current PR feedback");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("continuing a review session");
 
       await (scheduler as any).runJob(worker, {
         id: "job-reviewer",
@@ -2144,7 +2144,7 @@ describe("SchedulerService applyWorkerResult", () => {
       });
 
       expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).toContain("reviewer-native-session");
-      expect(await fs.readFile(promptOut, "utf8")).toContain("Review the latest PR changes.");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("continuing a reviewer session");
 
       getActiveSession.mockClear();
       await (scheduler as any).runJob(worker, {
