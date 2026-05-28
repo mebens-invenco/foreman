@@ -4,7 +4,13 @@ import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import { isRunnerProvider, runnerProviders } from "../../domain/index.js";
 import type { AttemptStatus, RunnerProvider, TokenUsage } from "../../domain/index.js";
-import type { AttemptEventRecord, AttemptRecord, AttemptRepo, RecoveredAttemptRecord } from "../attempt-repo.js";
+import type {
+  AttemptEventRecord,
+  AttemptRecord,
+  AttemptRepo,
+  AttemptUsageRow,
+  RecoveredAttemptRecord,
+} from "../attempt-repo.js";
 import type { LeaseResourceType } from "../lease-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
@@ -288,6 +294,28 @@ export class SqliteAttemptRepo implements AttemptRepo {
       )
       .all(...params, ...paginationParams)
       .map((row: unknown) => mapAttempt(row as SqliteRow));
+  }
+
+  listUsageRows(filters: { fromInclusive: string; toExclusive: string }): AttemptUsageRow[] {
+    return this.sqlite
+      .prepare(
+        `SELECT runner_name, runner_model, runner_variant, started_at, tokens_used_json
+           FROM execution_attempt
+          WHERE started_at >= ?
+            AND started_at < ?
+       ORDER BY started_at ASC`,
+      )
+      .all(filters.fromInclusive, filters.toExclusive)
+      .map((row: unknown) => {
+        const mapped = row as SqliteRow;
+        return {
+          runnerName: assertRunnerProvider(mapped.runner_name, "execution_attempt usage row"),
+          runnerModel: String(mapped.runner_model),
+          runnerVariant: String(mapped.runner_variant),
+          startedAt: String(mapped.started_at),
+          tokensUsed: parseTokensUsed(mapped.tokens_used_json),
+        };
+      });
   }
 
   getAttempt(attemptId: string): AttemptRecord {

@@ -5,6 +5,15 @@ import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { z } from "zod";
 
+import { listRunnerRates } from "./execution/cost/rates.js";
+import {
+  isUsageGroupBy,
+  rollupUsage,
+  usageGroupByValues,
+  type UsageBucket,
+  type UsageGroupBy,
+} from "./execution/cost/usage-rollup.js";
+import { isIsoDate, resolveUsageRange } from "./execution/cost/usage-range.js";
 import {
   formatWorkerResultValidationError,
   parseWorkerResult,
@@ -123,6 +132,68 @@ const withWorkspaceRepos = async <T>(workspace: string, handler: (repos: ReturnT
   } finally {
     repos.close();
   }
+};
+
+const parseUsageDate = (value: string): string => {
+  if (!isIsoDate(value)) {
+    throw new InvalidArgumentError("Date must be in YYYY-MM-DD format.");
+  }
+  return value;
+};
+
+const parseUsageGroupBy = (value: string): UsageGroupBy => {
+  if (!isUsageGroupBy(value)) {
+    throw new InvalidArgumentError(`Group-by must be one of: ${usageGroupByValues.join(", ")}`);
+  }
+  return value;
+};
+
+const formatUsd = (value: number): string => `$${value.toFixed(2)}`;
+
+const formatUsageNumber = (value: number): string => value.toLocaleString("en-US");
+
+const padCell = (value: string, width: number): string => value.padEnd(width, " ");
+
+const renderUsageTable = (input: {
+  groupBy: UsageGroupBy;
+  fromDate: string;
+  toDate: string;
+  buckets: UsageBucket[];
+  totals: UsageBucket;
+}): string => {
+  const groupHeader = input.groupBy === "day" ? "Day" : input.groupBy === "runner" ? "Runner" : "Runner/Model";
+  const header = [groupHeader, "Attempts", "Fresh in", "Output", "Cache read", "Cache write", "Cost USD"];
+  const rows = input.buckets.map((bucket) => [
+    bucket.groupKey,
+    formatUsageNumber(bucket.attemptsCount),
+    formatUsageNumber(bucket.tokens.inputTokens),
+    formatUsageNumber(bucket.tokens.outputTokens),
+    formatUsageNumber(bucket.tokens.cacheReadInputTokens),
+    formatUsageNumber(bucket.tokens.cacheCreationInputTokens),
+    formatUsd(bucket.cost.totalUsd),
+  ]);
+  rows.push([
+    "TOTAL",
+    formatUsageNumber(input.totals.attemptsCount),
+    formatUsageNumber(input.totals.tokens.inputTokens),
+    formatUsageNumber(input.totals.tokens.outputTokens),
+    formatUsageNumber(input.totals.tokens.cacheReadInputTokens),
+    formatUsageNumber(input.totals.tokens.cacheCreationInputTokens),
+    formatUsd(input.totals.cost.totalUsd),
+  ]);
+
+  const widths = header.map((cell, index) =>
+    Math.max(cell.length, ...rows.map((row) => row[index]?.length ?? 0)),
+  );
+
+  const lines = [
+    `Usage ${input.fromDate} to ${input.toDate} (grouped by ${input.groupBy}):`,
+    header.map((cell, index) => padCell(cell, widths[index]!)).join("  "),
+    widths.map((width) => "-".repeat(width)).join("  "),
+    ...rows.map((row) => row.map((cell, index) => padCell(cell, widths[index]!)).join("  ")),
+  ];
+
+  return lines.join("\n");
 };
 
 const parseLogLevel = (value: string): LoggerLevelName => {
@@ -317,6 +388,56 @@ learnings
         learnings,
         missingIds: options.id.filter((id) => !foundIds.has(id)),
       });
+    });
+  });
+
+program
+  .command("usage")
+  .description("Summarize per-attempt token usage and computed USD cost")
+  .argument("<workspace>")
+  .option("--from <date>", "Start date (inclusive), YYYY-MM-DD", parseUsageDate)
+  .option("--to <date>", "End date (inclusive), YYYY-MM-DD", parseUsageDate)
+  .option("--by <groupBy>", `Group by: ${usageGroupByValues.join("|")}`, parseUsageGroupBy, "day")
+  .option("--json", "Emit JSON instead of the tab-aligned table")
+  .action(async (workspace: string, options: { from?: string; to?: string; by: UsageGroupBy; json?: boolean }) => {
+    const range = resolveUsageRange({
+      ...(options.from !== undefined ? { from: options.from } : {}),
+      ...(options.to !== undefined ? { to: options.to } : {}),
+    });
+    await withWorkspaceRepos(workspace, async (repos) => {
+      const rows = repos.attempts.listUsageRows({
+        fromInclusive: range.fromInclusive,
+        toExclusive: range.toExclusive,
+      });
+      const rollup = rollupUsage({
+        rows,
+        groupBy: options.by,
+        fromInclusive: range.fromInclusive,
+        toExclusive: range.toExclusive,
+      });
+
+      if (options.json) {
+        writeJson({
+          workspace,
+          fromDate: range.fromDate,
+          toDate: range.toDate,
+          groupBy: options.by,
+          buckets: rollup.buckets,
+          totals: rollup.totals,
+          rates: listRunnerRates(),
+        });
+        return;
+      }
+
+      process.stdout.write(
+        `${renderUsageTable({
+          groupBy: options.by,
+          fromDate: range.fromDate,
+          toDate: range.toDate,
+          buckets: rollup.buckets,
+          totals: rollup.totals,
+        })}\n`,
+      );
     });
   });
 

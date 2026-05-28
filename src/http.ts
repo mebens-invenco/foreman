@@ -4,6 +4,14 @@ import path from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 
+import { listRunnerRates } from "./execution/cost/rates.js";
+import {
+  isUsageGroupBy,
+  rollupUsage,
+  usageGroupByValues,
+  type UsageGroupBy,
+} from "./execution/cost/usage-rollup.js";
+import { isIsoDate, resolveUsageRange } from "./execution/cost/usage-range.js";
 import { unavailableForemanVersionStatus, type ForemanVersionStatus } from "./foreman-version.js";
 import type { AttemptRecord, JobRecord } from "./repos/index.js";
 import type {
@@ -805,6 +813,65 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     request.raw.on("close", () => {
       clearInterval(interval);
     });
+  });
+
+  server.get("/api/rates", async () => ({ rates: listRunnerRates() }));
+
+  server.get("/api/usage", async (request) => {
+    const query = request.query as { from?: string; to?: string; groupBy?: string };
+    if (query.from !== undefined && !isIsoDate(query.from)) {
+      throw new ForemanError("invalid_request", "Query parameter from must be YYYY-MM-DD.", 400);
+    }
+    if (query.to !== undefined && !isIsoDate(query.to)) {
+      throw new ForemanError("invalid_request", "Query parameter to must be YYYY-MM-DD.", 400);
+    }
+    const groupBy: UsageGroupBy = query.groupBy === undefined
+      ? "day"
+      : isUsageGroupBy(query.groupBy)
+        ? query.groupBy
+        : (() => {
+            throw new ForemanError(
+              "invalid_request",
+              `Query parameter groupBy must be one of: ${usageGroupByValues.join(", ")}.`,
+              400,
+            );
+          })();
+
+    let range;
+    try {
+      range = resolveUsageRange({
+        ...(query.from !== undefined ? { from: query.from } : {}),
+        ...(query.to !== undefined ? { to: query.to } : {}),
+      });
+    } catch (error) {
+      throw new ForemanError(
+        "invalid_request",
+        error instanceof Error ? error.message : "Invalid usage range.",
+        400,
+      );
+    }
+
+    const rows = deps.repos.attempts.listUsageRows({
+      fromInclusive: range.fromInclusive,
+      toExclusive: range.toExclusive,
+    });
+    const rollup = rollupUsage({
+      rows,
+      groupBy,
+      fromInclusive: range.fromInclusive,
+      toExclusive: range.toExclusive,
+    });
+
+    return {
+      groupBy: rollup.groupBy,
+      fromDate: range.fromDate,
+      toDate: range.toDate,
+      fromInclusive: rollup.fromInclusive,
+      toExclusive: rollup.toExclusive,
+      buckets: rollup.buckets,
+      totals: rollup.totals,
+      rates: listRunnerRates(),
+    };
   });
 
   server.get("/api/learnings", async (request) => {

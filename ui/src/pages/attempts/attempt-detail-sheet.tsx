@@ -40,6 +40,8 @@ import {
   createLogBuffer,
   getDisplayLines,
 } from "@/lib/log-display"
+import { estimateCost, formatUsd } from "@/lib/cost"
+import { useRatesQuery } from "@/hooks/use-rates-query"
 import { cn } from "@/lib/utils"
 
 type AttemptDetailSheetProps = {
@@ -88,6 +90,81 @@ function buildOpenSessionCommand(attempt: AttemptRecord) {
     case "codex":
       return `${prefix}codex resume ${sessionId}`
   }
+}
+
+function CostSummaryPanel({ attempt }: { attempt: AttemptRecord }) {
+  const { data: rates } = useRatesQuery()
+  const estimate = estimateCost(
+    attempt.tokensUsed,
+    attempt.runnerName,
+    attempt.runnerModel,
+    rates
+  )
+
+  return (
+    <section className="border border-border/70 bg-background/70 px-4 py-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="text-xxs tracking-[0.28em] text-muted-foreground uppercase">
+          Cost summary
+        </p>
+        <p className="font-mono text-base text-foreground">
+          {formatUsd(estimate.totalUsd)}
+        </p>
+      </div>
+
+      {estimate.rateApplied ? (
+        <>
+          <dl className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-xs sm:grid-cols-3">
+            <div className="flex items-baseline justify-between gap-2">
+              <dt className="text-muted-foreground">Input</dt>
+              <dd className="font-mono text-foreground">
+                {formatUsd(estimate.breakdown.input)}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-2">
+              <dt className="text-muted-foreground">Output</dt>
+              <dd className="font-mono text-foreground">
+                {formatUsd(estimate.breakdown.output)}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-2">
+              <dt className="text-muted-foreground">Cache read</dt>
+              <dd className="font-mono text-foreground">
+                {formatUsd(estimate.breakdown.cacheRead)}
+              </dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-2">
+              <dt className="text-muted-foreground">Cache write</dt>
+              <dd className="font-mono text-foreground">
+                {formatUsd(estimate.breakdown.cacheCreate)}
+              </dd>
+            </div>
+            {estimate.breakdown.reasoning > 0 ? (
+              <div className="flex items-baseline justify-between gap-2">
+                <dt className="text-muted-foreground">Reasoning</dt>
+                <dd className="font-mono text-foreground">
+                  {formatUsd(estimate.breakdown.reasoning)}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+          <p className="mt-3 text-xxs leading-5 text-muted-foreground">
+            Rates per 1M tokens — input ${estimate.rateApplied.inputPerMtok.toFixed(2)},
+            output ${estimate.rateApplied.outputPerMtok.toFixed(2)}, cache read $
+            {estimate.rateApplied.cacheReadPerMtok.toFixed(2)}, cache write (5-min TTL) $
+            {estimate.rateApplied.cacheWriteFiveMinPerMtok.toFixed(2)}. Anthropic
+            cache writes default to a 5-minute TTL when no beta header is set.
+          </p>
+        </>
+      ) : (
+        <p className="mt-3 text-xs text-muted-foreground">
+          {rates === undefined
+            ? "Loading rate table…"
+            : `No rate entry for ${attempt.runnerName}/${attempt.runnerModel}. Add it to src/execution/cost/rates.ts to surface a cost here.`}
+        </p>
+      )}
+    </section>
+  )
 }
 
 function AttemptStatusBadge({ status }: { status: AttemptRecord["status"] }) {
@@ -645,6 +722,8 @@ export function AttemptDetailSheet({ attemptId }: AttemptDetailSheetProps) {
                 )}
               />
             </section>
+
+            <CostSummaryPanel attempt={attempt} />
 
             <OpenSessionSection attempt={attempt} />
 
