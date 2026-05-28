@@ -9,6 +9,7 @@ import type {
   AttemptRecord,
   AttemptRepo,
   AttemptUsageRow,
+  AttemptWorkItemRow,
   RecoveredAttemptRecord,
 } from "../attempt-repo.js";
 import type { LeaseResourceType } from "../lease-repo.js";
@@ -252,7 +253,15 @@ export class SqliteAttemptRepo implements AttemptRepo {
       );
   }
 
-  listAttempts(filters: { status?: AttemptStatus; jobId?: string; limit?: number; offset?: number } = {}): AttemptRecord[] {
+  listAttempts(
+    filters: {
+      status?: AttemptStatus;
+      jobId?: string;
+      taskId?: string;
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): AttemptRecord[] {
     const conditions: string[] = [];
     const params: unknown[] = [];
 
@@ -264,6 +273,11 @@ export class SqliteAttemptRepo implements AttemptRepo {
     if (filters.jobId) {
       conditions.push("ea.job_id = ?");
       params.push(filters.jobId);
+    }
+
+    if (filters.taskId) {
+      conditions.push("job.task_id = ?");
+      params.push(filters.taskId);
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
@@ -314,6 +328,37 @@ export class SqliteAttemptRepo implements AttemptRepo {
           runnerVariant: String(mapped.runner_variant),
           startedAt: String(mapped.started_at),
           tokensUsed: parseTokensUsed(mapped.tokens_used_json),
+        };
+      });
+  }
+
+  listWorkItemRows(filters: { fromInclusive: string; toExclusive: string }): AttemptWorkItemRow[] {
+    return this.sqlite
+      .prepare(
+        `SELECT ea.runner_name, ea.runner_model, ea.runner_variant, ea.started_at,
+                ea.finished_at, ea.status, ea.attempt_number, ea.tokens_used_json,
+                job.task_id, job.repo_key AS target
+           FROM execution_attempt ea
+           JOIN job ON job.id = ea.job_id
+          WHERE ea.started_at >= ?
+            AND ea.started_at < ?
+            AND job.task_id IS NOT NULL
+       ORDER BY ea.started_at ASC`,
+      )
+      .all(filters.fromInclusive, filters.toExclusive)
+      .map((row: unknown) => {
+        const mapped = row as SqliteRow;
+        return {
+          runnerName: assertRunnerProvider(mapped.runner_name, "execution_attempt work item row"),
+          runnerModel: String(mapped.runner_model),
+          runnerVariant: String(mapped.runner_variant),
+          startedAt: String(mapped.started_at),
+          finishedAt: (mapped.finished_at as string | null) ?? null,
+          status: mapped.status as AttemptStatus,
+          attemptNumber: Number(mapped.attempt_number),
+          tokensUsed: parseTokensUsed(mapped.tokens_used_json),
+          taskId: String(mapped.task_id),
+          target: (mapped.target as string | null) ?? null,
         };
       });
   }

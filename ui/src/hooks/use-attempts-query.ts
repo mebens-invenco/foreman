@@ -14,10 +14,12 @@ function messageFromError(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
 }
 
-export function useAttemptsQuery(limit?: number) {
+export function useAttemptsQuery(params?: { limit?: number; taskId?: string }) {
+  const limit = params?.limit
+  const taskId = params?.taskId
   return useQuery({
-    queryKey: [...attemptsQueryKey, limit ?? "all"],
-    queryFn: () => listAttempts({ limit }),
+    queryKey: [...attemptsQueryKey, limit ?? "all", taskId ?? "all"],
+    queryFn: () => listAttempts({ limit, taskId }),
     refetchInterval: 10_000,
   })
 }

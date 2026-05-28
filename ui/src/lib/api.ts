@@ -466,6 +466,7 @@ export function getArtifactContent(artifactId: string) {
 export function listAttempts(params: {
   status?: AttemptStatus
   jobId?: string
+  taskId?: string
   limit?: number
   offset?: number
 }) {
@@ -542,6 +543,78 @@ export type UsageRollupResponse = {
 
 export function getUsage(params: { from?: string; to?: string; groupBy?: UsageGroupBy }) {
   return requestJson<UsageRollupResponse>(`/api/usage${buildSearch(params)}`)
+}
+
+export type WorkItemPerTargetStatus = {
+  target: string
+  status: AttemptStatus
+}
+
+export type WorkItemBucket = {
+  taskId: string
+  taskUrl: string | null
+  targets: string[]
+  perTargetLatestStatus: WorkItemPerTargetStatus[]
+  effectiveStatus: AttemptStatus
+  attemptsCount: number
+  firstSeenInWindow: string
+  lastStartedAt: string
+  lastFinishedAt: string | null
+  tokens: {
+    inputTokens: number
+    outputTokens: number
+    cacheCreationInputTokens: number
+    cacheReadInputTokens: number
+    reasoningOutputTokens: number
+  }
+  cost: {
+    totalUsd: number
+    breakdown: {
+      input: number
+      output: number
+      cacheRead: number
+      cacheCreate: number
+      reasoning: number
+    }
+  }
+}
+
+export type WorkItemsResponse = {
+  fromDate: string
+  toDate: string
+  fromInclusive: string
+  toExclusive: string
+  buckets: WorkItemBucket[]
+  totals: {
+    attemptsCount: number
+    tokens: {
+      inputTokens: number
+      outputTokens: number
+      cacheCreationInputTokens: number
+      cacheReadInputTokens: number
+      reasoningOutputTokens: number
+    }
+    cost: {
+      totalUsd: number
+      breakdown: {
+        input: number
+        output: number
+        cacheRead: number
+        cacheCreate: number
+        reasoning: number
+      }
+    }
+  }
+  rates: UsageRate[]
+}
+
+export function getWorkItems(params: {
+  from?: string
+  to?: string
+  status?: AttemptStatus
+  search?: string
+}) {
+  return requestJson<WorkItemsResponse>(`/api/work-items${buildSearch(params)}`)
 }
 
 export function getRates() {

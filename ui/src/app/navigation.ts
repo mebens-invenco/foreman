@@ -3,6 +3,7 @@ import {
   BookOpenTextIcon,
   ChartColumnIncreasingIcon,
   DollarSignIcon,
+  ListTodoIcon,
   SlidersHorizontalIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -26,6 +27,12 @@ export const navigationItems: NavigationItem[] = [
     href: "/attempts",
     description: "Active execution flow, live state, and streaming log surfaces.",
     icon: ActivityIcon,
+  },
+  {
+    title: "Work items",
+    href: "/work-items",
+    description: "One row per ticket — summed tokens, cost, and effective status across all attempts.",
+    icon: ListTodoIcon,
   },
   {
     title: "Learnings",

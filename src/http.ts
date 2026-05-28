@@ -12,6 +12,7 @@ import {
   type UsageGroupBy,
 } from "./execution/cost/usage-rollup.js";
 import { isIsoDate, resolveUsageRange } from "./execution/cost/usage-range.js";
+import { rollupWorkItems } from "./execution/cost/work-item-rollup.js";
 import { unavailableForemanVersionStatus, type ForemanVersionStatus } from "./foreman-version.js";
 import type { AttemptRecord, JobRecord } from "./repos/index.js";
 import type {
@@ -623,14 +624,29 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   });
 
   server.get("/api/attempts", async (request) => {
-    const query = request.query as { status?: string; jobId?: string; limit?: string; offset?: string };
-    const filters: { status?: "running" | "completed" | "failed" | "blocked" | "canceled" | "timed_out"; jobId?: string; limit?: number; offset?: number } = {};
+    const query = request.query as {
+      status?: string;
+      jobId?: string;
+      taskId?: string;
+      limit?: string;
+      offset?: string;
+    };
+    const filters: {
+      status?: "running" | "completed" | "failed" | "blocked" | "canceled" | "timed_out";
+      jobId?: string;
+      taskId?: string;
+      limit?: number;
+      offset?: number;
+    } = {};
     const status = parseEnumQuery("status", query.status, attemptStatuses);
     if (status !== undefined) {
       filters.status = status;
     }
     if (query.jobId) {
       filters.jobId = query.jobId;
+    }
+    if (query.taskId) {
+      filters.taskId = query.taskId;
     }
     const limit = parsePositiveIntegerQuery("limit", query.limit);
     if (limit !== undefined) {
@@ -869,6 +885,61 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       fromInclusive: rollup.fromInclusive,
       toExclusive: rollup.toExclusive,
       buckets: rollup.buckets,
+      totals: rollup.totals,
+      rates: listRunnerRates(),
+    };
+  });
+
+  server.get("/api/work-items", async (request) => {
+    const query = request.query as { from?: string; to?: string; status?: string; search?: string };
+    if (query.from !== undefined && !isIsoDate(query.from)) {
+      throw new ForemanError("invalid_request", "Query parameter from must be YYYY-MM-DD.", 400);
+    }
+    if (query.to !== undefined && !isIsoDate(query.to)) {
+      throw new ForemanError("invalid_request", "Query parameter to must be YYYY-MM-DD.", 400);
+    }
+    const statusFilter = parseEnumQuery("status", query.status, attemptStatuses);
+
+    let range;
+    try {
+      range = resolveUsageRange({
+        ...(query.from !== undefined ? { from: query.from } : {}),
+        ...(query.to !== undefined ? { to: query.to } : {}),
+        defaultLookbackDays: 30,
+      });
+    } catch (error) {
+      throw new ForemanError(
+        "invalid_request",
+        error instanceof Error ? error.message : "Invalid work-items range.",
+        400,
+      );
+    }
+
+    const rows = deps.repos.attempts.listWorkItemRows({
+      fromInclusive: range.fromInclusive,
+      toExclusive: range.toExclusive,
+    });
+    const rollup = rollupWorkItems({
+      rows,
+      fromInclusive: range.fromInclusive,
+      toExclusive: range.toExclusive,
+    });
+
+    const searchTerm = query.search?.trim().toLowerCase() ?? "";
+    const filteredBuckets = rollup.buckets
+      .filter((bucket) => (statusFilter ? bucket.effectiveStatus === statusFilter : true))
+      .filter((bucket) => (searchTerm ? bucket.taskId.toLowerCase().includes(searchTerm) : true))
+      .map((bucket) => ({
+        ...bucket,
+        taskUrl: resolveTaskUrl(deps, bucket.taskId),
+      }));
+
+    return {
+      fromDate: range.fromDate,
+      toDate: range.toDate,
+      fromInclusive: rollup.fromInclusive,
+      toExclusive: rollup.toExclusive,
+      buckets: filteredBuckets,
       totals: rollup.totals,
       rates: listRunnerRates(),
     };
