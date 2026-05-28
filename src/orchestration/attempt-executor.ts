@@ -419,18 +419,27 @@ export class AttemptExecutor {
           });
         }
         if (job.action === "retry" && attemptStatus === "completed") {
-          const reviewerRunnerConfig = resolveRunnerConfigForAction(this.deps.config, "reviewer", task);
-          const activeReviewerSession = this.deps.foremanRepos.runnerSessions.getActiveSession({
-            taskTargetId,
-            role: "reviewer",
-            runnerName: reviewerRunnerConfig.type,
-            runnerModel: reviewerRunnerConfig.model,
-            runnerVariant: runnerTuningValue(reviewerRunnerConfig),
-          });
-          if (activeReviewerSession) {
-            this.deps.foremanRepos.runnerSessions.updateSession(activeReviewerSession.id, { isActive: false });
-            attemptLogger.info("deactivated reviewer session after completed retry", {
-              reviewerRunnerSessionId: activeReviewerSession.id,
+          try {
+            const reviewerRunnerConfig = resolveRunnerConfigForAction(this.deps.config, "reviewer", task);
+            const activeReviewerSession = this.deps.foremanRepos.runnerSessions.getActiveSession({
+              taskTargetId,
+              role: "reviewer",
+              runnerName: reviewerRunnerConfig.type,
+              runnerModel: reviewerRunnerConfig.model,
+              runnerVariant: runnerTuningValue(reviewerRunnerConfig),
+            });
+            if (activeReviewerSession) {
+              this.deps.foremanRepos.runnerSessions.updateSession(activeReviewerSession.id, { isActive: false });
+              attemptLogger.info("deactivated reviewer session after completed retry", {
+                reviewerRunnerSessionId: activeReviewerSession.id,
+              });
+            }
+          } catch (reviewerLookupError) {
+            // The retry already succeeded; an invalid reviewer override on the
+            // task must not roll back a completed retry. The next reviewer
+            // attempt will surface the invalid override at runner construction.
+            attemptLogger.warn("skipped reviewer session cleanup after completed retry", {
+              error: reviewerLookupError instanceof Error ? reviewerLookupError.message : String(reviewerLookupError),
             });
           }
         }

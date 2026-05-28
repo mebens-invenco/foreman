@@ -670,6 +670,40 @@ describe("AttemptExecutor", () => {
     }
   });
 
+  test("does not fail a completed retry when the reviewer override is invalid for the workspace reviewer provider", async () => {
+    const overrideTask: Task = {
+      ...task,
+      runnerOverride: { reviewer: { effort: "ultra" } },
+    };
+    const { db, claimedJob, executor, logger } = await createExecutorContext({
+      action: "retry",
+      selectedTask: overrideTask,
+    });
+
+    try {
+      const workerResult = createWorkerResult({ action: "retry", summary: "Retry succeeded." });
+      runnerMocks.invoke.mockResolvedValueOnce({
+        exitCode: 0,
+        signal: null,
+        startedAt: "2026-05-06T00:00:00.000Z",
+        finishedAt: "2026-05-06T00:01:00.000Z",
+        stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+        stderrBytes: 0,
+        stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+        stderr: "",
+      });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      const attempt = db.attempts.latestAttemptForJob(claimedJob.id)!;
+      expect(attempt.status).toBe("completed");
+      expect(db.jobs.getJob(claimedJob.id)).toMatchObject({ status: "completed" });
+    } finally {
+      db.close();
+    }
+  });
+
   test("marks attempts blocked when provider rate limiting interrupts result application", async () => {
     const { db, job, claimedJob, executor, logger, applyWorkerResult } = await createExecutorContext();
 
