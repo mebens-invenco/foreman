@@ -4,6 +4,7 @@ import { createTimeoutSignal, isAbortLikeError, PROVIDER_REQUEST_TIMEOUT_MS } fr
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
 import type { WorkspaceConfig } from "../../workspace/config.js";
+import { parseDotPathRunnerOverride } from "../task-runner-override.js";
 import { renderTaskCreateDescription, type CreatedTask, type TaskSystem } from "../task-system.js";
 import { getProviderStateForNormalized, normalizeTaskState } from "../task-state-mapping.js";
 
@@ -129,7 +130,7 @@ const normalizeLinearTaskReference = (value: string): string => {
 export const parseLinearMetadata = (
   description: string,
   defaultBranchName?: string,
-): Pick<Task, "targets" | "targetDependencies" | "dependencies" | "baseBranch"> => {
+): Pick<Task, "targets" | "targetDependencies" | "dependencies" | "baseBranch" | "runnerOverride"> => {
   const match = description.match(/(^|\n)Agent:\s*\n((?:\s{2,}.+\n?)*)/i);
   const lines =
     match?.[2]
@@ -177,6 +178,7 @@ export const parseLinearMetadata = (
       baseTaskId: baseTaskIdValue ? normalizeLinearTaskReference(baseTaskIdValue) : null,
     },
     baseBranch,
+    runnerOverride: parseDotPathRunnerOverride(values),
   };
 };
 
@@ -440,6 +442,7 @@ export class LinearTaskSystem implements TaskSystem {
       dependencies: metadata.dependencies,
       baseBranch: metadata.baseBranch,
       pullRequests: await this.resolvePullRequests(node.attachments.nodes, metadata.targets),
+      runnerOverride: metadata.runnerOverride,
       updatedAt: node.updatedAt,
       url: node.url,
     };

@@ -10,6 +10,7 @@ import {
   type Task,
   type TaskComment,
   type TaskPullRequest,
+  type TaskRunnerOverride,
   type TaskState,
   type TaskTargetDependencyRef,
   type TaskTargetRef,
@@ -21,6 +22,7 @@ import { isoNow } from "../../lib/time.js";
 import { LoggerService } from "../../logger.js";
 import type { WorkspaceConfig } from "../../workspace/config.js";
 import type { WorkspacePaths } from "../../workspace/workspace-paths.js";
+import { normalizeTaskRunnerOverride, serializeTaskRunnerOverride } from "../task-runner-override.js";
 import { renderTaskCreateDescription, type CreatedTask, type TaskSystem } from "../task-system.js";
 import { getProviderStateForNormalized, normalizeTaskState } from "../task-state-mapping.js";
 
@@ -65,6 +67,7 @@ type FileTaskFrontmatter = {
   baseBranch?: string | null;
   dependsOnBranches?: string[];
   pullRequests?: TaskPullRequest[];
+  runner?: Record<string, unknown> | null;
   assignee?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -82,13 +85,21 @@ const fileFrontmatterOrder: Array<keyof FileTaskFrontmatter> = [
   "baseFromTask",
   "baseBranch",
   "pullRequests",
+  "runner",
   "assignee",
   "createdAt",
   "updatedAt",
 ];
 
 const stringifyFileTask = (frontmatter: FileTaskFrontmatter, body: string): string => {
-  const ordered = Object.fromEntries(fileFrontmatterOrder.map((key) => [key, frontmatter[key]]));
+  const ordered: Record<string, unknown> = {};
+  for (const key of fileFrontmatterOrder) {
+    const value = frontmatter[key];
+    if (key === "runner" && (value === null || value === undefined)) {
+      continue;
+    }
+    ordered[key] = value;
+  }
   const yaml = YAML.stringify(ordered).trimEnd();
   return `---\n${yaml}\n---\n\n${body.trim()}\n`;
 };
@@ -162,6 +173,7 @@ const parseFileTaskDocument = (config: WorkspaceConfig, filePath: string, conten
     },
     baseBranch: data.baseBranch ?? null,
     pullRequests: data.pullRequests ?? [],
+    runnerOverride: normalizeTaskRunnerOverride(data.runner),
     updatedAt: data.updatedAt,
     url: null,
   };
@@ -181,6 +193,7 @@ const toFileFrontmatter = (task: Task, createdAt: string): FileTaskFrontmatter =
     baseFromTask: task.dependencies.baseTaskId,
     baseBranch: task.baseBranch,
     pullRequests: task.pullRequests,
+    runner: serializeTaskRunnerOverride(task.runnerOverride),
     assignee: task.assignee,
     createdAt,
     updatedAt: task.updatedAt,
@@ -299,6 +312,7 @@ export class FileTaskSystem implements TaskSystem {
       baseFromTask: input.mutation.dependencies?.baseTaskId ?? null,
       baseBranch: input.mutation.baseBranch ?? null,
       pullRequests: [],
+      runner: null,
       assignee: null,
       createdAt: now,
       updatedAt: now,

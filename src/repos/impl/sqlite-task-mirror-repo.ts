@@ -1,7 +1,8 @@
 import { newId } from "../../lib/ids.js";
 import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
-import { getTaskTargetRefsFromTask, type Task, type TaskPullRequest, type TaskTarget, type TaskTargetRef } from "../../domain/index.js";
+import { getTaskTargetRefsFromTask, type Task, type TaskPullRequest, type TaskRunnerOverride, type TaskTarget, type TaskTargetRef } from "../../domain/index.js";
+import { normalizeTaskRunnerOverride } from "../../tasking/task-runner-override.js";
 import type {
   GetTasksOptions,
   TaskDependencyRecord,
@@ -25,6 +26,7 @@ type StoredTaskRecord = {
   updatedAt: string;
   syncedAt: string;
   labels: string[];
+  runnerOverride: TaskRunnerOverride | null;
 };
 
 const TASK_COLUMNS = [
@@ -42,6 +44,7 @@ const TASK_COLUMNS = [
   "updated_at",
   "synced_at",
   "labels_json",
+  "runner_override_json",
 ].join(", ");
 
 const normalizeIds = (ids: readonly string[]): string[] => Array.from(new Set(ids.filter((id) => id.length > 0)));
@@ -53,6 +56,22 @@ const normalizeTimestamp = (value: unknown, fallback: string): string => {
     return value.toISOString();
   }
   return fallback;
+};
+
+const parseStoredRunnerOverride = (raw: unknown): TaskRunnerOverride | null => {
+  if (raw === null || raw === undefined) {
+    return null;
+  }
+  const text = String(raw);
+  if (text.length === 0) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(text);
+    return normalizeTaskRunnerOverride(parsed);
+  } catch {
+    return null;
+  }
 };
 
 const mapStoredTask = (row: unknown): StoredTaskRecord => {
@@ -72,6 +91,7 @@ const mapStoredTask = (row: unknown): StoredTaskRecord => {
     updatedAt: String(mapped.updated_at),
     syncedAt: String(mapped.synced_at),
     labels: JSON.parse(String(mapped.labels_json ?? "[]")),
+    runnerOverride: parseStoredRunnerOverride(mapped.runner_override_json),
   };
 };
 
@@ -310,6 +330,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
         },
         baseBranch: storedTask.baseBranch,
         pullRequests: pullRequestsByTaskId.get(storedTask.id) ?? [],
+        runnerOverride: storedTask.runnerOverride,
         updatedAt: storedTask.updatedAt,
         url: storedTask.url,
       } satisfies Task;
@@ -363,8 +384,8 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     const upsertTask = this.sqlite.prepare(
       `INSERT INTO task(
          id, provider, provider_id, title, description, state, provider_state, priority,
-          assignee, base_branch, url, updated_at, synced_at, labels_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          assignee, base_branch, url, updated_at, synced_at, labels_json, runner_override_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
          provider = excluded.provider,
          provider_id = excluded.provider_id,
@@ -378,7 +399,8 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
           url = excluded.url,
          updated_at = excluded.updated_at,
          synced_at = excluded.synced_at,
-         labels_json = excluded.labels_json`,
+         labels_json = excluded.labels_json,
+         runner_override_json = excluded.runner_override_json`,
     );
     const deleteTargets = this.sqlite.prepare("DELETE FROM task_target WHERE task_id = ?");
     const upsertTarget = this.sqlite.prepare(
@@ -438,6 +460,7 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
           normalizeTimestamp(task.updatedAt, syncedAt),
           syncedAt,
           stableStringify(task.labels ?? []),
+          task.runnerOverride ? stableStringify(task.runnerOverride) : null,
         );
 
         const targets = this.normalizeTaskTargets(task);

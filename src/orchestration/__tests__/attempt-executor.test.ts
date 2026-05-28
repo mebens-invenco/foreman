@@ -64,6 +64,7 @@ const task: Task = {
   dependencies: { taskIds: [], baseTaskId: null },
   baseBranch: null,
   pullRequests: [],
+  runnerOverride: null,
   updatedAt: "2026-05-06T00:00:00.000Z",
   url: null,
 };
@@ -592,6 +593,112 @@ describe("AttemptExecutor", () => {
       expect(attempt.status).toBe("canceled");
       expect(attempt.summary).toContain("Runner exited with timed out after 3600000ms with signal SIGTERM");
 
+    } finally {
+      db.close();
+    }
+  });
+
+  test("uses the task's execution override on the attempt record and runner session", async () => {
+    const overrideTask: Task = {
+      ...task,
+      runnerOverride: { execution: { model: "openai/gpt-5.5-pro", tuning: "max" } },
+    };
+    const { db, claimedJob, executor, logger, target } = await createExecutorContext({ selectedTask: overrideTask });
+
+    try {
+      const workerResult = createWorkerResult({ summary: "Used overridden model." });
+      runnerMocks.invoke.mockResolvedValueOnce({
+        exitCode: 0,
+        signal: null,
+        startedAt: "2026-05-06T00:00:00.000Z",
+        finishedAt: "2026-05-06T00:01:00.000Z",
+        stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+        stderrBytes: 0,
+        stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+        stderr: "",
+        nativeSessionId: "native-session-override",
+      });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      const attempt = db.attempts.latestAttemptForJob(claimedJob.id)!;
+      expect(attempt.runnerModel).toBe("openai/gpt-5.5-pro");
+      expect(attempt.runnerVariant).toBe("max");
+
+      const session = db.runnerSessions.getActiveSession({
+        taskTargetId: target.id,
+        role: "implementation",
+        runnerName: "opencode",
+        runnerModel: "openai/gpt-5.5-pro",
+        runnerVariant: "max",
+      });
+      expect(session?.nativeSessionId).toBe("native-session-override");
+
+      // The workspace-default session selector should remain empty so an
+      // overridden-model attempt cannot reuse a default-model session.
+      expect(
+        db.runnerSessions.getActiveSession({
+          taskTargetId: target.id,
+          role: "implementation",
+          runnerName: "opencode",
+          runnerModel: "openai/gpt-5.5",
+          runnerVariant: "high",
+        }),
+      ).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects an attempt whose override is invalid for the active provider", async () => {
+    const overrideTask: Task = {
+      ...task,
+      runnerOverride: { execution: { tuning: "ultra" } },
+    };
+    const { db, claimedJob, executor, logger, config } = await createExecutorContext({ selectedTask: overrideTask });
+    config.runner.execution = { type: "codex", model: "gpt-5.5", effort: "high", timeoutMs: 3_600_000 };
+
+    try {
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      expect(runnerMocks.invoke).not.toHaveBeenCalled();
+      expect(db.jobs.getJob(claimedJob.id)).toMatchObject({ status: "failed" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not fail a completed retry when the reviewer override is invalid for the workspace reviewer provider", async () => {
+    const overrideTask: Task = {
+      ...task,
+      runnerOverride: { reviewer: { tuning: "ultra" } },
+    };
+    const { db, claimedJob, executor, logger } = await createExecutorContext({
+      action: "retry",
+      selectedTask: overrideTask,
+    });
+
+    try {
+      const workerResult = createWorkerResult({ action: "retry", summary: "Retry succeeded." });
+      runnerMocks.invoke.mockResolvedValueOnce({
+        exitCode: 0,
+        signal: null,
+        startedAt: "2026-05-06T00:00:00.000Z",
+        finishedAt: "2026-05-06T00:01:00.000Z",
+        stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+        stderrBytes: 0,
+        stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+        stderr: "",
+      });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      const attempt = db.attempts.latestAttemptForJob(claimedJob.id)!;
+      expect(attempt.status).toBe("completed");
+      expect(db.jobs.getJob(claimedJob.id)).toMatchObject({ status: "completed" });
     } finally {
       db.close();
     }
