@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest"
 
-import type { AttemptRecord, WorkItemBucket } from "../lib/api"
+import type { AttemptRecord, TaskRollupBucket } from "../lib/api"
 import {
   attemptsPagePath,
   bucketTokensTotal,
@@ -8,8 +8,8 @@ import {
 } from "../pages/work-items/work-item-drawer-helpers"
 
 function makeBucket(
-  tokens: Partial<WorkItemBucket["tokens"]> = {}
-): WorkItemBucket {
+  tokens: Partial<TaskRollupBucket["tokens"]> = {}
+): TaskRollupBucket {
   return {
     taskId: "ENG-5260",
     taskUrl: null,

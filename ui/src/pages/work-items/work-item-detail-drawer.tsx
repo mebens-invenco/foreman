@@ -29,7 +29,7 @@ import {
 } from "@/lib/cost"
 import { formatStatusLabel, statusTone } from "@/lib/attempt-status"
 import { cn } from "@/lib/utils"
-import type { AttemptRecord, WorkItemBucket } from "@/lib/api"
+import type { AttemptRecord, TaskRollupBucket } from "@/lib/api"
 import {
   attemptsPagePath,
   bucketTokensTotal,
@@ -38,7 +38,7 @@ import {
 
 type WorkItemDetailDrawerProps = {
   taskId: string | null
-  bucket: WorkItemBucket | null
+  bucket: TaskRollupBucket | null
 }
 
 function StatusChip({

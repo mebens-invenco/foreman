@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
 
 import type { AttemptStatus } from "../../../domain/index.js";
-import type { AttemptWorkItemRow } from "../../../repos/attempt-repo.js";
-import { computeEffectiveStatus, rollupWorkItems } from "../work-item-rollup.js";
+import type { AttemptTaskRow } from "../../../repos/attempt-repo.js";
+import { computeEffectiveStatus, rollupTasks } from "../task-rollup.js";
 
-const baseRow = (overrides: Partial<AttemptWorkItemRow> = {}): AttemptWorkItemRow => ({
+const baseRow = (overrides: Partial<AttemptTaskRow> = {}): AttemptTaskRow => ({
   taskId: "ENG-1",
   target: "repo-a",
   runnerName: "claude",
@@ -20,7 +20,7 @@ const baseRow = (overrides: Partial<AttemptWorkItemRow> = {}): AttemptWorkItemRo
 
 describe("computeEffectiveStatus", () => {
   test("returns running when any attempt is still running", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({ status: "completed", startedAt: "2026-05-20T08:00:00.000Z" }),
       baseRow({ status: "running", startedAt: "2026-05-20T07:00:00.000Z", attemptNumber: 2 }),
     ];
@@ -28,7 +28,7 @@ describe("computeEffectiveStatus", () => {
   });
 
   test("returns blocked when no attempt is running but one is blocked", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({ status: "completed", startedAt: "2026-05-20T11:00:00.000Z" }),
       baseRow({ status: "blocked", startedAt: "2026-05-20T09:00:00.000Z", attemptNumber: 2 }),
     ];
@@ -36,7 +36,7 @@ describe("computeEffectiveStatus", () => {
   });
 
   test("returns the newest failed/timed_out status when no live attempt remains", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({ status: "failed", startedAt: "2026-05-20T08:00:00.000Z", attemptNumber: 1 }),
       baseRow({ status: "timed_out", startedAt: "2026-05-20T10:00:00.000Z", attemptNumber: 2 }),
       baseRow({ status: "canceled", startedAt: "2026-05-20T11:00:00.000Z", attemptNumber: 3 }),
@@ -45,7 +45,7 @@ describe("computeEffectiveStatus", () => {
   });
 
   test("breaks startedAt ties using attemptNumber for failures", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({ status: "failed", startedAt: "2026-05-20T10:00:00.000Z", attemptNumber: 1 }),
       baseRow({ status: "failed", startedAt: "2026-05-20T10:00:00.000Z", attemptNumber: 3 }),
       baseRow({ status: "failed", startedAt: "2026-05-20T10:00:00.000Z", attemptNumber: 2 }),
@@ -54,7 +54,7 @@ describe("computeEffectiveStatus", () => {
   });
 
   test("falls back to most recent completion when there are no failures", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({ status: "canceled", startedAt: "2026-05-20T08:00:00.000Z", attemptNumber: 1 }),
       baseRow({ status: "completed", startedAt: "2026-05-20T09:00:00.000Z", attemptNumber: 2 }),
     ];
@@ -66,7 +66,7 @@ describe("computeEffectiveStatus", () => {
   // canceled-wins case in so a future "prefer completed" refactor would have
   // to surface and own that policy change.
   test("a newest canceled attempt wins over an older completed attempt", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({ status: "completed", startedAt: "2026-05-20T08:00:00.000Z", attemptNumber: 1 }),
       baseRow({ status: "canceled", startedAt: "2026-05-20T09:00:00.000Z", attemptNumber: 2 }),
     ];
@@ -74,12 +74,12 @@ describe("computeEffectiveStatus", () => {
   });
 });
 
-describe("rollupWorkItems", () => {
+describe("rollupTasks", () => {
   const fromInclusive = "2026-05-20T00:00:00.000Z";
   const toExclusive = "2026-05-22T00:00:00.000Z";
 
   test("groups rows by taskId and sums tokens + cost", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({
         taskId: "ENG-1",
         startedAt: "2026-05-20T10:00:00.000Z",
@@ -93,7 +93,7 @@ describe("rollupWorkItems", () => {
       }),
     ];
 
-    const result = rollupWorkItems({ rows, fromInclusive, toExclusive });
+    const result = rollupTasks({ rows, fromInclusive, toExclusive });
 
     expect(result.buckets).toHaveLength(1);
     expect(result.buckets[0]!.attemptsCount).toBe(2);
@@ -105,13 +105,13 @@ describe("rollupWorkItems", () => {
   });
 
   test("buckets are sorted by taskId ascending", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({ taskId: "ENG-9", startedAt: "2026-05-20T10:00:00.000Z" }),
       baseRow({ taskId: "ENG-1", startedAt: "2026-05-20T11:00:00.000Z" }),
       baseRow({ taskId: "ENG-3", startedAt: "2026-05-20T12:00:00.000Z" }),
     ];
 
-    const result = rollupWorkItems({ rows, fromInclusive, toExclusive });
+    const result = rollupTasks({ rows, fromInclusive, toExclusive });
 
     expect(result.buckets.map((bucket) => bucket.taskId)).toEqual([
       "ENG-1",
@@ -121,20 +121,20 @@ describe("rollupWorkItems", () => {
   });
 
   test("captures first-seen-in-window as the earliest startedAt across the bucket", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({ startedAt: "2026-05-20T14:00:00.000Z", attemptNumber: 2 }),
       baseRow({ startedAt: "2026-05-20T10:00:00.000Z", attemptNumber: 1 }),
       baseRow({ startedAt: "2026-05-21T09:00:00.000Z", attemptNumber: 3 }),
     ];
 
-    const result = rollupWorkItems({ rows, fromInclusive, toExclusive });
+    const result = rollupTasks({ rows, fromInclusive, toExclusive });
 
     expect(result.buckets[0]!.firstSeenInWindow).toBe("2026-05-20T10:00:00.000Z");
     expect(result.buckets[0]!.lastStartedAt).toBe("2026-05-21T09:00:00.000Z");
   });
 
   test("computes per-target latest status independently from ticket-wide status", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({
         target: "repo-a",
         status: "completed",
@@ -155,7 +155,7 @@ describe("rollupWorkItems", () => {
       }),
     ];
 
-    const result = rollupWorkItems({ rows, fromInclusive, toExclusive });
+    const result = rollupTasks({ rows, fromInclusive, toExclusive });
 
     expect(result.buckets[0]!.targets).toEqual(["repo-a", "repo-b"]);
     expect(result.buckets[0]!.perTargetLatestStatus).toEqual([
@@ -166,7 +166,7 @@ describe("rollupWorkItems", () => {
   });
 
   test("tolerates attempt_number collisions across jobs without ambiguous status", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({
         status: "failed",
         startedAt: "2026-05-20T10:00:00.000Z",
@@ -179,7 +179,7 @@ describe("rollupWorkItems", () => {
       }),
     ];
 
-    const result = rollupWorkItems({ rows, fromInclusive, toExclusive });
+    const result = rollupTasks({ rows, fromInclusive, toExclusive });
 
     expect(result.buckets[0]!.effectiveStatus).toBe<AttemptStatus>("failed");
   });
@@ -190,7 +190,7 @@ describe("rollupWorkItems", () => {
   // "sum-tokens-then-estimate-once" would silently misprice mixed buckets
   // while every single-rate test stays green.
   test("prices a single bucket spanning two models at per-row rates", () => {
-    const rows: AttemptWorkItemRow[] = [
+    const rows: AttemptTaskRow[] = [
       baseRow({
         runnerName: "claude",
         runnerModel: "claude-opus-4-7",
@@ -207,7 +207,7 @@ describe("rollupWorkItems", () => {
       }),
     ];
 
-    const result = rollupWorkItems({ rows, fromInclusive, toExclusive });
+    const result = rollupTasks({ rows, fromInclusive, toExclusive });
 
     expect(result.buckets).toHaveLength(1);
     // 1M opus input @ $15/Mtok + 1M sonnet input @ $3/Mtok = $18.

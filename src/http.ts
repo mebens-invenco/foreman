@@ -12,7 +12,7 @@ import {
   type UsageGroupBy,
 } from "./execution/cost/usage-rollup.js";
 import { isIsoDate, resolveUsageRange } from "./execution/cost/usage-range.js";
-import { rollupWorkItems, sumWorkItemTotals } from "./execution/cost/work-item-rollup.js";
+import { rollupTasks, sumTaskRollupTotals } from "./execution/cost/task-rollup.js";
 import { unavailableForemanVersionStatus, type ForemanVersionStatus } from "./foreman-version.js";
 import type { AttemptRecord, JobRecord } from "./repos/index.js";
 import type {
@@ -890,7 +890,10 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     };
   });
 
-  server.get("/api/work-items", async (request) => {
+  // `/api/task-rollups` (not `/api/tasks` — the task-mirror routes already
+  // own that prefix). Powers the "Work items" page in the UI; the page label
+  // is product-side display copy while the code-side object is a task rollup.
+  server.get("/api/task-rollups", async (request) => {
     const query = request.query as { from?: string; to?: string; status?: string; search?: string };
     if (query.from !== undefined && !isIsoDate(query.from)) {
       throw new ForemanError("invalid_request", "Query parameter from must be YYYY-MM-DD.", 400);
@@ -910,16 +913,16 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     } catch (error) {
       throw new ForemanError(
         "invalid_request",
-        error instanceof Error ? error.message : "Invalid work-items range.",
+        error instanceof Error ? error.message : "Invalid task-rollups range.",
         400,
       );
     }
 
-    const rows = deps.repos.attempts.listWorkItemRows({
+    const rows = deps.repos.attempts.listTaskAttemptRows({
       fromInclusive: range.fromInclusive,
       toExclusive: range.toExclusive,
     });
-    const rollup = rollupWorkItems({
+    const rollup = rollupTasks({
       rows,
       fromInclusive: range.fromInclusive,
       toExclusive: range.toExclusive,
@@ -940,7 +943,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const totals =
       statusFilter === undefined && searchTerm === ""
         ? rollup.totals
-        : sumWorkItemTotals(filteredBuckets);
+        : sumTaskRollupTotals(filteredBuckets);
 
     return {
       fromDate: range.fromDate,

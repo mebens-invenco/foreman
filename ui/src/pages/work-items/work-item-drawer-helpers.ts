@@ -1,6 +1,6 @@
-import type { AttemptRecord, WorkItemBucket } from "@/lib/api"
+import type { AttemptRecord, TaskRollupBucket } from "@/lib/api"
 
-export function bucketTokensTotal(bucket: WorkItemBucket): number {
+export function bucketTokensTotal(bucket: TaskRollupBucket): number {
   const { tokens } = bucket
   return (
     tokens.inputTokens +

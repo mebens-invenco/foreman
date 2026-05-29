@@ -545,16 +545,19 @@ export function getUsage(params: { from?: string; to?: string; groupBy?: UsageGr
   return requestJson<UsageRollupResponse>(`/api/usage${buildSearch(params)}`)
 }
 
-export type WorkItemPerTargetStatus = {
+// Task rollup types power the "Work items" page. The page label is product
+// display copy; the underlying object is keyed by taskId (cron rows are
+// excluded server-side), so the code-side type is a TaskRollup.
+export type TaskTargetStatus = {
   target: string
   status: AttemptStatus
 }
 
-export type WorkItemBucket = {
+export type TaskRollupBucket = {
   taskId: string
   taskUrl: string | null
   targets: string[]
-  perTargetLatestStatus: WorkItemPerTargetStatus[]
+  perTargetLatestStatus: TaskTargetStatus[]
   effectiveStatus: AttemptStatus
   attemptsCount: number
   firstSeenInWindow: string
@@ -579,12 +582,12 @@ export type WorkItemBucket = {
   }
 }
 
-export type WorkItemsResponse = {
+export type TaskRollupResponse = {
   fromDate: string
   toDate: string
   fromInclusive: string
   toExclusive: string
-  buckets: WorkItemBucket[]
+  buckets: TaskRollupBucket[]
   totals: {
     attemptsCount: number
     tokens: {
@@ -608,13 +611,13 @@ export type WorkItemsResponse = {
   rates: UsageRate[]
 }
 
-export function getWorkItems(params: {
+export function getTaskRollups(params: {
   from?: string
   to?: string
   status?: AttemptStatus
   search?: string
 }) {
-  return requestJson<WorkItemsResponse>(`/api/work-items${buildSearch(params)}`)
+  return requestJson<TaskRollupResponse>(`/api/task-rollups${buildSearch(params)}`)
 }
 
 export function getRates() {
