@@ -16,7 +16,7 @@ import {
   workItemsGlobalFilter,
 } from "@/pages/work-items/columns"
 import { useWorkItemsTableState } from "@/pages/work-items/use-work-items-table-state"
-import { WorkItemDetailDrawer } from "@/pages/work-items/work-item-detail-drawer"
+import { TaskDetailDrawer } from "@/pages/work-items/task-detail-drawer"
 import type { AttemptStatus } from "@/lib/api"
 
 export function WorkItemsPage() {
@@ -112,7 +112,7 @@ export function WorkItemsPage() {
           }
         }}
       >
-        <WorkItemDetailDrawer taskId={selectedTaskId} bucket={selectedBucket} />
+        <TaskDetailDrawer taskId={selectedTaskId} bucket={selectedBucket} />
       </Sheet>
     </>
   )

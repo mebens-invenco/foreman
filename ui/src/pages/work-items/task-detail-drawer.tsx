@@ -34,9 +34,9 @@ import {
   attemptsPagePath,
   bucketTokensTotal,
   sortAttemptsNewestFirst,
-} from "@/pages/work-items/work-item-drawer-helpers"
+} from "@/pages/work-items/task-drawer-helpers"
 
-type WorkItemDetailDrawerProps = {
+type TaskDetailDrawerProps = {
   taskId: string | null
   bucket: TaskRollupBucket | null
 }
@@ -93,10 +93,10 @@ function HeaderTotal({
   )
 }
 
-export function WorkItemDetailDrawer({
+export function TaskDetailDrawer({
   taskId,
   bucket,
-}: WorkItemDetailDrawerProps) {
+}: TaskDetailDrawerProps) {
   const navigate = useNavigate()
   const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery({
     taskId: taskId ?? undefined,
@@ -156,12 +156,12 @@ export function WorkItemDetailDrawer({
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-1">
-              <SheetTitle>Work item</SheetTitle>
+              <SheetTitle>Task</SheetTitle>
               <SheetDescription className="font-mono text-xs text-muted-foreground">
                 {taskId ? (
                   <TaskLink taskUrl={taskUrl}>{taskId}</TaskLink>
                 ) : (
-                  "No work item selected"
+                  "No task selected"
                 )}
               </SheetDescription>
             </div>
@@ -237,10 +237,10 @@ export function WorkItemDetailDrawer({
           </div>
         ) : orderedAttempts.length === 0 ? (
           <div className="border border-dashed border-border/70 bg-background/65 px-4 py-6 text-sm text-muted-foreground">
-            No attempts recorded for this work item.
+            No attempts recorded for this task.
           </div>
         ) : (
-          <ul className="space-y-2" data-testid="work-item-attempts-list">
+          <ul className="space-y-2" data-testid="task-attempts-list">
             {orderedAttempts.map((attempt) => {
               const totalTokens = totalAllTokenBuckets(attempt.tokensUsed)
               const cost = estimateCost(

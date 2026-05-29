@@ -14,7 +14,7 @@ import { formatDuration, formatShortNumber, formatTimestamp } from "@/lib/format
 import { cn } from "@/lib/utils"
 import { formatUsd } from "@/lib/cost"
 import { attemptStatusValues, formatStatusLabel, statusTone } from "@/lib/attempt-status"
-import { bucketTokensTotal } from "@/pages/work-items/work-item-drawer-helpers"
+import { bucketTokensTotal } from "@/pages/work-items/task-drawer-helpers"
 import type { TaskRollupBucket } from "@/lib/api"
 
 export const workItemStatusFilterValues = [
