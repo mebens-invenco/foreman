@@ -891,8 +891,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   });
 
   // `/api/task-rollups` (not `/api/tasks` — the task-mirror routes already
-  // own that prefix). Powers the "Work items" page in the UI; the page label
-  // is product-side display copy while the code-side object is a task rollup.
+  // own that prefix). Powers the Tasks page in the UI.
   server.get("/api/task-rollups", async (request) => {
     const query = request.query as { from?: string; to?: string; status?: string; search?: string };
     if (query.from !== undefined && !isIsoDate(query.from)) {

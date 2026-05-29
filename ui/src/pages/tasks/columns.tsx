@@ -16,18 +16,18 @@ import { formatUsd, totalAllTokenBuckets } from "@/lib/cost"
 import { attemptStatusValues, formatStatusLabel, statusTone } from "@/lib/attempt-status"
 import type { TaskRollupBucket } from "@/lib/api"
 
-export const workItemStatusFilterValues = [
+export const taskStatusFilterValues = [
   "all",
   ...attemptStatusValues,
 ] as const
 
-export const workItemFilterOptions: DataTableFilterOption[] =
+export const taskFilterOptions: DataTableFilterOption[] =
   attemptStatusValues.map((status) => ({
     label: formatStatusLabel(status),
     value: status,
   }))
 
-export const workItemsGlobalFilter: FilterFn<TaskRollupBucket> = (
+export const tasksGlobalFilter: FilterFn<TaskRollupBucket> = (
   row,
   _columnId,
   filterValue
@@ -48,7 +48,7 @@ const tokensTotal = (tokens: TaskRollupBucket["tokens"]): number =>
     reasoningOutputTokens: tokens.reasoningOutputTokens,
   }) ?? 0
 
-export const workItemColumns: ColumnDef<TaskRollupBucket>[] = [
+export const taskColumns: ColumnDef<TaskRollupBucket>[] = [
   {
     accessorKey: "taskId",
     cell: ({ row }) => (

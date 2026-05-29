@@ -545,9 +545,8 @@ export function getUsage(params: { from?: string; to?: string; groupBy?: UsageGr
   return requestJson<UsageRollupResponse>(`/api/usage${buildSearch(params)}`)
 }
 
-// Task rollup types power the "Work items" page. The page label is product
-// display copy; the underlying object is keyed by taskId (cron rows are
-// excluded server-side), so the code-side type is a TaskRollup.
+// Task rollup types power the Tasks page. Cron rows are excluded
+// server-side; each bucket is one task enriched with attempt-derived data.
 export type TaskTargetStatus = {
   target: string
   status: AttemptStatus

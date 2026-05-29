@@ -1,9 +1,9 @@
 import { parseAsStringLiteral, useQueryStates } from "nuqs"
 
 import { useDataTableState } from "@/components/data-table"
-import { workItemStatusFilterValues } from "@/pages/work-items/columns"
+import { taskStatusFilterValues } from "@/pages/tasks/columns"
 
-export function useWorkItemsTableState() {
+export function useTasksTableState() {
   const baseState = useDataTableState({
     defaultSort: {
       desc: true,
@@ -12,7 +12,7 @@ export function useWorkItemsTableState() {
   })
   const [filters, setFilters] = useQueryStates(
     {
-      status: parseAsStringLiteral(workItemStatusFilterValues).withDefault("all"),
+      status: parseAsStringLiteral(taskStatusFilterValues).withDefault("all"),
     },
     {
       history: "replace",
@@ -20,10 +20,10 @@ export function useWorkItemsTableState() {
   )
 
   const setStatus = (value: string) => {
-    const nextStatus = workItemStatusFilterValues.includes(
-      value as (typeof workItemStatusFilterValues)[number]
+    const nextStatus = taskStatusFilterValues.includes(
+      value as (typeof taskStatusFilterValues)[number]
     )
-      ? (value as (typeof workItemStatusFilterValues)[number])
+      ? (value as (typeof taskStatusFilterValues)[number])
       : "all"
 
     baseState.setPageIndex(0)

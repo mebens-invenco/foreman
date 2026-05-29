@@ -1,19 +1,17 @@
 /**
  * Aggregates raw {@link AttemptTaskRow} rows into per-task buckets with
  * computed USD cost. Backs the HTTP `/api/task-rollups` endpoint that powers
- * the work-items table in the UI.
+ * the Tasks page in the UI.
  *
- * Naming note: every bucket is a `Task` (the rollup keys on `taskId` and the
- * SQL upstream filters cron rows via `task_id IS NOT NULL`). The user-facing
- * page label is "Work items" because that's the product-side surface name,
- * but the code-side object IS a task — see `src/domain/task.ts` for the
- * domain aggregate this enriches with attempt-derived data.
+ * Every bucket is a `Task`: the rollup keys on `taskId` and the SQL upstream
+ * filters cron rows via `task_id IS NOT NULL`. See `src/domain/task.ts` for
+ * the domain aggregate this enriches with attempt-derived data.
  *
  * Cost math mirrors {@link rollupUsage}: estimated per row so each row's
  * own runner/model rate is honoured, then summed into the bucket. The shape
  * differs from usage rollup because the user question is "what happened on
- * this ticket" rather than "how much did we spend per runner/day" — we
- * carry per-target latest status, an effective ticket-wide status, and the
+ * this task" rather than "how much did we spend per runner/day" — we
+ * carry per-target latest status, an effective task-wide status, and the
  * first/last seen timestamps inside the window.
  */
 import type { AttemptStatus, TokenUsage } from "../../domain/index.js";
