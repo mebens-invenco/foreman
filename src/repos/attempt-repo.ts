@@ -48,7 +48,7 @@ export type AttemptUsageRow = {
   tokensUsed: TokenUsage | null;
 };
 
-export type AttemptWorkItemRow = AttemptUsageRow & {
+export type AttemptTaskRow = AttemptUsageRow & {
   taskId: string;
   target: string | null;
   status: AttemptStatus;
@@ -94,7 +94,7 @@ export interface AttemptRepo {
     offset?: number;
   }): AttemptRecord[];
   listUsageRows(filters: { fromInclusive: string; toExclusive: string }): AttemptUsageRow[];
-  listWorkItemRows(filters: { fromInclusive: string; toExclusive: string }): AttemptWorkItemRow[];
+  listTaskAttemptRows(filters: { fromInclusive: string; toExclusive: string }): AttemptTaskRow[];
   getAttempt(attemptId: string): AttemptRecord;
   latestAttemptForJob(jobId: string): AttemptRecord | null;
   latestAttemptForTaskTarget(taskTargetId: string): AttemptRecord | null;

@@ -9,7 +9,7 @@ import type {
   AttemptRecord,
   AttemptRepo,
   AttemptUsageRow,
-  AttemptWorkItemRow,
+  AttemptTaskRow,
   RecoveredAttemptRecord,
 } from "../attempt-repo.js";
 import type { LeaseResourceType } from "../lease-repo.js";
@@ -332,7 +332,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
       });
   }
 
-  listWorkItemRows(filters: { fromInclusive: string; toExclusive: string }): AttemptWorkItemRow[] {
+  listTaskAttemptRows(filters: { fromInclusive: string; toExclusive: string }): AttemptTaskRow[] {
     return this.sqlite
       .prepare(
         `SELECT ea.runner_name, ea.runner_model, ea.runner_variant, ea.started_at,
@@ -349,7 +349,7 @@ export class SqliteAttemptRepo implements AttemptRepo {
       .map((row: unknown) => {
         const mapped = row as SqliteRow;
         return {
-          runnerName: assertRunnerProvider(mapped.runner_name, "execution_attempt work item row"),
+          runnerName: assertRunnerProvider(mapped.runner_name, "execution_attempt task row"),
           runnerModel: String(mapped.runner_model),
           runnerVariant: String(mapped.runner_variant),
           startedAt: String(mapped.started_at),

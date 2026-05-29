@@ -8,7 +8,7 @@ import {
   DataTableToolbar,
   useDataTable,
 } from "@/components/data-table"
-import { useWorkItemsQuery } from "@/hooks/use-work-items-query"
+import { useTaskRollupsQuery } from "@/hooks/use-task-rollups-query"
 import {
   workItemColumns,
   workItemFilterOptions,
@@ -22,7 +22,7 @@ export function WorkItemsPage() {
   const tableState = useWorkItemsTableState()
   const queryStatus: AttemptStatus | undefined =
     tableState.status === "all" ? undefined : (tableState.status as AttemptStatus)
-  const query = useWorkItemsQuery({
+  const query = useTaskRollupsQuery({
     search: tableState.globalFilter || undefined,
     status: queryStatus,
   })

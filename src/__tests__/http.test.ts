@@ -1182,7 +1182,7 @@ describe("HTTP artifact content", () => {
   });
 });
 
-describe("HTTP work-items rollup", () => {
+describe("HTTP task rollups", () => {
   const taskA: Task = {
     ...sampleTask,
     id: "ENG-1",
@@ -1210,7 +1210,7 @@ describe("HTTP work-items rollup", () => {
     tokens?: Record<string, number>;
   };
 
-  const setupWorkItemsServer = async () => {
+  const setupTaskRollupsServer = async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
     cleanupDirs.push(workspaceRoot);
     const paths = createWorkspacePaths(projectRoot, workspaceRoot);
@@ -1321,7 +1321,7 @@ describe("HTTP work-items rollup", () => {
   };
 
   test("rolls up multiple attempts on one ticket into a single bucket with summed tokens and cost", async () => {
-    const { db, server, seedAttempt } = await setupWorkItemsServer();
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
 
     seedAttempt({
       id: "att-1",
@@ -1346,7 +1346,7 @@ describe("HTTP work-items rollup", () => {
     try {
       const response = await server.inject({
         method: "GET",
-        url: "/api/work-items?from=2026-05-20&to=2026-05-20",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20",
       });
 
       expect(response.statusCode).toBe(200);
@@ -1368,7 +1368,7 @@ describe("HTTP work-items rollup", () => {
   });
 
   test("returns one sorted bucket per ticket when multiple tickets run in the window", async () => {
-    const { db, server, seedAttempt } = await setupWorkItemsServer();
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
 
     seedAttempt({
       id: "att-1",
@@ -1390,7 +1390,7 @@ describe("HTTP work-items rollup", () => {
     try {
       const response = await server.inject({
         method: "GET",
-        url: "/api/work-items?from=2026-05-20&to=2026-05-20",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20",
       });
       const payload = response.json();
       expect(payload.buckets.map((bucket: { taskId: string }) => bucket.taskId)).toEqual([
@@ -1404,7 +1404,7 @@ describe("HTTP work-items rollup", () => {
   });
 
   test("excludes cron attempts that have no taskId via the IS NOT NULL join filter", async () => {
-    const { db, server, seedAttempt, seedCronAttempt } = await setupWorkItemsServer();
+    const { db, server, seedAttempt, seedCronAttempt } = await setupTaskRollupsServer();
 
     seedAttempt({
       id: "att-task",
@@ -1419,7 +1419,7 @@ describe("HTTP work-items rollup", () => {
     try {
       const response = await server.inject({
         method: "GET",
-        url: "/api/work-items?from=2026-05-20&to=2026-05-20",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20",
       });
       const payload = response.json();
       expect(payload.buckets).toHaveLength(1);
@@ -1432,7 +1432,7 @@ describe("HTTP work-items rollup", () => {
   });
 
   test("captures per-target latest status for a multi-target ticket", async () => {
-    const { db, server, seedAttempt } = await setupWorkItemsServer();
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
 
     seedAttempt({
       id: "att-a",
@@ -1454,7 +1454,7 @@ describe("HTTP work-items rollup", () => {
     try {
       const response = await server.inject({
         method: "GET",
-        url: "/api/work-items?from=2026-05-20&to=2026-05-20",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20",
       });
       const payload = response.json();
       expect(payload.buckets).toHaveLength(1);
@@ -1471,13 +1471,13 @@ describe("HTTP work-items rollup", () => {
   });
 
   test("rejects malformed from/to and invalid status values", async () => {
-    const { db, server } = await setupWorkItemsServer();
+    const { db, server } = await setupTaskRollupsServer();
     try {
-      const invalidFrom = await server.inject({ method: "GET", url: "/api/work-items?from=2026-5-1" });
+      const invalidFrom = await server.inject({ method: "GET", url: "/api/task-rollups?from=2026-5-1" });
       expect(invalidFrom.statusCode).toBe(400);
       expect(invalidFrom.json().error.code).toBe("invalid_request");
 
-      const invalidStatus = await server.inject({ method: "GET", url: "/api/work-items?status=unknown" });
+      const invalidStatus = await server.inject({ method: "GET", url: "/api/task-rollups?status=unknown" });
       expect(invalidStatus.statusCode).toBe(400);
       expect(invalidStatus.json().error.code).toBe("invalid_request");
 
@@ -1485,7 +1485,7 @@ describe("HTTP work-items rollup", () => {
       // endpoint must map that to 400 invalid_request, not bubble a 500.
       const invertedRange = await server.inject({
         method: "GET",
-        url: "/api/work-items?from=2026-05-26&to=2026-05-20",
+        url: "/api/task-rollups?from=2026-05-26&to=2026-05-20",
       });
       expect(invertedRange.statusCode).toBe(400);
       expect(invertedRange.json().error.code).toBe("invalid_request");
@@ -1496,7 +1496,7 @@ describe("HTTP work-items rollup", () => {
   });
 
   test("filters by the bucket's effective status (running over latest started)", async () => {
-    const { db, server, seedAttempt } = await setupWorkItemsServer();
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
 
     seedAttempt({
       id: "att-running",
@@ -1526,7 +1526,7 @@ describe("HTTP work-items rollup", () => {
     try {
       const runningResponse = await server.inject({
         method: "GET",
-        url: "/api/work-items?from=2026-05-20&to=2026-05-20&status=running",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20&status=running",
       });
       const runningPayload = runningResponse.json();
       expect(runningPayload.buckets).toHaveLength(1);
@@ -1535,7 +1535,7 @@ describe("HTTP work-items rollup", () => {
 
       const completedResponse = await server.inject({
         method: "GET",
-        url: "/api/work-items?from=2026-05-20&to=2026-05-20&status=completed",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20&status=completed",
       });
       const completedPayload = completedResponse.json();
       expect(completedPayload.buckets).toHaveLength(1);
@@ -1547,7 +1547,7 @@ describe("HTTP work-items rollup", () => {
   });
 
   test("totals stay aligned with returned buckets when status filter is applied", async () => {
-    const { db, server, seedAttempt } = await setupWorkItemsServer();
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
 
     seedAttempt({
       id: "att-running",
@@ -1570,7 +1570,7 @@ describe("HTTP work-items rollup", () => {
     try {
       const response = await server.inject({
         method: "GET",
-        url: "/api/work-items?from=2026-05-20&to=2026-05-20&status=running",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20&status=running",
       });
       const payload = response.json();
       const bucketSum = payload.buckets.reduce(
@@ -1590,7 +1590,7 @@ describe("HTTP work-items rollup", () => {
   });
 
   test("totals stay aligned with returned buckets when search filter is applied", async () => {
-    const { db, server, seedAttempt } = await setupWorkItemsServer();
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
 
     seedAttempt({
       id: "att-eng-1",
@@ -1614,7 +1614,7 @@ describe("HTTP work-items rollup", () => {
     try {
       const response = await server.inject({
         method: "GET",
-        url: "/api/work-items?from=2026-05-20&to=2026-05-20&search=ENG-1",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20&search=ENG-1",
       });
       const payload = response.json();
       const bucketSum = payload.buckets.reduce(
@@ -1635,7 +1635,7 @@ describe("HTTP work-items rollup", () => {
   });
 
   test("applies status and search filters together (AND, not OR)", async () => {
-    const { db, server, seedAttempt } = await setupWorkItemsServer();
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
 
     // ENG-1 is running (matches status, matches search).
     seedAttempt({
@@ -1671,7 +1671,7 @@ describe("HTTP work-items rollup", () => {
     try {
       const response = await server.inject({
         method: "GET",
-        url: "/api/work-items?from=2026-05-20&to=2026-05-20&status=running&search=ENG-1",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20&status=running&search=ENG-1",
       });
       const payload = response.json();
       // Only ENG-1 matches BOTH predicates. An OR refactor would also
@@ -1694,11 +1694,11 @@ describe("HTTP work-items rollup", () => {
   });
 
   test("returns empty buckets but still reports rates when the window has no attempts", async () => {
-    const { db, server } = await setupWorkItemsServer();
+    const { db, server } = await setupTaskRollupsServer();
     try {
       const response = await server.inject({
         method: "GET",
-        url: "/api/work-items?from=2026-05-20&to=2026-05-20",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20",
       });
       const payload = response.json();
       expect(payload.buckets).toEqual([]);

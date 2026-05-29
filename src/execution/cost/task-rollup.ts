@@ -1,7 +1,13 @@
 /**
- * Aggregates raw {@link AttemptWorkItemRow} rows into per-ticket work-item
- * buckets with computed USD cost. Backs the HTTP `/api/work-items` endpoint
- * that powers the work-items table in the UI.
+ * Aggregates raw {@link AttemptTaskRow} rows into per-task buckets with
+ * computed USD cost. Backs the HTTP `/api/task-rollups` endpoint that powers
+ * the work-items table in the UI.
+ *
+ * Naming note: every bucket is a `Task` (the rollup keys on `taskId` and the
+ * SQL upstream filters cron rows via `task_id IS NOT NULL`). The user-facing
+ * page label is "Work items" because that's the product-side surface name,
+ * but the code-side object IS a task — see `src/domain/task.ts` for the
+ * domain aggregate this enriches with attempt-derived data.
  *
  * Cost math mirrors {@link rollupUsage}: estimated per row so each row's
  * own runner/model rate is honoured, then summed into the bucket. The shape
@@ -11,19 +17,19 @@
  * first/last seen timestamps inside the window.
  */
 import type { AttemptStatus, TokenUsage } from "../../domain/index.js";
-import type { AttemptWorkItemRow } from "../../repos/attempt-repo.js";
+import type { AttemptTaskRow } from "../../repos/attempt-repo.js";
 
 import { estimateCost, type CostBreakdown } from "./cost-estimator.js";
 
-export type WorkItemPerTargetStatus = {
+export type TaskTargetStatus = {
   target: string;
   status: AttemptStatus;
 };
 
-export type WorkItemBucket = {
+export type TaskRollupBucket = {
   taskId: string;
   targets: string[];
-  perTargetLatestStatus: WorkItemPerTargetStatus[];
+  perTargetLatestStatus: TaskTargetStatus[];
   effectiveStatus: AttemptStatus;
   attemptsCount: number;
   firstSeenInWindow: string;
@@ -36,7 +42,7 @@ export type WorkItemBucket = {
   };
 };
 
-export type WorkItemTotals = {
+export type TaskRollupTotals = {
   attemptsCount: number;
   tokens: Required<TokenUsage>;
   cost: {
@@ -45,11 +51,11 @@ export type WorkItemTotals = {
   };
 };
 
-export type WorkItemRollup = {
+export type TaskRollup = {
   fromInclusive: string;
   toExclusive: string;
-  buckets: WorkItemBucket[];
-  totals: WorkItemTotals;
+  buckets: TaskRollupBucket[];
+  totals: TaskRollupTotals;
 };
 
 const emptyTokens = (): Required<TokenUsage> => ({
@@ -68,7 +74,7 @@ const emptyBreakdown = (): CostBreakdown => ({
   reasoning: 0,
 });
 
-const emptyTotals = (): WorkItemTotals => ({
+const emptyTotals = (): TaskRollupTotals => ({
   attemptsCount: 0,
   tokens: emptyTokens(),
   cost: { totalUsd: 0, breakdown: emptyBreakdown() },
@@ -80,9 +86,9 @@ const emptyTotals = (): WorkItemTotals => ({
  * stay aligned with the buckets actually returned, otherwise totals and
  * the sum of buckets diverge for any non-empty filter.
  */
-export const sumWorkItemTotals = (
-  buckets: readonly Pick<WorkItemBucket, "attemptsCount" | "tokens" | "cost">[],
-): WorkItemTotals => {
+export const sumTaskRollupTotals = (
+  buckets: readonly Pick<TaskRollupBucket, "attemptsCount" | "tokens" | "cost">[],
+): TaskRollupTotals => {
   const totals = emptyTotals();
   for (const bucket of buckets) {
     totals.attemptsCount += bucket.attemptsCount;
@@ -103,7 +109,7 @@ export const sumWorkItemTotals = (
 
 type Aggregator = {
   taskId: string;
-  rows: AttemptWorkItemRow[];
+  rows: AttemptTaskRow[];
   attemptsCount: number;
   tokens: Required<TokenUsage>;
   cost: { totalUsd: number; breakdown: CostBreakdown };
@@ -112,7 +118,7 @@ type Aggregator = {
   lastFinishedAt: string | null;
 };
 
-const createAggregator = (taskId: string, row: AttemptWorkItemRow): Aggregator => ({
+const createAggregator = (taskId: string, row: AttemptTaskRow): Aggregator => ({
   taskId,
   rows: [],
   attemptsCount: 0,
@@ -138,8 +144,8 @@ const laterNullable = (current: string | null, candidate: string | null): string
 };
 
 const accumulateTokensAndCost = (
-  aggregator: Aggregator | WorkItemTotals,
-  row: AttemptWorkItemRow,
+  aggregator: Aggregator | TaskRollupTotals,
+  row: AttemptTaskRow,
 ): void => {
   aggregator.attemptsCount += 1;
   const tokens = row.tokensUsed;
@@ -182,7 +188,7 @@ const accumulateTokensAndCost = (
  */
 const failureStatuses: ReadonlySet<AttemptStatus> = new Set(["failed", "timed_out"]);
 
-const compareForLatest = (a: AttemptWorkItemRow, b: AttemptWorkItemRow): number => {
+const compareForLatest = (a: AttemptTaskRow, b: AttemptTaskRow): number => {
   if (a.startedAt !== b.startedAt) {
     return a.startedAt < b.startedAt ? -1 : 1;
   }
@@ -192,10 +198,10 @@ const compareForLatest = (a: AttemptWorkItemRow, b: AttemptWorkItemRow): number 
   return 0;
 };
 
-const latestOf = (rows: AttemptWorkItemRow[]): AttemptWorkItemRow =>
+const latestOf = (rows: AttemptTaskRow[]): AttemptTaskRow =>
   rows.reduce((latest, row) => (compareForLatest(row, latest) > 0 ? row : latest));
 
-export const computeEffectiveStatus = (rows: AttemptWorkItemRow[]): AttemptStatus => {
+export const computeEffectiveStatus = (rows: AttemptTaskRow[]): AttemptStatus => {
   if (rows.some((row) => row.status === "running")) {
     return "running";
   }
@@ -209,8 +215,8 @@ export const computeEffectiveStatus = (rows: AttemptWorkItemRow[]): AttemptStatu
   return latestOf(rows).status;
 };
 
-const computePerTargetLatest = (rows: AttemptWorkItemRow[]): WorkItemPerTargetStatus[] => {
-  const byTarget = new Map<string, AttemptWorkItemRow[]>();
+const computePerTargetLatest = (rows: AttemptTaskRow[]): TaskTargetStatus[] => {
+  const byTarget = new Map<string, AttemptTaskRow[]>();
   for (const row of rows) {
     if (row.target === null) {
       continue;
@@ -230,11 +236,11 @@ const computePerTargetLatest = (rows: AttemptWorkItemRow[]): WorkItemPerTargetSt
     .sort((a, b) => a.target.localeCompare(b.target));
 };
 
-export const rollupWorkItems = (input: {
-  rows: AttemptWorkItemRow[];
+export const rollupTasks = (input: {
+  rows: AttemptTaskRow[];
   fromInclusive: string;
   toExclusive: string;
-}): WorkItemRollup => {
+}): TaskRollup => {
   const aggregatorsByTaskId = new Map<string, Aggregator>();
   const totals = emptyTotals();
 
@@ -254,7 +260,7 @@ export const rollupWorkItems = (input: {
   }
 
   const buckets = [...aggregatorsByTaskId.values()]
-    .map((aggregator): WorkItemBucket => {
+    .map((aggregator): TaskRollupBucket => {
       const targets = [
         ...new Set(
           aggregator.rows
