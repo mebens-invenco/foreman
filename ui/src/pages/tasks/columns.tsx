@@ -14,21 +14,21 @@ import { formatDuration, formatShortNumber, formatTimestamp } from "@/lib/format
 import { cn } from "@/lib/utils"
 import { formatUsd } from "@/lib/cost"
 import { attemptStatusValues, formatStatusLabel, statusTone } from "@/lib/attempt-status"
-import { bucketTokensTotal } from "@/pages/work-items/task-drawer-helpers"
+import { bucketTokensTotal } from "@/pages/tasks/task-drawer-helpers"
 import type { TaskRollupBucket } from "@/lib/api"
 
-export const workItemStatusFilterValues = [
+export const taskStatusFilterValues = [
   "all",
   ...attemptStatusValues,
 ] as const
 
-export const workItemFilterOptions: DataTableFilterOption[] =
+export const taskFilterOptions: DataTableFilterOption[] =
   attemptStatusValues.map((status) => ({
     label: formatStatusLabel(status),
     value: status,
   }))
 
-export const workItemsGlobalFilter: FilterFn<TaskRollupBucket> = (
+export const tasksGlobalFilter: FilterFn<TaskRollupBucket> = (
   row,
   _columnId,
   filterValue
@@ -40,7 +40,7 @@ export const workItemsGlobalFilter: FilterFn<TaskRollupBucket> = (
   return row.original.taskId.toLowerCase().includes(search)
 }
 
-export const workItemColumns: ColumnDef<TaskRollupBucket>[] = [
+export const taskColumns: ColumnDef<TaskRollupBucket>[] = [
   {
     accessorKey: "taskId",
     cell: ({ row }) => (

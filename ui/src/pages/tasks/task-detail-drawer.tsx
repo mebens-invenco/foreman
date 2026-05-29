@@ -34,7 +34,7 @@ import {
   attemptsPagePath,
   bucketTokensTotal,
   sortAttemptsNewestFirst,
-} from "@/pages/work-items/task-drawer-helpers"
+} from "@/pages/tasks/task-drawer-helpers"
 
 type TaskDetailDrawerProps = {
   taskId: string | null

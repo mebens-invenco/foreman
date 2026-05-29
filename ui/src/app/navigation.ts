@@ -29,9 +29,9 @@ export const navigationItems: NavigationItem[] = [
     icon: ActivityIcon,
   },
   {
-    title: "Work items",
-    href: "/work-items",
-    description: "One row per ticket — summed tokens, cost, and effective status across all attempts.",
+    title: "Tasks",
+    href: "/tasks",
+    description: "One row per task — summed tokens, cost, and effective status across all attempts.",
     icon: ListTodoIcon,
   },
   {

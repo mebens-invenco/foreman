@@ -11,18 +11,18 @@ import {
 import { Sheet } from "@/components/ui/sheet"
 import { useTaskRollupsQuery } from "@/hooks/use-task-rollups-query"
 import {
-  workItemColumns,
-  workItemFilterOptions,
-  workItemsGlobalFilter,
-} from "@/pages/work-items/columns"
-import { useWorkItemsTableState } from "@/pages/work-items/use-work-items-table-state"
-import { TaskDetailDrawer } from "@/pages/work-items/task-detail-drawer"
+  taskColumns,
+  taskFilterOptions,
+  tasksGlobalFilter,
+} from "@/pages/tasks/columns"
+import { useTasksTableState } from "@/pages/tasks/use-tasks-table-state"
+import { TaskDetailDrawer } from "@/pages/tasks/task-detail-drawer"
 import type { AttemptStatus } from "@/lib/api"
 
-export function WorkItemsPage() {
+export function TasksPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedTaskId = searchParams.get("taskId")
-  const tableState = useWorkItemsTableState()
+  const tableState = useTasksTableState()
   const queryStatus: AttemptStatus | undefined =
     tableState.status === "all" ? undefined : (tableState.status as AttemptStatus)
   const query = useTaskRollupsQuery({
@@ -33,11 +33,11 @@ export function WorkItemsPage() {
   const buckets = data?.buckets ?? []
 
   const table = useDataTable({
-    columns: workItemColumns,
+    columns: taskColumns,
     data: buckets,
     getRowId: (row) => row.taskId,
     globalFilter: tableState.globalFilter,
-    globalFilterFn: workItemsGlobalFilter,
+    globalFilterFn: tasksGlobalFilter,
     onGlobalFilterChange: tableState.setGlobalFilter,
     onPaginationChange: tableState.setPagination,
     onSortingChange: tableState.setSorting,
@@ -62,10 +62,10 @@ export function WorkItemsPage() {
     <>
       <div className="space-y-4">
         <header className="flex flex-col gap-2">
-          <h2 className="text-3xl tracking-tight text-foreground">Work items</h2>
+          <h2 className="text-3xl tracking-tight text-foreground">Tasks</h2>
           <p className="text-sm text-muted-foreground">
-            One row per ticket. Tokens, cost, and timestamps reflect the selected
-            window only — tickets that started before the window will show
+            One row per task. Tokens, cost, and timestamps reflect the selected
+            window only — tasks that started before the window will show
             partial sums.
           </p>
         </header>
@@ -82,7 +82,7 @@ export function WorkItemsPage() {
               allLabel="All statuses"
               label="Status"
               onValueChange={tableState.setStatus}
-              options={workItemFilterOptions}
+              options={taskFilterOptions}
               value={tableState.status}
             />
           </DataTableToolbar>
@@ -90,8 +90,8 @@ export function WorkItemsPage() {
           <DataTable
             emptyMessage={
               buckets.length === 0
-                ? "No work items recorded in this window."
-                : "No work items match the current filters."
+                ? "No tasks recorded in this window."
+                : "No tasks match the current filters."
             }
             error={error}
             isError={isError}

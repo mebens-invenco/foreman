@@ -5,7 +5,7 @@ import {
   attemptsPagePath,
   bucketTokensTotal,
   sortAttemptsNewestFirst,
-} from "../pages/work-items/task-drawer-helpers"
+} from "../pages/tasks/task-drawer-helpers"
 
 function makeBucket(
   tokens: Partial<TaskRollupBucket["tokens"]> = {}
