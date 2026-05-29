@@ -1,5 +1,17 @@
 import type { AttemptStatus } from "@/lib/api"
 
+// Single source of truth for the persisted AttemptStatus value-set; both
+// tables and any future status-aware UI import this so a new status only
+// needs to be added once (here) plus the api.ts type union.
+export const attemptStatusValues = [
+  "running",
+  "completed",
+  "failed",
+  "blocked",
+  "canceled",
+  "timed_out",
+] as const satisfies readonly AttemptStatus[]
+
 export function formatStatusLabel(status: string) {
   return status.replace(/_/g, " ")
 }

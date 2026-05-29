@@ -13,17 +13,8 @@ import { TaskLink } from "@/components/task-link"
 import { formatDuration, formatShortNumber, formatTimestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { formatUsd, totalAllTokenBuckets } from "@/lib/cost"
-import { formatStatusLabel, statusTone } from "@/lib/attempt-status"
+import { attemptStatusValues, formatStatusLabel, statusTone } from "@/lib/attempt-status"
 import type { WorkItemBucket } from "@/lib/api"
-
-const attemptStatusValues = [
-  "running",
-  "completed",
-  "failed",
-  "blocked",
-  "canceled",
-  "timed_out",
-] as const
 
 export const workItemStatusFilterValues = [
   "all",

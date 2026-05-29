@@ -167,7 +167,12 @@ const accumulateTokensAndCost = (
  *   1. any `running`              → running
  *   2. else any `blocked`         → blocked
  *   3. else any failure-y status  → most recent failure (started_at, then attempt_number)
- *   4. else                       → most recent completion (started_at, then attempt_number)
+ *   4. else                       → most recent of remaining rows (completed or canceled),
+ *                                   tie-broken by started_at then attempt_number
+ *
+ * Step 4 means a newest `canceled` attempt surfaces as the effective status
+ * when no live/blocked/failed attempt remains — there is no implicit
+ * preference for `completed` over `canceled` once both buckets are drained.
  *
  * Why not "latest started, full stop": a still-running older attempt should
  * not be hidden behind a stale `completed` that started earlier. And ties on
