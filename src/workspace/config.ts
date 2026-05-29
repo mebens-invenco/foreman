@@ -93,7 +93,7 @@ export const opencodeRunnerSchema = z.object({
 
 export const claudeRunnerSchema = z.object({
   type: z.literal("claude"),
-  model: z.string().min(1).default("claude-opus-4-7"),
+  model: z.string().min(1).default("claude-opus-4-8"),
   effort: z.preprocess(coerceToKnown(CLAUDE_EFFORT_VALUES), z.enum(CLAUDE_EFFORT_VALUES).default("high")),
   timeoutMs: z.number().int().positive().default(3_600_000),
   // Optional per-invocation USD budget cap forwarded to claude as
@@ -169,7 +169,7 @@ const defaultExecutionRunner = {
 
 const defaultReviewerRunner = {
   type: "claude",
-  model: "claude-opus-4-7",
+  model: "claude-opus-4-8",
   effort: "high",
   timeoutMs: 3_600_000,
 } as const;

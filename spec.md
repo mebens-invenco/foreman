@@ -244,7 +244,7 @@ runner:
 
   reviewer:
     type: claude
-    model: claude-opus-4-7
+    model: claude-opus-4-8
     effort: high
     timeoutMs: 3600000
 
@@ -1415,7 +1415,7 @@ Returns:
     "reviewSystem": {"type": "github", "status": "ok"},
     "runners": {
       "execution": {"type": "opencode", "model": "openai/gpt-5.5", "status": "ok"},
-      "reviewer": {"type": "claude", "model": "claude-opus-4-7", "status": "ok"}
+      "reviewer": {"type": "claude", "model": "claude-opus-4-8", "status": "ok"}
     }
   },
   "repos": {

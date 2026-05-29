@@ -18,7 +18,7 @@ describe("workspace config", () => {
     });
     expect(parsed.runner.reviewer).toEqual({
       type: "claude",
-      model: "claude-opus-4-7",
+      model: "claude-opus-4-8",
       effort: "high",
       timeoutMs: 3_600_000,
     });
