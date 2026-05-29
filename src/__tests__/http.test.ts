@@ -1480,6 +1480,15 @@ describe("HTTP work-items rollup", () => {
       const invalidStatus = await server.inject({ method: "GET", url: "/api/work-items?status=unknown" });
       expect(invalidStatus.statusCode).toBe(400);
       expect(invalidStatus.json().error.code).toBe("invalid_request");
+
+      // Well-formed dates but from > to — resolveUsageRange throws and the
+      // endpoint must map that to 400 invalid_request, not bubble a 500.
+      const invertedRange = await server.inject({
+        method: "GET",
+        url: "/api/work-items?from=2026-05-26&to=2026-05-20",
+      });
+      expect(invertedRange.statusCode).toBe(400);
+      expect(invertedRange.json().error.code).toBe("invalid_request");
     } finally {
       await server.close();
       db.close();
@@ -1531,6 +1540,153 @@ describe("HTTP work-items rollup", () => {
       const completedPayload = completedResponse.json();
       expect(completedPayload.buckets).toHaveLength(1);
       expect(completedPayload.buckets[0].taskId).toBe("ENG-2");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("totals stay aligned with returned buckets when status filter is applied", async () => {
+    const { db, server, seedAttempt } = await setupWorkItemsServer();
+
+    seedAttempt({
+      id: "att-running",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      status: "running",
+      tokens: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    seedAttempt({
+      id: "att-other",
+      taskId: "ENG-2",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T11:00:00.000Z",
+      finishedAt: "2026-05-20T11:30:00.000Z",
+      status: "completed",
+      tokens: { inputTokens: 0, outputTokens: 1_000_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/work-items?from=2026-05-20&to=2026-05-20&status=running",
+      });
+      const payload = response.json();
+      const bucketSum = payload.buckets.reduce(
+        (acc: number, bucket: { attemptsCount: number }) => acc + bucket.attemptsCount,
+        0,
+      );
+      expect(payload.totals.attemptsCount).toBe(bucketSum);
+      expect(payload.totals.attemptsCount).toBe(1);
+      // ENG-1 contributed 1M input tokens; ENG-2 (completed, excluded by the
+      // filter) must not leak its 1M output tokens into the totals.
+      expect(payload.totals.tokens.outputTokens).toBe(0);
+      expect(payload.totals.tokens.inputTokens).toBe(1_000_000);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("totals stay aligned with returned buckets when search filter is applied", async () => {
+    const { db, server, seedAttempt } = await setupWorkItemsServer();
+
+    seedAttempt({
+      id: "att-eng-1",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      finishedAt: "2026-05-20T10:30:00.000Z",
+      status: "completed",
+      tokens: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    seedAttempt({
+      id: "att-eng-2",
+      taskId: "ENG-2",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T11:00:00.000Z",
+      finishedAt: "2026-05-20T11:30:00.000Z",
+      status: "completed",
+      tokens: { inputTokens: 0, outputTokens: 1_000_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/work-items?from=2026-05-20&to=2026-05-20&search=ENG-1",
+      });
+      const payload = response.json();
+      const bucketSum = payload.buckets.reduce(
+        (acc: number, bucket: { attemptsCount: number }) => acc + bucket.attemptsCount,
+        0,
+      );
+      expect(payload.buckets).toHaveLength(1);
+      expect(payload.buckets[0].taskId).toBe("ENG-1");
+      expect(payload.totals.attemptsCount).toBe(bucketSum);
+      expect(payload.totals.attemptsCount).toBe(1);
+      // ENG-2 (excluded by search) must not leak its output tokens.
+      expect(payload.totals.tokens.outputTokens).toBe(0);
+      expect(payload.totals.tokens.inputTokens).toBe(1_000_000);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("applies status and search filters together (AND, not OR)", async () => {
+    const { db, server, seedAttempt } = await setupWorkItemsServer();
+
+    // ENG-1 is running (matches status, matches search).
+    seedAttempt({
+      id: "att-1-running",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      status: "running",
+      tokens: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    // ENG-2 is running (matches status, does not match search).
+    seedAttempt({
+      id: "att-2-running",
+      taskId: "ENG-2",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T11:00:00.000Z",
+      status: "running",
+      tokens: { inputTokens: 2_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    // ENG-1 also has a completed attempt — but the bucket's effective status
+    // stays "running" so it still matches.
+    seedAttempt({
+      id: "att-1-completed",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T12:00:00.000Z",
+      finishedAt: "2026-05-20T12:30:00.000Z",
+      status: "completed",
+      attemptNumber: 2,
+      tokens: { inputTokens: 0, outputTokens: 500_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/work-items?from=2026-05-20&to=2026-05-20&status=running&search=ENG-1",
+      });
+      const payload = response.json();
+      // Only ENG-1 matches BOTH predicates. An OR refactor would also
+      // return ENG-2 (matches status) and an AND→OR regression on either
+      // predicate would also surface a different bucket count.
+      expect(payload.buckets.map((bucket: { taskId: string }) => bucket.taskId)).toEqual(["ENG-1"]);
+      expect(payload.buckets[0].attemptsCount).toBe(2);
+      const bucketSum = payload.buckets.reduce(
+        (acc: number, bucket: { attemptsCount: number }) => acc + bucket.attemptsCount,
+        0,
+      );
+      expect(payload.totals.attemptsCount).toBe(bucketSum);
+      // ENG-2's 2M input tokens must not leak into totals.
+      expect(payload.totals.tokens.inputTokens).toBe(1_000_000);
+      expect(payload.totals.tokens.outputTokens).toBe(500_000);
     } finally {
       await server.close();
       db.close();

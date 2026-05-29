@@ -60,6 +60,18 @@ describe("computeEffectiveStatus", () => {
     ];
     expect(computeEffectiveStatus(rows)).toBe<AttemptStatus>("completed");
   });
+
+  // There's no implicit preference for completed over canceled once the
+  // failure bucket is empty — step 4 picks whichever is newest. Locking the
+  // canceled-wins case in so a future "prefer completed" refactor would have
+  // to surface and own that policy change.
+  test("a newest canceled attempt wins over an older completed attempt", () => {
+    const rows: AttemptWorkItemRow[] = [
+      baseRow({ status: "completed", startedAt: "2026-05-20T08:00:00.000Z", attemptNumber: 1 }),
+      baseRow({ status: "canceled", startedAt: "2026-05-20T09:00:00.000Z", attemptNumber: 2 }),
+    ];
+    expect(computeEffectiveStatus(rows)).toBe<AttemptStatus>("canceled");
+  });
 });
 
 describe("rollupWorkItems", () => {
@@ -170,5 +182,40 @@ describe("rollupWorkItems", () => {
     const result = rollupWorkItems({ rows, fromInclusive, toExclusive });
 
     expect(result.buckets[0]!.effectiveStatus).toBe<AttemptStatus>("failed");
+  });
+
+  // A bucket can span multiple runner/model triples (e.g. an opus execution
+  // followed by a sonnet review pass). The cost rollup estimates per row
+  // before summing so each row's own rate applies; a refactor to
+  // "sum-tokens-then-estimate-once" would silently misprice mixed buckets
+  // while every single-rate test stays green.
+  test("prices a single bucket spanning two models at per-row rates", () => {
+    const rows: AttemptWorkItemRow[] = [
+      baseRow({
+        runnerName: "claude",
+        runnerModel: "claude-opus-4-7",
+        startedAt: "2026-05-20T10:00:00.000Z",
+        attemptNumber: 1,
+        tokensUsed: { inputTokens: 1_000_000, outputTokens: 0 },
+      }),
+      baseRow({
+        runnerName: "claude",
+        runnerModel: "claude-sonnet-4-6",
+        startedAt: "2026-05-20T11:00:00.000Z",
+        attemptNumber: 2,
+        tokensUsed: { inputTokens: 1_000_000, outputTokens: 0 },
+      }),
+    ];
+
+    const result = rollupWorkItems({ rows, fromInclusive, toExclusive });
+
+    expect(result.buckets).toHaveLength(1);
+    // 1M opus input @ $15/Mtok + 1M sonnet input @ $3/Mtok = $18.
+    // A sum-then-estimate refactor would either bill all 2M at $15 ($30) or
+    // at $3 ($6) depending on which row's rate it sampled — the assert below
+    // catches either.
+    expect(result.buckets[0]!.cost.totalUsd).toBeCloseTo(15 + 3);
+    expect(result.buckets[0]!.cost.breakdown.input).toBeCloseTo(15 + 3);
+    expect(result.totals.cost.totalUsd).toBeCloseTo(15 + 3);
   });
 });

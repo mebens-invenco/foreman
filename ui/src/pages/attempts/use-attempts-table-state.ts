@@ -44,11 +44,6 @@ export function useAttemptsTableState() {
     })
   }
 
-  const clearTaskId = () => {
-    baseState.setPageIndex(0)
-    void setFilters({ taskId: null })
-  }
-
   const resetFilters = () => {
     baseState.resetBaseState()
     void setFilters({
@@ -61,7 +56,6 @@ export function useAttemptsTableState() {
 
   return {
     ...baseState,
-    clearTaskId,
     columnFilters,
     hasActiveFilters:
       baseState.hasBaseState || filters.status !== "all" || taskId !== null,
