@@ -1,7 +1,7 @@
 /**
  * Hardcoded per-runner USD cost table for the {@link estimateCost} helper.
  *
- * Last verified against vendor pricing pages on 2026-05-26. Updating is a
+ * Last verified against vendor pricing pages on 2026-05-29. Updating is a
  * tiny PR — bump the rate, bump the comment, ship.
  *
  * Cache-write TTL assumption (Anthropic):
@@ -53,6 +53,14 @@ const buildKey = (key: RunnerRateKey): string =>
 // Foreman persists on the attempt row — see `runnerForAction(config).model`
 // in `src/workspace/config.ts` for the configured defaults.
 const rateEntries: ReadonlyArray<RunnerRateKey & RunnerRate> = [
+  {
+    runnerName: "claude",
+    runnerModel: "claude-opus-4-8",
+    inputPerMtok: 5,
+    outputPerMtok: 25,
+    cacheReadPerMtok: 0.5,
+    cacheWriteFiveMinPerMtok: 6.25,
+  },
   {
     runnerName: "claude",
     runnerModel: "claude-opus-4-7",

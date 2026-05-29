@@ -319,7 +319,7 @@ describe("provider runners", () => {
       "--dangerously-skip-permissions",
       "--exclude-dynamic-system-prompt-sections",
       "--model",
-      "claude-opus-4-7",
+      "claude-opus-4-8",
       "--effort",
       "high",
       "--output-format",

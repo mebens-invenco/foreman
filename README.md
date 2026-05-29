@@ -100,13 +100,13 @@ For `claude` runner blocks (either `runner.execution` or `runner.reviewer`), set
 runner:
   execution:
     type: claude
-    model: claude-opus-4-7
+    model: claude-opus-4-8
     effort: max
     timeoutMs: 3600000
     maxBudgetUsd: 100   # optional; omit to leave spend uncapped
   reviewer:
     type: claude
-    model: claude-opus-4-7
+    model: claude-opus-4-8
     effort: high
     timeoutMs: 3600000
     maxBudgetUsd: 50

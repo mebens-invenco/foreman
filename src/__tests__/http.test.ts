@@ -454,7 +454,7 @@ describe("HTTP query validation", () => {
             },
             reviewer: {
               type: "claude",
-              model: "claude-opus-4-7",
+              model: "claude-opus-4-8",
               status: "ok",
             },
           },

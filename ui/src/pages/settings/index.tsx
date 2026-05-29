@@ -363,7 +363,7 @@ function runnerForType(type: RunnerProvider["type"], current: RunnerProvider): R
     case "claude":
       return {
         type,
-        model: current.model || "claude-opus-4-7",
+        model: current.model || "claude-opus-4-8",
         effort: "high",
         timeoutMs: current.timeoutMs,
       }
