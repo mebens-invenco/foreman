@@ -161,7 +161,7 @@ const seedContinuationCheckpoint = (
   } else {
     db.reviewerCheckpoints.upsertReviewerCheckpoint(checkpointInput);
   }
-  return target;
+  return { target, attempt };
 };
 
 describe("prompt rendering", () => {
@@ -649,7 +649,7 @@ describe("prompt rendering", () => {
     cleanupDbs.push(db);
 
     const reviewTask: Task = { ...sampleTask, state: "in_review", providerState: "in_review" };
-    const target = seedContinuationCheckpoint(db, {
+    const { target } = seedContinuationCheckpoint(db, {
       action: "review",
       repoKey: "repo-a",
       task: reviewTask,
@@ -683,6 +683,15 @@ describe("prompt rendering", () => {
     expect(prompt).toContain("## Prior Checkpoint");
     expect(prompt).toContain("priorPassSummary");
     expect(prompt).toContain("Resolved the failing lint check and replied to the open thread.");
+    // Pin the structured fingerprint fields the continuation agent SHA-compares against,
+    // so a rename/drop of any key in resolvePriorCheckpointContext fails the test.
+    expect(prompt).toContain('"headSha": "abc123"');
+    expect(prompt).toContain('"mergeState": "clean"');
+    expect(prompt).toContain('"latestReviewSummaryId"');
+    expect(prompt).toContain('"latestConversationCommentId"');
+    expect(prompt).toContain('"reviewThreadsFingerprint"');
+    expect(prompt).toContain('"checksFingerprint"');
+    expect(prompt).toContain('"recordedAt"');
     expect(prompt).not.toContain("No prior checkpoint recorded.");
     expect(prompt).not.toContain("{{context:prior-checkpoint}}");
   });
@@ -696,7 +705,7 @@ describe("prompt rendering", () => {
     cleanupDbs.push(db);
 
     const reviewerTask: Task = { ...sampleTask, state: "in_review", providerState: "in_review" };
-    const target = seedContinuationCheckpoint(db, {
+    const { target } = seedContinuationCheckpoint(db, {
       action: "reviewer",
       repoKey: "repo-a",
       task: reviewerTask,
@@ -730,6 +739,14 @@ describe("prompt rendering", () => {
     expect(prompt).toContain("## Prior Checkpoint");
     expect(prompt).toContain("priorPassSummary");
     expect(prompt).toContain("Reviewed the new diff; flagged one missing test in a thread.");
+    // Same structured-field pinning as the review-continuation test (reviewer checkpoint path).
+    expect(prompt).toContain('"headSha": "abc123"');
+    expect(prompt).toContain('"mergeState": "clean"');
+    expect(prompt).toContain('"latestReviewSummaryId"');
+    expect(prompt).toContain('"latestConversationCommentId"');
+    expect(prompt).toContain('"reviewThreadsFingerprint"');
+    expect(prompt).toContain('"checksFingerprint"');
+    expect(prompt).toContain('"recordedAt"');
     expect(prompt).not.toContain("No prior checkpoint recorded.");
     expect(prompt).not.toContain("{{context:prior-checkpoint}}");
   });
@@ -763,5 +780,79 @@ describe("prompt rendering", () => {
     expect(prompt).toContain("No prior checkpoint recorded.");
     expect(prompt).not.toContain("{{context:prior-checkpoint}}");
     expect(prompt).not.toContain("priorPassSummary");
+  });
+
+  test("renders the no-summary fallback when the prior attempt summary is blank", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-continuation-blank-summary-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(`${workspaceRoot}/foreman.db`, projectRoot);
+    cleanupDbs.push(db);
+
+    const reviewTask: Task = { ...sampleTask, state: "in_review", providerState: "in_review" };
+    const { target } = seedContinuationCheckpoint(db, {
+      action: "review",
+      repoKey: "repo-a",
+      task: reviewTask,
+      summary: "   ",
+    });
+
+    const prompt = await renderWorkerPrompt({
+      action: "review",
+      config,
+      paths,
+      task: reviewTask,
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      taskTarget: target,
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+      foremanRepos: db,
+      continuation: true,
+    });
+
+    expect(prompt).toContain("## Prior Checkpoint");
+    expect(prompt).toContain("(prior pass recorded no summary)");
+    expect(prompt).not.toContain("No prior checkpoint recorded.");
+  });
+
+  test("renders the unavailable fallback when the prior attempt is missing", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-continuation-missing-attempt-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(`${workspaceRoot}/foreman.db`, projectRoot);
+    cleanupDbs.push(db);
+
+    const reviewTask: Task = { ...sampleTask, state: "in_review", providerState: "in_review" };
+    const { target, attempt } = seedContinuationCheckpoint(db, {
+      action: "review",
+      repoKey: "repo-a",
+      task: reviewTask,
+      summary: "Resolved the failing lint check.",
+    });
+    // The source_attempt_id FK is ON DELETE SET NULL, so dropping the attempt nulls the
+    // checkpoint column; the read maps it to a non-existent id and exercises the
+    // attempt_not_found fallback in resolvePriorPassSummary.
+    db.database.sqlite.prepare("DELETE FROM execution_attempt WHERE id = ?").run(attempt.id);
+
+    const prompt = await renderWorkerPrompt({
+      action: "review",
+      config,
+      paths,
+      task: reviewTask,
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      taskTarget: target,
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+      foremanRepos: db,
+      continuation: true,
+    });
+
+    expect(prompt).toContain("## Prior Checkpoint");
+    expect(prompt).toContain("(prior pass summary unavailable)");
+    expect(prompt).not.toContain("No prior checkpoint recorded.");
   });
 });
