@@ -1181,3 +1181,630 @@ describe("HTTP artifact content", () => {
     }
   });
 });
+
+describe("HTTP task rollups", () => {
+  const taskA: Task = {
+    ...sampleTask,
+    id: "ENG-1",
+    providerId: "ENG-1",
+    targets: [
+      { repoKey: "repo-a", branchName: "eng-1-a", position: 0 },
+      { repoKey: "repo-b", branchName: "eng-1-b", position: 1 },
+    ],
+  };
+  const taskB: Task = {
+    ...sampleTask,
+    id: "ENG-2",
+    providerId: "ENG-2",
+    targets: [{ repoKey: "repo-a", branchName: "eng-2", position: 0 }],
+  };
+
+  type SeededAttempt = {
+    id: string;
+    taskId: string;
+    targetRepoKey: string;
+    startedAt: string;
+    finishedAt?: string | null;
+    status: "running" | "completed" | "failed" | "blocked" | "canceled" | "timed_out";
+    attemptNumber?: number;
+    tokens?: Record<string, number>;
+  };
+
+  const setupTaskRollupsServer = async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+
+    db.taskMirror.saveTasks([taskA, taskB]);
+    db.workers.ensureWorkerSlots(1);
+    const worker = db.workers.listWorkers()[0]!;
+
+    const seedAttempt = (input: SeededAttempt): string => {
+      const target = db.taskMirror.getTaskTarget(input.taskId, input.targetRepoKey);
+      const job = db.jobs.createJob({
+        taskId: input.taskId,
+        taskTargetId: target!.id,
+        taskProvider: "file",
+        action: "execution",
+        priorityRank: 3,
+        repoKey: input.targetRepoKey,
+        baseBranch: "main",
+        dedupeKey: `${input.taskId}:${input.id}`,
+        selectionReason: "test",
+      });
+      db.database.sqlite
+        .prepare(
+          `INSERT INTO execution_attempt(
+            id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, runner_session_id,
+            status, started_at, finished_at, exit_code, signal, summary, error_message, tokens_used_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.id,
+          job.id,
+          worker.id,
+          input.attemptNumber ?? 1,
+          "claude",
+          "claude-opus-4-7",
+          "high",
+          null,
+          input.status,
+          input.startedAt,
+          input.finishedAt ?? null,
+          input.status === "completed" ? 0 : null,
+          null,
+          "",
+          null,
+          input.tokens ? JSON.stringify(input.tokens) : null,
+        );
+      return job.id;
+    };
+
+    const seedCronAttempt = (input: { id: string; startedAt: string }): void => {
+      const job = db.jobs.createCronJob({
+        cronJobId: `cron-${input.id}`,
+        dedupeKey: `cron:${input.id}`,
+        selectionReason: "test",
+      });
+      db.database.sqlite
+        .prepare(
+          `INSERT INTO execution_attempt(
+            id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, runner_session_id,
+            status, started_at, finished_at, exit_code, signal, summary, error_message, tokens_used_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.id,
+          job.id,
+          worker.id,
+          1,
+          "claude",
+          "claude-opus-4-7",
+          "high",
+          null,
+          "completed",
+          input.startedAt,
+          input.startedAt,
+          0,
+          null,
+          "",
+          null,
+          null,
+        );
+    };
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [
+        { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+        { key: "repo-b", rootPath: "/repos/repo-b", defaultBranch: "main" },
+      ],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => []),
+        getTask: vi.fn(async () => taskA),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: { resolvePullRequest: vi.fn(async () => null) } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    return { db, server, seedAttempt, seedCronAttempt };
+  };
+
+  test("rolls up multiple attempts on one ticket into a single bucket with summed tokens and cost", async () => {
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
+
+    seedAttempt({
+      id: "att-1",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      finishedAt: "2026-05-20T10:30:00.000Z",
+      status: "completed",
+      tokens: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    seedAttempt({
+      id: "att-2",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T18:00:00.000Z",
+      finishedAt: "2026-05-20T18:30:00.000Z",
+      status: "completed",
+      attemptNumber: 2,
+      tokens: { inputTokens: 0, outputTokens: 1_000_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20",
+      });
+
+      expect(response.statusCode).toBe(200);
+      const payload = response.json();
+      expect(payload.buckets).toHaveLength(1);
+      expect(payload.buckets[0]).toMatchObject({
+        taskId: "ENG-1",
+        attemptsCount: 2,
+        effectiveStatus: "completed",
+      });
+      expect(payload.buckets[0].cost.totalUsd).toBeCloseTo(15 + 75);
+      expect(payload.buckets[0].firstSeenInWindow).toBe("2026-05-20T10:00:00.000Z");
+      expect(payload.totals.attemptsCount).toBe(2);
+      expect(Array.isArray(payload.rates)).toBe(true);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("returns one sorted bucket per ticket when multiple tickets run in the window", async () => {
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
+
+    seedAttempt({
+      id: "att-1",
+      taskId: "ENG-2",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      finishedAt: "2026-05-20T10:30:00.000Z",
+      status: "completed",
+    });
+    seedAttempt({
+      id: "att-2",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T11:00:00.000Z",
+      finishedAt: "2026-05-20T11:30:00.000Z",
+      status: "completed",
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20",
+      });
+      const payload = response.json();
+      expect(payload.buckets.map((bucket: { taskId: string }) => bucket.taskId)).toEqual([
+        "ENG-1",
+        "ENG-2",
+      ]);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("excludes cron attempts that have no taskId via the IS NOT NULL join filter", async () => {
+    const { db, server, seedAttempt, seedCronAttempt } = await setupTaskRollupsServer();
+
+    seedAttempt({
+      id: "att-task",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      finishedAt: "2026-05-20T10:30:00.000Z",
+      status: "completed",
+    });
+    seedCronAttempt({ id: "att-cron", startedAt: "2026-05-20T11:00:00.000Z" });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20",
+      });
+      const payload = response.json();
+      expect(payload.buckets).toHaveLength(1);
+      expect(payload.buckets[0].taskId).toBe("ENG-1");
+      expect(payload.buckets[0].attemptsCount).toBe(1);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("captures per-target latest status for a multi-target ticket", async () => {
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
+
+    seedAttempt({
+      id: "att-a",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      finishedAt: "2026-05-20T10:30:00.000Z",
+      status: "completed",
+    });
+    seedAttempt({
+      id: "att-b",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-b",
+      startedAt: "2026-05-20T11:00:00.000Z",
+      finishedAt: "2026-05-20T11:30:00.000Z",
+      status: "failed",
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20",
+      });
+      const payload = response.json();
+      expect(payload.buckets).toHaveLength(1);
+      expect(payload.buckets[0].targets).toEqual(["repo-a", "repo-b"]);
+      expect(payload.buckets[0].perTargetLatestStatus).toEqual([
+        { target: "repo-a", status: "completed" },
+        { target: "repo-b", status: "failed" },
+      ]);
+      expect(payload.buckets[0].effectiveStatus).toBe("failed");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("rejects malformed from/to and invalid status values", async () => {
+    const { db, server } = await setupTaskRollupsServer();
+    try {
+      const invalidFrom = await server.inject({ method: "GET", url: "/api/task-rollups?from=2026-5-1" });
+      expect(invalidFrom.statusCode).toBe(400);
+      expect(invalidFrom.json().error.code).toBe("invalid_request");
+
+      const invalidStatus = await server.inject({ method: "GET", url: "/api/task-rollups?status=unknown" });
+      expect(invalidStatus.statusCode).toBe(400);
+      expect(invalidStatus.json().error.code).toBe("invalid_request");
+
+      // Well-formed dates but from > to — resolveUsageRange throws and the
+      // endpoint must map that to 400 invalid_request, not bubble a 500.
+      const invertedRange = await server.inject({
+        method: "GET",
+        url: "/api/task-rollups?from=2026-05-26&to=2026-05-20",
+      });
+      expect(invertedRange.statusCode).toBe(400);
+      expect(invertedRange.json().error.code).toBe("invalid_request");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("filters by the bucket's effective status (running over latest started)", async () => {
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
+
+    seedAttempt({
+      id: "att-running",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      status: "running",
+    });
+    seedAttempt({
+      id: "att-completed",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T11:00:00.000Z",
+      finishedAt: "2026-05-20T11:30:00.000Z",
+      status: "completed",
+      attemptNumber: 2,
+    });
+    seedAttempt({
+      id: "att-other",
+      taskId: "ENG-2",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T12:00:00.000Z",
+      finishedAt: "2026-05-20T12:30:00.000Z",
+      status: "completed",
+    });
+
+    try {
+      const runningResponse = await server.inject({
+        method: "GET",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20&status=running",
+      });
+      const runningPayload = runningResponse.json();
+      expect(runningPayload.buckets).toHaveLength(1);
+      expect(runningPayload.buckets[0].taskId).toBe("ENG-1");
+      expect(runningPayload.buckets[0].effectiveStatus).toBe("running");
+
+      const completedResponse = await server.inject({
+        method: "GET",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20&status=completed",
+      });
+      const completedPayload = completedResponse.json();
+      expect(completedPayload.buckets).toHaveLength(1);
+      expect(completedPayload.buckets[0].taskId).toBe("ENG-2");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("totals stay aligned with returned buckets when status filter is applied", async () => {
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
+
+    seedAttempt({
+      id: "att-running",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      status: "running",
+      tokens: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    seedAttempt({
+      id: "att-other",
+      taskId: "ENG-2",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T11:00:00.000Z",
+      finishedAt: "2026-05-20T11:30:00.000Z",
+      status: "completed",
+      tokens: { inputTokens: 0, outputTokens: 1_000_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20&status=running",
+      });
+      const payload = response.json();
+      const bucketSum = payload.buckets.reduce(
+        (acc: number, bucket: { attemptsCount: number }) => acc + bucket.attemptsCount,
+        0,
+      );
+      expect(payload.totals.attemptsCount).toBe(bucketSum);
+      expect(payload.totals.attemptsCount).toBe(1);
+      // ENG-1 contributed 1M input tokens; ENG-2 (completed, excluded by the
+      // filter) must not leak its 1M output tokens into the totals.
+      expect(payload.totals.tokens.outputTokens).toBe(0);
+      expect(payload.totals.tokens.inputTokens).toBe(1_000_000);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("totals stay aligned with returned buckets when search filter is applied", async () => {
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
+
+    seedAttempt({
+      id: "att-eng-1",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      finishedAt: "2026-05-20T10:30:00.000Z",
+      status: "completed",
+      tokens: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    seedAttempt({
+      id: "att-eng-2",
+      taskId: "ENG-2",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T11:00:00.000Z",
+      finishedAt: "2026-05-20T11:30:00.000Z",
+      status: "completed",
+      tokens: { inputTokens: 0, outputTokens: 1_000_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20&search=ENG-1",
+      });
+      const payload = response.json();
+      const bucketSum = payload.buckets.reduce(
+        (acc: number, bucket: { attemptsCount: number }) => acc + bucket.attemptsCount,
+        0,
+      );
+      expect(payload.buckets).toHaveLength(1);
+      expect(payload.buckets[0].taskId).toBe("ENG-1");
+      expect(payload.totals.attemptsCount).toBe(bucketSum);
+      expect(payload.totals.attemptsCount).toBe(1);
+      // ENG-2 (excluded by search) must not leak its output tokens.
+      expect(payload.totals.tokens.outputTokens).toBe(0);
+      expect(payload.totals.tokens.inputTokens).toBe(1_000_000);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("applies status and search filters together (AND, not OR)", async () => {
+    const { db, server, seedAttempt } = await setupTaskRollupsServer();
+
+    // ENG-1 is running (matches status, matches search).
+    seedAttempt({
+      id: "att-1-running",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T10:00:00.000Z",
+      status: "running",
+      tokens: { inputTokens: 1_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    // ENG-2 is running (matches status, does not match search).
+    seedAttempt({
+      id: "att-2-running",
+      taskId: "ENG-2",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T11:00:00.000Z",
+      status: "running",
+      tokens: { inputTokens: 2_000_000, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+    // ENG-1 also has a completed attempt — but the bucket's effective status
+    // stays "running" so it still matches.
+    seedAttempt({
+      id: "att-1-completed",
+      taskId: "ENG-1",
+      targetRepoKey: "repo-a",
+      startedAt: "2026-05-20T12:00:00.000Z",
+      finishedAt: "2026-05-20T12:30:00.000Z",
+      status: "completed",
+      attemptNumber: 2,
+      tokens: { inputTokens: 0, outputTokens: 500_000, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20&status=running&search=ENG-1",
+      });
+      const payload = response.json();
+      // Only ENG-1 matches BOTH predicates. An OR refactor would also
+      // return ENG-2 (matches status) and an AND→OR regression on either
+      // predicate would also surface a different bucket count.
+      expect(payload.buckets.map((bucket: { taskId: string }) => bucket.taskId)).toEqual(["ENG-1"]);
+      expect(payload.buckets[0].attemptsCount).toBe(2);
+      const bucketSum = payload.buckets.reduce(
+        (acc: number, bucket: { attemptsCount: number }) => acc + bucket.attemptsCount,
+        0,
+      );
+      expect(payload.totals.attemptsCount).toBe(bucketSum);
+      // ENG-2's 2M input tokens must not leak into totals.
+      expect(payload.totals.tokens.inputTokens).toBe(1_000_000);
+      expect(payload.totals.tokens.outputTokens).toBe(500_000);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("returns empty buckets but still reports rates when the window has no attempts", async () => {
+    const { db, server } = await setupTaskRollupsServer();
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/api/task-rollups?from=2026-05-20&to=2026-05-20",
+      });
+      const payload = response.json();
+      expect(payload.buckets).toEqual([]);
+      expect(payload.totals.attemptsCount).toBe(0);
+      expect(payload.totals.cost.totalUsd).toBe(0);
+      expect(Array.isArray(payload.rates)).toBe(true);
+      expect(payload.rates.length).toBeGreaterThan(0);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+});
+
+describe("HTTP attempts taskId filter", () => {
+  test("returns only attempts whose job has the requested task_id", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+
+    const taskA: Task = {
+      ...sampleTask,
+      id: "ENG-1",
+      providerId: "ENG-1",
+    };
+    const taskB: Task = {
+      ...sampleTask,
+      id: "ENG-2",
+      providerId: "ENG-2",
+      targets: [{ repoKey: "repo-a", branchName: "eng-2", position: 0 }],
+    };
+    db.taskMirror.saveTasks([taskA, taskB]);
+    db.workers.ensureWorkerSlots(1);
+    const worker = db.workers.listWorkers()[0]!;
+
+    const seedAttempt = (input: { id: string; taskId: string; startedAt: string }) => {
+      const target = db.taskMirror.getTaskTarget(input.taskId, "repo-a")!;
+      const job = db.jobs.createJob({
+        taskId: input.taskId,
+        taskTargetId: target.id,
+        taskProvider: "file",
+        action: "execution",
+        priorityRank: 3,
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: `${input.taskId}:${input.id}`,
+        selectionReason: "test",
+      });
+      db.database.sqlite
+        .prepare(
+          `INSERT INTO execution_attempt(
+            id, job_id, worker_id, attempt_number, runner_name, runner_model, runner_variant, runner_session_id,
+            status, started_at, finished_at, exit_code, signal, summary, error_message, tokens_used_json
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, 0, NULL, '', NULL, NULL)`,
+        )
+        .run(
+          input.id,
+          job.id,
+          worker.id,
+          1,
+          "claude",
+          "claude-opus-4-7",
+          "high",
+          null,
+          input.startedAt,
+          input.startedAt,
+        );
+    };
+
+    seedAttempt({ id: "att-1", taskId: "ENG-1", startedAt: "2026-05-20T10:00:00.000Z" });
+    seedAttempt({ id: "att-2", taskId: "ENG-2", startedAt: "2026-05-20T11:00:00.000Z" });
+    seedAttempt({ id: "att-3", taskId: "ENG-1", startedAt: "2026-05-20T12:00:00.000Z" });
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => []),
+        getTask: vi.fn(async () => taskA),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: { resolvePullRequest: vi.fn(async () => null) } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({ method: "GET", url: "/api/attempts?taskId=ENG-1" });
+      expect(response.statusCode).toBe(200);
+      const payload = response.json();
+      expect(payload.attempts.map((attempt: { id: string }) => attempt.id).sort()).toEqual([
+        "att-1",
+        "att-3",
+      ]);
+      expect(payload.attempts.every((attempt: { taskId: string }) => attempt.taskId === "ENG-1")).toBe(true);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+});

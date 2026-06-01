@@ -43,15 +43,21 @@ export type UsageRange = {
   toDate: string;
 };
 
-export const resolveUsageRange = (input: { from?: string; to?: string; now?: Date }): UsageRange => {
+export const resolveUsageRange = (input: {
+  from?: string;
+  to?: string;
+  now?: Date;
+  defaultLookbackDays?: number;
+}): UsageRange => {
   const now = input.now ?? new Date();
   const today = startOfDayUtc(now);
+  const lookback = input.defaultLookbackDays ?? 7;
 
   const explicitTo = input.to ? parseIsoDate(input.to) : null;
   const explicitFrom = input.from ? parseIsoDate(input.from) : null;
 
   const toInclusiveDay = explicitTo ?? today;
-  const fromInclusiveDay = explicitFrom ?? addDaysUtc(toInclusiveDay, -6);
+  const fromInclusiveDay = explicitFrom ?? addDaysUtc(toInclusiveDay, -(lookback - 1));
 
   if (fromInclusiveDay.getTime() > toInclusiveDay.getTime()) {
     throw new Error("`from` must be on or before `to`.");

@@ -22,9 +22,11 @@ import { useAttemptsTableState } from "@/pages/attempts/use-attempts-table-state
 export function AttemptsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const selectedAttemptId = searchParams.get("attemptId")
-  const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery()
-  const { data: rates } = useRatesQuery()
   const tableState = useAttemptsTableState()
+  const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery(
+    tableState.taskId ? { taskId: tableState.taskId } : undefined
+  )
+  const { data: rates } = useRatesQuery()
   const setSelectedAttemptId = (attemptId: string | null) => {
     const nextSearchParams = new URLSearchParams(searchParams)
     if (attemptId) {

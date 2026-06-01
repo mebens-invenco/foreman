@@ -1,5 +1,5 @@
 import type { ColumnFiltersState } from "@tanstack/react-table"
-import { parseAsStringLiteral, useQueryStates } from "nuqs"
+import { parseAsString, parseAsStringLiteral, useQueryStates } from "nuqs"
 
 import { useDataTableState } from "@/components/data-table"
 import { attemptStatusFilterValues } from "@/pages/attempts/columns"
@@ -14,6 +14,7 @@ export function useAttemptsTableState() {
   const [filters, setFilters] = useQueryStates(
     {
       status: parseAsStringLiteral(attemptStatusFilterValues).withDefault("all"),
+      taskId: parseAsString.withDefault(""),
     },
     {
       history: "replace",
@@ -47,15 +48,20 @@ export function useAttemptsTableState() {
     baseState.resetBaseState()
     void setFilters({
       status: null,
+      taskId: null,
     })
   }
+
+  const taskId = filters.taskId === "" ? null : filters.taskId
 
   return {
     ...baseState,
     columnFilters,
-    hasActiveFilters: baseState.hasBaseState || filters.status !== "all",
+    hasActiveFilters:
+      baseState.hasBaseState || filters.status !== "all" || taskId !== null,
     resetFilters,
     setStatus,
     status: filters.status,
+    taskId,
   }
 }
