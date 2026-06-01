@@ -1369,36 +1369,39 @@ describe("GitHubReviewService reply mutations", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
-  test("falls back to a body-only review when GitHub cannot resolve an inline comment line", async () => {
-    global.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ message: "Validation Failed", errors: ["Line could not be resolved"] }, 422))
-      .mockResolvedValueOnce(jsonResponse({ id: 1 }, 200)) as typeof fetch;
+  test.each(["Line could not be resolved", "Path could not be resolved"])(
+    "falls back to a body-only review when GitHub cannot resolve an inline comment location: %s",
+    async (errorMessage) => {
+      global.fetch = vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse({ message: "Validation Failed", errors: [errorMessage] }, 422))
+        .mockResolvedValueOnce(jsonResponse({ id: 1 }, 200)) as typeof fetch;
 
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await service.submitPullRequestReview("https://github.com/acme/repo/pull/946", {
-      body: "[review agent] Please tighten this validation.",
-      event: "COMMENT",
-      comments: [
-        {
-          path: "src/example.ts",
-          line: 42,
-          body: "[review agent] This branch is missing a null check.",
-        },
-      ],
-    });
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      await service.submitPullRequestReview("https://github.com/acme/repo/pull/946", {
+        body: "[review agent] Please tighten this validation.",
+        event: "COMMENT",
+        comments: [
+          {
+            path: "src/example.ts",
+            line: 42,
+            body: "[review agent] This branch is missing a null check.",
+          },
+        ],
+      });
 
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews");
-    const retryInit = vi.mocked(global.fetch).mock.calls[1]?.[1] as RequestInit;
-    const retryBody = JSON.parse(String(retryInit.body));
-    expect(retryBody).toEqual({
-      body: expect.stringContaining("GitHub rejected one or more inline review comment locations as unresolvable"),
-      event: "COMMENT",
-    });
-    expect(retryBody.body).toContain("Location: `src/example.ts:42` (RIGHT)");
-    expect(retryBody.body).toContain("[review agent] This branch is missing a null check.");
-  });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews");
+      const retryInit = vi.mocked(global.fetch).mock.calls[1]?.[1] as RequestInit;
+      const retryBody = JSON.parse(String(retryInit.body));
+      expect(retryBody).toEqual({
+        body: expect.stringContaining("GitHub rejected one or more inline review comment locations as unresolvable"),
+        event: "COMMENT",
+      });
+      expect(retryBody.body).toContain("Location: `src/example.ts:42` (RIGHT)");
+      expect(retryBody.body).toContain("[review agent] This branch is missing a null check.");
+    },
+  );
 
   test("posts review-summary replies as prefixed top-level comments", async () => {
     global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 1 }, 201)) as typeof fetch;

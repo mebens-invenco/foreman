@@ -49,7 +49,9 @@ const parseGitRemote = (remoteUrl: string): RepoDescriptor => {
 };
 
 const isUnresolvableReviewCommentError = (error: unknown): boolean =>
-  error instanceof ForemanError && error.message.includes("GitHub request failed: 422") && error.message.includes("Line could not be resolved");
+  error instanceof ForemanError &&
+  error.message.includes("GitHub request failed: 422") &&
+  (error.message.includes("Line could not be resolved") || error.message.includes("Path could not be resolved"));
 
 const isExistingPendingReviewError = (error: unknown): boolean =>
   error instanceof ForemanError &&
@@ -1343,7 +1345,7 @@ export class GitHubReviewService implements ReviewService {
         throw error;
       }
 
-      this.logger.warn("retrying GitHub pull request review without inline comments after unresolvable line rejection", {
+      this.logger.warn("retrying GitHub pull request review without inline comments after unresolvable location rejection", {
         owner,
         repo,
         pullRequestNumber: number,
