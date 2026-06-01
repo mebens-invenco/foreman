@@ -222,6 +222,12 @@ export function TaskDetailDrawer({
                 )}
               />
             </div>
+          ) : taskId ? (
+            <p className="text-xs text-muted-foreground">
+              Rollup summary unavailable — the task is outside the current
+              window or excluded by the active filter. The attempts below are
+              still complete.
+            </p>
           ) : null}
         </div>
       </SheetHeader>
