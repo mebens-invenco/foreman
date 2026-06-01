@@ -22,8 +22,11 @@ export function TasksPage() {
   const tableState = useTasksTableState()
   const queryStatus: AttemptStatus | undefined =
     tableState.status === "all" ? undefined : (tableState.status as AttemptStatus)
+  // Search stays client-side via tasksGlobalFilter — the server returns the
+  // full window's buckets and tanstack-table re-filters on every keystroke,
+  // so re-sending `search` would just refetch what the client already has.
+  // Mirrors the Attempts page convention.
   const query = useTaskRollupsQuery({
-    search: tableState.globalFilter || undefined,
     status: queryStatus,
   })
   const { data, isLoading, isError, error } = query
