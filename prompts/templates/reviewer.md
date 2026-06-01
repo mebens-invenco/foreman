@@ -10,6 +10,8 @@ You are reviewing one selected pull request in Foreman as an internal review age
 
 {{fragment:summary-policy}}
 
+{{fragment:learning-policy}}
+
 {{fragment:reviewer-audience}}
 
 ## Objective
