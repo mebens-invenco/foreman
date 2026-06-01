@@ -192,3 +192,49 @@ export const validateWorkerResult = (value: unknown): WorkerResult => workerResu
 
 export const validateWorkerResultForAction = (value: unknown, action: WorkerResultAction): WorkerResult =>
   workerResultSchema.safeExtend({ action: z.literal(action) }).parse(value) as WorkerResult;
+
+// Serialises the worker result schema for a given action to the human-readable
+// help text that both the `agent-result validate --help` command and the
+// rendered worker prompts inline. Sourcing both from this single helper keeps
+// the inline prompt schema honest against the validator as the schema evolves.
+// Pass `undefined` for the generic, action-agnostic shape.
+export const renderAgentResultSchemaHelp = (action?: WorkerResultAction): string => {
+  const actionLiteral = action ?? `<${workerResultActionValues.join("|")}>`;
+  const schema = action ? workerResultSchema.safeExtend({ action: z.literal(action) }) : workerResultSchema;
+  const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, 2);
+  const exampleJson = JSON.stringify({
+    ...workerResultExample,
+    action: actionLiteral,
+    ...((action === "review" || action === "reviewer") ? { outcome: "no_action_needed" } : {}),
+  });
+  const reviewGuidance =
+    action === "review" || action === "reviewer"
+      ? "\n- For no-op review results, use outcome `no_action_needed`; `completed` requires mutations or code changes."
+      : "";
+
+  return `
+Action-specific accepted output shape
+
+- Required action literal: "${actionLiteral}".
+- Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block containing JSON.
+- The final answer returned to Foreman must contain exactly one <agent-result> block and no prose after it.
+- The worker result JSON schema below is generated from Foreman's Zod worker result schema.
+${reviewGuidance}
+
+Worker result JSON schema:
+
+\`\`\`json
+${jsonSchema}
+\`\`\`
+
+Minimal raw JSON example:
+
+${exampleJson}
+
+Wrapped final answer example:
+
+<agent-result>
+${exampleJson}
+</agent-result>
+`;
+};

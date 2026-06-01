@@ -17,10 +17,9 @@ import { isIsoDate, resolveUsageRange } from "./execution/cost/usage-range.js";
 import {
   formatWorkerResultValidationError,
   parseWorkerResult,
+  renderAgentResultSchemaHelp,
   validateWorkerResultForAction,
   workerResultActionValues,
-  workerResultExample,
-  workerResultSchema,
   type WorkerResultAction,
 } from "./execution/worker-result.js";
 import { ForemanVersionMonitor } from "./foreman-version.js";
@@ -76,47 +75,6 @@ const resolveHelpAction = (): WorkerResultAction | undefined => {
     : process.argv[actionArgIndex + 1];
 
   return workerResultActionValues.includes(value as WorkerResultAction) ? (value as WorkerResultAction) : undefined;
-};
-
-const renderAgentResultValidateHelp = (): string => {
-  const action = resolveHelpAction();
-  const actionLiteral = action ?? `<${workerResultActionValues.join("|")}>`;
-  const schema = action ? workerResultSchema.safeExtend({ action: z.literal(action) }) : workerResultSchema;
-  const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, 2);
-  const exampleJson = JSON.stringify({
-    ...workerResultExample,
-    action: actionLiteral,
-    ...((action === "review" || action === "reviewer") ? { outcome: "no_action_needed" } : {}),
-  });
-  const reviewGuidance = action === "review" || action === "reviewer"
-    ? "\n- For no-op review results, use outcome `no_action_needed`; `completed` requires mutations or code changes."
-    : "";
-
-  return `
-Action-specific accepted output shape
-
-- Required action literal: \"${actionLiteral}\".
-- Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block containing JSON.
-- The final answer returned to Foreman must contain exactly one <agent-result> block and no prose after it.
-- The worker result JSON schema below is generated from Foreman's Zod worker result schema.
-${reviewGuidance}
-
-Worker result JSON schema:
-
-\`\`\`json
-${jsonSchema}
-\`\`\`
-
-Minimal raw JSON example:
-
-${exampleJson}
-
-Wrapped final answer example:
-
-<agent-result>
-${exampleJson}
-</agent-result>
-`;
 };
 
 const writeJson = (value: unknown): void => {
@@ -447,7 +405,7 @@ agentResult
   .command("validate")
   .description("Validate raw JSON or a complete <agent-result> block from stdin")
   .requiredOption("--action <action>", "Expected worker action", parseWorkerResultAction)
-  .addHelpText("after", renderAgentResultValidateHelp)
+  .addHelpText("after", () => renderAgentResultSchemaHelp(resolveHelpAction()))
   .action(async (options: { action: WorkerResultAction }) => {
     try {
       const value = parseWorkerResult(await readStdin());

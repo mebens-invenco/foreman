@@ -1,15 +1,28 @@
 import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test } from "vitest";
+import { z } from "zod";
 
 import { createDefaultWorkspaceConfig } from "../workspace/config.js";
 import type { ReviewContext, Task } from "../domain/index.js";
 import { renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
+import {
+  renderAgentResultSchemaHelp,
+  workerResultActionValues,
+  workerResultSchema,
+  type WorkerResultAction,
+} from "../execution/worker-result.js";
 import { renderPlanPrompt } from "../planning/render-plan-prompt.js";
 import { createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
 
 const cleanupDirs: string[] = [];
 const projectRoot = testProjectRoot;
+
+// The exact JSON schema the stdin `agent-result validate` step enforces for an action.
+// Asserting the rendered prompt contains this proves the inline schema is sourced from
+// the same validator, so the two cannot silently drift apart.
+const validatorJsonSchema = (action: WorkerResultAction): string =>
+  JSON.stringify(z.toJSONSchema(workerResultSchema.safeExtend({ action: z.literal(action) })), null, 2);
 
 afterEach(async () => {
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
@@ -204,20 +217,22 @@ describe("prompt rendering", () => {
     expect(result).toContain("artifacts/attempt-1-runner-output.txt");
     expect(result).toContain("## Invalid Stdout Excerpt");
     expect(result).toContain("Implemented the change.");
-    expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action execution --help`);
+    expect(result).toContain(renderAgentResultSchemaHelp("execution").trim());
+    expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action execution`);
+    expect(result).not.toContain("--help");
     expect(result).not.toContain("{{context:");
     expect(result).not.toContain("{{fragment:");
     expect(result).not.toContain("{{session:");
   });
 
-  test("renders action-specific agent result validator commands", async () => {
+  test("inlines the action-specific result schema instead of a --help round-trip", async () => {
     const workspaceRoot = await createTempDir("foreman-prompts-validator-");
     cleanupDirs.push(workspaceRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
     const paths = createWorkspacePaths(projectRoot, workspaceRoot);
     const repo = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
 
-    for (const action of ["execution", "review", "reviewer", "retry", "deployment", "consolidation"] as const) {
+    for (const action of workerResultActionValues) {
       const result = await renderWorkerPrompt({
         action,
         config,
@@ -228,9 +243,14 @@ describe("prompt rendering", () => {
         baseBranch: "main",
       });
 
-      expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action} --help`);
+      // Inline schema is present and is exactly what the shared validator helper emits...
+      expect(result).toContain(renderAgentResultSchemaHelp(action).trim());
+      // ...with the embedded JSON schema bound to the validator's own schema for the action.
+      expect(result).toContain(validatorJsonSchema(action));
+      // The genuinely dynamic stdin validate step stays; the static --help round-trip is gone.
       expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action}`);
       expect(result).toContain("validate the complete final result block on stdin");
+      expect(result).not.toContain("--help");
     }
 
     for (const action of ["review", "reviewer"] as const) {
@@ -245,10 +265,33 @@ describe("prompt rendering", () => {
         continuation: true,
       });
 
-      expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action} --help`);
+      expect(result).toContain(renderAgentResultSchemaHelp(action).trim());
       expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action}`);
       expect(result).toContain("Return exactly one final result block:");
+      expect(result).not.toContain("--help");
       expect(result).not.toContain("output-schema-continuation");
+    }
+  });
+
+  test("renders a deterministic inline result schema bound to the validator", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-schema-drift-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const repo = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
+
+    for (const action of workerResultActionValues) {
+      const render = (): Promise<string> =>
+        renderWorkerPrompt({ action, config, paths, task: sampleTask, repo, worktreePath: workspaceRoot, baseBranch: "main" });
+      const [first, second] = await Promise.all([render(), render()]);
+
+      const schemaText = renderAgentResultSchemaHelp(action).trim();
+      // Two renders of the same action produce the identical inline schema (deterministic).
+      expect(first).toContain(schemaText);
+      expect(second).toContain(schemaText);
+      // The inline schema embeds exactly the validator's JSON schema, so any change to
+      // workerResultSchema moves this fixture in lockstep and keeps the inline text honest.
+      expect(schemaText).toContain(validatorJsonSchema(action));
     }
   });
 
@@ -389,12 +432,15 @@ describe("prompt rendering", () => {
     expect(continuationPrompt).not.toContain("## Continuation Context");
     expect(continuationPrompt).toContain("## Required Output");
     expect(continuationPrompt).toContain("<agent-result>");
-    expect(continuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action review --help`);
+    expect(continuationPrompt).toContain(renderAgentResultSchemaHelp("review").trim());
     expect(continuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action review`);
+    expect(continuationPrompt).not.toContain("--help");
     expect(continuationPrompt).not.toContain("Do not assume every actionable review item requires a code change.");
     expect(continuationPrompt).not.toContain("## Selected Task");
     expect(continuationPrompt).not.toContain("## Task Provider Context");
-    expect(continuationPrompt).not.toContain("create_pull_request");
+    // The inlined schema lists `create_pull_request` as a mutation enum, so assert the
+    // continuation omits the PR-creation *instruction* rather than the bare schema token.
+    expect(continuationPrompt).not.toContain("Use `create_pull_request` whenever");
     expect(continuationPrompt).not.toContain("Allowed learning mutation types");
     expect(continuationPrompt).not.toContain("## Latest Review Activity");
     expect(continuationPrompt).not.toContain("Please tighten this up.");
@@ -434,9 +480,12 @@ describe("prompt rendering", () => {
     expect(reviewerContinuationPrompt).not.toContain("## Continuation Context");
     expect(reviewerContinuationPrompt).toContain("## Required Output");
     expect(reviewerContinuationPrompt).toContain("<agent-result>");
-    expect(reviewerContinuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action reviewer --help`);
+    expect(reviewerContinuationPrompt).toContain(renderAgentResultSchemaHelp("reviewer").trim());
     expect(reviewerContinuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action reviewer`);
-    expect(reviewerContinuationPrompt).not.toContain("submit_pull_request_review");
+    expect(reviewerContinuationPrompt).not.toContain("--help");
+    // `submit_pull_request_review` is now in the inlined schema enum, so assert the
+    // continuation omits the feedback-submission *instruction* rather than the bare token.
+    expect(reviewerContinuationPrompt).not.toContain("use a `submit_pull_request_review` mutation");
     expect(reviewerContinuationPrompt).not.toContain("## Selected Task");
     expect(reviewerContinuationPrompt).not.toContain("## Latest Review Activity");
 
@@ -492,7 +541,9 @@ describe("prompt rendering", () => {
     expect(result).toContain("Ship plan notes");
     expect(result).toContain("Check the production dashboard once.");
     expect(result).toContain("https://github.com/acme/repo-a/pull/10");
-    expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action deployment --help`);
+    expect(result).toContain(renderAgentResultSchemaHelp("deployment").trim());
+    expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action deployment`);
+    expect(result).not.toContain("--help");
 
     const continuationResult = await renderWorkerPrompt({
       action: "deployment",
@@ -521,7 +572,9 @@ describe("prompt rendering", () => {
     expect(continuationResult).toContain("Continue deployment tracking from the current deployment session.");
     expect(continuationResult).toContain("Check deployment status once.");
     expect(continuationResult).toContain("Return `in_progress` if rollout is still pending");
-    expect(continuationResult).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action deployment --help`);
+    expect(continuationResult).toContain(renderAgentResultSchemaHelp("deployment").trim());
+    expect(continuationResult).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action deployment`);
+    expect(continuationResult).not.toContain("--help");
     expect(continuationResult).not.toContain("# Deployment Tracking Prompt");
     expect(continuationResult).not.toContain("## Deployment Instructions");
     expect(continuationResult).not.toContain("## Current Git State");
