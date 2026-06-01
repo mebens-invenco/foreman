@@ -1,7 +1,15 @@
 import { describe, expect, test } from "vitest";
 
 import { getProviderStateForNormalized, normalizeTaskState } from "../../tasking/task-state-mapping.js";
-import { createDefaultWorkspaceConfig, parseWorkspaceConfig, runnerForAction, runnerSessionRoleForAction, stringifyWorkspaceConfig } from "../config.js";
+import {
+  createDefaultWorkspaceConfig,
+  parseWorkspaceConfig,
+  runnerForAction,
+  runnerForActionAndContinuation,
+  runnerSessionRoleForAction,
+  runnerTuningValue,
+  stringifyWorkspaceConfig,
+} from "../config.js";
 
 describe("workspace config", () => {
   test("round-trips default file task config", () => {
@@ -610,6 +618,166 @@ http:
     expect(() => parseWorkspaceConfig(yamlWithBudget("-1"))).toThrow(/maxBudgetUsd/);
     expect(() => parseWorkspaceConfig(yamlWithBudget("0"))).toThrow(/maxBudgetUsd/);
     expect(() => parseWorkspaceConfig(yamlWithBudget('"not-a-number"'))).toThrow(/maxBudgetUsd/);
+  });
+
+  const yamlWithRunner = (runnerBlock: string): string => `
+version: 1
+workspace:
+  name: foo
+repos:
+  explicit: []
+  roots: []
+  ignore: []
+taskSystem:
+  type: file
+  file:
+    tasksDir: tasks
+    idPrefix: TASK
+    states:
+      ready: [ready]
+      inProgress: [in_progress]
+      inReview: [in_review]
+      done: [done]
+      canceled: [canceled]
+reviewSystem:
+  type: github
+runner:
+${runnerBlock}
+scheduler:
+  workerConcurrency: 4
+  scoutPollIntervalSeconds: 60
+  scoutRerunDebounceMs: 1000
+  leaseTtlSeconds: 120
+  workerHeartbeatSeconds: 15
+  staleLeaseReapIntervalSeconds: 15
+  schedulerLoopIntervalMs: 1000
+  shutdownGracePeriodSeconds: 10
+http:
+  host: 127.0.0.1
+  port: 8765
+`;
+
+  test("accepts optional continuationEffort on claude execution and reviewer runners", () => {
+    const parsed = parseWorkspaceConfig(
+      yamlWithRunner(`  execution:
+    type: claude
+    model: claude-opus-4-8
+    effort: max
+    continuationEffort: high
+    timeoutMs: 3600000
+  reviewer:
+    type: claude
+    model: claude-opus-4-8
+    effort: max
+    continuationEffort: medium
+    timeoutMs: 3600000`),
+    );
+
+    expect(parsed.runner.execution).toMatchObject({ type: "claude", effort: "max", continuationEffort: "high" });
+    expect(parsed.runner.reviewer).toMatchObject({ type: "claude", effort: "max", continuationEffort: "medium" });
+  });
+
+  test("accepts optional continuationEffort on codex runners", () => {
+    const parsed = parseWorkspaceConfig(
+      yamlWithRunner(`  execution:
+    type: codex
+    model: gpt-5.5
+    effort: xhigh
+    continuationEffort: medium
+    timeoutMs: 3600000
+  reviewer:
+    type: codex
+    model: gpt-5.5
+    effort: high
+    timeoutMs: 3600000`),
+    );
+
+    expect(parsed.runner.execution).toMatchObject({ type: "codex", effort: "xhigh", continuationEffort: "medium" });
+    expect(parsed.runner.reviewer).toMatchObject({ type: "codex", effort: "high" });
+    expect(parsed.runner.reviewer).not.toHaveProperty("continuationEffort");
+  });
+
+  test("accepts optional continuationVariant on opencode runners", () => {
+    const parsed = parseWorkspaceConfig(
+      yamlWithRunner(`  execution:
+    type: opencode
+    model: openai/gpt-5.5
+    variant: high
+    continuationVariant: low
+    timeoutMs: 3600000
+  reviewer:
+    type: opencode
+    model: openai/gpt-5.5
+    variant: high
+    timeoutMs: 3600000`),
+    );
+
+    expect(parsed.runner.execution).toMatchObject({ type: "opencode", variant: "high", continuationVariant: "low" });
+    expect(parsed.runner.reviewer).not.toHaveProperty("continuationVariant");
+  });
+
+  test("rejects unknown continuationEffort values", () => {
+    expect(() =>
+      parseWorkspaceConfig(
+        yamlWithRunner(`  execution:
+    type: claude
+    model: claude-opus-4-8
+    effort: max
+    continuationEffort: ultra
+    timeoutMs: 3600000
+  reviewer:
+    type: claude
+    model: claude-opus-4-8
+    effort: max
+    timeoutMs: 3600000`),
+      ),
+    ).toThrow();
+  });
+
+  test("omits continuation tuning when not configured", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const parsed = parseWorkspaceConfig(stringifyWorkspaceConfig(config));
+
+    expect(parsed.runner.execution).not.toHaveProperty("continuationVariant");
+    expect(parsed.runner.reviewer).not.toHaveProperty("continuationEffort");
+  });
+
+  describe("runnerForActionAndContinuation", () => {
+    const claudeConfig = () => {
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      config.runner.execution = { type: "claude", model: "claude-opus-4-8", effort: "max", continuationEffort: "high", timeoutMs: 3_600_000 };
+      config.runner.reviewer = { type: "claude", model: "claude-opus-4-8", effort: "max", continuationEffort: "medium", timeoutMs: 3_600_000 };
+      return config;
+    };
+
+    test("uses continuationEffort for review and reviewer continuations", () => {
+      const config = claudeConfig();
+
+      expect(runnerTuningValue(runnerForActionAndContinuation(config, "review", true))).toBe("high");
+      expect(runnerTuningValue(runnerForActionAndContinuation(config, "reviewer", true))).toBe("medium");
+    });
+
+    test("falls back to base effort when the dispatch is not a continuation", () => {
+      const config = claudeConfig();
+
+      expect(runnerTuningValue(runnerForActionAndContinuation(config, "execution", false))).toBe("max");
+      expect(runnerTuningValue(runnerForActionAndContinuation(config, "reviewer", false))).toBe("max");
+    });
+
+    test("falls back to base effort when continuationEffort is omitted", () => {
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      config.runner.execution = { type: "claude", model: "claude-opus-4-8", effort: "max", timeoutMs: 3_600_000 };
+
+      expect(runnerTuningValue(runnerForActionAndContinuation(config, "review", true))).toBe("max");
+    });
+
+    test("uses continuationVariant for opencode continuations and falls back otherwise", () => {
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      config.runner.execution = { type: "opencode", model: "openai/gpt-5.5", variant: "high", continuationVariant: "low", timeoutMs: 3_600_000 };
+
+      expect(runnerTuningValue(runnerForActionAndContinuation(config, "review", true))).toBe("low");
+      expect(runnerTuningValue(runnerForActionAndContinuation(config, "execution", false))).toBe("high");
+    });
   });
 
   test("rejects mismatched task system blocks", () => {

@@ -4,7 +4,7 @@ import type { WorkspaceConfig, WorkspaceRunnerConfig } from "../workspace/config
 import {
   CLAUDE_EFFORT_VALUES,
   CODEX_EFFORT_VALUES,
-  runnerForAction,
+  runnerForActionAndContinuation,
   runnerRoleForAction,
 } from "../workspace/config.js";
 import type { AgentRunner } from "./agent-runner.js";
@@ -80,8 +80,9 @@ export const resolveRunnerConfigForAction = (
   config: WorkspaceConfig,
   action: ActionType,
   task?: Pick<Task, "runnerOverride"> | null,
+  continuation = false,
 ): WorkspaceRunnerConfig => {
-  const baseConfig = runnerForAction(config, action);
+  const baseConfig = runnerForActionAndContinuation(config, action, continuation);
   const role = runnerRoleForAction(action);
   const override = task?.runnerOverride?.[role];
   return applyRoleOverride(baseConfig, override);
@@ -91,6 +92,9 @@ export const createAgentRunner = (input: {
   config: WorkspaceConfig;
   action: ActionType;
   task?: Pick<Task, "runnerOverride"> | null;
+  continuation?: boolean;
 }): AgentRunner => {
-  return createProviderRunner(resolveRunnerConfigForAction(input.config, input.action, input.task));
+  return createProviderRunner(
+    resolveRunnerConfigForAction(input.config, input.action, input.task, input.continuation ?? false),
+  );
 };
