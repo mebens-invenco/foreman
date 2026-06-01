@@ -23,6 +23,6 @@ Structure the `content` of every learning so its intent is explicit:
 **Example:** [a concrete one-liner from this task - optional]
 
 Use `tags` to carry signal for retrieval and future promotion:
-- The action that surfaced it: one of `execution`, `consolidation`, `review`, `retry`, `deployment`.
+- The action that surfaced it: one of `execution`, `consolidation`, `review`, `reviewer`, `retry`, `deployment`.
 - A pain signal when relevant: e.g. `review-blocker`, `ci-fail`, `deploy-fail`, `high-impact`.
 - `skill-candidate` when the learning is generalizable enough to become a workspace skill.
