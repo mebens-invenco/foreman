@@ -174,6 +174,8 @@ describe("prompt rendering", () => {
     expect(result).toContain("## Current Git State");
     expect(result).toContain("## Pull Request Reference");
     expect(result).toContain("## Required Output");
+    expect(result).toContain("## Learning Review (required end-of-run step)");
+    expect(result).toContain("foreman learnings search foo --repo shared");
     expect(result).toContain("including fetching and inspecting any images attached to the initial task");
     expect(result).toContain("If execution completes with code changes, return a PR review mutation");
     expect(result).not.toContain("Task Comments");
@@ -346,6 +348,8 @@ describe("prompt rendering", () => {
     expect(consolidationPrompt).not.toContain("### Review Threads");
     expect(consolidationPrompt).not.toContain("### Actionable Now");
     expect(reviewerPrompt).toContain("# Reviewer Prompt");
+    expect(reviewerPrompt).toContain("## Learning Review (required end-of-run step)");
+    expect(reviewerPrompt).toContain("foreman learnings search foo --repo shared");
     expect(reviewerPrompt).toContain("submit_pull_request_review");
     expect(reviewerPrompt).toContain("ignore comments whose review metadata is missing");
     expect(reviewerPrompt).toContain("include image links or uploaded assets");
