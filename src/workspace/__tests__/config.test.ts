@@ -778,6 +778,14 @@ http:
       expect(runnerTuningValue(runnerForActionAndContinuation(config, "review", true))).toBe("low");
       expect(runnerTuningValue(runnerForActionAndContinuation(config, "execution", false))).toBe("high");
     });
+
+    test("uses continuationEffort for codex continuations and falls back otherwise", () => {
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      config.runner.execution = { type: "codex", model: "gpt-5.5", effort: "xhigh", continuationEffort: "medium", timeoutMs: 3_600_000 };
+
+      expect(runnerTuningValue(runnerForActionAndContinuation(config, "review", true))).toBe("medium");
+      expect(runnerTuningValue(runnerForActionAndContinuation(config, "review", false))).toBe("xhigh");
+    });
   });
 
   test("rejects mismatched task system blocks", () => {
