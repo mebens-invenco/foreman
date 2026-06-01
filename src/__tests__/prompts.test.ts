@@ -244,6 +244,7 @@ describe("prompt rendering", () => {
     expect(result).toContain("## Pull Request Reference");
     expect(result).toContain("## Required Output");
     expect(result).toContain("## Learning Review (required end-of-run step)");
+    expect(result).toContain("at least one action-type tag");
     expect(result).toContain("foreman learnings search foo --repo shared");
     expect(result).toContain("including fetching and inspecting any images attached to the initial task");
     expect(result).toContain("If execution completes with code changes, return a PR review mutation");
@@ -276,6 +277,8 @@ describe("prompt rendering", () => {
     expect(result).toContain(renderAgentResultSchemaHelp("execution").trim());
     expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action execution`);
     expect(result).not.toContain("--help");
+    // Learning self-checks must not leak into recovery prompts (no learning-policy here).
+    expect(result).not.toContain("at least one action-type tag");
     expect(result).not.toContain("{{context:");
     expect(result).not.toContain("{{fragment:");
     expect(result).not.toContain("{{session:");
@@ -503,6 +506,7 @@ describe("prompt rendering", () => {
     // continuation omits the PR-creation *instruction* rather than the bare schema token.
     expect(continuationPrompt).not.toContain("Use `create_pull_request` whenever");
     expect(continuationPrompt).not.toContain("Allowed learning mutation types");
+    expect(continuationPrompt).not.toContain("at least one action-type tag");
     expect(continuationPrompt).not.toContain("## Latest Review Activity");
     expect(continuationPrompt).not.toContain("Please tighten this up.");
     expect(continuationPrompt).not.toContain("Earlier discussion that should stay historical.");
