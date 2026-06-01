@@ -88,9 +88,7 @@ export const opencodeRunnerSchema = z.object({
   type: z.literal("opencode").default("opencode"),
   model: z.string().min(1).default("openai/gpt-5.5"),
   variant: z.string().min(1).default("high"),
-  // Optional variant used only for continuation dispatches (review/reviewer
-  // follow-ups that resume a live runner session). Omit to reuse `variant` for
-  // every dispatch.
+  // Optional variant for continuation dispatches; omit to reuse `variant`.
   continuationVariant: z.string().min(1).optional(),
   timeoutMs: z.number().int().positive().default(3_600_000),
 });
@@ -99,11 +97,8 @@ export const claudeRunnerSchema = z.object({
   type: z.literal("claude"),
   model: z.string().min(1).default("claude-opus-4-8"),
   effort: z.preprocess(coerceToKnown(CLAUDE_EFFORT_VALUES), z.enum(CLAUDE_EFFORT_VALUES).default("high")),
-  // Optional effort used only for continuation dispatches (review/reviewer
-  // follow-ups that frequently return no_action_needed or a single reply).
-  // Omit to reuse `effort`. Unlike `effort`, this is a brand-new knob with no
-  // stale-config burden, so unknown values are rejected outright rather than
-  // coerced — mirroring the optional `maxBudgetUsd` guard below.
+  // Optional effort for continuation dispatches; omit to reuse `effort`.
+  // Unknown values are rejected, not coerced like `effort`.
   continuationEffort: z.enum(CLAUDE_EFFORT_VALUES).optional(),
   timeoutMs: z.number().int().positive().default(3_600_000),
   // Optional per-invocation USD budget cap forwarded to claude as
@@ -117,8 +112,7 @@ export const codexRunnerSchema = z.object({
   type: z.literal("codex"),
   model: z.string().min(1).default("gpt-5.5"),
   effort: z.preprocess(coerceToKnown(CODEX_EFFORT_VALUES), z.enum(CODEX_EFFORT_VALUES).default("high")),
-  // Optional effort used only for continuation dispatches; see the claude
-  // schema above for the rationale. Omit to reuse `effort`.
+  // Optional effort for continuation dispatches; omit to reuse `effort`.
   continuationEffort: z.enum(CODEX_EFFORT_VALUES).optional(),
   timeoutMs: z.number().int().positive().default(3_600_000),
 });
@@ -397,14 +391,9 @@ export const runnerTuningValue = (runner: WorkspaceRunnerConfig): string => {
   return runner.effort;
 };
 
-// Swap in the provider's optional continuation tuning knob when a dispatch
-// continues an existing runner session. Continuations (review/reviewer
-// follow-ups) frequently return no_action_needed or a single-thread reply, so
-// a lighter effort/variant trims spend without touching first-pass behavior.
-// When the knob is unset, or the dispatch is not a continuation, the base
-// effort/variant is returned unchanged. Session keys still use the base value
-// (see `runnerTuningValue`), so swapping here does not disturb session
-// continuity.
+// For a continuation dispatch, swap in the provider's optional continuation
+// knob. Session keys still use the base tuning, so this does not disturb
+// session continuity.
 export const applyContinuationTuning = (runner: WorkspaceRunnerConfig, continuation: boolean): WorkspaceRunnerConfig => {
   if (!continuation) {
     return runner;
@@ -414,9 +403,7 @@ export const applyContinuationTuning = (runner: WorkspaceRunnerConfig, continuat
     return runner.continuationVariant === undefined ? runner : { ...runner, variant: runner.continuationVariant };
   }
 
-  // claude and codex both carry continuation tuning on `continuationEffort`;
-  // they are handled in separate branches so TypeScript keeps each provider's
-  // `effort` enum narrowed to its own value set.
+  // claude and codex stay separate so TS narrows each provider's `effort` enum.
   if (runner.type === "claude") {
     return runner.continuationEffort === undefined ? runner : { ...runner, effort: runner.continuationEffort };
   }
