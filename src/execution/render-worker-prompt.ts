@@ -2,8 +2,10 @@ import path from "node:path";
 
 import { z } from "zod";
 
-import { resolveTaskPullRequest, resolveTaskTargetRef, type RepoRef, type ReviewContext, type Task, type TaskTargetRef } from "../domain/index.js";
+import { resolveTaskPullRequest, resolveTaskTargetRef, type RepoRef, type ReviewContext, type Task, type TaskTarget, type TaskTargetRef } from "../domain/index.js";
+import { isForemanError } from "../lib/errors.js";
 import { jsonSection, renderPromptTemplate, textSection, type WorkerPromptTemplateName } from "../prompts/template-renderer.js";
+import type { ForemanRepos } from "../repos/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import { readWorkspacePlan, resolveDeploymentInstructions } from "../workspace/deployment.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
@@ -176,6 +178,62 @@ const renderPullRequestReference = (input: {
   pullRequestReference?: WorkerPromptPullRequestReference;
 }): string => jsonSection("Pull Request Reference", resolvePullRequestReferenceContext(input));
 
+const priorCheckpointPlaceholder = "No prior checkpoint recorded.";
+
+const resolvePriorPassSummary = (foremanRepos: ForemanRepos, sourceAttemptId: string): string => {
+  try {
+    const summary = foremanRepos.attempts.getAttempt(sourceAttemptId).summary.trim();
+    return summary.length > 0 ? summary : "(prior pass recorded no summary)";
+  } catch (error) {
+    if (isForemanError(error) && error.code === "attempt_not_found") {
+      return "(prior pass summary unavailable)";
+    }
+    throw error;
+  }
+};
+
+const resolvePriorCheckpointContext = (input: {
+  action: WorkerPromptTemplateName;
+  continuation: boolean | undefined;
+  taskTargetId: string | null;
+  foremanRepos: ForemanRepos | undefined;
+}): Record<string, unknown> | null => {
+  if (input.continuation !== true || !input.foremanRepos || !input.taskTargetId) {
+    return null;
+  }
+
+  const record =
+    input.action === "review"
+      ? input.foremanRepos.reviewCheckpoints.getReviewCheckpoint(input.taskTargetId)
+      : input.action === "reviewer"
+        ? input.foremanRepos.reviewerCheckpoints.getReviewerCheckpoint(input.taskTargetId)
+        : null;
+  if (!record) {
+    return null;
+  }
+
+  return {
+    priorPassSummary: resolvePriorPassSummary(input.foremanRepos, record.sourceAttemptId),
+    headSha: record.headSha,
+    latestReviewSummaryId: record.latestReviewSummaryId,
+    latestConversationCommentId: record.latestConversationCommentId,
+    reviewThreadsFingerprint: record.reviewThreadsFingerprint,
+    checksFingerprint: record.checksFingerprint,
+    mergeState: record.mergeState,
+    recordedAt: record.recordedAt,
+  };
+};
+
+const renderPriorCheckpoint = (input: {
+  action: WorkerPromptTemplateName;
+  continuation: boolean | undefined;
+  taskTargetId: string | null;
+  foremanRepos: ForemanRepos | undefined;
+}): string => {
+  const checkpoint = resolvePriorCheckpointContext(input);
+  return checkpoint ? jsonSection("Prior Checkpoint", checkpoint) : textSection("Prior Checkpoint", priorCheckpointPlaceholder);
+};
+
 const renderWorkspacePlan = async (paths: WorkspacePaths): Promise<string> => {
   const plan = await readWorkspacePlan(paths);
   return textSection("Workspace Plan", plan || `No plan.md was found at ${paths.planPath}.`);
@@ -218,12 +276,13 @@ export const renderWorkerPrompt = async (input: {
   paths: WorkspacePaths;
   task: Task;
   repo: RepoRef;
-  taskTarget?: TaskTargetRef;
+  taskTarget?: TaskTarget;
   worktreePath: string;
   baseBranch: string;
   reviewContext?: ReviewContext;
   pullRequestReference?: WorkerPromptPullRequestReference;
   deploymentInstructionBody?: string;
+  foremanRepos?: ForemanRepos;
   gitState?: {
     worktreeHeadSha: string | null;
     reviewHeadSha: string | null;
@@ -252,6 +311,12 @@ export const renderWorkerPrompt = async (input: {
       }),
       "git-state": renderGitStateContext(input),
       "pull-request": renderPullRequestReference(input),
+      "prior-checkpoint": renderPriorCheckpoint({
+        action: input.action,
+        continuation: input.continuation,
+        taskTargetId: input.taskTarget?.id ?? null,
+        foremanRepos: input.foremanRepos,
+      }),
       "workspace-plan": await renderWorkspacePlan(input.paths),
       "deployment-instructions": await renderDeploymentInstructions(input.paths, input.deploymentInstructionBody),
       "result-schema": renderAgentResultSchemaHelp(resultSchemaAction).trim(),

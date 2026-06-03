@@ -4,7 +4,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { z } from "zod";
 
 import { createDefaultWorkspaceConfig } from "../workspace/config.js";
-import type { ReviewContext, Task } from "../domain/index.js";
+import { priorityToRank, type ReviewContext, type Task } from "../domain/index.js";
 import { renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
 import {
   renderAgentResultSchemaHelp,
@@ -13,9 +13,11 @@ import {
   type WorkerResultAction,
 } from "../execution/worker-result.js";
 import { renderPlanPrompt } from "../planning/render-plan-prompt.js";
-import { createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
+import type { ForemanRepos } from "../repos/index.js";
+import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
 
 const cleanupDirs: string[] = [];
+const cleanupDbs: Array<{ close(): void }> = [];
 const projectRoot = testProjectRoot;
 
 // The exact JSON schema the stdin `agent-result validate` step enforces for an action.
@@ -25,6 +27,7 @@ const validatorJsonSchema = (action: WorkerResultAction): string =>
   JSON.stringify(z.toJSONSchema(workerResultSchema.safeExtend({ action: z.literal(action) })), null, 2);
 
 afterEach(async () => {
+  cleanupDbs.splice(0).forEach((db) => db.close());
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -119,6 +122,59 @@ const sampleReviewContext: ReviewContext = {
   ],
   failingChecks: [{ name: "test", state: "failure" }],
   pendingChecks: [{ name: "lint", state: "pending" }],
+};
+
+const seedTaskTarget = (db: ForemanRepos, task: Task, repoKey: string) => {
+  db.taskMirror.saveTasks([task]);
+  const target = db.taskMirror.getTaskTarget(task.id, repoKey);
+  if (!target) {
+    throw new Error(`expected a seeded task target for ${task.id}/${repoKey}`);
+  }
+  return target;
+};
+
+const seedContinuationCheckpoint = (
+  db: ForemanRepos,
+  options: { action: "review" | "reviewer"; repoKey: string; task: Task; summary: string },
+) => {
+  db.workers.ensureWorkerSlots(1);
+  const target = seedTaskTarget(db, options.task, options.repoKey);
+  const job = db.jobs.createJob({
+    taskId: options.task.id,
+    taskTargetId: target.id,
+    taskProvider: options.task.provider,
+    action: options.action,
+    priorityRank: priorityToRank(options.task.priority),
+    repoKey: options.repoKey,
+    baseBranch: "main",
+    dedupeKey: `${options.task.id}:${options.repoKey}:${options.action}`,
+    selectionReason: "test",
+  });
+  const worker = db.workers.listWorkers()[0];
+  if (!worker) {
+    throw new Error("expected a worker slot");
+  }
+  const attempt = db.attempts.createAttempt({
+    jobId: job.id,
+    workerId: worker.id,
+    runnerName: "claude",
+    runnerModel: "claude",
+    runnerVariant: "default",
+  });
+  db.attempts.finalizeAttempt(attempt.id, "completed", { summary: options.summary });
+  const checkpointInput = {
+    taskId: options.task.id,
+    taskTargetId: target.id,
+    prUrl: sampleReviewContext.pullRequestUrl,
+    reviewContext: sampleReviewContext,
+    sourceAttemptId: attempt.id,
+  };
+  if (options.action === "review") {
+    db.reviewCheckpoints.upsertReviewCheckpoint(checkpointInput);
+  } else {
+    db.reviewerCheckpoints.upsertReviewerCheckpoint(checkpointInput);
+  }
+  return { target, attempt };
 };
 
 describe("prompt rendering", () => {
@@ -436,8 +492,13 @@ describe("prompt rendering", () => {
     expect(continuationPrompt).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action review`);
     expect(continuationPrompt).not.toContain("--help");
     expect(continuationPrompt).not.toContain("Do not assume every actionable review item requires a code change.");
-    expect(continuationPrompt).not.toContain("## Selected Task");
-    expect(continuationPrompt).not.toContain("## Task Provider Context");
+    expect(continuationPrompt).toContain("## Selected Task");
+    expect(continuationPrompt).toContain("## Task Provider Context");
+    expect(continuationPrompt).toContain("## Repository Context");
+    expect(continuationPrompt).toContain("## Pull Request Reference");
+    expect(continuationPrompt).toContain("## Prior Checkpoint");
+    expect(continuationPrompt).toContain("No prior checkpoint recorded.");
+    expect(continuationPrompt).not.toContain("{{context:prior-checkpoint}}");
     // The inlined schema lists `create_pull_request` as a mutation enum, so assert the
     // continuation omits the PR-creation *instruction* rather than the bare schema token.
     expect(continuationPrompt).not.toContain("Use `create_pull_request` whenever");
@@ -486,7 +547,13 @@ describe("prompt rendering", () => {
     // `submit_pull_request_review` is now in the inlined schema enum, so assert the
     // continuation omits the feedback-submission *instruction* rather than the bare token.
     expect(reviewerContinuationPrompt).not.toContain("use a `submit_pull_request_review` mutation");
-    expect(reviewerContinuationPrompt).not.toContain("## Selected Task");
+    expect(reviewerContinuationPrompt).toContain("## Selected Task");
+    expect(reviewerContinuationPrompt).toContain("## Task Provider Context");
+    expect(reviewerContinuationPrompt).toContain("## Repository Context");
+    expect(reviewerContinuationPrompt).toContain("## Pull Request Reference");
+    expect(reviewerContinuationPrompt).toContain("## Prior Checkpoint");
+    expect(reviewerContinuationPrompt).toContain("No prior checkpoint recorded.");
+    expect(reviewerContinuationPrompt).not.toContain("{{context:prior-checkpoint}}");
     expect(reviewerContinuationPrompt).not.toContain("## Latest Review Activity");
 
     const retryPrompt = await renderWorkerPrompt({
@@ -624,5 +691,221 @@ describe("prompt rendering", () => {
 
     expect(result).toContain("Scout-selected instructions.");
     expect(result).not.toContain("New instructions from disk.");
+  });
+
+  test("threads the prior review checkpoint into a review continuation prompt", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-review-continuation-checkpoint-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(`${workspaceRoot}/foreman.db`, projectRoot);
+    cleanupDbs.push(db);
+
+    const reviewTask: Task = { ...sampleTask, state: "in_review", providerState: "in_review" };
+    const { target } = seedContinuationCheckpoint(db, {
+      action: "review",
+      repoKey: "repo-a",
+      task: reviewTask,
+      summary: "Resolved the failing lint check and replied to the open thread.",
+    });
+
+    const prompt = await renderWorkerPrompt({
+      action: "review",
+      config,
+      paths,
+      task: reviewTask,
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      taskTarget: target,
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+      foremanRepos: db,
+      gitState: {
+        worktreeHeadSha: "current-head",
+        reviewHeadSha: "abc123",
+        baseBranch: "main",
+        previousSessionHeadSha: "previous-head",
+      },
+      continuation: true,
+    });
+
+    expect(prompt).toContain("## Selected Task");
+    expect(prompt).toContain("## Pull Request Reference");
+    expect(prompt).toContain("## Repository Context");
+    expect(prompt).toContain("## Current Git State");
+    expect(prompt).toContain("## Prior Checkpoint");
+    expect(prompt).toContain("priorPassSummary");
+    expect(prompt).toContain("Resolved the failing lint check and replied to the open thread.");
+    // Pin the structured fingerprint fields the continuation agent SHA-compares against,
+    // so a rename/drop of any key in resolvePriorCheckpointContext fails the test.
+    expect(prompt).toContain('"headSha": "abc123"');
+    expect(prompt).toContain('"mergeState": "clean"');
+    expect(prompt).toContain('"latestReviewSummaryId"');
+    expect(prompt).toContain('"latestConversationCommentId"');
+    expect(prompt).toContain('"reviewThreadsFingerprint"');
+    expect(prompt).toContain('"checksFingerprint"');
+    expect(prompt).toContain('"recordedAt"');
+    expect(prompt).not.toContain("No prior checkpoint recorded.");
+    expect(prompt).not.toContain("{{context:prior-checkpoint}}");
+  });
+
+  test("threads the prior reviewer checkpoint into a reviewer continuation prompt", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-reviewer-continuation-checkpoint-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(`${workspaceRoot}/foreman.db`, projectRoot);
+    cleanupDbs.push(db);
+
+    const reviewerTask: Task = { ...sampleTask, state: "in_review", providerState: "in_review" };
+    const { target } = seedContinuationCheckpoint(db, {
+      action: "reviewer",
+      repoKey: "repo-a",
+      task: reviewerTask,
+      summary: "Reviewed the new diff; flagged one missing test in a thread.",
+    });
+
+    const prompt = await renderWorkerPrompt({
+      action: "reviewer",
+      config,
+      paths,
+      task: reviewerTask,
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      taskTarget: target,
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+      foremanRepos: db,
+      gitState: {
+        worktreeHeadSha: "current-head",
+        reviewHeadSha: "abc123",
+        baseBranch: "main",
+        previousSessionHeadSha: "previous-reviewer-head",
+      },
+      continuation: true,
+    });
+
+    expect(prompt).toContain("## Selected Task");
+    expect(prompt).toContain("## Pull Request Reference");
+    expect(prompt).toContain("## Repository Context");
+    expect(prompt).toContain("## Current Git State");
+    expect(prompt).toContain("## Prior Checkpoint");
+    expect(prompt).toContain("priorPassSummary");
+    expect(prompt).toContain("Reviewed the new diff; flagged one missing test in a thread.");
+    // Same structured-field pinning as the review-continuation test (reviewer checkpoint path).
+    expect(prompt).toContain('"headSha": "abc123"');
+    expect(prompt).toContain('"mergeState": "clean"');
+    expect(prompt).toContain('"latestReviewSummaryId"');
+    expect(prompt).toContain('"latestConversationCommentId"');
+    expect(prompt).toContain('"reviewThreadsFingerprint"');
+    expect(prompt).toContain('"checksFingerprint"');
+    expect(prompt).toContain('"recordedAt"');
+    expect(prompt).not.toContain("No prior checkpoint recorded.");
+    expect(prompt).not.toContain("{{context:prior-checkpoint}}");
+  });
+
+  test("renders a placeholder Prior Checkpoint block when no checkpoint exists", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-continuation-no-checkpoint-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(`${workspaceRoot}/foreman.db`, projectRoot);
+    cleanupDbs.push(db);
+
+    const reviewTask: Task = { ...sampleTask, state: "in_review", providerState: "in_review" };
+    const target = seedTaskTarget(db, reviewTask, "repo-a");
+
+    const prompt = await renderWorkerPrompt({
+      action: "review",
+      config,
+      paths,
+      task: reviewTask,
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      taskTarget: target,
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+      foremanRepos: db,
+      continuation: true,
+    });
+
+    expect(prompt).toContain("## Prior Checkpoint");
+    expect(prompt).toContain("No prior checkpoint recorded.");
+    expect(prompt).not.toContain("{{context:prior-checkpoint}}");
+    expect(prompt).not.toContain("priorPassSummary");
+  });
+
+  test("renders the no-summary fallback when the prior attempt summary is blank", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-continuation-blank-summary-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(`${workspaceRoot}/foreman.db`, projectRoot);
+    cleanupDbs.push(db);
+
+    const reviewTask: Task = { ...sampleTask, state: "in_review", providerState: "in_review" };
+    const { target } = seedContinuationCheckpoint(db, {
+      action: "review",
+      repoKey: "repo-a",
+      task: reviewTask,
+      summary: "   ",
+    });
+
+    const prompt = await renderWorkerPrompt({
+      action: "review",
+      config,
+      paths,
+      task: reviewTask,
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      taskTarget: target,
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+      foremanRepos: db,
+      continuation: true,
+    });
+
+    expect(prompt).toContain("## Prior Checkpoint");
+    expect(prompt).toContain("(prior pass recorded no summary)");
+    expect(prompt).not.toContain("No prior checkpoint recorded.");
+  });
+
+  test("renders the unavailable fallback when the prior attempt is missing", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-continuation-missing-attempt-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(`${workspaceRoot}/foreman.db`, projectRoot);
+    cleanupDbs.push(db);
+
+    const reviewTask: Task = { ...sampleTask, state: "in_review", providerState: "in_review" };
+    const { target, attempt } = seedContinuationCheckpoint(db, {
+      action: "review",
+      repoKey: "repo-a",
+      task: reviewTask,
+      summary: "Resolved the failing lint check.",
+    });
+    // The source_attempt_id FK is ON DELETE SET NULL, so dropping the attempt nulls the
+    // checkpoint column; the read maps it to a non-existent id and exercises the
+    // attempt_not_found fallback in resolvePriorPassSummary.
+    db.database.sqlite.prepare("DELETE FROM execution_attempt WHERE id = ?").run(attempt.id);
+
+    const prompt = await renderWorkerPrompt({
+      action: "review",
+      config,
+      paths,
+      task: reviewTask,
+      repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+      taskTarget: target,
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+      reviewContext: sampleReviewContext,
+      foremanRepos: db,
+      continuation: true,
+    });
+
+    expect(prompt).toContain("## Prior Checkpoint");
+    expect(prompt).toContain("(prior pass summary unavailable)");
+    expect(prompt).not.toContain("No prior checkpoint recorded.");
   });
 });
