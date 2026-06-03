@@ -7,7 +7,7 @@ import { jsonSection, renderPromptTemplate, textSection, type WorkerPromptTempla
 import type { WorkspaceConfig } from "../workspace/config.js";
 import { readWorkspacePlan, resolveDeploymentInstructions } from "../workspace/deployment.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
-import type { WorkerResultAction } from "./worker-result.js";
+import { renderAgentResultSchemaHelp, workerResultActionValues, type WorkerResultAction } from "./worker-result.js";
 
 const parsePullRequestNumber = (url: string | null): number | null => {
   if (!url) {
@@ -234,6 +234,9 @@ export const renderWorkerPrompt = async (input: {
 }): Promise<string> => {
   const selectedTarget = resolveSelectedTarget(input.task, input.repo, input.taskTarget);
   const template = selectWorkerPromptTemplate(input);
+  const resultSchemaAction = workerResultActionValues.includes(input.action as WorkerResultAction)
+    ? (input.action as WorkerResultAction)
+    : undefined;
 
   return renderPromptTemplate({
     paths: input.paths,
@@ -251,6 +254,7 @@ export const renderWorkerPrompt = async (input: {
       "pull-request": renderPullRequestReference(input),
       "workspace-plan": await renderWorkspacePlan(input.paths),
       "deployment-instructions": await renderDeploymentInstructions(input.paths, input.deploymentInstructionBody),
+      "result-schema": renderAgentResultSchemaHelp(resultSchemaAction).trim(),
     },
     fragmentAliases: {
       "task-system-worker": input.config.taskSystem.type === "linear" ? "task-system-linear-worker" : "task-system-file-worker",
@@ -278,6 +282,7 @@ export const renderWorkerResultRecoveryPrompt = async (input: {
         stdoutArtifactPath: input.stdoutArtifactPath,
       }),
       "invalid-output": textSection("Invalid Stdout Excerpt", truncateWorkerResultRecoveryOutput(input.invalidStdout.trim() || "<empty>")),
+      "result-schema": renderAgentResultSchemaHelp(input.action).trim(),
     },
     properties: {
       foreman: { cliPath: path.join(input.paths.projectRoot, "dist/cli.js") },
