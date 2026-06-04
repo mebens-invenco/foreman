@@ -21,12 +21,13 @@ Graders come in two kinds, both run on the **model output**:
 - **deterministic** — schema valid, exactly one matching action tag, required
   `**Rule:** / **When to apply:**` content structure. Cheap, exact; they cover
   what the loose worker-result Zod schema lets through.
-- **LLM-as-judge** (`quality`) — scores what structure can't see: is the
-  learning a reusable rule, or just a restatement of the task? `--no-judge`
-  disables it.
+- **LLM-as-judge** (`quality`, **advisory**) — a binary yes/no on what structure
+  can't see: is the learning a reusable rule, or just a restatement of the task?
+  Reported but does **not** gate a sample's pass until it is calibrated against
+  human labels (TPR/TNR). `--no-judge` disables it.
 
 Non-determinism is handled by sampling each case `--samples` times and
-reporting the **pass-rate**, not a single pass/fail.
+reporting the **pass-rate** per dimension, not a single pass/fail.
 
 ## Running
 

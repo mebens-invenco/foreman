@@ -30,8 +30,11 @@ export type EvalCase = {
 export type GraderResult = {
   dimension: string;
   pass: boolean;
-  /** Optional numeric score (e.g. 1-5 for the judge). `pass` is the gate. */
-  score?: number;
+  /**
+   * Set by the runner from the grader's `advisory` flag: an advisory dimension
+   * is reported but does not gate the sample's pass.
+   */
+  advisory?: boolean;
   detail: string;
 };
 
@@ -50,6 +53,12 @@ export type GradeContext = {
 
 export type Grader = {
   name: string;
+  /**
+   * Advisory graders are reported but do NOT gate a sample's pass. The judge is
+   * advisory until it's calibrated against human labels (TPR/TNR); an
+   * uncalibrated judge must not fail a sample on its own.
+   */
+  advisory?: boolean;
   grade(ctx: GradeContext): GraderResult | Promise<GraderResult>;
 };
 
@@ -57,7 +66,7 @@ export type SampleResult = {
   sampleIndex: number;
   parsed: boolean;
   graderResults: GraderResult[];
-  /** A sample passes only when every grader passes. */
+  /** A sample passes only when every non-advisory grader passes. */
   pass: boolean;
 };
 

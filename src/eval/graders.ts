@@ -109,12 +109,15 @@ export const structureGrader: Grader = {
   },
 };
 
+// Binary verdict, not a 1-5 Likert: per current eval practice (Hamel/Shreya),
+// binary judgments label more consistently across runs than Likert points whose
+// boundaries drift between annotators and samples. The judge is also ADVISORY
+// until calibrated against human labels (TPR/TNR) — see judgeGrader.advisory —
+// so it never fails a sample on its own.
 const judgeVerdictSchema = z.object({
-  score: z.number().min(1).max(5),
+  verdict: z.enum(["yes", "no"]),
   rationale: z.string().min(1),
 });
-
-const JUDGE_PASS_THRESHOLD = 3;
 
 const parseJudgeVerdict = (stdout: string): z.infer<typeof judgeVerdictSchema> | null => {
   const open = "<judge>";
@@ -134,13 +137,9 @@ const parseJudgeVerdict = (stdout: string): z.infer<typeof judgeVerdictSchema> |
 const buildJudgePrompt = (add: LearningAdd, syntheticSession: string): string =>
   [
     "You are grading the QUALITY of a learning an agent recorded at the end of a work session.",
-    "A high-quality learning is a non-obvious, reusable pattern or decision rule that will help a FUTURE agent on a DIFFERENT task. A low-quality learning just restates what this one task did, or is too obvious/one-off to be worth keeping.",
-    "",
-    "Score 1-5 on the combination of:",
-    "- reusable & non-obvious (not a restatement of this task)",
-    "- phrased as a general pattern or decision rule (not a timeline of one task)",
-    "- appropriately scoped",
-    "5 = excellent reusable rule; 3 = borderline but defensible; 1 = task restatement or not reusable.",
+    "Answer one yes/no question about the learning below.",
+    "Is it a non-obvious, reusable pattern or decision rule that would help a FUTURE agent on a DIFFERENT task — as opposed to a restatement of this one task, or something too obvious or one-off to be worth keeping?",
+    'Answer "yes" only if it is reusable AND non-obvious AND phrased as a general pattern/rule rather than a timeline of this one task. Otherwise answer "no".',
     "",
     "The session that produced it:",
     syntheticSession.trim(),
@@ -153,15 +152,19 @@ const buildJudgePrompt = (add: LearningAdd, syntheticSession: string): string =>
     add.content,
     "",
     'Reply with ONLY this block and nothing else:',
-    '<judge>{"score": <1-5>, "rationale": "<one sentence>"}</judge>',
+    '<judge>{"verdict": "yes" | "no", "rationale": "<one sentence>"}</judge>',
   ].join("\n");
 
 /**
- * LLM-as-judge quality grader. Runs only for cases that expect a learning, and
- * only when the harness injected a model call (`--no-judge` disables it).
+ * LLM-as-judge quality grader. ADVISORY: reported but does not gate a sample's
+ * pass, because an uncalibrated judge must not fail a sample on its own — it has
+ * no measured agreement (TPR/TNR) with human labels yet. Runs only for cases
+ * that expect a learning, and only when the harness injected a model call
+ * (`--no-judge` disables it).
  */
 export const judgeGrader: Grader = {
   name: "quality",
+  advisory: true,
   grade: async ({ evalCase, result, invokeModel }) => {
     if (evalCase.expect !== "learning") {
       return pass("quality", "n/a (no learning expected)");
@@ -182,12 +185,7 @@ export const judgeGrader: Grader = {
     if (!verdict) {
       return fail("quality", "could not parse a judge verdict from the judge model output");
     }
-    return {
-      dimension: "quality",
-      pass: verdict.score >= JUDGE_PASS_THRESHOLD,
-      score: verdict.score,
-      detail: verdict.rationale,
-    };
+    return verdict.verdict === "yes" ? pass("quality", verdict.rationale) : fail("quality", verdict.rationale);
   },
 };
 

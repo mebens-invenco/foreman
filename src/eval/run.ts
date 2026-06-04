@@ -130,8 +130,13 @@ const runCase = async (evalCase: EvalCase, graders: Grader[], config: WorkspaceC
       ...(parseError ? { parseError } : {}),
       ...(deps.invokeModel ? { invokeModel: deps.invokeModel } : {}),
     };
-    const graderResults = await Promise.all(graders.map((grader) => grader.grade(ctx)));
-    samples.push({ sampleIndex, parsed: result !== null, graderResults, pass: graderResults.every((entry) => entry.pass) });
+    const graded = await Promise.all(graders.map((grader) => grader.grade(ctx)));
+    // Carry each grader's advisory flag onto its result so the report can
+    // distinguish gating dimensions from advisory ones.
+    const graderResults = graded.map((entry, index) => (graders[index]?.advisory ? { ...entry, advisory: true } : entry));
+    // Advisory graders (the uncalibrated judge) are reported but do not gate.
+    const pass = graders.every((grader, index) => grader.advisory === true || (graderResults[index]?.pass ?? false));
+    samples.push({ sampleIndex, parsed: result !== null, graderResults, pass });
   }
 
   const passRate = samples.length > 0 ? samples.filter((sample) => sample.pass).length / samples.length : 0;
@@ -187,14 +192,20 @@ export const formatEvalReport = (report: EvalReport): string => {
   lines.push("");
 
   for (const caseResult of report.cases) {
+    const n = caseResult.samples.length;
     lines.push(`• ${caseResult.caseId} — ${pct(caseResult.passRate)}  (${caseResult.description})`);
-    // Show the dimension breakdown from the first failing sample, else the first sample.
-    const sample = caseResult.samples.find((entry) => !entry.pass) ?? caseResult.samples[0];
-    if (sample) {
-      for (const grader of sample.graderResults) {
-        const score = grader.score !== undefined ? ` [${grader.score}/5]` : "";
-        lines.push(`    ${grader.pass ? "✓" : "✗"} ${grader.dimension}${score}: ${grader.detail}`);
-      }
+    // Per-dimension pass-rate across ALL samples, so grader/judge variance is
+    // visible rather than hidden behind a single sample's breakdown. Dimension
+    // order follows the first sample.
+    const dimensions = caseResult.samples[0]?.graderResults.map((entry) => entry.dimension) ?? [];
+    for (const dimension of dimensions) {
+      const results = caseResult.samples.map((sample) => sample.graderResults.find((entry) => entry.dimension === dimension));
+      const passes = results.filter((entry) => entry?.pass).length;
+      const advisory = results[0]?.advisory ? " (advisory)" : "";
+      const marker = passes === n ? "✓" : "✗";
+      // Surface one representative detail: the first failing sample's, else the first.
+      const detail = (results.find((entry) => entry && !entry.pass) ?? results[0])?.detail ?? "";
+      lines.push(`    ${marker} ${dimension}${advisory}: ${pct(n > 0 ? passes / n : 0)} (${passes}/${n})  ${detail}`);
     }
   }
 
