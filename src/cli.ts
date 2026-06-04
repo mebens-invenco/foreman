@@ -34,6 +34,9 @@ import { createSelfRebootScheduler, runRebootSidecar } from "./system/reboot.js"
 import { createTaskSystem } from "./tasking/index.js";
 import { discoverGitRepos } from "./workspace/git-repo-discovery.js";
 import { initializeWorkspace, loadWorkspace } from "./workspace/index.js";
+import { evalPromptNames } from "./eval/registry.js";
+import { formatEvalReport, runEval } from "./eval/run.js";
+import { isRunnerProvider, runnerProviders, type RunnerProvider } from "./domain/index.js";
 import type { LoggerLevelName } from "./logger.js";
 
 const program = new Command();
@@ -417,6 +420,60 @@ agentResult
       process.exitCode = 1;
     }
   });
+
+const parseRunnerProvider = (value: string): RunnerProvider => {
+  if (!isRunnerProvider(value)) {
+    throw new InvalidArgumentError(`Runner must be one of: ${runnerProviders.join(", ")}`);
+  }
+  return value;
+};
+
+program
+  .command("eval")
+  .description("Run a behavioral eval for a prompt against a live runner (opt-in; costs tokens, non-deterministic)")
+  .argument("<prompt>", `Prompt to evaluate (one of: ${evalPromptNames.join(", ")})`)
+  .option("--samples <count>", "Samples per case", parsePositiveInteger, 3)
+  .option("--runner <provider>", `Runner provider (${runnerProviders.join("|")}); defaults to the workspace default`, parseRunnerProvider)
+  .option("--model <model>", "Override the runner model")
+  .option("--case <id>", "Run only the case with this id")
+  .option("--timeout <ms>", "Per-sample timeout in milliseconds", parsePositiveInteger, 300_000)
+  .option("--no-judge", "Skip the LLM-as-judge quality grader (deterministic graders only)")
+  .option("--show-output", "Print each sample's raw runner stdout to stderr (debugging)")
+  .option("--json", "Emit the JSON report instead of the human-readable summary")
+  .action(
+    async (
+      prompt: string,
+      options: { samples: number; runner?: RunnerProvider; model?: string; case?: string; timeout: number; judge: boolean; showOutput?: boolean; json?: boolean },
+    ) => {
+      if (!evalPromptNames.includes(prompt)) {
+        process.stderr.write(`Unknown prompt "${prompt}". Known: ${evalPromptNames.join(", ")}\n`);
+        process.exitCode = 1;
+        return;
+      }
+
+      try {
+        const report = await runEval({
+          prompt,
+          samplesPerCase: options.samples,
+          timeoutMs: options.timeout,
+          judge: options.judge,
+          ...(options.runner ? { runner: options.runner } : {}),
+          ...(options.model ? { model: options.model } : {}),
+          ...(options.case ? { caseId: options.case } : {}),
+          ...(options.showOutput ? { showOutput: true } : {}),
+        });
+
+        if (options.json) {
+          writeJson(report);
+        } else {
+          process.stdout.write(`${formatEvalReport(report)}\n`);
+        }
+      } catch (error) {
+        process.stderr.write(`eval failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    },
+  );
 
 const scheduler = program.command("scheduler");
 for (const action of ["start", "pause", "stop"] as const) {

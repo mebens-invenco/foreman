@@ -26,3 +26,8 @@ Use `tags` to carry signal for retrieval and future promotion:
 - The action that surfaced it: one of `execution`, `consolidation`, `review`, `reviewer`, `retry`, `deployment`.
 - A pain signal when relevant: e.g. `review-blocker`, `ci-fail`, `deploy-fail`, `high-impact`.
 - `skill-candidate` when the learning is generalizable enough to become a workspace skill.
+
+Before returning, verify your learning review is complete:
+- `learningMutations` was evaluated, not silently defaulted to `[]`.
+- Each `add` mutation's `content` includes a **Rule:** line and a **When to apply:** line.
+- Each `add` mutation's `tags` includes at least one action-type tag (`execution` / `consolidation` / `review` / `reviewer` / `retry` / `deployment`).
