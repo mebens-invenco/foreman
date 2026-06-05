@@ -15,7 +15,7 @@ export const isBlockedOrdinaryWorkPendingUnblock = (task: Task, latestJob: JobRe
 
   const blockedTaskUpdatedAt = latestJob.selectionContext[blockedTaskUpdatedAtContextKey];
   if (typeof blockedTaskUpdatedAt !== "string") {
-    return true;
+    return false;
   }
 
   const taskUpdatedAtTime = new Date(task.updatedAt).getTime();

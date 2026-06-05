@@ -1033,6 +1033,46 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test("resumes blocked jobs without worker-declared blocked markers", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-execution-missing-marker-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const blockedTask = task({
+      id: "TASK-BLOCKED-EXECUTION-MISSING-MARKER",
+      title: "Blocked execution without worker marker",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    seedBlockedOrdinaryJob(db, blockedTask, "execution");
+    const target = db.taskMirror.getTaskTarget(blockedTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    const seededJob = db.jobs.latestJobForTaskTarget(target!.id);
+    expect(seededJob).not.toBeNull();
+    db.jobs.updateJobSelectionContext(seededJob!.id, {});
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([blockedTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.task.id).toBe(blockedTask.id);
+    } finally {
+      db.close();
+    }
+  });
+
   test("resumes blocked jobs when the latest attempt is no longer blocked", async () => {
     const tempDir = await createTempDir("foreman-scout-blocked-execution-completed-attempt-");
     cleanupDirs.push(tempDir);
