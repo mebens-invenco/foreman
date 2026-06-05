@@ -7,6 +7,7 @@ import type { AttemptRecord, ForemanRepos, JobRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
+import { blockedTaskUpdatedAtContextKey } from "./blocked-ordinary-work.js";
 
 const consolidationLabels = (config: WorkspaceConfig): { remove: string[]; add: string[] } => {
   if (config.taskSystem.type === "linear") {
@@ -90,6 +91,14 @@ export class WorkerResultApplier {
           body: `${this.deps.config.workspace.agentPrefix}${blocker}`,
         });
         logger.warn("posted blocker comment", { blocker });
+      }
+      if (input.job.action === "execution" || input.job.action === "retry") {
+        const blockedTask = await this.deps.taskSystem.getTask(input.task.id);
+        this.deps.foremanRepos.jobs.updateJobSelectionContext(input.job.id, {
+          ...input.job.selectionContext,
+          [blockedTaskUpdatedAtContextKey]: blockedTask.updatedAt,
+        });
+        logger.info("saved blocked ordinary work checkpoint", { blockedTaskUpdatedAt: blockedTask.updatedAt });
       }
       if (input.job.action === "review" && pullRequestUrl) {
         await this.applyReviewMutations(workerResult.reviewMutations, pullRequestUrl, logger);

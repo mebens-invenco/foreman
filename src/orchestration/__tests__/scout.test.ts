@@ -6,6 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   priorityToRank,
   type ActionType,
+  type AttemptStatus,
   type RepoRef,
   type ResolvedPullRequest,
   type ReviewContext,
@@ -214,6 +215,7 @@ const seedBlockedOrdinaryJob = (
   db: Awaited<ReturnType<typeof createMigratedDb>>,
   blockedTask: Task,
   action: Extract<ActionType, "execution" | "retry">,
+  options: { attemptStatus?: AttemptStatus; blockedTaskUpdatedAt?: string } = {},
 ): void => {
   db.workers.ensureWorkerSlots(1);
   const worker = db.workers.listWorkers()[0];
@@ -232,6 +234,7 @@ const seedBlockedOrdinaryJob = (
     baseBranch: "main",
     dedupeKey: `${blockedTask.id}:${target!.repoKey}:${action}`,
     selectionReason: "test blocked ordinary work",
+    selectionContext: { blockedTaskUpdatedAt: options.blockedTaskUpdatedAt ?? blockedTask.updatedAt },
   });
   const attempt = db.attempts.createAttemptWithLeases({
     jobId: job.id,
@@ -243,7 +246,7 @@ const seedBlockedOrdinaryJob = (
     leases: [],
   });
   expect(attempt).not.toBeNull();
-  db.attempts.finalizeAttempt(attempt!.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
+  db.attempts.finalizeAttempt(attempt!.id, options.attemptStatus ?? "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
   db.jobs.updateJobStatus(job.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
 };
 
@@ -959,6 +962,107 @@ describe("runScoutSelection", () => {
       expect(unblocked.jobs).toHaveLength(1);
       expect(unblocked.jobs[0]?.action).toBe("execution");
       expect(unblocked.jobs[0]?.task.id).toBe(blockedTask.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps blocked execution targets suppressed when provider timestamps are ahead of the job clock", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-execution-clock-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const blockedTask = task({
+      id: "TASK-BLOCKED-EXECUTION-CLOCK",
+      title: "Blocked execution with provider clock ahead",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2999-01-01T00:00:00.000Z",
+    });
+    seedBlockedOrdinaryJob(db, blockedTask, "execution");
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([blockedTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps blocked execution targets suppressed when task timestamps are malformed", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-execution-malformed-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const blockedTask = task({
+      id: "TASK-BLOCKED-EXECUTION-MALFORMED",
+      title: "Blocked execution with malformed timestamp",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "not-a-date",
+    });
+    seedBlockedOrdinaryJob(db, blockedTask, "execution");
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([blockedTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("resumes blocked jobs when the latest attempt is no longer blocked", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-execution-completed-attempt-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const blockedTask = task({
+      id: "TASK-BLOCKED-JOB-COMPLETED-ATTEMPT",
+      title: "Blocked job with completed latest attempt",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    seedBlockedOrdinaryJob(db, blockedTask, "execution", { attemptStatus: "completed" });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([blockedTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.task.id).toBe(blockedTask.id);
     } finally {
       db.close();
     }

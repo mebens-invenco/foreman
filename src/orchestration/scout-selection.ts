@@ -25,6 +25,7 @@ import type { WorkspaceConfig } from "../workspace/config.js";
 import { resolveDeploymentInstructions, type DeploymentInstructions } from "../workspace/deployment.js";
 import { branchExistsOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
+import { isBlockedOrdinaryWorkPendingUnblock, type TargetProgressState } from "./blocked-ordinary-work.js";
 import { runStateTransitions } from "./state-transition.js";
 
 type Selection = {
@@ -38,8 +39,6 @@ type Selection = {
   selectionContext: Record<string, unknown>;
 };
 
-type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable" | "blocked";
-
 type TargetProgress = {
   latestJob: JobRecord | null;
   latestAttempt: AttemptRecord | null;
@@ -49,17 +48,6 @@ type TargetProgress = {
 
 const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
 const stopIntentPhrases = ["abandon", "do not continue", "do not retry"];
-
-const isBlockedOrdinaryWorkPendingUnblock = (task: Task, latestJob: JobRecord | null, latestAttempt: AttemptRecord | null): boolean => {
-  if (!latestJob || (latestJob.action !== "execution" && latestJob.action !== "retry") || latestJob.status !== "blocked") {
-    return false;
-  }
-  if (latestAttempt && latestAttempt.status !== "blocked") {
-    return false;
-  }
-
-  return new Date(task.updatedAt).getTime() <= new Date(latestJob.updatedAt).getTime();
-};
 
 const reviewPriorityReason = (context: ReviewContext): string | null => {
   if (actionableReviewThreads(context).length > 0) {

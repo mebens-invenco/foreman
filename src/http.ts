@@ -24,6 +24,7 @@ import type {
   TaskTargetStatus,
 } from "./domain/index.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
+import { isBlockedOrdinaryWorkPendingUnblock, type TargetProgressState } from "./orchestration/blocked-ordinary-work.js";
 import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
 import type { ReviewService } from "./review/index.js";
@@ -242,7 +243,6 @@ const settingsResponse = async (config: WorkspaceConfig, paths: WorkspacePaths) 
 const taskStates = ["ready", "in_progress", "in_review", "deployable", "done", "canceled"] as const satisfies readonly TaskState[];
 const attemptStatuses = ["running", "completed", "failed", "blocked", "canceled", "timed_out"] as const;
 const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
-type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable";
 
 type BuiltTaskTarget = {
   id: string;
@@ -333,16 +333,18 @@ const deriveTaskTargetStatus = (input: {
 
   if (!input.dependenciesSatisfied) {
     return "blocked";
-    }
+  }
 
-    switch (input.progressState) {
-      case "active":
-        return input.latestJob?.action === "review" || input.latestJob?.action === "reviewer" ? "in_review" : "in_progress";
+  switch (input.progressState) {
+    case "active":
+      return input.latestJob?.action === "review" || input.latestJob?.action === "reviewer" ? "in_review" : "in_progress";
     case "in_review":
       return "in_review";
     case "merged":
     case "completed":
       return "done";
+    case "blocked":
+      return "blocked";
     case "retryable":
       return "in_review";
     case "pending":
@@ -426,14 +428,16 @@ export const createHttpServer = (deps: HttpServerDeps) => {
               ? "in_review"
               : pullRequest?.state === "merged"
                 ? "merged"
-                : pullRequest?.state === "closed"
-                  ? "retryable"
-                  : latestJob &&
-                      (latestJob.action === "execution" || latestJob.action === "retry") &&
-                      latestJob.status === "completed" &&
-                      latestAttempt?.status === "completed"
-                    ? "completed"
-                    : "pending";
+                : isBlockedOrdinaryWorkPendingUnblock(targetTask, latestJob, latestAttempt)
+                  ? "blocked"
+                  : pullRequest?.state === "closed"
+                    ? "retryable"
+                    : latestJob &&
+                          (latestJob.action === "execution" || latestJob.action === "retry") &&
+                          latestJob.status === "completed" &&
+                          latestAttempt?.status === "completed"
+                      ? "completed"
+                      : "pending";
 
           return {
             id: target.id,

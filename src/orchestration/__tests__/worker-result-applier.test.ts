@@ -22,6 +22,7 @@ afterEach(async () => {
 class FakeTaskSystem implements TaskSystem {
   transitions: Array<{ taskId: string; toState: Task["state"] }> = [];
   comments: Array<{ taskId: string; body: string }> = [];
+  commentUpdatedAt: string | null = null;
 
   constructor(private readonly tasks: Task[]) {}
 
@@ -51,6 +52,10 @@ class FakeTaskSystem implements TaskSystem {
 
   async addComment(input: { taskId: string; body: string }): Promise<void> {
     this.comments.push(input);
+    const task = this.tasks.find((item) => item.id === input.taskId);
+    if (task && this.commentUpdatedAt) {
+      task.updatedAt = this.commentUpdatedAt;
+    }
   }
 
   async transition(input: { taskId: string; toState: Task["state"] }): Promise<void> {
@@ -235,6 +240,100 @@ describe("WorkerResultApplier review result mutations", () => {
         prUrl: pullRequest.pullRequestUrl,
         headSha: reviewContext.headSha,
         sourceAttemptId: attempt.id,
+      });
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("WorkerResultApplier blocked ordinary work", () => {
+  test("saves the provider task timestamp observed after blocker comments", async () => {
+    const tempDir = await createTempDir("foreman-execution-applier-blocked-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const executionTask: Task = {
+      ...task(),
+      id: "TASK-BLOCKED-APPLY",
+      providerId: "TASK-BLOCKED-APPLY",
+      title: "Apply blocked execution result",
+      state: "in_progress",
+      providerState: "in_progress",
+      updatedAt: "2026-03-14T12:00:00Z",
+    };
+    const repo: RepoRef = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
+    const pullRequest: ResolvedPullRequest = {
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/68",
+      pullRequestNumber: 68,
+      state: "open",
+      isDraft: false,
+      headBranch: "task-blocked-apply",
+      baseBranch: "main",
+    };
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      db.taskMirror.saveTasks([executionTask]);
+      const target = db.taskMirror.getTaskTarget(executionTask.id, "repo-a");
+      expect(target).not.toBeNull();
+      const job = db.jobs.createJob({
+        taskId: executionTask.id,
+        taskTargetId: target!.id,
+        taskProvider: executionTask.provider,
+        action: "execution",
+        priorityRank: priorityToRank(executionTask.priority),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: `${executionTask.id}:repo-a:execution`,
+        selectionReason: "test",
+        selectionContext: { existing: true },
+      });
+      const worker = db.workers.listWorkers()[0];
+      expect(worker).toBeDefined();
+      const attempt = db.attempts.createAttempt({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerName: "opencode",
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+      });
+      const taskSystem = new FakeTaskSystem([executionTask]);
+      taskSystem.commentUpdatedAt = "2026-03-14T12:10:00Z";
+      const applier = new WorkerResultApplier({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService(pullRequest),
+        repos: [repo],
+        logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
+        scheduleScout: () => undefined,
+      });
+
+      await applier.apply({
+        attempt,
+        job,
+        task: executionTask,
+        target: target!,
+        repo,
+        worktreePath: tempDir,
+        workerResult: {
+          schemaVersion: 1,
+          action: "execution",
+          outcome: "blocked",
+          summary: "Waiting on dependency.",
+          taskMutations: [],
+          reviewMutations: [],
+          learningMutations: [],
+          blockers: ["Dependency has not landed."],
+          signals: [],
+        },
+      });
+
+      expect(taskSystem.comments).toEqual([{ taskId: executionTask.id, body: "[agent] Dependency has not landed." }]);
+      expect(db.jobs.getJob(job.id).selectionContext).toMatchObject({
+        existing: true,
+        blockedTaskUpdatedAt: "2026-03-14T12:10:00Z",
       });
     } finally {
       db.close();

@@ -199,6 +199,17 @@ export class SqliteJobRepo implements JobRepo {
     return mapJob(row);
   }
 
+  updateJobSelectionContext(jobId: string, selectionContext: Record<string, unknown>): void {
+    this.sqlite
+      .prepare(
+        `UPDATE job
+            SET selection_context_json = ?,
+                updated_at = ?
+          WHERE id = ?`,
+      )
+      .run(stableStringify(selectionContext), isoNow(), jobId);
+  }
+
   updateJobStatus(
     jobId: string,
     status: JobStatus,
