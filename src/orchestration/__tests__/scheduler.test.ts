@@ -1984,7 +1984,7 @@ describe("SchedulerService applyWorkerResult", () => {
           "  fs.writeFileSync(process.env.FOREMAN_TEST_PROMPT_OUT, prompt);",
           "  const argv = process.argv.slice(2);",
           "  fs.writeFileSync(process.env.FOREMAN_TEST_ARGV_OUT, JSON.stringify(argv));",
-          "  const action = prompt.includes('# Retry Prompt') ? 'retry' : prompt.includes('# Reviewer Prompt') || prompt.includes('Review the latest PR changes.') ? 'reviewer' : 'review';",
+          "  const action = prompt.includes('# Retry Prompt') ? 'retry' : prompt.includes('# Reviewer Prompt') || prompt.includes('continuing a reviewer session') ? 'reviewer' : 'review';",
           "  const sessionFlag = argv.indexOf('--session');",
           "  const sessionID = sessionFlag >= 0 ? argv[sessionFlag + 1] : action + '-fresh-session';",
           "  const result = '<agent-result>' + JSON.stringify({ schemaVersion: 1, action, outcome: 'no_action_needed', summary: 'done', taskMutations: [], reviewMutations: [], learningMutations: [], blockers: [], signals: [] }) + '</agent-result>';",
@@ -2131,7 +2131,7 @@ describe("SchedulerService applyWorkerResult", () => {
       });
 
       expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).toContain("implementation-native-session");
-      expect(await fs.readFile(promptOut, "utf8")).toContain("Continue addressing current PR feedback");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("continuing a review session");
 
       await (scheduler as any).runJob(worker, {
         id: "job-reviewer",
@@ -2144,7 +2144,7 @@ describe("SchedulerService applyWorkerResult", () => {
       });
 
       expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).toContain("reviewer-native-session");
-      expect(await fs.readFile(promptOut, "utf8")).toContain("Review the latest PR changes.");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("continuing a reviewer session");
 
       getActiveSession.mockClear();
       await (scheduler as any).runJob(worker, {
