@@ -600,35 +600,40 @@ export class LinearTaskSystem implements TaskSystem {
         issueLabels: { nodes: Array<{ id: string; name: string }> };
       }>(
         `query ValidateForemanStartup {
-          issueLabels {
+          issueLabels(first: 250) {
             nodes { id name }
           }
         }`,
         {},
       );
 
-      const configuredStates = [
+      const configuredStates = uniqueValues([
         ...linear.states.ready,
         ...linear.states.inProgress,
         ...linear.states.inReview,
+        ...linear.states.deployable,
         ...linear.states.done,
         ...linear.states.canceled,
-      ];
+      ]);
       const availableStates = new Set(team.states.map((state) => state.name));
-      for (const state of configuredStates) {
-        if (!availableStates.has(state)) {
-          this.logger.error("Linear startup validation failed because a configured state was not found", { state, team: linear.team });
-          throw new ForemanError("linear_state_not_found", `Configured Linear state not found: ${state}`);
-        }
+      const missingStates = configuredStates.filter((state) => !availableStates.has(state));
+      if (missingStates.length > 0) {
+        this.logger.error("Linear startup validation failed because configured states were not found", {
+          states: missingStates.join(", "),
+          team: linear.team,
+        });
+        throw new ForemanError("linear_state_not_found", `Configured Linear states not found: ${missingStates.join(", ")}`);
       }
 
-      const requiredLabels = [...linear.includeLabels, linear.agentCreatedLabel, linear.consolidatedLabel];
+      const requiredLabels = uniqueValues([...linear.includeLabels, linear.agentCreatedLabel, linear.consolidatedLabel]);
       const availableLabels = new Set(response.issueLabels.nodes.map((label) => label.name));
-      for (const label of requiredLabels) {
-        if (!availableLabels.has(label)) {
-          this.logger.error("Linear startup validation failed because a configured label was not found", { label, team: linear.team });
-          throw new ForemanError("linear_label_not_found", `Configured Linear label not found: ${label}`);
-        }
+      const missingLabels = requiredLabels.filter((label) => !availableLabels.has(label));
+      if (missingLabels.length > 0) {
+        this.logger.error("Linear startup validation failed because configured labels were not found", {
+          labels: missingLabels.join(", "),
+          team: linear.team,
+        });
+        throw new ForemanError("linear_label_not_found", `Configured Linear labels not found: ${missingLabels.join(", ")}`);
       }
 
       let resolvedAssignee: { id: string; name: string } | null = null;

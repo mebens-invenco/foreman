@@ -2051,6 +2051,117 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test("allows completed cross-repo dependencies without a matching repo target", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const dependencyTask = task({
+      id: "ENG-5282",
+      title: "Completed frontend dependency",
+      state: "done",
+      providerState: "done",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:00:00Z",
+      targets: [{ repoKey: "lynk-frontend", branchName: "eng-5282", position: 0 }],
+    });
+    const dependentTask = task({
+      id: "ENG-5304",
+      title: "E2E dependent task",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      dependencies: { taskIds: ["ENG-5282"], baseTaskId: null },
+      targets: [{ repoKey: "e2e", branchName: "eng-5304", position: 0 }],
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([dependencyTask, dependentTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [
+          { key: "e2e", rootPath: "/repos/e2e", defaultBranch: "main" },
+          { key: "lynk-frontend", rootPath: "/repos/lynk-frontend", defaultBranch: "main" },
+        ],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.task.id).toBe("ENG-5304");
+      expect(result.jobs[0]?.target.repoKey).toBe("e2e");
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.baseBranch).toBe("main");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps unresolved cross-repo dependencies blocking tasks without a matching repo target", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 2;
+
+    const dependencyTask = task({
+      id: "ENG-5282",
+      title: "Unresolved frontend dependency",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2026-03-14T10:00:00Z",
+      targets: [{ repoKey: "lynk-frontend", branchName: "eng-5282", position: 0 }],
+    });
+    const dependentTask = task({
+      id: "ENG-5304",
+      title: "E2E dependent task",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T11:00:00Z",
+      dependencies: { taskIds: ["ENG-5282"], baseTaskId: null },
+      targets: [{ repoKey: "e2e", branchName: "eng-5304", position: 0 }],
+    });
+
+    db.taskMirror.saveTasks([dependencyTask]);
+    const dependencyTarget = db.taskMirror.getTaskTarget("ENG-5282", "lynk-frontend");
+    expect(dependencyTarget).not.toBeNull();
+    db.jobs.createJob({
+      taskId: dependencyTask.id,
+      taskTargetId: dependencyTarget!.id,
+      taskProvider: dependencyTask.provider,
+      action: "execution",
+      priorityRank: priorityToRank(dependencyTask.priority),
+      repoKey: dependencyTarget!.repoKey,
+      baseBranch: "main",
+      dedupeKey: `${dependencyTask.id}:${dependencyTarget!.repoKey}:execution`,
+      selectionReason: "test",
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([dependencyTask, dependentTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [
+          { key: "e2e", rootPath: "/repos/e2e", defaultBranch: "main" },
+          { key: "lynk-frontend", rootPath: "/repos/lynk-frontend", defaultBranch: "main" },
+        ],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
   test("keeps unresolved dependencies blocking tasks with an explicit base branch", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);

@@ -273,6 +273,8 @@ const satisfiesRepoDependency = (progress: TargetProgress): boolean =>
 const satisfiesMergedDependency = (progress: TargetProgress): boolean =>
   progress.state === "merged" || progress.state === "completed";
 
+const satisfiesCrossRepoTaskDependency = (task: Task): boolean => task.state === "done";
+
 const isUnknownProviderStateError = (error: unknown): error is ForemanError =>
   isForemanError(error) && error.code === "unknown_provider_state";
 
@@ -383,7 +385,37 @@ export const resolveBaseBranch = async (input: {
     };
   };
 
+  const resolveDependencyTarget = async (taskId: string): Promise<{ task: Task; target: TaskTarget | null } | null> => {
+    const dependencyTask = await getDependencyTask(taskId);
+    if (!dependencyTask) {
+      return null;
+    }
+
+    return {
+      task: dependencyTask,
+      target: await getDependencyTarget(taskId, input.target.repoKey),
+    };
+  };
+
+  const blockMissingDependencyTarget = (taskId: string): void => {
+    blockers.push(`Dependency task ${taskId} does not expose repo target ${input.target.repoKey}.`);
+  };
+
   const resolveDependencyBaseBranch = async (taskId: string): Promise<{ branch: string | null; merged: boolean }> => {
+    const dependencyTarget = await resolveDependencyTarget(taskId);
+    if (!dependencyTarget) {
+      return { branch: null, merged: false };
+    }
+
+    if (!dependencyTarget.target) {
+      if (satisfiesCrossRepoTaskDependency(dependencyTarget.task)) {
+        return { branch: input.repo.defaultBranch, merged: true };
+      }
+
+      blockMissingDependencyTarget(taskId);
+      return { branch: null, merged: false };
+    }
+
     const dependency = await resolveMatchedDependency(taskId);
     if (!dependency) {
       return { branch: null, merged: false };
@@ -416,6 +448,20 @@ export const resolveBaseBranch = async (input: {
   };
 
   const ensureMergedDependency = async (taskId: string): Promise<void> => {
+    const dependencyTarget = await resolveDependencyTarget(taskId);
+    if (!dependencyTarget) {
+      return;
+    }
+
+    if (!dependencyTarget.target) {
+      if (satisfiesCrossRepoTaskDependency(dependencyTarget.task)) {
+        return;
+      }
+
+      blockMissingDependencyTarget(taskId);
+      return;
+    }
+
     const dependency = await resolveMatchedDependency(taskId);
     if (!dependency) {
       return;

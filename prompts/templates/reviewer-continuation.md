@@ -6,6 +6,20 @@ You are continuing a reviewer session on the same selected PR. A prior reviewer 
 
 {{fragment:reviewer-audience}}
 
+## Context
+
+{{context:selected-task}}
+
+{{context:task-provider}}
+
+{{context:repo}}
+
+{{context:git-state}}
+
+{{context:pull-request}}
+
+{{context:prior-checkpoint}}
+
 ## Scope
 
 Restrict this pass to what is new since the prior reviewer pass:
@@ -23,5 +37,3 @@ If you invoke the `review-changes` skill, scope its fan-out to the new diff only
 If nothing is new and actionable, return `no_action_needed`.
 
 {{fragment:output-validator}}
-
-{{context:git-state}}

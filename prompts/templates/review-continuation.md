@@ -4,6 +4,20 @@ You are continuing a review session on the same selected PR. A prior review acti
 
 {{fragment:review-github}}
 
+## Context
+
+{{context:selected-task}}
+
+{{context:task-provider}}
+
+{{context:repo}}
+
+{{context:git-state}}
+
+{{context:pull-request}}
+
+{{context:prior-checkpoint}}
+
 ## Scope
 
 Restrict this pass to what is new since the prior review action:
@@ -17,5 +31,3 @@ Do not re-address feedback that was already handled in the prior pass unless new
 If you make code changes, run the relevant automated checks for the affected scope, then commit and push the task branch before returning `completed`. If nothing is new and actionable, return `no_action_needed`.
 
 {{fragment:output-validator}}
-
-{{context:git-state}}

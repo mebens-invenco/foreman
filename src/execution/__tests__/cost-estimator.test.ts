@@ -38,6 +38,35 @@ describe("estimateCost", () => {
       expect(result.totalUsd).toBeCloseTo(15 + 75 + 1.5 + 18.75 + 75);
     });
 
+    test("computes per-bucket USD using the rate table for Claude Opus 4.8", () => {
+      const rate = lookupRunnerRate({
+        runnerName: "claude",
+        runnerModel: "claude-opus-4-8",
+      });
+      expect(rate).not.toBeNull();
+
+      const result = estimateCost(
+        {
+          inputTokens: 1_000_000,
+          outputTokens: 1_000_000,
+          cacheReadInputTokens: 1_000_000,
+          cacheCreationInputTokens: 1_000_000,
+          reasoningOutputTokens: 1_000_000,
+        },
+        "claude",
+        "claude-opus-4-8",
+      );
+
+      // Per-1M token rates for Opus 4.8 — fresh in, output, cache read, cache write.
+      expect(result.breakdown.input).toBeCloseTo(5);
+      expect(result.breakdown.output).toBeCloseTo(25);
+      expect(result.breakdown.cacheRead).toBeCloseTo(0.5);
+      expect(result.breakdown.cacheCreate).toBeCloseTo(6.25);
+      // Reasoning tokens bill at the output rate.
+      expect(result.breakdown.reasoning).toBeCloseTo(25);
+      expect(result.totalUsd).toBeCloseTo(5 + 25 + 0.5 + 6.25 + 25);
+    });
+
     test("matches the 2026-05-26 audit ballpark for a foreman day on Opus 4.7", () => {
       const result = estimateCost(
         {

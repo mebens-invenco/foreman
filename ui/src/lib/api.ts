@@ -466,6 +466,7 @@ export function getArtifactContent(artifactId: string) {
 export function listAttempts(params: {
   status?: AttemptStatus
   jobId?: string
+  taskId?: string
   limit?: number
   offset?: number
 }) {
@@ -542,6 +543,80 @@ export type UsageRollupResponse = {
 
 export function getUsage(params: { from?: string; to?: string; groupBy?: UsageGroupBy }) {
   return requestJson<UsageRollupResponse>(`/api/usage${buildSearch(params)}`)
+}
+
+// Task rollup types power the Tasks page. Cron rows are excluded
+// server-side; each bucket is one task enriched with attempt-derived data.
+export type TaskTargetStatus = {
+  target: string
+  status: AttemptStatus
+}
+
+export type TaskRollupBucket = {
+  taskId: string
+  taskUrl: string | null
+  targets: string[]
+  perTargetLatestStatus: TaskTargetStatus[]
+  effectiveStatus: AttemptStatus
+  attemptsCount: number
+  firstSeenInWindow: string
+  lastStartedAt: string
+  lastFinishedAt: string | null
+  tokens: {
+    inputTokens: number
+    outputTokens: number
+    cacheCreationInputTokens: number
+    cacheReadInputTokens: number
+    reasoningOutputTokens: number
+  }
+  cost: {
+    totalUsd: number
+    breakdown: {
+      input: number
+      output: number
+      cacheRead: number
+      cacheCreate: number
+      reasoning: number
+    }
+  }
+}
+
+export type TaskRollupResponse = {
+  fromDate: string
+  toDate: string
+  fromInclusive: string
+  toExclusive: string
+  buckets: TaskRollupBucket[]
+  totals: {
+    attemptsCount: number
+    tokens: {
+      inputTokens: number
+      outputTokens: number
+      cacheCreationInputTokens: number
+      cacheReadInputTokens: number
+      reasoningOutputTokens: number
+    }
+    cost: {
+      totalUsd: number
+      breakdown: {
+        input: number
+        output: number
+        cacheRead: number
+        cacheCreate: number
+        reasoning: number
+      }
+    }
+  }
+  rates: UsageRate[]
+}
+
+export function getTaskRollups(params: {
+  from?: string
+  to?: string
+  status?: AttemptStatus
+  search?: string
+}) {
+  return requestJson<TaskRollupResponse>(`/api/task-rollups${buildSearch(params)}`)
 }
 
 export function getRates() {

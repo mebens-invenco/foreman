@@ -278,6 +278,7 @@ export class AttemptExecutor {
           taskTarget: target,
           worktreePath,
           baseBranch: job.baseBranch ?? repo.defaultBranch,
+          foremanRepos: this.deps.foremanRepos,
           gitState: {
             worktreeHeadSha: beforeSha,
             reviewHeadSha,
