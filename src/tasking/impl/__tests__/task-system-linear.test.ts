@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { ForemanError, isForemanError } from "../../../lib/errors.js";
 import { createDefaultWorkspaceConfig } from "../../../workspace/config.js";
-import { LinearTaskSystem, linearPriorityToNormalized, normalizedPriorityToLinear, parseLinearMetadata } from "../../index.js";
+import { LinearClient, LinearTaskSystem, linearPriorityToNormalized, normalizedPriorityToLinear, parseLinearMetadata } from "../../index.js";
 
 const originalFetch = global.fetch;
 const fakeLogger = {
@@ -169,6 +169,55 @@ describe("LinearTaskSystem.listCandidates", () => {
     );
   });
 
+  test("retries a transient candidate query status and returns candidates", async () => {
+    vi.useFakeTimers();
+    const logger = createSpyingLogger();
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("Service Unavailable", { status: 503, statusText: "Service Unavailable" }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: linearIssue([], "Jane Doe") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], logger as any);
+
+    const tasksPromise = taskSystem.listCandidates();
+    await vi.advanceTimersByTimeAsync(250);
+    const tasks = await tasksPromise;
+
+    expect(tasks.map((task) => task.id)).toEqual(["ENG-123"]);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Linear GraphQL request failed with transient status; retrying",
+      expect.objectContaining({
+        operationName: "ForemanIssueCandidates",
+        status: 503,
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 250,
+      }),
+    );
+  });
+
+  test("does not retry non-transient candidate query statuses", async () => {
+    const logger = createSpyingLogger();
+    global.fetch = vi.fn(async () => new Response("Internal Server Error", { status: 500, statusText: "Internal Server Error" })) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], logger as any);
+
+    await expect(taskSystem.listCandidates()).rejects.toThrow("Linear request failed: 500 Internal Server Error");
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
   test("surfaces candidate query timeout after bounded retries", async () => {
     vi.useFakeTimers();
     const logger = createSpyingLogger();
@@ -186,6 +235,16 @@ describe("LinearTaskSystem.listCandidates", () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(3);
     expect(logger.warn).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenNthCalledWith(
+      2,
+      "Linear GraphQL request timed out; retrying",
+      expect.objectContaining({
+        operationName: "ForemanIssueCandidates",
+        attempt: 2,
+        maxAttempts: 3,
+        delayMs: 1_000,
+      }),
+    );
     expect(logger.error).toHaveBeenCalledWith(
       "Linear GraphQL request timed out",
       expect.objectContaining({
@@ -211,6 +270,25 @@ describe("LinearTaskSystem.listCandidates", () => {
     const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], logger as any);
 
     await expect(taskSystem.listCandidates()).rejects.toThrow('Cannot query field "bad"');
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  test("does not retry mutations when transient retries are requested", async () => {
+    const logger = createSpyingLogger();
+    global.fetch = vi.fn().mockRejectedValue(timeoutError()) as typeof fetch;
+    const client = new LinearClient("test-key", logger as any);
+
+    await expect(
+      client.request(
+        `mutation ForemanMutation {
+          issueUpdate(id: "issue-1", input: { title: "Task" }) { success }
+        }`,
+        {},
+        { retryTransient: true },
+      ),
+    ).rejects.toMatchObject({ code: "linear_request_timeout" });
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(logger.warn).not.toHaveBeenCalled();
