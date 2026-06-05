@@ -2,6 +2,7 @@
   "prompt": "learning-policy",
   "dimension": "quality (worth-keeping: generalizable rule vs one-off)",
   "judgeModel": "claude-sonnet-4-6",
+  "judgeModelCaveat": "Measured on sonnet-4-6 (operator-supplied). The shipped judge uses the eval execution-runner model, default opencode/gpt-5.5, which is NOT calibrated here; reproduce with --runner claude --model claude-sonnet-4-6.",
   "judgePromptSource": "src/eval/graders.ts buildJudgePrompt (imported verbatim by the calibration runner)",
   "judgePromptVersion": "v3 (generalizable-rule vs one-off-fact)",
   "labelBasis": "strict reusability bar (ENG-5342); agent-proposed under the ratified bar — provisional ground truth, not independent per-item human annotation",

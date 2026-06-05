@@ -20,8 +20,15 @@ the shipped judge.
 3. **Hard negatives + held-out.** Added 6 *constructed* clearly-junk learnings, and
    a *held-out* validation set of fresh narrow one-offs (5) + broadly-transferable
    rules (4) to test the judge on UNAMBIGUOUS cases it wasn't tuned against.
-4. **Judge.** Ran the production `buildJudgePrompt` (imported, not copied; sonnet-4-6)
-   over each item with MCP disabled (`--strict-mcp-config`).
+4. **Judge.** Ran the production `buildJudgePrompt` (imported, not copied) on
+   **claude-sonnet-4-6** with MCP disabled (`--strict-mcp-config`).
+
+> **Model caveat.** These numbers characterise the judge *prompt* on
+> **sonnet-4-6** — not the default judge *model*. The judge runs on the eval's
+> execution-runner config, whose default is `opencode / openai/gpt-5.5`, so the
+> default-config judge is **not** what was calibrated here. Reproduce these numbers
+> with `--runner claude --model claude-sonnet-4-6`; calibrating the default model is
+> separate work.
 
 `R23` (`PDP8V2::Use plain useQuery…`) is **excluded from the real-negative TNR**: it
 was wrong-at-recording (a later run corrected it). The judge grades reusability, not
@@ -64,6 +71,8 @@ reusable ones.
 
 ## Re-running
 
-The judge prompt + model are pinned in `graders.ts`. Rebuild the labelled set from
-retained worker artifacts, then run the judge per item with MCP disabled. Re-calibrate
-whenever the judge prompt or the learning-policy fragment changes.
+The judge *prompt* lives in `graders.ts`; the *model* is supplied by the eval runner
+at invocation (pin it with `--runner claude --model claude-sonnet-4-6` to match this
+run — the default is gpt-5.5). Rebuild the labelled set from retained worker artifacts,
+then run the judge per item with MCP disabled. Re-calibrate whenever the judge prompt,
+the judge model, or the learning-policy fragment changes.

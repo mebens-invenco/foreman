@@ -77,8 +77,13 @@ Fidelity notes:
 ## Judge calibration
 
 The `quality` judge is **advisory** (it never gates a sample) and was calibrated
-against human-labelled learnings (ENG-5342, claude sonnet-4-6). Full method,
-per-item verdicts, and iteration history are in [`calibration/`](./calibration/).
+against human-labelled learnings (ENG-5342). Full method, per-item verdicts, and
+iteration history are in [`calibration/`](./calibration/).
+
+These numbers are for the judge prompt on **claude-sonnet-4-6**. The judge runs on the
+eval's execution-runner model, whose default is `opencode / gpt-5.5` — so the
+default-config judge is uncalibrated; reproduce these numbers with
+`--runner claude --model claude-sonnet-4-6`.
 
 | | rate | note |
 |---|---|---|
