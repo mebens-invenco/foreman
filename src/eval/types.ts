@@ -24,6 +24,13 @@ export type EvalCase = {
   syntheticSession: string;
   /** What the learning review should do given this session. */
   expect: "learning" | "no_learning";
+  /**
+   * Optional scope expectation for an emitted learning, checked by the advisory
+   * `scopeGrader`: "shared" when the insight is clearly cross-repo, "repo-specific"
+   * when it is local to one repo. Omit when the case expects no learning, or when
+   * scope is not the dimension under test.
+   */
+  expectScope?: "shared" | "repo-specific";
 };
 
 /** One graded dimension of a single sample's output. */

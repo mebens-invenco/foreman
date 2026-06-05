@@ -12,13 +12,13 @@ import { ClaudeRunner } from "./impl/claude-runner.js";
 import { CodexRunner } from "./impl/codex-runner.js";
 import { OpenCodeRunner } from "./impl/opencode-runner.js";
 
-const createProviderRunner = (config: WorkspaceRunnerConfig): AgentRunner => {
+const createProviderRunner = (config: WorkspaceRunnerConfig, options?: { excludeMcp?: boolean }): AgentRunner => {
   if (config.type === "opencode") {
     return new OpenCodeRunner(config.model, config.variant);
   }
 
   if (config.type === "claude") {
-    return new ClaudeRunner(config.model, config.effort, config.maxBudgetUsd);
+    return new ClaudeRunner(config.model, config.effort, config.maxBudgetUsd, options?.excludeMcp ?? false);
   }
 
   if (config.type === "codex") {
@@ -93,8 +93,11 @@ export const createAgentRunner = (input: {
   action: ActionType;
   task?: Pick<Task, "runnerOverride"> | null;
   continuation?: boolean;
+  // Claude-only: load no MCP servers (pure grading calls like the eval judge).
+  excludeMcp?: boolean;
 }): AgentRunner => {
   return createProviderRunner(
     resolveRunnerConfigForAction(input.config, input.action, input.task, input.continuation ?? false),
+    { excludeMcp: input.excludeMcp ?? false },
   );
 };

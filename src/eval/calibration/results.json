@@ -1,0 +1,358 @@
+{
+  "prompt": "learning-policy",
+  "dimension": "quality (worth-keeping: generalizable rule vs one-off)",
+  "judgeModel": "claude-sonnet-4-6",
+  "judgePromptSource": "src/eval/graders.ts buildJudgePrompt (imported verbatim by the calibration runner)",
+  "judgePromptVersion": "v3 (generalizable-rule vs one-off-fact)",
+  "labelBasis": "strict reusability bar (ENG-5342); agent-proposed under the ratified bar — provisional ground truth, not independent per-item human annotation",
+  "n": 45,
+  "metrics": {
+    "tpr_real_positives": {
+      "value": "25/25",
+      "pct": 100
+    },
+    "tnr_real_negatives_R23_excluded": {
+      "value": "0/4",
+      "pct": 0,
+      "note": "these 4 are defensibly reusable per the judge rationales; the 0% reflects an over-strict label bar more than a judge failure"
+    },
+    "tnr_constructed_hard_negatives": {
+      "value": "6/6",
+      "pct": 100
+    },
+    "tnr_heldout_negatives": {
+      "value": "4/5",
+      "pct": 80,
+      "note": "held-out validation: clear one-off facts/configs/incidents"
+    },
+    "tpr_heldout_positives": {
+      "value": "4/4",
+      "pct": 100,
+      "note": "held-out validation: clear broadly-transferable rules"
+    }
+  },
+  "notes": [
+    "An earlier v2 breadth-of-transfer prompt scored TPR 17/25 (rejected repo-internal-but-reusable rules incl. 2 empirically-reused) for no real-negative gain; not shipped.",
+    "The durable over-eager signal is empirical reuse (applied_count: only 4/30 stored learnings were ever applied), not this content-judge — over-eager learnings are written to read as reusable.",
+    "Judge stays ADVISORY (does not gate). Gating would need a larger, independently human-annotated negative set and an agreed TNR bar."
+  ],
+  "items": [
+    {
+      "key": "CN::Added retry to the bulk-sync j",
+      "source": "constructed-negative",
+      "humanLabel": "no",
+      "judgeVerdict": "no",
+      "judgeRationale": "This is a bare fact about one job's current state with no transferable rule — it states what was done to a specific artifact for a specific ticket, not a generalizable pattern about when or how to add retries."
+    },
+    {
+      "key": "CN::Fixed the dashboard header typ",
+      "source": "constructed-negative",
+      "humanLabel": "no",
+      "judgeVerdict": "no",
+      "judgeRationale": "This is a bare fact about one artifact's corrected spelling — a one-off typo fix with no transferable rule for future agents."
+    },
+    {
+      "key": "CN::Imported debounce from lodash",
+      "source": "constructed-negative",
+      "humanLabel": "no",
+      "judgeVerdict": "no",
+      "judgeRationale": "This is obvious advice — 'use lodash debounce when debouncing' is universally known and adds no non-obvious convention, gotcha, or decision rule that a future agent couldn't infer on its own."
+    },
+    {
+      "key": "CN::Run the test suite before push",
+      "source": "constructed-negative",
+      "humanLabel": "no",
+      "judgeVerdict": "no",
+      "judgeRationale": "This is obvious, universal advice with no repo-specific nuance — every developer already knows to run tests before pushing, so it adds no transferable signal."
+    },
+    {
+      "key": "CN::The carrier-accounts settings ",
+      "source": "constructed-negative",
+      "humanLabel": "no",
+      "judgeVerdict": "no",
+      "judgeRationale": "This is a bare fact about one artifact's current state (a specific button's color value on one page), not a generalizable pattern or convention that would re-apply across future tasks."
+    },
+    {
+      "key": "CN::The local staging DB runs on p",
+      "source": "constructed-negative",
+      "humanLabel": "no",
+      "judgeVerdict": "no",
+      "judgeRationale": "A bare config value (port 54322) is a single environment detail with no transferable rule beyond itself."
+    },
+    {
+      "key": "heldout-neg::OrderSummaryCard total must use useMem",
+      "source": "heldout-neg",
+      "humanLabel": "no",
+      "judgeVerdict": "no",
+      "judgeRationale": "This is a bare fact about one component's current implementation detail — the memoization dependency in OrderSummaryCard — not a generalizable pattern; a future agent editing that file will see the useMemo directly in the code, and the 'When to apply: Editing OrderSummaryCard' clause confirms it won't transfer beyond this single artifact."
+    },
+    {
+      "key": "heldout-neg::PR #842 flaky test was a missing await",
+      "source": "heldout-neg",
+      "humanLabel": "no",
+      "judgeVerdict": "no",
+      "judgeRationale": "This is a single incident about one specific PR, file, and line number with no transferable rule beyond 'awaits can be missing,' which is obvious advice already known to any agent."
+    },
+    {
+      "key": "heldout-neg::SettingsPage tab order must list Billi",
+      "source": "heldout-neg",
+      "humanLabel": "no",
+      "judgeVerdict": "no",
+      "judgeRationale": "This is a bare fact about one component's tab ordering tied to a brittle positional selector that should be fixed, not preserved — the transferable lesson (avoid nth-child selectors in e2e tests) is not what the learning captures."
+    },
+    {
+      "key": "heldout-neg::The /v1/labels/bulk endpoint caps batc",
+      "source": "heldout-neg",
+      "humanLabel": "no",
+      "judgeVerdict": "yes",
+      "judgeRationale": "This captures a hard API constraint (50-item batch cap on /v1/labels/bulk) that any future agent calling that endpoint must respect to avoid 400 errors — directly actionable and permanently applicable."
+    },
+    {
+      "key": "heldout-neg::warehousing-service jest maxWorkers is",
+      "source": "heldout-neg",
+      "humanLabel": "no",
+      "judgeVerdict": "no",
+      "judgeRationale": "This captures a single config value (maxWorkers: 2) for one specific repo, which fits exactly the 'a single config value or environment detail (a worker count, a fixed batch limit)' discard criterion."
+    },
+    {
+      "key": "heldout-pos::Cursor pagination needs a stable tiebr",
+      "source": "heldout-pos",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a recurring, non-obvious pagination correctness rule — any cursor-paginated endpoint sorting by a non-unique column like createdAt needs a unique tiebreaker — that directly re-applies every time a new list endpoint is built in this or any repo."
+    },
+    {
+      "key": "heldout-pos::Prefer safeParse over parse in request",
+      "source": "heldout-pos",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a generalizable Zod convention — safeParse over parse in any request handler — that recurs whenever payload validation is added and prevents a whole class of unhandled-exception 500s."
+    },
+    {
+      "key": "heldout-pos::Use Promise.allSettled when partial fa",
+      "source": "heldout-pos",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a concrete, frequently-misapplied JS concurrency rule — Promise.all vs allSettled — that applies to any batch operation across the codebase where partial failures should be collected rather than aborting the run."
+    },
+    {
+      "key": "heldout-pos::vi.mock factories are hoisted above im",
+      "source": "heldout-pos",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, recurring Vitest hoisting pitfall — vi.mock factories are hoisted above imports — that any future agent writing vi.mock tests in this repo will hit."
+    },
+    {
+      "key": "0KX0E1::Mirror non-continuation Context block or",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, recurring convention for Foreman's continuation templates — preserve the non-continuation prefix order to enable Anthropic prompt-cache reuse — with the anti-pattern and cost mechanism explained, making it directly re-applicable any time a continuation template is edited."
+    },
+    {
+      "key": "0KX0E1::Run foreman type-check gate with `yarn r",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, repo-specific footgun — bare `yarn check` silently invokes Yarn's dependency-integrity verifier instead of the project's typecheck script, producing hundreds of false errors that look like a broken build — a pitfall any future agent would re-encounter on every verification step."
+    },
+    {
+      "key": "0W6YMF::Assert individual serialized field keys,",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a generalizable testing discipline — pin every serialized field key individually rather than one marker string — that prevents silent regressions whenever any function emitting structured/JSON output is tested, applicable across repos and domains."
+    },
+    {
+      "key": "0W6YMF::Exercise a missing-referent branch via F",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, reusable SQLite test technique — delete the referent to trigger FK ON DELETE SET NULL rather than fabricating an invalid id — that will recur whenever foreman tests need to cover any missing-referent fallback branch on an FK column with enforcement on."
+    },
+    {
+      "key": "376VG5::Cross-`@invenco/*` deps in common subpac",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a recurring, non-obvious monorepo convention — cross-@invenco/* deps in common subpackages must use peerDependencies with \"*\" plus a root devDep, not regular dependencies — that any future agent touching package.json in this repo would need to follow."
+    },
+    {
+      "key": "3XE3J0::Check inline json-rules-engine usage bef",
+      "source": "real-trace",
+      "humanLabel": "no",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, repo-specific architectural rule: before widening the Workflow aggregate in @invenco/common-domain for a new scope, check whether json-rules-engine can be invoked directly at the consumer (warehousing-service is the reference pattern), preventing unnecessary aggregate coupling that will recur whenever new rule-based evaluations are added."
+    },
+    {
+      "key": "69VCC4::Independently-saved editor cards re-seed",
+      "source": "real-trace",
+      "humanLabel": "no",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, reusable architectural invariant: React Query's structural sharing is load-bearing for the per-item editor card pattern, and breaking it (deep-cloning, structuralSharing:false, churning keys) silently corrupts sibling unsaved state — a pitfall that will recur across any page using this pattern."
+    },
+    {
+      "key": "6T6NS6::Assert executor-wired createAgentRunner ",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a repo-specific but recurring pitfall: `createAgentRunner`'s mock silently ignores call args, so any new executor argument requires explicit `toHaveBeenCalledWith` assertions in `attempt-executor.test.ts` — a gap that will recur every time a new runner-config knob is wired through the executor."
+    },
+    {
+      "key": "7K47PW::Project tsconfig.json should mirror ship",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a generalizable monorepo-migration convention: the tsconfig.json include pattern (vs tsconfig.lib.json) that silently hides test-side type errors in nx typecheck, applicable to any service being migrated into the Lynk Nx monorepo."
+    },
+    {
+      "key": "88WRBJ::Continuation-conditional runner knobs: s",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, reusable architectural invariant for Foreman: continuation-conditional knobs must be applied at runner construction only, not at session-key resolution, with a concrete explanation of why (session key includes the tuning value, so applying the continuation knob at selection would always miss the base-keyed session and silently start fresh) — directly applicable to any future continuation-conditional knob like `continuationModel`."
+    },
+    {
+      "key": "BBKBPD::Defer large base-integration merge confl",
+      "source": "real-trace",
+      "humanLabel": "no",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a generalizable decision rule for review agents: defer base-integration when CONFLICTING + maintainer-owned + large base advance touching shared infra, distinguishing it from the safe case of small agent-owned conflicts."
+    },
+    {
+      "key": "BC1FZ0::Gateway create payloads may need fields ",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a recurring, non-obvious pitfall in this codebase: generated `*-interface` DTOs are not authoritative for API required-fields, so gateway create/update methods must independently verify required fields — a rule directly re-applicable any time a new gateway method is written against a service endpoint."
+    },
+    {
+      "key": "BQWWFJ::A maintainer's 'marking ready' FYI/open-",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious agent behavior rule — distinguishing a maintainer's own FYI/open-question comment from a directed change request — that recurs in any continuation review pass and prevents a concrete, repeatable over-acting failure mode."
+    },
+    {
+      "key": "C31HB2::Dedup the first step of a multi-call use",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, reusable react-query pitfall — that the entire mutationFn re-runs on retry — and gives a concrete dedup pattern (useRef cache) applicable to any sequential POST chain where an early step can't be safely repeated."
+    },
+    {
+      "key": "D2TMFT::Retarget bare-token prompt leanness guar",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a generalizable testing technique for this repo: when merging base changes that inline schemas into worker prompts, bare-token `not.toContain` leanness guards must be retargeted to instruction phrases — a pattern that will recur every time the agent-result schema or similar content blob is inlined or expanded."
+    },
+    {
+      "key": "E54F8X::Assert structured payload fields in prom",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a generalizable test-coverage rule for structured prompt-template blocks: assert payload fields by key, not just one narrative field, so that renderer renames or drops fail CI rather than silently gutting the feature."
+    },
+    {
+      "key": "ETPQCH::Cache created-entity id in a ref to avoi",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, recurring data-integrity pattern — caching a created entity's id in a ref to prevent duplicate parent creation on mutation retry — that applies to any frontend form with sequential non-idempotent gateway writes, with a concrete detection heuristic and test strategy."
+    },
+    {
+      "key": "EWAHCH::Client-side DataTable list pages must lo",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, recurring frontend convention — client-side DataTable pages must use fetchAllPages or silently truncate data — with a concrete anti-pattern, a masking test failure mode, and multiple in-repo examples confirming it recurs across list pages."
+    },
+    {
+      "key": "HP4KC3::Review the merge resolution, not the bas",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, reusable review methodology — diff against both merge parents to verify neither side's intent was silently dropped — that applies to any continuation PR review where the new head is a merge commit."
+    },
+    {
+      "key": "MXQV37::shipping-service .gitignore excludes doc",
+      "source": "real-trace",
+      "humanLabel": "no",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, recurring gitignore gotcha in shipping-service — the docs/* + !docs/*.md negation pattern silently swallows subdirectory files — that any future agent adding runbooks or structured docs to this repo will hit."
+    },
+    {
+      "key": "PDP8V2::Feature-flagged nav entries belong in th",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, recurring lynk-frontend convention — new nav entries go in the modern navigation-sidebar (not the legacy file), feature-flagging a child NavSubItem requires extending the type and updating child-level filtering, and the legacy file is a trap that tickets cite by mistake."
+    },
+    {
+      "key": "PDP8V2::Use plain useQuery (not fetchAllPages) f",
+      "source": "real-trace",
+      "humanLabel": "no",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious decision rule — use fetchAllPages only when the gateway accepts cursor/take params, otherwise plain useQuery — with a concrete failure mode (infinite loop to MAX_FETCHES guard) that recurs whenever building list pages in this codebase.",
+      "excludedFromRealTnr": true,
+      "excludeReason": "wrong-at-recording (later corrected) — a correctness issue, not a reusability-quality negative"
+    },
+    {
+      "key": "QF1HZT::Foreman tickets can lag the codebase — v",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a generalizable pre-implementation discipline — grep for the claimed-missing behavior before building it — directly applicable to any fast-moving repo where tickets can lag foundational commits."
+    },
+    {
+      "key": "SCDS14::shadcn/radix Select item values cannot b",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious radix/shadcn API constraint (empty-string SelectItem values throw at runtime) with a concrete workaround pattern that will recur throughout this repo's ongoing Ant Design → shadcn migration."
+    },
+    {
+      "key": "VJMVFR::Reviewing foreman PRs: local master lags",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a recurrent, non-obvious pitfall — stale local master in worktrees producing phantom diffs — with a concrete corrective technique (gh pr diff) that any future review agent in this repo will need."
+    },
+    {
+      "key": "VJMVFR::Reviewing foreman: ForemanError throws a",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a repo-specific architectural convention that will recur on every foreman review: foreman intentionally uses throw/ForemanError rather than Lynk Result<Happy,Sad>, so reviewers must not flag throws as Result-discipline violations in this repo."
+    },
+    {
+      "key": "X0G5JH::Inlining schema enums into prompt fragme",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, repo-specific testing pitfall — inlining schema enums into shared prompt fragments invalidates bare-token `not.toContain` guards — with a concrete retargeting rule that applies to any future Foreman change that renders enums into prompt fragments."
+    },
+    {
+      "key": "XK29X0::Datadog version on Lambdas comes from DD",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, repo-wide convention: DD_VERSION env var (not tags.version) is what Datadog reads for version tagging on Lynk Lambdas, with a concrete fix pattern and a diagnostic command that will recur whenever any Lynk service is wired for observability."
+    },
+    {
+      "key": "Y42BNQ::Don't flag a missing fixture when inline",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, generalizable reviewer heuristic: when inline text and a validator both render from a single shared source, structural drift is impossible and requesting a snapshot fixture is a false gap — applicable whenever reviewing any refactor that consolidates a runtime lookup into a shared render helper."
+    },
+    {
+      "key": "Y42BNQ::Run `yarn run check`, not `yarn check`, ",
+      "source": "real-trace",
+      "humanLabel": "yes",
+      "judgeVerdict": "yes",
+      "judgeRationale": "Captures a non-obvious, repo-specific gotcha — `yarn check` silently runs yarn's integrity checker instead of the `check` script — that any future agent verifying foreman changes will hit, with a clear anti-pattern and concrete example."
+    }
+  ]
+}

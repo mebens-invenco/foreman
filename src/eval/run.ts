@@ -89,7 +89,9 @@ const assembleCasePrompt = async (evalCase: EvalCase, paths: WorkspacePaths, con
 const buildJudgeInvoker =
   (config: WorkspaceConfig, cwd: string, timeoutMs: number) =>
   async (prompt: string): Promise<string> => {
-    const runner = createAgentRunner({ config, action: "execution" });
+    // excludeMcp: the judge is a pure grading call — no tools, and it must not
+    // trigger per-call MCP auth prompts when `eval` runs with the claude runner.
+    const runner = createAgentRunner({ config, action: "execution", excludeMcp: true });
     const captured = await runner.invoke({ attemptId: randomUUID(), cwd, env: {}, prompt, timeoutMs, action: "execution" });
     return captured.stdout;
   };

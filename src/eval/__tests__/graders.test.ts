@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { WorkerResult } from "../../domain/index.js";
 import { learningPolicyCases } from "../cases/learning-policy.js";
-import { emitsExpectedGrader, schemaGrader, structureGrader, tagsGrader } from "../graders.js";
+import { emitsExpectedGrader, schemaGrader, scopeGrader, structureGrader, tagsGrader } from "../graders.js";
 import type { EvalCase, GradeContext, Grader } from "../types.js";
 
 // Deterministic graders only — the judge runs a live model and is exercised by
@@ -111,5 +111,37 @@ describe("structureGrader", () => {
   it("fails when a required content marker is missing", async () => {
     const noWhen = { ...goodAdd, content: "**Rule:** retry on RATELIMITED." };
     expect(await passOf(structureGrader, ctxFor(executionCase, makeResult([noWhen])))).toBe(false);
+  });
+});
+
+describe("scopeGrader", () => {
+  const repoAdd = { ...goodAdd, repo: "lynk-frontend" }; // goodAdd is repo "shared"
+
+  it("passes (n/a) when the case sets no scope expectation", async () => {
+    expect(await passOf(scopeGrader, ctxFor(makeCase({}), makeResult([repoAdd])))).toBe(true);
+  });
+
+  it("passes (n/a) when a scope is expected but no learning was emitted", async () => {
+    expect(await passOf(scopeGrader, ctxFor(makeCase({ expectScope: "shared" }), makeResult([])))).toBe(true);
+  });
+
+  it("passes when shared is expected and the learning is scoped shared", async () => {
+    expect(await passOf(scopeGrader, ctxFor(makeCase({ expectScope: "shared" }), makeResult([goodAdd])))).toBe(true);
+  });
+
+  it("fails when shared is expected but the learning is scoped to a specific repo", async () => {
+    expect(await passOf(scopeGrader, ctxFor(makeCase({ expectScope: "shared" }), makeResult([repoAdd])))).toBe(false);
+  });
+
+  it("passes when repo-specific is expected and the learning is scoped to a repo", async () => {
+    expect(await passOf(scopeGrader, ctxFor(makeCase({ expectScope: "repo-specific" }), makeResult([repoAdd])))).toBe(true);
+  });
+
+  it("fails when repo-specific is expected but the learning is scoped shared", async () => {
+    expect(await passOf(scopeGrader, ctxFor(makeCase({ expectScope: "repo-specific" }), makeResult([goodAdd])))).toBe(false);
+  });
+
+  it("is advisory (does not gate a sample's pass)", () => {
+    expect(scopeGrader.advisory).toBe(true);
   });
 });
