@@ -127,11 +127,21 @@ const normalizeLinearTaskReference = (value: string): string => {
   return extractLinearIssueIdentifier(label) ?? extractLinearIssueIdentifier(target) ?? trimmed;
 };
 
+// Lenient detector for the `Agent:` metadata block (indent >= 2, any keys).
+// Shared by parseLinearMetadata and hasLinearAgentBlock so block detection has
+// exactly one definition — callers must never re-implement it.
+const LINEAR_AGENT_BLOCK_PATTERN = /(^|\n)Agent:\s*\n((?:\s{2,}.+\n?)*)/i;
+
+// True when a description carries an `Agent:` block, regardless of whether that
+// block yields usable targets. Lets callers distinguish a broken block (present
+// but no usable `Repos:`) from a missing one without parsing the repos again.
+export const hasLinearAgentBlock = (description: string): boolean => LINEAR_AGENT_BLOCK_PATTERN.test(description);
+
 export const parseLinearMetadata = (
   description: string,
   defaultBranchName?: string,
 ): Pick<Task, "targets" | "targetDependencies" | "dependencies" | "baseBranch" | "runnerOverride"> => {
-  const match = description.match(/(^|\n)Agent:\s*\n((?:\s{2,}.+\n?)*)/i);
+  const match = description.match(LINEAR_AGENT_BLOCK_PATTERN);
   const lines =
     match?.[2]
       ?.split(/\r?\n/)

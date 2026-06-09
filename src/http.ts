@@ -30,7 +30,7 @@ import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
 import type { ReviewService } from "./review/index.js";
 import type { RebootScheduler } from "./system/reboot.js";
-import type { TaskSystem } from "./tasking/index.js";
+import { hasLinearAgentBlock, parseLinearMetadata, type TaskSystem } from "./tasking/index.js";
 import { stringifyWorkspaceConfig, workspaceConfigSchema, type WorkspaceConfig } from "./workspace/config.js";
 import { resolveDeploymentInstructions } from "./workspace/deployment.js";
 import type { WorkspacePaths } from "./workspace/workspace-paths.js";
@@ -87,6 +87,27 @@ const resolveTaskUrl = (deps: HttpServerDeps, taskId: string | null): string | n
   } catch {
     return null;
   }
+};
+
+// Exclude labels are a Linear-only concept; other task systems never exclude.
+const configuredExcludeLabels = (config: WorkspaceConfig): string[] =>
+  config.taskSystem.type === "linear" ? config.taskSystem.linear!.excludeLabels : [];
+
+type TaskFrontmatter = { state: "valid" | "broken" | "missing"; repos: string[]; detail: string | null };
+
+// Re-derive the Agent: metadata verdict from the fetched description, reusing
+// Foreman's own parser as the single source of truth — never the stale mirror
+// targets. valid => parser produced usable Repos:, broken => an Agent: block is
+// present but yields no Repos:, missing => no Agent: block at all.
+const computeTaskFrontmatter = (task: Task): TaskFrontmatter => {
+  const { targets } = parseLinearMetadata(task.description, task.id.toLowerCase());
+  if (targets.length > 0) {
+    return { state: "valid", repos: targets.map((target) => target.repoKey), detail: null };
+  }
+  if (hasLinearAgentBlock(task.description)) {
+    return { state: "broken", repos: [], detail: "Agent: block found, but no usable Repos:" };
+  }
+  return { state: "missing", repos: [], detail: "No Agent: metadata block" };
 };
 
 const writeSseEvent = (reply: { raw: NodeJS.WritableStream }, event: string, data: string): void => {
@@ -461,6 +482,8 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     cache = new Map<string, Promise<BuiltTaskTarget>>(),
   ) => {
     const targets = await buildTaskTargets(task, tasksById, refreshReview, cache);
+    const excludeLabels = configuredExcludeLabels(deps.config);
+    const agentEnabled = !task.labels.some((label) => excludeLabels.includes(label));
 
     return {
       id: task.id,
@@ -478,6 +501,8 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       updatedAt: task.updatedAt,
       url: task.url,
       targets,
+      agentEnabled,
+      frontmatter: computeTaskFrontmatter(task),
     };
   };
 
@@ -554,6 +579,36 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const tasksById = new Map(getAllMirroredTasks().map((candidateTask) => [candidateTask.id, candidateTask]));
     tasksById.set(task.id, task);
     return { task: await serializeTask(task, tasksById, refreshReview), comments };
+  });
+
+  // Toggle whether the agent may pick up a task by adding/removing the
+  // configured exclude label. Disabling adds the first exclude label (one is
+  // enough to exclude); enabling removes every exclude label so none remain.
+  // 4xxs loudly when the feature is unconfigured or the task is unknown rather
+  // than silently no-op'ing — updateLabels surfaces task_not_found as a 404.
+  server.post("/api/tasks/:taskId/agent-enabled", async (request) => {
+    const params = request.params as { taskId: string };
+    const body = request.body;
+    if (!isRecord(body) || typeof body.enabled !== "boolean") {
+      throw new ForemanError("invalid_request", "Body must include an 'enabled' boolean.", 400);
+    }
+
+    const excludeLabels = configuredExcludeLabels(deps.config);
+    if (excludeLabels.length === 0) {
+      throw new ForemanError(
+        "exclude_labels_not_configured",
+        "Enabling or disabling the agent requires taskSystem.linear.excludeLabels to be configured.",
+        400,
+      );
+    }
+
+    const enabled = body.enabled;
+    await deps.taskSystem.updateLabels(
+      enabled
+        ? { taskId: params.taskId, add: [], remove: excludeLabels }
+        : { taskId: params.taskId, add: [excludeLabels[0]!], remove: [] },
+    );
+    return { agentEnabled: enabled };
   });
 
   server.get("/api/queue", async () => ({

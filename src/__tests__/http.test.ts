@@ -3,9 +3,10 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { createDefaultWorkspaceConfig } from "../workspace/config.js";
+import { createDefaultWorkspaceConfig, type WorkspaceConfig } from "../workspace/config.js";
 import { createHttpServer } from "../http.js";
 import { createSelfRebootScheduler } from "../system/reboot.js";
+import { parseLinearMetadata } from "../tasking/index.js";
 import type { Task } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
@@ -1802,6 +1803,244 @@ describe("HTTP attempts taskId filter", () => {
         "att-3",
       ]);
       expect(payload.attempts.every((attempt: { taskId: string }) => attempt.taskId === "ENG-1")).toBe(true);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+});
+
+describe("HTTP agent-enabled toggle", () => {
+  const linearConfig = (excludeLabels: string[]): WorkspaceConfig => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = excludeLabels;
+    return config;
+  };
+
+  const buildServer = async (options: { config: WorkspaceConfig; updateLabels: ReturnType<typeof vi.fn> }) => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const server = createHttpServer({
+      config: options.config,
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => []),
+        getTask: vi.fn(async () => sampleTask),
+        listComments: vi.fn(async () => []),
+        updateLabels: options.updateLabels,
+      } as any,
+      reviewService: { resolvePullRequest: vi.fn(async () => null) } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+    return { server, db };
+  };
+
+  test("disabling adds only the first exclude label and reports agentEnabled false", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const { server, db } = await buildServer({ config: linearConfig(["agent:disabled", "agent:paused"]), updateLabels });
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: false },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ agentEnabled: false });
+      expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-1", add: ["agent:disabled"], remove: [] });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("enabling removes every exclude label and reports agentEnabled true", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const { server, db } = await buildServer({ config: linearConfig(["agent:disabled", "agent:paused"]), updateLabels });
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: true },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ agentEnabled: true });
+      expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-1", add: [], remove: ["agent:disabled", "agent:paused"] });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("4xxs without calling updateLabels when excludeLabels is unconfigured", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const { server, db } = await buildServer({ config: linearConfig([]), updateLabels });
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: false },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("exclude_labels_not_configured");
+      expect(updateLabels).not.toHaveBeenCalled();
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("propagates the 404 when the task is unknown", async () => {
+    const updateLabels = vi.fn(async () => {
+      throw new ForemanError("task_not_found", "Linear task not found: ENG-404", 404);
+    });
+    const { server, db } = await buildServer({ config: linearConfig(["agent:disabled"]), updateLabels });
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-404/agent-enabled",
+        payload: { enabled: false },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error.code).toBe("task_not_found");
+      expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-404", add: ["agent:disabled"], remove: [] });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("4xxs without calling updateLabels when the body lacks an enabled boolean", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const { server, db } = await buildServer({ config: linearConfig(["agent:disabled"]), updateLabels });
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: "yes" },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("invalid_request");
+      expect(updateLabels).not.toHaveBeenCalled();
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+});
+
+describe("HTTP task agentEnabled and frontmatter fields", () => {
+  // Each fixture stores empty `targets` while carrying its verdict purely in the
+  // description, proving the endpoint re-parses the fetched description rather
+  // than trusting the stale mirror targets.
+  const validTask: Task = {
+    ...sampleTask,
+    id: "ENG-1001",
+    provider: "linear",
+    providerId: "ENG-1001",
+    title: "Valid frontmatter",
+    description: "Summary line.\n\nAgent:\n  Repos: repo-a, repo-b",
+    labels: ["Agent"],
+    targets: [],
+    updatedAt: "2026-03-14T12:00:03Z",
+  };
+  const brokenTask: Task = {
+    ...sampleTask,
+    id: "ENG-1002",
+    provider: "linear",
+    providerId: "ENG-1002",
+    title: "Broken frontmatter, agent disabled",
+    description: "Agent:\n  Depends on tasks: ENG-1001",
+    labels: ["Agent", "agent:disabled"],
+    targets: [],
+    updatedAt: "2026-03-14T12:00:02Z",
+  };
+  const missingTask: Task = {
+    ...sampleTask,
+    id: "ENG-1003",
+    provider: "linear",
+    providerId: "ENG-1003",
+    title: "No metadata block",
+    description: "Plain description with no Agent metadata.",
+    labels: ["Agent"],
+    targets: [],
+    updatedAt: "2026-03-14T12:00:01Z",
+  };
+
+  test("derives agentEnabled from the exclude label and frontmatter from the parsed description", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = ["agent:disabled"];
+
+    db.taskMirror.saveTasks([validTask, brokenTask, missingTask]);
+
+    const server = createHttpServer({
+      config,
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => []),
+        getTask: vi.fn(async () => validTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: { resolvePullRequest: vi.fn(async () => null) } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({ method: "GET", url: "/api/tasks" });
+      expect(response.statusCode).toBe(200);
+      const byId = new Map(
+        (response.json().tasks as Array<{ id: string }>).map((task) => [task.id, task]),
+      );
+
+      expect(byId.get("ENG-1001")).toMatchObject({
+        agentEnabled: true,
+        frontmatter: { state: "valid", repos: ["repo-a", "repo-b"], detail: null },
+      });
+      expect(byId.get("ENG-1002")).toMatchObject({
+        agentEnabled: false,
+        frontmatter: { state: "broken", repos: [], detail: "Agent: block found, but no usable Repos:" },
+      });
+      expect(byId.get("ENG-1003")).toMatchObject({
+        agentEnabled: true,
+        frontmatter: { state: "missing", repos: [], detail: "No Agent: metadata block" },
+      });
+
+      // The frontmatter repos must agree with parseLinearMetadata run on the same fixture.
+      expect(parseLinearMetadata(validTask.description, validTask.id.toLowerCase()).targets.map((target) => target.repoKey)).toEqual([
+        "repo-a",
+        "repo-b",
+      ]);
     } finally {
       await server.close();
       db.close();

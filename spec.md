@@ -1391,6 +1391,7 @@ All endpoints are workspace-scoped because one process serves exactly one worksp
 - `POST /api/scheduler/pause`
 - `POST /api/scheduler/stop`
 - `POST /api/scout/run`
+- `POST /api/tasks/:taskId/agent-enabled`
 
 ### Endpoint Contracts
 
@@ -1448,11 +1449,15 @@ Returns:
       "priority": "high",
       "repo": "product-app",
       "updatedAt": "2026-03-14T12:00:00Z",
-      "url": "https://linear.app/..."
+      "url": "https://linear.app/...",
+      "agentEnabled": true,
+      "frontmatter": {"state": "valid", "repos": ["product-app"], "detail": null}
     }
   ]
 }
 ```
+
+`agentEnabled` is `false` when the task carries any configured `taskSystem.linear.excludeLabels` label (always `true` when none are configured). `frontmatter` re-parses the fetched description with Foreman's own `Agent:` metadata parser: `state` is `valid` when it yields usable `Repos:`, `broken` when an `Agent:` block is present but yields none, and `missing` when there is no block.
 
 #### `GET /api/tasks/:taskId`
 
@@ -1728,6 +1733,28 @@ Response:
   }
 }
 ```
+
+#### `POST /api/tasks/:taskId/agent-enabled`
+
+Toggles whether the agent may pick up a task by adding or removing the configured `taskSystem.linear.excludeLabels`. Disabling adds the first exclude label (one is enough to exclude the task at scout intake); enabling removes every exclude label.
+
+Request body:
+
+```json
+{
+  "enabled": false
+}
+```
+
+Response (echoes the resulting `agentEnabled`):
+
+```json
+{
+  "agentEnabled": false
+}
+```
+
+Responds `400` when `excludeLabels` is unconfigured or the body lacks an `enabled` boolean, and `404` when the task does not exist; it never silently no-ops.
 
 ### Log Endpoints
 
