@@ -74,7 +74,7 @@ export function UsagePage() {
   const columnLabel = groupByOptions.find((option) => option.value === groupBy)?.columnLabel ?? "Group"
 
   return (
-    <div className="space-y-4">
+    <div className="max-w-4xl space-y-4">
       <header className="flex flex-col gap-2">
         <h2 className="text-3xl tracking-tight text-foreground">Usage</h2>
         <p className="text-sm text-muted-foreground">

@@ -592,7 +592,7 @@ export function SettingsPage() {
                 onCommit={(idPrefix) => patch({ taskSystem: { file: { idPrefix } } })}
               />
             </FieldGrid>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {stateFields.map(([key, label]) => (
                 <ListField
                   key={key}
@@ -647,7 +647,7 @@ export function SettingsPage() {
                 onCommit={(consolidatedLabel) => patch({ taskSystem: { linear: { consolidatedLabel } } })}
               />
             </FieldGrid>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+            <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
               {stateFields.map(([key, label]) => (
                 <ListField
                   key={key}

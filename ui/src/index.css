@@ -6,8 +6,11 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-    --text-xxs: 0.625rem;
-    --text-xxs--line-height: calc(0.875 / 0.625);
+    /* Legibility floor: keep micro-labels at the text-xs size (0.75rem / 12px)
+       rather than a sub-11px value. Defined once here so every text-xxs usage
+       across all pages clears the floor. */
+    --text-xxs: 0.75rem;
+    --text-xxs--line-height: calc(1 / 0.75);
 }
 
 @theme inline {
