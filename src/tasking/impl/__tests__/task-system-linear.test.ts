@@ -270,6 +270,23 @@ describe("LinearTaskSystem.validateStartup", () => {
     expect(error.message).toContain("Frontend");
   });
 
+  test("throws linear_label_not_found when a configured exclude label is missing from Linear", async () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = ["agent:disabled"];
+    stubStartupFetch({ teamStates: ALL_TEAM_STATES, labels: ALL_LABELS });
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const error = await expectForemanError(taskSystem.validateStartup(), "linear_label_not_found");
+    expect(error.message).toContain("agent:disabled");
+  });
+
+  test("resolves when configured exclude labels exist in Linear", async () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = ["agent:disabled"];
+    stubStartupFetch({ teamStates: ALL_TEAM_STATES, labels: [...ALL_LABELS, "agent:disabled"] });
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    await expect(taskSystem.validateStartup()).resolves.toBeUndefined();
+  });
+
   test("throws linear_state_not_found naming a configured state missing from the team", async () => {
     stubStartupFetch({ teamStates: ALL_TEAM_STATES.filter((state) => state !== "Ready to Deploy"), labels: ALL_LABELS });
     const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);

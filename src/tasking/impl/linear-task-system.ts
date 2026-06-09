@@ -625,7 +625,12 @@ export class LinearTaskSystem implements TaskSystem {
         throw new ForemanError("linear_state_not_found", `Configured Linear states not found: ${missingStates.join(", ")}`);
       }
 
-      const requiredLabels = uniqueValues([...linear.includeLabels, linear.agentCreatedLabel, linear.consolidatedLabel]);
+      const requiredLabels = uniqueValues([
+        ...linear.includeLabels,
+        linear.agentCreatedLabel,
+        linear.consolidatedLabel,
+        ...linear.excludeLabels,
+      ]);
       const availableLabels = new Set(response.issueLabels.nodes.map((label) => label.name));
       const missingLabels = requiredLabels.filter((label) => !availableLabels.has(label));
       if (missingLabels.length > 0) {

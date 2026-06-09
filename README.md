@@ -77,6 +77,7 @@ Task body...
 Tickets become Foreman candidates when they satisfy the task-system filter and metadata requirements:
 
 - Linear tickets must be in the configured team, assigned to the configured assignee, and have one of `taskSystem.linear.includeLabels`.
+- Tickets carrying any `taskSystem.linear.excludeLabels` label are hard-skipped at candidate intake, removing them from every action (execution, review, retry, deployment, consolidation). Defaults to `[]` (skip nothing).
 - File tickets must be valid markdown task files in the configured task directory, with an `id` matching the filename.
 - The ticket state must map to a configured Foreman state such as `ready`, `in_progress`, `in_review`, `deployable`, `done`, or `canceled`; unmapped states are skipped.
 - Execution requires at least one target repo via `targets` or `Agent: Repos`, and every repo key must match a discovered repo.

@@ -213,6 +213,7 @@ taskSystem:
     team: Engineering
     assignee: me
     includeLabels: [Agent]
+    excludeLabels: []
     agentCreatedLabel: "Agent Created"
     consolidatedLabel: "Agent Consolidated"
     states:
