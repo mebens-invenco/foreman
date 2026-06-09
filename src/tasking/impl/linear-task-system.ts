@@ -65,6 +65,16 @@ const uniqueValues = (values: string[]): string[] => {
   return unique;
 };
 
+const configuredLinearStateNames = (linear: NonNullable<WorkspaceConfig["taskSystem"]["linear"]>): string[] =>
+  uniqueValues([
+    ...linear.states.ready,
+    ...linear.states.inProgress,
+    ...linear.states.inReview,
+    ...linear.states.deployable,
+    ...linear.states.done,
+    ...linear.states.canceled,
+  ]);
+
 const parseRepoDependencies = (value: string): TaskTargetDependencyRef[] => {
   const dependencies: TaskTargetDependencyRef[] = [];
   for (const [position, dependency] of parseCsv(value).entries()) {
@@ -607,14 +617,7 @@ export class LinearTaskSystem implements TaskSystem {
         {},
       );
 
-      const configuredStates = uniqueValues([
-        ...linear.states.ready,
-        ...linear.states.inProgress,
-        ...linear.states.inReview,
-        ...linear.states.deployable,
-        ...linear.states.done,
-        ...linear.states.canceled,
-      ]);
+      const configuredStates = configuredLinearStateNames(linear);
       const availableStates = new Set(team.states.map((state) => state.name));
       const missingStates = configuredStates.filter((state) => !availableStates.has(state));
       if (missingStates.length > 0) {
@@ -662,19 +665,23 @@ export class LinearTaskSystem implements TaskSystem {
   async listCandidates(): Promise<Task[]> {
     const linear = this.config.taskSystem.linear!;
     const assigneeFilter = await this.resolveAssigneeFilter();
+    const stateNames = configuredLinearStateNames(linear);
     this.logger.debug("listing Linear candidate issues", {
       team: linear.team,
       assignee: assigneeFilter.assigneeName ?? assigneeFilter.assigneeId,
       labelCount: linear.includeLabels.length,
+      stateCount: stateNames.length,
+      stateNames: stateNames.join(", "),
     });
     const data = await this.client.request<{ issues: { nodes: LinearIssueNode[] } }>(
       assigneeFilter.assigneeId
-        ? `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeId: ID!) {
+        ? `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeId: ID!, $stateNames: [String!]) {
         issues(
           filter: {
             team: { name: { eq: $teamName } },
             assignee: { id: { eq: $assigneeId } },
-            labels: { some: { name: { in: $labels } } }
+            labels: { some: { name: { in: $labels } } },
+            state: { name: { in: $stateNames } }
           },
           first: 250
         ) {
@@ -694,12 +701,13 @@ export class LinearTaskSystem implements TaskSystem {
           }
         }
       }`
-        : `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeName: String!) {
+        : `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeName: String!, $stateNames: [String!]) {
         issues(
           filter: {
             team: { name: { eq: $teamName } },
             assignee: { name: { eq: $assigneeName } },
-            labels: { some: { name: { in: $labels } } }
+            labels: { some: { name: { in: $labels } } },
+            state: { name: { in: $stateNames } }
           },
           first: 250
         ) {
@@ -722,6 +730,7 @@ export class LinearTaskSystem implements TaskSystem {
       {
         teamName: linear.team,
         labels: linear.includeLabels,
+        stateNames,
         ...(assigneeFilter.assigneeId ? { assigneeId: assigneeFilter.assigneeId } : { assigneeName: assigneeFilter.assigneeName! }),
       },
     );
