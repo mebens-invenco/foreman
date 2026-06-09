@@ -146,6 +146,65 @@ describe("CodexRunner", () => {
     expect(invocation.argv).toContain('model_reasoning_effort="high\\nbreak"');
   });
 
+  test("excludeMcp appends a mcp_servers={} override so the invocation loads zero MCP servers", async () => {
+    const tempDir = await createTempDir("foreman-runner-test-");
+    cleanupDirs.push(tempDir);
+
+    const codexScriptPath = path.join(tempDir, "fake-codex.js");
+    await writeExecutableScript(codexScriptPath, echoArgvScript);
+    process.env.FOREMAN_CODEX_BIN = codexScriptPath;
+
+    // The eval judge is a pure grading call: it needs no tools and must not
+    // trigger per-call MCP auth prompts. excludeMcp must therefore clear the
+    // mcp_servers table — the Codex analogue of claude's --strict-mcp-config.
+    const runner = new CodexRunner("gpt-5.5", "high", true);
+    const result = await runner.invoke({
+      attemptId: "attempt-codex-exclude-mcp",
+      action: "execution",
+      cwd: tempDir,
+      env: {},
+      prompt: "probe",
+      timeoutMs: 5_000,
+    });
+
+    const invocation = JSON.parse(result.stdout) as { argv: string[]; stdin: string };
+    expect(invocation.argv).toEqual([
+      "exec",
+      "--json",
+      "-c",
+      'sandbox_mode="workspace-write"',
+      "-c",
+      'model="gpt-5.5"',
+      "-c",
+      'model_reasoning_effort="high"',
+      "-c",
+      "mcp_servers={}",
+      "-",
+    ]);
+  });
+
+  test("omits the mcp_servers override when excludeMcp is not set so normal runs keep their MCP servers", async () => {
+    const tempDir = await createTempDir("foreman-runner-test-");
+    cleanupDirs.push(tempDir);
+
+    const codexScriptPath = path.join(tempDir, "fake-codex.js");
+    await writeExecutableScript(codexScriptPath, echoArgvScript);
+    process.env.FOREMAN_CODEX_BIN = codexScriptPath;
+
+    const runner = new CodexRunner("gpt-5.5", "high");
+    const result = await runner.invoke({
+      attemptId: "attempt-codex-keep-mcp",
+      action: "execution",
+      cwd: tempDir,
+      env: {},
+      prompt: "probe",
+      timeoutMs: 5_000,
+    });
+
+    const invocation = JSON.parse(result.stdout) as { argv: string[]; stdin: string };
+    expect(invocation.argv).not.toContain("mcp_servers={}");
+  });
+
   test("rejects option-shaped and otherwise-malformed nativeSessionId values", async () => {
     const tempDir = await createTempDir("foreman-runner-test-");
     cleanupDirs.push(tempDir);

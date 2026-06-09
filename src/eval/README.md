@@ -109,8 +109,10 @@ Two findings worth carrying forward:
   facts*, not *repo-specificity*.
 
 > Note: the judge is a pure grading call, so its invoker runs the agent CLI with MCP
-> disabled (claude: `--strict-mcp-config`, via `createAgentRunner({ excludeMcp: true })`)
-> — running `eval` with the judge does not trigger MCP auth prompts.
+> disabled (via `createAgentRunner({ excludeMcp: true })`) — running `eval` with the
+> judge does not trigger MCP auth prompts. Honoured by claude (`--strict-mcp-config`)
+> and codex (`-c mcp_servers={}`); a no-op for opencode, which exposes no
+> per-invocation MCP-disable flag, so an opencode judge keeps its configured MCP.
 
 ## Adding a prompt
 
