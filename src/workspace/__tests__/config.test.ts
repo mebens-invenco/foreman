@@ -96,6 +96,22 @@ describe("workspace config", () => {
     expect(parsed.taskSystem.linear!.agentCreatedLabel).toBe("AI Generated");
   });
 
+  test("defaults Linear excludeLabels to an empty list", () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    const parsed = parseWorkspaceConfig(stringifyWorkspaceConfig(config));
+
+    expect(parsed.taskSystem.linear!.excludeLabels).toEqual([]);
+  });
+
+  test("round-trips configured Linear excludeLabels", () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = ["agent:disabled"];
+
+    const parsed = parseWorkspaceConfig(stringifyWorkspaceConfig(config));
+
+    expect(parsed.taskSystem.linear!.excludeLabels).toEqual(["agent:disabled"]);
+  });
+
   test("parses codex execution and reviewer runner configs", () => {
     const parsed = parseWorkspaceConfig(`
 version: 1

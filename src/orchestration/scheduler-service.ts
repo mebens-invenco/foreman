@@ -504,7 +504,10 @@ export class SchedulerService extends EventEmitter {
         selectedAction: firstAction,
         selectedTaskId: firstTaskId,
         selectedReason: firstReason,
-        summary: { enqueued: selection.jobs.length },
+        summary: {
+          enqueued: selection.jobs.length,
+          ...(selection.excludedByLabelCount > 0 ? { excludedByLabelCount: selection.excludedByLabelCount } : {}),
+        },
       });
 
       if (selection.jobs.length > 0) {
