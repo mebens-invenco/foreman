@@ -113,3 +113,29 @@ runner:
 ```
 
 The cap is a **per-invocation** safety net, not an aggregate budget: each attempt and each reviewer run starts a fresh `claude` process with its own cap. The cap and `timeoutMs` are independent guards — whichever fires first terminates the run. Use it to bound runaway attempts; pick the value from observed normal spend plus headroom, not from cost-estimation rates. Omitting the field preserves current behavior (no cap).
+
+## Reducing Effort on Continuations
+
+Continuation dispatches — review and reviewer follow-ups that resume an existing runner session — often only need to return `no_action_needed` or reply to a single thread, yet they inherit the same `effort` as the first pass. Set the optional `continuationEffort` field to run those follow-ups at a lighter effort while leaving the first pass untouched:
+
+```yaml
+runner:
+  execution:
+    type: claude
+    model: claude-opus-4-8
+    effort: max
+    continuationEffort: high   # optional; used for review continuations
+  reviewer:
+    type: claude
+    model: claude-opus-4-8
+    effort: max
+    continuationEffort: high   # optional; used for reviewer continuations
+```
+
+`runner.execution` supplies the effort for continuations of execution-runner actions (a `review` reply resumes the implementation session); `runner.reviewer` supplies it for `reviewer` continuations. For `opencode` runners the parallel knob is `continuationVariant`.
+
+Behavior notes:
+
+- **Omitting the field preserves current behavior** — every dispatch uses `effort` (or `variant`).
+- It only takes effect on a **continuation** — a dispatch that resumes a live runner session, in practice a `review` or `reviewer` follow-up. A first-pass `execution` and a `retry` are never continuations (a `retry` always starts a fresh session), so they keep using the base `effort`/`variant`.
+- It **composes with `maxBudgetUsd`** rather than replacing it: `continuationEffort` lowers the thinking budget of continuation runs, while `maxBudgetUsd` still caps per-invocation spend. Use either or both.

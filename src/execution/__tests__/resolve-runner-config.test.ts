@@ -109,4 +109,22 @@ describe("resolveRunnerConfigForAction", () => {
 
     expect(() => resolveRunnerConfigForAction(config, "execution", task)).toThrow(/Invalid runner override/);
   });
+
+  test("applies continuationEffort only for continuation dispatches", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.runner.execution = { type: "claude", model: "claude-opus-4-8", effort: "max", continuationEffort: "high", timeoutMs: 3_600_000 };
+
+    expect(resolveRunnerConfigForAction(config, "review", null, true)).toMatchObject({ effort: "high" });
+    expect(resolveRunnerConfigForAction(config, "review", null, false)).toMatchObject({ effort: "max" });
+    // Continuation defaults to false, preserving the pre-existing call shape.
+    expect(resolveRunnerConfigForAction(config, "review", null)).toMatchObject({ effort: "max" });
+  });
+
+  test("lets a task tuning override win over continuationEffort", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.runner.execution = { type: "claude", model: "claude-opus-4-8", effort: "max", continuationEffort: "high", timeoutMs: 3_600_000 };
+    const task = baseTask({ runnerOverride: { execution: { tuning: "low" } } });
+
+    expect(resolveRunnerConfigForAction(config, "review", task, true)).toMatchObject({ effort: "low" });
+  });
 });
