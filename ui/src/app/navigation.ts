@@ -1,6 +1,7 @@
 import {
   ActivityIcon,
   BookOpenTextIcon,
+  BotIcon,
   ChartColumnIncreasingIcon,
   DollarSignIcon,
   ListTodoIcon,
@@ -33,6 +34,12 @@ export const navigationItems: NavigationItem[] = [
     href: "/tasks",
     description: "One row per task — summed tokens, cost, and effective status across all attempts.",
     icon: ListTodoIcon,
+  },
+  {
+    title: "Foreman",
+    href: "/foreman",
+    description: "Issue manager — every ready or agent-tagged issue, with a Foreman on/off toggle and frontmatter health.",
+    icon: BotIcon,
   },
   {
     title: "Learnings",

@@ -322,6 +322,31 @@ export type TaskListItem = {
   targets: TaskTargetSummary[]
 }
 
+export type ForemanTaskFrontmatterState = "valid" | "broken" | "missing"
+
+// Health of an issue's `Agent:` metadata block, re-derived server-side from the
+// freshly-fetched description. Drives the Foreman manager's frontmatter column.
+export type ForemanTaskFrontmatter = {
+  state: ForemanTaskFrontmatterState
+  repos: string[]
+  detail: string | null
+}
+
+// The Foreman issue-manager view of a task: the agent on/off state and
+// frontmatter health on top of the core identity/state fields, as returned by
+// GET /api/tasks.
+export type ForemanTask = {
+  id: string
+  title: string
+  state: TaskState
+  providerState: string
+  labels: string[]
+  assignee: string | null
+  url: string | null
+  agentEnabled: boolean
+  frontmatter: ForemanTaskFrontmatter
+}
+
 export type LearningRecord = {
   id: string
   title: string
@@ -484,6 +509,29 @@ export function listTasks(params: {
   return requestJson<{ tasks: TaskListItem[] }>(
     `/api/tasks${buildSearch(params)}`
   ).then((payload) => payload.tasks)
+}
+
+// The Foreman manager lists the union of ready-state and agent-tagged issues;
+// it filters that union client-side, so it fetches the full default window.
+export function listForemanTasks() {
+  return requestJson<{ tasks: ForemanTask[] }>("/api/tasks").then(
+    (payload) => payload.tasks
+  )
+}
+
+// Toggle whether the agent may pick up an issue (adds/removes the configured
+// exclude label server-side). Returns the reconciled agentEnabled state.
+export function setAgentEnabled(taskId: string, enabled: boolean) {
+  return requestJson<{ agentEnabled: boolean }>(
+    `/api/tasks/${encodeURIComponent(taskId)}/agent-enabled`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ enabled }),
+    }
+  )
 }
 
 export function listLearnings(params: {
