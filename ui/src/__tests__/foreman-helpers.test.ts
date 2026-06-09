@@ -36,6 +36,25 @@ describe("agentLabelsOf", () => {
     const task = makeTask({ labels: ["agent:michael", "chore"] })
     expect(agentLabelsOf(task, [])).toEqual(["agent:michael"])
   })
+
+  // The fallback regex is the live path until settings resolve and drives both
+  // the union scope and the agent facet, so pin its boundaries: the : / _ / -
+  // separators and case-insensitivity match; a bare `agent` prefix (agentic) or
+  // a non-anchored match (my-agent:x) must not — otherwise loosening the regex
+  // would silently widen Foreman's scope.
+  test.each([
+    ["agent:foo", true],
+    ["agent_foo", true],
+    ["agent-foo", true],
+    ["Agent:foo", true],
+    ["AGENT:foo", true],
+    ["agentic", false],
+    ["my-agent:foo", false],
+    ["chore", false],
+  ] as const)("fallback treats %s as agent-tagged: %s", (label, expected) => {
+    const task = makeTask({ labels: [label] })
+    expect(isAgentTagged(task, [])).toBe(expected)
+  })
 })
 
 describe("isAgentTagged", () => {
