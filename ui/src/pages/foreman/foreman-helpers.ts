@@ -25,10 +25,13 @@ export const foremanFrontmatterOptions: DataTableFilterOption[] = [
 // distinct from the "all" sentinel the shared filter-select reserves.
 export const UNASSIGNED_VALUE = "unassigned"
 
-// An "agent label" is one the workspace configured as an include label — this
-// mirrors the backend's configuredAgentLabel (= includeLabels[0]). Until the
-// settings query resolves we fall back to the `agent:` naming convention so the
-// union scope and facets populate rather than flashing empty.
+// An "agent label" is any label the workspace configured as an include label.
+// This is intentionally broader than the backend's configuredAgentLabel
+// (strictly includeLabels[0], used for issue selection/creation): for scope and
+// facets we treat every configured include label as an agent tag, so a
+// multi-agent setup (agent:tars, agent:michael, …) all reads as tagged. Until
+// the settings query resolves we fall back to the `agent:` naming convention so
+// the union scope and facets populate rather than flashing empty.
 export function agentLabelsOf(task: ForemanTask, includeLabels: string[]): string[] {
   if (includeLabels.length > 0) {
     return task.labels.filter((label) => includeLabels.includes(label))
