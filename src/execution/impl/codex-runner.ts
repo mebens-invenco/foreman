@@ -11,6 +11,16 @@ import { runAgentProcess } from "./run-agent-process.js";
 // `disk-full-write-access` is intentionally not used.
 const CODEX_SANDBOX_OVERRIDE = 'sandbox_mode="workspace-write"';
 
+// Clears every `[mcp_servers.*]` entry that would otherwise load from
+// `~/.codex/config.toml`. Passed as a `-c` TOML override (consistent with how
+// model/effort/sandbox are injected) so a single invocation loads ZERO MCP
+// servers — the Codex analogue of claude's `--strict-mcp-config`. Used for pure
+// grading calls (the eval judge) that need no tools and must not trigger
+// per-call MCP auth prompts. We override the table rather than pass
+// `--ignore-user-config` so unrelated user config (profiles, env policy) stays
+// intact.
+const CODEX_EXCLUDE_MCP_OVERRIDE = "mcp_servers={}";
+
 // Codex thread ids are UUIDs (typically UUIDv7). Validating the shape before
 // passing as a positional arg prevents option-shaped strings (e.g. "--last",
 // "-c whatever") from being interpreted as flags by `codex exec resume`. The
@@ -24,6 +34,10 @@ export class CodexRunner implements AgentRunner {
   constructor(
     private readonly model: string,
     private readonly effort: string,
+    // When true, override `mcp_servers` to an empty table so the CLI loads ZERO
+    // MCP servers (see CODEX_EXCLUDE_MCP_OVERRIDE). Default off — normal worker
+    // runs keep their configured MCP servers.
+    private readonly excludeMcp: boolean = false,
   ) {}
 
   async invoke(request: AgentRunnerInvokeRequest): Promise<CapturedAgentRunResult> {
@@ -63,6 +77,7 @@ export class CodexRunner implements AgentRunner {
       `model=${JSON.stringify(this.model)}`,
       "-c",
       `model_reasoning_effort=${JSON.stringify(this.effort)}`,
+      ...(this.excludeMcp ? ["-c", CODEX_EXCLUDE_MCP_OVERRIDE] : []),
     ];
 
     const args = resume && nativeSessionId

@@ -109,6 +109,41 @@ export const structureGrader: Grader = {
   },
 };
 
+/**
+ * Emitted learnings match the case's expected repo scope. ADVISORY: reported but
+ * does not gate a sample's pass — scope is a softer judgment than the structural
+ * checks, and the policy itself leaves room ("use `shared` only when the insight
+ * is clearly cross-repo"). Checks the `repo` field the worker-result schema lets
+ * through unverified: "shared" must be the literal shared scope; "repo-specific"
+ * must be any non-shared repo.
+ */
+export const scopeGrader: Grader = {
+  name: "scope",
+  advisory: true,
+  grade: ({ evalCase, result }) => {
+    if (!evalCase.expectScope) {
+      return pass("scope", "n/a (no scope expectation)");
+    }
+    if (!result) {
+      return fail("scope", "no parseable result to inspect");
+    }
+    const adds = learningAdds(result);
+    if (adds.length === 0) {
+      return pass("scope", "n/a (no add mutations)");
+    }
+    for (const add of adds) {
+      const isShared = add.repo === "shared";
+      if (evalCase.expectScope === "shared" && !isShared) {
+        return fail("scope", `expected a shared (cross-repo) learning but "${add.title}" is scoped to repo "${add.repo}"`);
+      }
+      if (evalCase.expectScope === "repo-specific" && isShared) {
+        return fail("scope", `expected a repo-specific learning but "${add.title}" used the "shared" scope`);
+      }
+    }
+    return pass("scope", `all ${adds.length} learning(s) match the expected ${evalCase.expectScope} scope`);
+  },
+};
+
 // Binary verdict, not a 1-5 Likert: per current eval practice (Hamel/Shreya),
 // binary judgments label more consistently across runs than Likert points whose
 // boundaries drift between annotators and samples. The judge is also ADVISORY
@@ -119,7 +154,7 @@ const judgeVerdictSchema = z.object({
   rationale: z.string().min(1),
 });
 
-const parseJudgeVerdict = (stdout: string): z.infer<typeof judgeVerdictSchema> | null => {
+export const parseJudgeVerdict = (stdout: string): z.infer<typeof judgeVerdictSchema> | null => {
   const open = "<judge>";
   const close = "</judge>";
   const openStart = stdout.lastIndexOf(open);
@@ -134,12 +169,24 @@ const parseJudgeVerdict = (stdout: string): z.infer<typeof judgeVerdictSchema> |
   }
 };
 
-const buildJudgePrompt = (add: LearningAdd, syntheticSession: string): string =>
+// Generalizable rule vs one-off fact. The weakness this targets: a model will
+// rubber-stamp any well-structured "Rule:" as reusable. But the failure mode is
+// specifically the ONE-OFF FACT (a bare config value, a single incident, one
+// artifact's current shape), NOT repo-specificity — a repo-internal convention or
+// pitfall that recurs across that repo's work is genuinely reusable. An earlier
+// "breadth of transfer" framing wrongly rejected repo-internal rules and cratered
+// agreement on real positives; this version keeps those and rejects only one-offs.
+export const buildJudgePrompt = (add: LearningAdd, syntheticSession: string): string =>
   [
-    "You are grading the QUALITY of a learning an agent recorded at the end of a work session.",
-    "Answer one yes/no question about the learning below.",
-    "Is it a non-obvious, reusable pattern or decision rule that would help a FUTURE agent on a DIFFERENT task — as opposed to a restatement of this one task, or something too obvious or one-off to be worth keeping?",
-    'Answer "yes" only if it is reusable AND non-obvious AND phrased as a general pattern/rule rather than a timeline of this one task. Otherwise answer "no".',
+    "You are grading whether a learning an agent recorded at the end of a work session is worth keeping for future agents to read before later work.",
+    "Keep it (answer \"yes\") if it captures a non-obvious, GENERALIZABLE pattern, pitfall, convention, technique, or decision rule that a future agent would re-apply. This MAY be specific to one repo or domain: a convention, gotcha, or testing technique that recurs across that repo's work still earns its place.",
+    "",
+    'Discard it (answer "no") only when it is a ONE-OFF that will not re-apply:',
+    "- a bare fact about one artifact's current shape (one component's memo dependency, one page's tab order, one function's line number);",
+    "- a single config value or environment detail (a port, a worker count, a fixed batch limit);",
+    '- a single incident with no transferable rule ("PR #X\'s flaky test was a missing await");',
+    "- obvious advice, or a restatement/timeline of this one task.",
+    'A well-written "Rule:" heading does not make a one-off fact generalizable; conversely, a repo-specific rule IS generalizable when the same situation recurs across that repo\'s tasks.',
     "",
     "The session that produced it:",
     syntheticSession.trim(),
@@ -151,8 +198,8 @@ const buildJudgePrompt = (add: LearningAdd, syntheticSession: string): string =>
     "Content:",
     add.content,
     "",
-    'Reply with ONLY this block and nothing else:',
-    '<judge>{"verdict": "yes" | "no", "rationale": "<one sentence>"}</judge>',
+    "Reply with ONLY this block and nothing else:",
+    '<judge>{"verdict": "yes" | "no", "rationale": "<one sentence: the generalizable rule it captures, or why it is a one-off>"}</judge>',
   ].join("\n");
 
 /**
@@ -189,5 +236,5 @@ export const judgeGrader: Grader = {
   },
 };
 
-/** Graders applied to each learning-policy sample, deterministic first. */
-export const learningWritebackGraders: Grader[] = [schemaGrader, emitsExpectedGrader, tagsGrader, structureGrader, judgeGrader];
+/** Graders applied to each learning-policy sample, deterministic first, advisory last. */
+export const learningWritebackGraders: Grader[] = [schemaGrader, emitsExpectedGrader, tagsGrader, structureGrader, scopeGrader, judgeGrader];
