@@ -9,6 +9,35 @@ describe("estimateCost", () => {
   });
 
   describe("known model", () => {
+    test("computes per-bucket USD using the rate table for Claude Fable 5", () => {
+      const rate = lookupRunnerRate({
+        runnerName: "claude",
+        runnerModel: "claude-fable-5",
+      });
+      expect(rate).not.toBeNull();
+
+      const result = estimateCost(
+        {
+          inputTokens: 1_000_000,
+          outputTokens: 1_000_000,
+          cacheReadInputTokens: 1_000_000,
+          cacheCreationInputTokens: 1_000_000,
+          reasoningOutputTokens: 1_000_000,
+        },
+        "claude",
+        "claude-fable-5",
+      );
+
+      // Per-1M token rates for Fable 5 - fresh in, output, cache read, cache write.
+      expect(result.breakdown.input).toBeCloseTo(10);
+      expect(result.breakdown.output).toBeCloseTo(50);
+      expect(result.breakdown.cacheRead).toBeCloseTo(1);
+      expect(result.breakdown.cacheCreate).toBeCloseTo(12.5);
+      // Reasoning tokens bill at the output rate.
+      expect(result.breakdown.reasoning).toBeCloseTo(50);
+      expect(result.totalUsd).toBeCloseTo(10 + 50 + 1 + 12.5 + 50);
+    });
+
     test("computes per-bucket USD using the rate table for Claude Opus 4.7", () => {
       const rate = lookupRunnerRate({
         runnerName: "claude",
