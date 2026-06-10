@@ -1,6 +1,13 @@
 import type { DataTableFilterOption } from "@/components/data-table"
 import type { ForemanTask } from "@/lib/api"
 
+// Scope = which set the manager fetches. `candidates` is the mirrored,
+// scheduler-visible set; `assigned` broadens to every issue assigned to the
+// user (a live backend query) so untagged issues can be marked for Foreman.
+// Unlike the facets below this drives the query, not a client-side filter.
+export const foremanScopeValues = ["candidates", "assigned"] as const
+export type ForemanScope = (typeof foremanScopeValues)[number]
+
 // Foreman on/off facet — `on` = agent may pick the issue up (agentEnabled).
 export const foremanOnOffValues = ["all", "on", "off"] as const
 export type ForemanOnOff = (typeof foremanOnOffValues)[number]

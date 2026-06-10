@@ -513,8 +513,11 @@ export function listTasks(params: {
 
 // The Foreman manager lists the union of ready-state and agent-tagged issues;
 // it filters that union client-side, so it fetches the full default window.
-export function listForemanTasks() {
-  return requestJson<{ tasks: ForemanTask[] }>("/api/tasks").then(
+// `scope=assigned` broadens the fetch to every issue assigned to the user (a
+// live query), surfacing untagged issues that can be marked for Foreman.
+export function listForemanTasks(scope: "candidates" | "assigned" = "candidates") {
+  const query = scope === "assigned" ? "?scope=assigned" : ""
+  return requestJson<{ tasks: ForemanTask[] }>(`/api/tasks${query}`).then(
     (payload) => payload.tasks
   )
 }

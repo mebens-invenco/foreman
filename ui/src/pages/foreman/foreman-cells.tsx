@@ -111,7 +111,9 @@ export function ForemanToggleCell({ task, includeLabels }: ForemanCellProps) {
       />
       <span
         className={cn(
-          "text-xxs font-medium tracking-[0.18em] uppercase",
+          // Fixed width so "On"→"Off" doesn't change the cell's content width
+          // and reflow the (content-sized) table column on every toggle.
+          "inline-block w-7 text-xxs font-medium tracking-[0.18em] uppercase",
           task.agentEnabled
             ? "text-emerald-700 dark:text-emerald-300"
             : "text-muted-foreground"
