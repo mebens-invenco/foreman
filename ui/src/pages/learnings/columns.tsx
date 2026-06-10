@@ -11,7 +11,7 @@ import type { LearningRecord } from "@/lib/api"
 
 const confidenceValues = ["emerging", "established", "proven"] as const
 
-function confidenceTone(confidence: LearningRecord["confidence"]) {
+export function confidenceTone(confidence: LearningRecord["confidence"]) {
   switch (confidence) {
     case "proven":
       return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
@@ -124,7 +124,7 @@ export const learningColumns: ColumnDef<LearningRecord>[] = [
   {
     accessorKey: "content",
     cell: ({ row }) => (
-      <p className="max-w-[32rem] whitespace-normal text-xs leading-6 text-muted-foreground">
+      <p className="line-clamp-2 max-w-72 whitespace-normal text-xs leading-6 text-muted-foreground">
         {row.original.content}
       </p>
     ),

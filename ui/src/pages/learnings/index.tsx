@@ -1,3 +1,5 @@
+import { useSearchParams } from "react-router"
+
 import {
   DataTable,
   DataTableFilterSelect,
@@ -6,6 +8,7 @@ import {
   DataTableToolbar,
   useDataTable,
 } from "@/components/data-table"
+import { Sheet } from "@/components/ui/sheet"
 import { useLearningsQuery } from "@/hooks/use-learnings-query"
 import {
   getLearningRepoOptions,
@@ -13,9 +16,12 @@ import {
   learningConfidenceOptions,
   learningsGlobalFilter,
 } from "@/pages/learnings/columns"
+import { LearningDetailSheet } from "@/pages/learnings/learning-detail-sheet"
 import { useLearningsTableState } from "@/pages/learnings/use-learnings-table-state"
 
 export function LearningsPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const selectedLearningId = searchParams.get("learningId")
   const { data: learnings = [], isLoading, isError, error } = useLearningsQuery()
   const tableState = useLearningsTableState()
   const table = useDataTable({
@@ -32,51 +38,77 @@ export function LearningsPage() {
     sorting: tableState.sorting,
   })
   const repoOptions = getLearningRepoOptions(learnings)
+  const selectedLearning =
+    learnings.find((learning) => learning.id === selectedLearningId) ?? null
+
+  const setSelectedLearningId = (learningId: string | null) => {
+    const next = new URLSearchParams(searchParams)
+    if (learningId) {
+      next.set("learningId", learningId)
+    } else {
+      next.delete("learningId")
+    }
+    setSearchParams(next, { replace: true })
+  }
 
   return (
-    <div className="space-y-4">
-      <header>
-        <h2 className="text-3xl tracking-tight text-foreground">Captured learnings</h2>
-      </header>
+    <>
+      <div className="space-y-4">
+        <header>
+          <h2 className="text-3xl tracking-tight text-foreground">Captured learnings</h2>
+        </header>
 
-      <DataTableShell>
-        <DataTableToolbar
-          hasActiveFilters={tableState.hasActiveFilters}
-          onReset={tableState.resetFilters}
-          onSearchChange={tableState.setGlobalFilter}
-          searchPlaceholder="Search learnings by title, repo, tags, and content"
-          searchValue={tableState.globalFilter}
-        >
-          <DataTableFilterSelect
-            allLabel="All confidence"
-            label="Confidence"
-            onValueChange={tableState.setConfidence}
-            options={learningConfidenceOptions}
-            value={tableState.confidence}
-          />
-          <DataTableFilterSelect
-            allLabel="All repos"
-            label="Repo"
-            onValueChange={tableState.setRepo}
-            options={repoOptions}
-            value={tableState.repo}
-          />
-        </DataTableToolbar>
+        <DataTableShell>
+          <DataTableToolbar
+            hasActiveFilters={tableState.hasActiveFilters}
+            onReset={tableState.resetFilters}
+            onSearchChange={tableState.setGlobalFilter}
+            searchPlaceholder="Search learnings by title, repo, tags, and content"
+            searchValue={tableState.globalFilter}
+          >
+            <DataTableFilterSelect
+              allLabel="All confidence"
+              label="Confidence"
+              onValueChange={tableState.setConfidence}
+              options={learningConfidenceOptions}
+              value={tableState.confidence}
+            />
+            <DataTableFilterSelect
+              allLabel="All repos"
+              label="Repo"
+              onValueChange={tableState.setRepo}
+              options={repoOptions}
+              value={tableState.repo}
+            />
+          </DataTableToolbar>
 
-        <DataTable
-          emptyMessage={
-            learnings.length === 0
-              ? "No learnings have been captured yet."
-              : "No learnings match the current filters."
+          <DataTable
+            emptyMessage={
+              learnings.length === 0
+                ? "No learnings have been captured yet."
+                : "No learnings match the current filters."
+            }
+            error={error}
+            isError={isError}
+            isLoading={isLoading}
+            onRowClick={(learning) => setSelectedLearningId(learning.id)}
+            table={table}
+          />
+
+          <DataTablePagination table={table} />
+        </DataTableShell>
+      </div>
+
+      <Sheet
+        open={selectedLearningId !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedLearningId(null)
           }
-          error={error}
-          isError={isError}
-          isLoading={isLoading}
-          table={table}
-        />
-
-        <DataTablePagination table={table} />
-      </DataTableShell>
-    </div>
+        }}
+      >
+        <LearningDetailSheet learning={selectedLearning} />
+      </Sheet>
+    </>
   )
 }
