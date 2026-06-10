@@ -190,6 +190,82 @@ describe("LinearTaskSystem.listCandidates", () => {
   });
 });
 
+describe("LinearTaskSystem.listAssignedIssues", () => {
+  test("omits the label filter and variable on the assigneeId path", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanViewer")) {
+        return new Response(JSON.stringify({ data: { viewer: { id: "user-123", name: "Test User" } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (body.query.includes("query ForemanAssignedIssues")) {
+        return new Response(JSON.stringify({ data: linearIssue([], "Test User") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const tasks = await taskSystem.listAssignedIssues();
+
+    expect(tasks).toHaveLength(1);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.query).toContain("$assigneeId: ID!");
+    expect(requests[1]?.query).toContain("assignee: { id: { eq: $assigneeId } }");
+    // The no-label branch must drop both the $labels var-decl and the filter
+    // clause, so a malformed assembly (dangling comma / stray $labels) is caught.
+    expect(requests[1]?.query).not.toContain("$labels: [String!]");
+    expect(requests[1]?.query).not.toContain("labels: { some: { name: { in: $labels } } }");
+    // ...and send no labels variable at all.
+    expect(requests[1]?.variables).toEqual({
+      teamName: "Engineering",
+      assigneeId: "user-123",
+    });
+  });
+
+  test("omits the label filter and variable on the assigneeName path", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanAssignedIssues")) {
+        return new Response(JSON.stringify({ data: linearIssue([], "Jane Doe") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const tasks = await taskSystem.listAssignedIssues();
+
+    expect(tasks).toHaveLength(1);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.query).not.toContain("query ForemanViewer");
+    expect(requests[0]?.query).toContain("assignee: { name: { eq: $assigneeName } }");
+    expect(requests[0]?.query).not.toContain("$labels: [String!]");
+    expect(requests[0]?.query).not.toContain("labels: { some: { name: { in: $labels } } }");
+    expect(requests[0]?.variables).toEqual({
+      teamName: "Engineering",
+      assigneeName: "Jane Doe",
+    });
+  });
+});
+
 describe("LinearTaskSystem.validateStartup", () => {
   const ALL_TEAM_STATES = ["Todo", "Ready", "In Progress", "In Review", "Ready to Deploy", "Done", "Canceled"];
   const ALL_LABELS = ["Agent", "Agent Created", "Agent Consolidated"];
