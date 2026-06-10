@@ -55,7 +55,7 @@ export function ReviewTable({ now }: { now: number }) {
           No pull requests need review right now.
         </div>
       ) : (
-        <Table className="w-full table-fixed">
+        <Table className="w-full min-w-[36rem] table-fixed">
           <colgroup>
             <col className="w-28" />
             <col className="w-44" />

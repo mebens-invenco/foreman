@@ -74,7 +74,7 @@ export function AttemptsTable({ now }: { now: number }) {
           No execution attempts recorded yet.
         </div>
       ) : (
-        <Table className="w-full table-fixed">
+        <Table className="w-full min-w-[48rem] table-fixed">
           <colgroup>
             <col className="w-28" />
             <col className="w-44" />
