@@ -675,46 +675,41 @@ export class LinearTaskSystem implements TaskSystem {
   }
 
   async listCandidates(): Promise<Task[]> {
+    // Candidates = assigned issues narrowed to the configured agent labels.
+    return this.queryAssignedIssues({ labels: this.config.taskSystem.linear!.includeLabels });
+  }
+
+  async listAssignedIssues(): Promise<Task[]> {
+    // The full assigned set — same query without the label narrowing.
+    return this.queryAssignedIssues({});
+  }
+
+  // Shared assignee+team query. `labels` narrows to issues carrying one of the
+  // given labels (candidate view); omit it for the full assigned set. The query
+  // is assembled rather than passing a whole IssueFilter variable so the proven
+  // candidate filter is unchanged when labels are present.
+  private async queryAssignedIssues(options: { labels?: string[] }): Promise<Task[]> {
     const linear = this.config.taskSystem.linear!;
     const assigneeFilter = await this.resolveAssigneeFilter();
-    this.logger.debug("listing Linear candidate issues", {
+    const useLabels = (options.labels?.length ?? 0) > 0;
+    const assigneeVarDecl = assigneeFilter.assigneeId ? ", $assigneeId: ID!" : ", $assigneeName: String!";
+    const assigneeClause = assigneeFilter.assigneeId
+      ? "assignee: { id: { eq: $assigneeId } }"
+      : "assignee: { name: { eq: $assigneeName } }";
+    const labelsVarDecl = useLabels ? ", $labels: [String!]" : "";
+    const labelsClause = useLabels ? ",\n            labels: { some: { name: { in: $labels } } }" : "";
+
+    this.logger.debug("listing Linear assigned issues", {
       team: linear.team,
       assignee: assigneeFilter.assigneeName ?? assigneeFilter.assigneeId,
-      labelCount: linear.includeLabels.length,
+      labelCount: options.labels?.length ?? 0,
     });
     const data = await this.client.request<{ issues: { nodes: LinearIssueNode[] } }>(
-      assigneeFilter.assigneeId
-        ? `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeId: ID!) {
+      `query ForemanAssignedIssues($teamName: String!${assigneeVarDecl}${labelsVarDecl}) {
         issues(
           filter: {
             team: { name: { eq: $teamName } },
-            assignee: { id: { eq: $assigneeId } },
-            labels: { some: { name: { in: $labels } } }
-          },
-          first: 250
-        ) {
-          nodes {
-            id
-            identifier
-            title
-            description
-            branchName
-            updatedAt
-            url
-            priorityLabel
-            state { id name }
-            assignee { name }
-            labels { nodes { id name } }
-            attachments { nodes { id title url } }
-          }
-        }
-      }`
-        : `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeName: String!) {
-        issues(
-          filter: {
-            team: { name: { eq: $teamName } },
-            assignee: { name: { eq: $assigneeName } },
-            labels: { some: { name: { in: $labels } } }
+            ${assigneeClause}${labelsClause}
           },
           first: 250
         ) {
@@ -736,8 +731,8 @@ export class LinearTaskSystem implements TaskSystem {
       }`,
       {
         teamName: linear.team,
-        labels: linear.includeLabels,
         ...(assigneeFilter.assigneeId ? { assigneeId: assigneeFilter.assigneeId } : { assigneeName: assigneeFilter.assigneeName! }),
+        ...(useLabels ? { labels: options.labels } : {}),
       },
     );
 
@@ -750,7 +745,7 @@ export class LinearTaskSystem implements TaskSystem {
             throw error;
           }
 
-          this.logger.info("skipping Linear candidate with unmapped provider state", {
+          this.logger.info("skipping Linear issue with unmapped provider state", {
             provider: "linear",
             taskId: node.identifier,
             providerId: node.id,
@@ -762,10 +757,11 @@ export class LinearTaskSystem implements TaskSystem {
     );
     const tasks = mappedTasks.flatMap((task) => (task ? [task] : []));
 
-    this.logger.debug("listed Linear candidate issues", {
+    this.logger.debug("listed Linear assigned issues", {
       count: data.issues.nodes.length,
       acceptedCount: tasks.length,
       skippedCount: data.issues.nodes.length - tasks.length,
+      labelFiltered: useLabels,
     });
     return tasks;
   }

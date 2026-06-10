@@ -61,7 +61,7 @@ describe("LinearTaskSystem.listCandidates", () => {
         });
       }
 
-      if (body.query.includes("query ForemanIssueCandidates")) {
+      if (body.query.includes("query ForemanAssignedIssues")) {
         return new Response(JSON.stringify({ data: linearIssue([], "Test User") }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -92,7 +92,7 @@ describe("LinearTaskSystem.listCandidates", () => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
       requests.push(body);
 
-      if (body.query.includes("query ForemanIssueCandidates")) {
+      if (body.query.includes("query ForemanAssignedIssues")) {
         return new Response(JSON.stringify({ data: linearIssue([], "Jane Doe") }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -142,7 +142,7 @@ describe("LinearTaskSystem.listCandidates", () => {
         });
       }
 
-      if (body.query.includes("query ForemanIssueCandidates")) {
+      if (body.query.includes("query ForemanAssignedIssues")) {
         return new Response(
           JSON.stringify({
             data: {
@@ -181,7 +181,7 @@ describe("LinearTaskSystem.listCandidates", () => {
     const tasks = await taskSystem.listCandidates();
 
     expect(tasks.map((task) => task.id)).toEqual(["ENG-123"]);
-    expect(logger.info).toHaveBeenCalledWith("skipping Linear candidate with unmapped provider state", {
+    expect(logger.info).toHaveBeenCalledWith("skipping Linear issue with unmapped provider state", {
       provider: "linear",
       taskId: "ENG-124",
       providerId: "issue-2",

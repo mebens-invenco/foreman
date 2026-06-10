@@ -9,6 +9,7 @@ import {
   useDataTable,
   type DataTableFilterOption,
 } from "@/components/data-table"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useForemanTasksQuery } from "@/hooks/use-foreman-tasks-query"
 import { useSettingsQuery } from "@/hooks/use-settings-query"
 import {
@@ -37,14 +38,20 @@ export function ForemanPage() {
     [settingsData]
   )
 
-  const query = useForemanTasksQuery()
+  const query = useForemanTasksQuery(tableState.scope)
   const { isLoading, isError, error } = query
   const tasks = useMemo(() => query.data ?? [], [query.data])
 
-  // The union the manager lists — ready-state OR agent-tagged.
+  // In `assigned` scope the backend already returns exactly the user's tickets,
+  // so show them all — narrowing to ready-or-tagged here would re-hide the very
+  // untagged issues that view exists to surface. In `candidates` scope keep the
+  // ready-state OR agent-tagged union.
   const scopedTasks = useMemo(
-    () => tasks.filter((task) => isInForemanScope(task, includeLabels)),
-    [tasks, includeLabels]
+    () =>
+      tableState.scope === "assigned"
+        ? tasks
+        : tasks.filter((task) => isInForemanScope(task, includeLabels)),
+    [tasks, includeLabels, tableState.scope]
   )
 
   const filteredTasks = useMemo(
@@ -136,6 +143,12 @@ export function ForemanPage() {
           searchPlaceholder="Search by ticket or title"
           searchValue={tableState.globalFilter}
         >
+          <Tabs onValueChange={tableState.setScope} value={tableState.scope}>
+            <TabsList aria-label="Ticket scope">
+              <TabsTrigger value="candidates">Foreman candidates</TabsTrigger>
+              <TabsTrigger value="assigned">All my tickets</TabsTrigger>
+            </TabsList>
+          </Tabs>
           <DataTableFilterSelect
             allLabel="All agents"
             label="Agent"
@@ -169,7 +182,9 @@ export function ForemanPage() {
         <DataTable
           emptyMessage={
             scopedTasks.length === 0
-              ? "No issues in Foreman's scope yet."
+              ? tableState.scope === "assigned"
+                ? "No issues assigned to you."
+                : "No issues in Foreman's scope yet."
               : "No issues match the current filters."
           }
           error={error}

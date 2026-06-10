@@ -530,6 +530,12 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     })();
   }
 
+  setTaskLabels(taskId: string, labels: string[]): void {
+    this.sqlite
+      .prepare("UPDATE task SET labels_json = ?, synced_at = ? WHERE id = ?")
+      .run(stableStringify(labels), isoNow(), taskId);
+  }
+
   upsertTaskPullRequest(input: { taskId: string; pullRequest: TaskPullRequest }): void {
     const target = this.getTaskTarget(input.taskId, input.pullRequest.repoKey);
     if (!target) {

@@ -210,6 +210,61 @@ describe("HTTP query validation", () => {
     }
   });
 
+  test("scope=assigned merges live assigned issues with mirrored candidates", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+
+    const candidate: Task = { ...sampleTask, id: "ENG-1", providerId: "ENG-1", labels: ["Agent"] };
+    // Assigned but untagged and never mirrored — only the live query knows it.
+    const assignedOnly: Task = { ...sampleTask, id: "ENG-2", providerId: "ENG-2", labels: [], targets: [] };
+    db.taskMirror.saveTasks([candidate]);
+
+    const taskSystem = {
+      listCandidates: vi.fn(async () => [candidate]),
+      listAssignedIssues: vi.fn(async () => [candidate, assignedOnly]),
+      getTask: vi.fn(async () => candidate),
+      listComments: vi.fn(async () => []),
+    } as any;
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "linear"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem,
+      reviewService: { resolvePullRequest: vi.fn(async () => null) } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      // Default scope serves only mirrored candidates; the live query is untouched.
+      const candidatesResponse = await server.inject({ method: "GET", url: "/api/tasks" });
+      expect(candidatesResponse.statusCode).toBe(200);
+      expect(candidatesResponse.json().tasks.map((task: { id: string }) => task.id)).toEqual(["ENG-1"]);
+      expect(taskSystem.listAssignedIssues).not.toHaveBeenCalled();
+
+      // Assigned scope unions the mirrored candidate with the untagged assigned issue.
+      const assignedResponse = await server.inject({ method: "GET", url: "/api/tasks?scope=assigned" });
+      expect(assignedResponse.statusCode).toBe(200);
+      const tasks = assignedResponse.json().tasks as Array<{ id: string; agentEnabled: boolean }>;
+      expect(tasks.map((task) => task.id).sort()).toEqual(["ENG-1", "ENG-2"]);
+      expect(taskSystem.listAssignedIssues).toHaveBeenCalledTimes(1);
+      // No exclude label on the untagged issue, so it reads as enabled.
+      expect(tasks.find((task) => task.id === "ENG-2")?.agentEnabled).toBe(true);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
   test("serves mirrored tasks and returns target projections for task APIs", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
     cleanupDirs.push(workspaceRoot);
@@ -1848,6 +1903,7 @@ describe("HTTP agent-enabled toggle", () => {
   test("disabling adds only the first exclude label and reports agentEnabled false", async () => {
     const updateLabels = vi.fn(async () => undefined);
     const { server, db } = await buildServer({ config: linearConfig(["agent:disabled", "agent:paused"]), updateLabels });
+    db.taskMirror.saveTasks([{ ...sampleTask, id: "ENG-1", providerId: "ENG-1", labels: ["Agent"] }]);
 
     try {
       const response = await server.inject({
@@ -1859,6 +1915,8 @@ describe("HTTP agent-enabled toggle", () => {
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({ agentEnabled: false });
       expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-1", add: ["agent:disabled"], remove: [] });
+      // The mirror is updated so the UI's refetch derives agentEnabled fresh.
+      expect(db.taskMirror.getTask("ENG-1")?.labels).toEqual(["Agent", "agent:disabled"]);
     } finally {
       await server.close();
       db.close();
@@ -1868,6 +1926,9 @@ describe("HTTP agent-enabled toggle", () => {
   test("enabling removes every exclude label and reports agentEnabled true", async () => {
     const updateLabels = vi.fn(async () => undefined);
     const { server, db } = await buildServer({ config: linearConfig(["agent:disabled", "agent:paused"]), updateLabels });
+    db.taskMirror.saveTasks([
+      { ...sampleTask, id: "ENG-1", providerId: "ENG-1", labels: ["Agent", "agent:disabled", "agent:paused"] },
+    ]);
 
     try {
       const response = await server.inject({
@@ -1878,7 +1939,35 @@ describe("HTTP agent-enabled toggle", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({ agentEnabled: true });
-      expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-1", add: [], remove: ["agent:disabled", "agent:paused"] });
+      // Enabling strips every exclude label and ensures the agent label is present.
+      expect(updateLabels).toHaveBeenCalledWith({
+        taskId: "ENG-1",
+        add: ["Agent"],
+        remove: ["agent:disabled", "agent:paused"],
+      });
+      expect(db.taskMirror.getTask("ENG-1")?.labels).toEqual(["Agent"]);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("marking an untagged issue adds the agent label so it becomes a candidate", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const { server, db } = await buildServer({ config: linearConfig(["agent:disabled"]), updateLabels });
+    db.taskMirror.saveTasks([{ ...sampleTask, id: "ENG-1", providerId: "ENG-1", labels: [] }]);
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: true },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ agentEnabled: true });
+      expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-1", add: ["Agent"], remove: ["agent:disabled"] });
+      expect(db.taskMirror.getTask("ENG-1")?.labels).toEqual(["Agent"]);
     } finally {
       await server.close();
       db.close();
