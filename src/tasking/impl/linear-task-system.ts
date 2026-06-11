@@ -736,6 +736,17 @@ export class LinearTaskSystem implements TaskSystem {
       },
     );
 
+    // Linear serves this as a single 250-result page (no pagination here). The
+    // label-narrowed candidate set stays well under that, but the full assigned
+    // set can grow past it — warn so silently-dropped issues are at least
+    // visible in the logs rather than vanishing without a signal.
+    if (data.issues.nodes.length >= 250) {
+      this.logger.warn("Linear assigned-issues query hit the 250-result page cap; results may be truncated", {
+        team: linear.team,
+        labelFiltered: useLabels,
+      });
+    }
+
     const mappedTasks = await Promise.all(
       data.issues.nodes.map(async (node) => {
         try {

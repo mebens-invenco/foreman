@@ -50,9 +50,10 @@ export function isAgentTagged(task: ForemanTask, includeLabels: string[]): boole
   return agentLabelsOf(task, includeLabels).length > 0
 }
 
-// The list the manager shows: the union of ready-state issues and agent-tagged
-// issues. GET /api/tasks only returns agent-labelled candidates today, so the
-// ready clause is forward-compatible headroom rather than a live broadening.
+// The `candidates` scope's client-side narrowing: the union of ready-state and
+// agent-tagged issues. The `assigned` scope bypasses this (the page shows the
+// backend's full assigned set there), so this only filters the mirrored
+// candidate set — where the ready clause is forward-compatible headroom.
 export function isInForemanScope(task: ForemanTask, includeLabels: string[]): boolean {
   return task.state === "ready" || isAgentTagged(task, includeLabels)
 }

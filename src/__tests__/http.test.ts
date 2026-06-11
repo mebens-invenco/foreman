@@ -1939,10 +1939,11 @@ describe("HTTP agent-enabled toggle", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json()).toEqual({ agentEnabled: true });
-      // Enabling strips every exclude label and ensures the agent label is present.
+      // Enabling strips every exclude label. The agent label is already present,
+      // so it isn't re-added.
       expect(updateLabels).toHaveBeenCalledWith({
         taskId: "ENG-1",
-        add: ["Agent"],
+        add: [],
         remove: ["agent:disabled", "agent:paused"],
       });
       expect(db.taskMirror.getTask("ENG-1")?.labels).toEqual(["Agent"]);
@@ -1968,6 +1969,34 @@ describe("HTTP agent-enabled toggle", () => {
       expect(response.json()).toEqual({ agentEnabled: true });
       expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-1", add: ["Agent"], remove: ["agent:disabled"] });
       expect(db.taskMirror.getTask("ENG-1")?.labels).toEqual(["Agent"]);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("enabling an issue tagged for another agent does not add the default agent label", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const config = linearConfig(["agent:disabled"]);
+    config.taskSystem.linear!.includeLabels = ["agent:tars", "agent:michael"];
+    const { server, db } = await buildServer({ config, updateLabels });
+    db.taskMirror.saveTasks([
+      { ...sampleTask, id: "ENG-1", providerId: "ENG-1", labels: ["agent:michael", "agent:disabled"] },
+    ]);
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: true },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ agentEnabled: true });
+      // Already agent-tagged (agent:michael), so includeLabels[0] (agent:tars) is
+      // not stamped on top — only the exclude label is cleared.
+      expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-1", add: [], remove: ["agent:disabled"] });
+      expect(db.taskMirror.getTask("ENG-1")?.labels).toEqual(["agent:michael"]);
     } finally {
       await server.close();
       db.close();
