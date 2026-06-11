@@ -1442,3 +1442,100 @@ describe("persistence repos", () => {
     }
   });
 });
+
+// The live-workspace safety guarantee of read-only consumers (eval-harvest)
+// rests on these two pieces: assertMigrationsCurrent must refuse a DB that is
+// behind (or diverged from) the checkout, and the readonly open must reject
+// writes and missing files. Regressions here would silently mutate a DB owned
+// by a running server.
+describe("read-only workspace access", () => {
+  test("assertMigrationsCurrent passes on a fully migrated DB, also via a readonly connection", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const dbPath = path.join(tempDir, "foreman.db");
+    const db = await createMigratedDb(dbPath, projectRoot);
+    db.close();
+
+    const readonly = createRepos(await openSqliteDatabase(dbPath, { readonly: true }));
+    try {
+      await expect(readonly.migrationRunner.assertMigrationsCurrent(projectRoot)).resolves.toBeUndefined();
+    } finally {
+      readonly.close();
+    }
+  });
+
+  test("assertMigrationsCurrent throws migrations_pending on an uninitialized DB (no schema_migration table)", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    // Writable open creates an empty DB file without running any migrations.
+    const db = createRepos(await openSqliteDatabase(path.join(tempDir, "foreman.db")));
+    try {
+      await expect(db.migrationRunner.assertMigrationsCurrent(projectRoot)).rejects.toMatchObject({ code: "migrations_pending" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("assertMigrationsCurrent throws migrations_pending naming the missing migration", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    try {
+      db.database.sqlite.prepare("DELETE FROM schema_migration WHERE version = ?").run("0001_init_core.sql");
+      await expect(db.migrationRunner.assertMigrationsCurrent(projectRoot)).rejects.toMatchObject({
+        code: "migrations_pending",
+        message: expect.stringContaining("0001_init_core.sql"),
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("assertMigrationsCurrent throws on a checksum that diverged from the shipped migration", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    try {
+      db.database.sqlite.prepare("UPDATE schema_migration SET checksum = ? WHERE version = ?").run("tampered", "0001_init_core.sql");
+      await expect(db.migrationRunner.assertMigrationsCurrent(projectRoot)).rejects.toMatchObject({ code: "migration_checksum_mismatch" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("assertMigrationsCurrent tolerates a DB AHEAD of the checkout (documented as intentional)", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    try {
+      // A stale checkout reading a newer live DB must not be blocked: migrations
+      // are additive in practice (see assertMigrationsCurrent).
+      db.database.sqlite
+        .prepare("INSERT INTO schema_migration(version, checksum, applied_at) VALUES (?, ?, ?)")
+        .run("9999_from_the_future.sql", "future-checksum", isoNow());
+      await expect(db.migrationRunner.assertMigrationsCurrent(projectRoot)).resolves.toBeUndefined();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("readonly open rejects writes and refuses a missing DB file", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const dbPath = path.join(tempDir, "foreman.db");
+    const db = await createMigratedDb(dbPath, projectRoot);
+    db.close();
+
+    const readonly = await openSqliteDatabase(dbPath, { readonly: true });
+    try {
+      expect(() => readonly.sqlite.prepare("INSERT INTO schema_migration(version, checksum, applied_at) VALUES ('x', 'y', 'z')").run()).toThrow(
+        /readonly/i,
+      );
+    } finally {
+      readonly.close();
+    }
+
+    // fileMustExist: a readonly open must never create the DB.
+    await expect(openSqliteDatabase(path.join(tempDir, "absent.db"), { readonly: true })).rejects.toThrow();
+  });
+});
