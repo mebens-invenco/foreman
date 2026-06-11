@@ -116,9 +116,12 @@ Two findings worth carrying forward:
 
 ## Adding a prompt
 
-Add an `EvalDefinition` to `EVAL_REGISTRY` with its cases and graders. Reuse
-the deterministic graders where they apply; add prompt-specific graders or a
-tailored judge rubric as needed.
+Add a `defineEval({...})` entry to `EVAL_REGISTRY` with the prompt's cases and
+graders — `defineEval` type-checks that both agree on one `Expect` shape before
+the registry erases it (the erased registry plus bivariant `grade()` would
+otherwise let a mismatched pairing through to runtime). Reuse the deterministic
+graders where they apply; add prompt-specific graders or a tailored judge rubric
+as needed.
 
 `EvalCase<Expect>` is generic over a **per-prompt expectation payload**. The
 harness core never inspects `expect` — only that prompt's graders do — so each
