@@ -5,13 +5,16 @@ import type { WorkerResultAction } from "../execution/worker-result.js";
  * A single behavioral eval case: a scenario engineered to elicit (or to
  * correctly NOT elicit) a specific prompt-driven behavior.
  *
- * v1 targets the learning-policy write-back, which is an *end-of-run* step, so
- * a case carries a synthetic "completed session" the model is asked to reflect
- * on. The harness renders the real worker prompt for `action`, appends the
- * synthetic session, runs it through a live runner, and grades the emitted
- * `learningMutations`.
+ * The end-of-run prompts (learning-policy, summary-policy) carry a synthetic
+ * "completed session" the model reflects on: the harness renders the real worker
+ * prompt for `action`, appends the synthetic session, runs it through a live
+ * runner, and the prompt's graders inspect the emitted `<agent-result>`.
+ *
+ * `Expect` is the prompt-specific expectation payload. The harness core never
+ * inspects it — only that prompt's graders do — so each prompt defines its own
+ * shape (e.g. the learning-policy decision + scope) without touching the core.
  */
-export type EvalCase = {
+export type EvalCase<Expect = unknown> = {
   id: string;
   /** What behaviour this case probes — shown in the report. */
   description: string;
@@ -22,15 +25,8 @@ export type EvalCase = {
   task: Task;
   /** Faithful account of the work that "just happened", injected post-render. */
   syntheticSession: string;
-  /** What the learning review should do given this session. */
-  expect: "learning" | "no_learning";
-  /**
-   * Optional scope expectation for an emitted learning, checked by the advisory
-   * `scopeGrader`: "shared" when the insight is clearly cross-repo, "repo-specific"
-   * when it is local to one repo. Omit when the case expects no learning, or when
-   * scope is not the dimension under test.
-   */
-  expectScope?: "shared" | "repo-specific";
+  /** Prompt-specific expectation, consumed only by that prompt's graders. */
+  expect: Expect;
 };
 
 /** One graded dimension of a single sample's output. */
@@ -45,8 +41,8 @@ export type GraderResult = {
   detail: string;
 };
 
-export type GradeContext = {
-  evalCase: EvalCase;
+export type GradeContext<Expect = unknown> = {
+  evalCase: EvalCase<Expect>;
   /** Parsed + action-validated worker result, or null if parse/validation failed. */
   result: WorkerResult | null;
   rawStdout: string;
@@ -58,7 +54,7 @@ export type GradeContext = {
   invokeModel?: (prompt: string) => Promise<string>;
 };
 
-export type Grader = {
+export type Grader<Expect = unknown> = {
   name: string;
   /**
    * Advisory graders are reported but do NOT gate a sample's pass. The judge is
@@ -66,7 +62,10 @@ export type Grader = {
    * uncalibrated judge must not fail a sample on its own.
    */
   advisory?: boolean;
-  grade(ctx: GradeContext): GraderResult | Promise<GraderResult>;
+  // `grade` is a method (not a function-typed property) on purpose: method
+  // parameters are bivariant, so a prompt-specific `Grader<LearningExpect>`
+  // stays assignable to the type-erased `Grader` the registry stores.
+  grade(ctx: GradeContext<Expect>): GraderResult | Promise<GraderResult>;
 };
 
 export type SampleResult = {
@@ -95,8 +94,8 @@ export type EvalReport = {
 };
 
 /** A prompt's registered eval: its cases + the graders applied to each sample. */
-export type EvalDefinition = {
+export type EvalDefinition<Expect = unknown> = {
   prompt: string;
-  cases: EvalCase[];
-  graders: Grader[];
+  cases: EvalCase<Expect>[];
+  graders: Grader<Expect>[];
 };
