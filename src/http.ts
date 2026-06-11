@@ -99,6 +99,11 @@ const configuredExcludeLabels = (config: WorkspaceConfig): string[] =>
 const configuredAgentLabel = (config: WorkspaceConfig): string | null =>
   config.taskSystem.type === "linear" ? config.taskSystem.linear!.includeLabels[0] ?? null : null;
 
+// Every configured include label. The UI treats any of these as "agent-tagged"
+// (agentLabelsOf), so the enable path consults the full set, not just the first.
+const configuredIncludeLabels = (config: WorkspaceConfig): string[] =>
+  config.taskSystem.type === "linear" ? config.taskSystem.linear!.includeLabels : [];
+
 type TaskFrontmatter = { state: "valid" | "broken" | "missing"; repos: string[]; detail: string | null };
 
 // Re-derive the Agent: metadata verdict from the fetched description, reusing
@@ -586,7 +591,11 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const candidateTasks = deps.repos.taskMirror.getTasks(taskQuery);
     let serializable = candidateTasks;
     if (scope === "assigned") {
-      const mirroredIds = new Set(candidateTasks.map((task) => task.id));
+      // Dedup against every mirrored task (tasksById), not just the
+      // limit/search-windowed candidateTasks — otherwise a mirrored task outside
+      // that window would be served from the live set and lose its persisted
+      // targets, jobs, and reviews.
+      const mirroredIds = new Set(tasksById.keys());
       const assignedOnly = (await deps.taskSystem.listAssignedIssues()).filter(
         (task) => !mirroredIds.has(task.id) && (!state || task.state === state),
       );
@@ -642,8 +651,19 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     // label is a no-op. Disabling adds one exclude label and keeps the agent
     // label, so the issue stays in scope but parked.
     const enabled = body.enabled;
+    // Read the mirror snapshot up front: it tells us the issue's current labels
+    // (so an already-tagged issue isn't re-stamped) and is reused for the local
+    // label sync below.
+    const mirrored = deps.repos.taskMirror.getTask(params.taskId);
     const agentLabel = configuredAgentLabel(deps.config);
-    const add = enabled ? (agentLabel ? [agentLabel] : []) : [excludeLabels[0]!];
+    // Only add the agent label when the issue carries none of the configured
+    // include labels — otherwise enabling an issue tagged for a different agent
+    // (e.g. agent:michael) would also stamp includeLabels[0]. Mirrors the UI's
+    // agentLabelsOf, where any include label counts as agent-tagged.
+    const alreadyTagged = (mirrored?.labels ?? []).some((label) =>
+      configuredIncludeLabels(deps.config).includes(label),
+    );
+    const add = enabled ? (agentLabel && !alreadyTagged ? [agentLabel] : []) : [excludeLabels[0]!];
     const remove = enabled ? excludeLabels : [];
     await deps.taskSystem.updateLabels({ taskId: params.taskId, add, remove });
 
@@ -654,7 +674,6 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     // up. setTaskLabels updates only the labels column — using saveTasks here
     // would needlessly rebuild the whole target-dependency graph. No-op when the
     // task isn't mirrored, since it can't appear in the list anyway.
-    const mirrored = deps.repos.taskMirror.getTask(params.taskId);
     if (mirrored) {
       const labels = mirrored.labels.filter((label) => !remove.includes(label));
       for (const label of add) {

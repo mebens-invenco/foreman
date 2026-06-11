@@ -81,10 +81,9 @@ export function ForemanToggleCell({ task, includeLabels }: ForemanCellProps) {
   const mutation = useSetAgentEnabledMutation()
 
   // One control answering "should Foreman work this issue?". Tagged rows get an
-  // on/off switch; an untagged ready row instead offers to mark it. (The mark
-  // path reuses the enable mutation — GET /api/tasks is candidate-filtered today
-  // so untagged rows don't yet appear; adding agent:tars itself needs the
-  // backend variant noted in the design, which is out of scope here.)
+  // on/off switch; an untagged row (surfaced by the "All my tickets" scope)
+  // instead offers to mark it — the enable mutation adds the configured agent
+  // label server-side, so the issue becomes a Foreman candidate.
   if (!isAgentTagged(task, includeLabels)) {
     return (
       <Button
