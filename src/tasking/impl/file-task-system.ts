@@ -290,6 +290,12 @@ export class FileTaskSystem implements TaskSystem {
     return tasks.flatMap((task) => (task ? [task] : []));
   }
 
+  // File tasks carry no agent-label concept, so the candidate set already is the
+  // full assigned set.
+  async listAssignedIssues(): Promise<Task[]> {
+    return this.listCandidates();
+  }
+
   async getTask(taskId: string): Promise<Task> {
     return (await this.loadTaskDocument(taskId)).task;
   }

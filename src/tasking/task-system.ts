@@ -45,6 +45,11 @@ export const renderTaskCreateDescription = (mutation: TaskCreateMutation): strin
 export interface TaskSystem {
   getProvider(): TaskProvider;
   listCandidates(): Promise<Task[]>;
+  // Every issue assigned to the configured user, regardless of agent label —
+  // the superset of listCandidates(). Powers the manager's "all my tickets"
+  // view, where untagged issues can be marked for Foreman. Read-only: these are
+  // not mirrored as scheduling candidates.
+  listAssignedIssues(): Promise<Task[]>;
   getTask(taskId: string): Promise<Task>;
   createTask(input: { parentTask: Task; mutation: TaskCreateMutation }): Promise<CreatedTask>;
   listComments(taskId: string): Promise<TaskComment[]>;

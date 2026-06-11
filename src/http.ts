@@ -92,6 +92,17 @@ const resolveTaskUrl = (deps: HttpServerDeps, taskId: string | null): string | n
 const configuredExcludeLabels = (config: WorkspaceConfig): string[] =>
   config.taskSystem.type === "linear" ? config.taskSystem.linear!.excludeLabels : [];
 
+// The label that makes an issue a Foreman candidate (includeLabels[0]); adding
+// it is how an untagged issue gets "marked for Foreman". Mirrors
+// scout-selection's configuredAgentLabel. Empty for providers without labels.
+const configuredAgentLabel = (config: WorkspaceConfig): string | null =>
+  config.taskSystem.type === "linear" ? config.taskSystem.linear!.includeLabels[0] ?? null : null;
+
+// Every configured include label. The UI treats any of these as "agent-tagged"
+// (agentLabelsOf), so the enable path consults the full set, not just the first.
+const configuredIncludeLabels = (config: WorkspaceConfig): string[] =>
+  config.taskSystem.type === "linear" ? config.taskSystem.linear!.includeLabels : [];
+
 type TaskFrontmatter = { state: "valid" | "broken" | "missing"; repos: string[]; detail: string | null };
 
 // Re-derive the Agent: metadata verdict from the fetched description, reusing
@@ -262,6 +273,10 @@ const settingsResponse = async (config: WorkspaceConfig, paths: WorkspacePaths) 
 };
 
 const taskStates = ["ready", "in_progress", "in_review", "deployable", "done", "canceled"] as const satisfies readonly TaskState[];
+
+// GET /api/tasks scope: the mirrored candidate set, or the broader live set of
+// every issue assigned to the user.
+const taskScopes = ["candidates", "assigned"] as const;
 const attemptStatuses = ["running", "completed", "failed", "blocked", "canceled", "timed_out"] as const;
 const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
 type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable";
@@ -580,20 +595,48 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   }));
 
   server.get("/api/tasks", async (request) => {
-    const query = request.query as { state?: string; search?: string; limit?: string; refreshReview?: string };
+    const query = request.query as {
+      state?: string;
+      search?: string;
+      limit?: string;
+      refreshReview?: string;
+      scope?: string;
+    };
     const state = parseEnumQuery("state", query.state, taskStates);
     const limit = parsePositiveIntegerQuery("limit", query.limit);
     const refreshReview = parseBooleanQuery("refreshReview", query.refreshReview);
+    const scope = parseEnumQuery("scope", query.scope, taskScopes) ?? "candidates";
     const taskQuery = {
       ...(state ? { state } : {}),
       ...(query.search ? { search: query.search } : {}),
       limit: limit ?? 100,
     };
     const tasksById = new Map(getAllMirroredTasks().map((task) => [task.id, task]));
+
+    // `candidates` (default) serves the mirrored, scheduler-visible set.
+    // `assigned` broadens to every issue assigned to the user — a live query, so
+    // untagged issues that were never mirrored show up to be marked for Foreman.
+    // The mirror wins on overlap: it carries persisted targets, jobs, and reviews
+    // the live issue lacks.
+    const candidateTasks = deps.repos.taskMirror.getTasks(taskQuery);
+    let serializable = candidateTasks;
+    if (scope === "assigned") {
+      // Dedup against every mirrored task (tasksById), not just the
+      // limit/search-windowed candidateTasks — otherwise a mirrored task outside
+      // that window would be served from the live set and lose its persisted
+      // targets, jobs, and reviews.
+      const mirroredIds = new Set(tasksById.keys());
+      const assignedOnly = (await deps.taskSystem.listAssignedIssues()).filter(
+        (task) => !mirroredIds.has(task.id) && (!state || task.state === state),
+      );
+      for (const task of assignedOnly) {
+        tasksById.set(task.id, task);
+      }
+      serializable = [...candidateTasks, ...assignedOnly];
+    }
+
     const tasks = await Promise.all(
-      deps.repos.taskMirror
-        .getTasks(taskQuery)
-        .map((task) => serializeTask(task, tasksById, refreshReview)),
+      serializable.map((task) => serializeTask(task, tasksById, refreshReview)),
     );
     return { tasks };
   });
@@ -632,12 +675,45 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       );
     }
 
+    // Enabling = "Foreman may work this issue": clear every exclude label and
+    // ensure the agent label is present, so an untagged issue (the "mark for
+    // Foreman" path) actually becomes a candidate. Adding an already-present
+    // label is a no-op. Disabling adds one exclude label and keeps the agent
+    // label, so the issue stays in scope but parked.
     const enabled = body.enabled;
-    await deps.taskSystem.updateLabels(
-      enabled
-        ? { taskId: params.taskId, add: [], remove: excludeLabels }
-        : { taskId: params.taskId, add: [excludeLabels[0]!], remove: [] },
+    // Read the mirror snapshot up front: it tells us the issue's current labels
+    // (so an already-tagged issue isn't re-stamped) and is reused for the local
+    // label sync below.
+    const mirrored = deps.repos.taskMirror.getTask(params.taskId);
+    const agentLabel = configuredAgentLabel(deps.config);
+    // Only add the agent label when the issue carries none of the configured
+    // include labels — otherwise enabling an issue tagged for a different agent
+    // (e.g. agent:michael) would also stamp includeLabels[0]. Mirrors the UI's
+    // agentLabelsOf, where any include label counts as agent-tagged.
+    const alreadyTagged = (mirrored?.labels ?? []).some((label) =>
+      configuredIncludeLabels(deps.config).includes(label),
     );
+    const add = enabled ? (agentLabel && !alreadyTagged ? [agentLabel] : []) : [excludeLabels[0]!];
+    const remove = enabled ? excludeLabels : [];
+    await deps.taskSystem.updateLabels({ taskId: params.taskId, add, remove });
+
+    // Mirror the label change locally so the UI's immediate refetch derives
+    // agentEnabled from fresh data. Without this the next GET /api/tasks reads
+    // the pre-toggle mirror snapshot, recomputes agentEnabled from stale labels,
+    // and the optimistic flip visibly reverts until the next scout poll catches
+    // up. setTaskLabels updates only the labels column — using saveTasks here
+    // would needlessly rebuild the whole target-dependency graph. No-op when the
+    // task isn't mirrored, since it can't appear in the list anyway.
+    if (mirrored) {
+      const labels = mirrored.labels.filter((label) => !remove.includes(label));
+      for (const label of add) {
+        if (!labels.includes(label)) {
+          labels.push(label);
+        }
+      }
+      deps.repos.taskMirror.setTaskLabels(params.taskId, labels);
+    }
+
     return { agentEnabled: enabled };
   });
 

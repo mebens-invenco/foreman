@@ -1264,6 +1264,59 @@ describe("persistence repos", () => {
     }
   });
 
+  test("setTaskLabels updates labels in place without disturbing targets or dependencies", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      const base = syncSingleTargetTask(db, { taskId: "ENG-9000", repoKey: "repo-a" });
+      db.taskMirror.saveTasks([
+        {
+          id: "ENG-9001",
+          provider: "linear",
+          providerId: "issue-9001",
+          title: "Dependent",
+          description: "",
+          state: "ready",
+          providerState: "Todo",
+          priority: "normal",
+          labels: ["Agent"],
+          assignee: null,
+          targets: [{ repoKey: "repo-a", branchName: "eng-9001", position: 0 }],
+          targetDependencies: [],
+          dependencies: { taskIds: ["ENG-9000"], baseTaskId: null },
+          baseBranch: null,
+          pullRequests: [],
+          runnerOverride: null,
+          updatedAt: "2026-03-18T12:00:00Z",
+          url: null,
+        },
+      ]);
+
+      const dependentTargetBefore = db.taskMirror.getTargetsForTask("ENG-9001")[0];
+      const targetDepsBefore = db.taskMirror.getTargetDependenciesForTask("ENG-9001");
+      expect(targetDepsBefore).toEqual([
+        expect.objectContaining({
+          taskTargetId: dependentTargetBefore?.id,
+          dependsOnTaskTargetId: base.id,
+          source: "derived",
+        }),
+      ]);
+
+      db.taskMirror.setTaskLabels("ENG-9001", ["Agent", "agent:disabled"]);
+
+      // Labels updated…
+      expect(db.taskMirror.getTask("ENG-9001")?.labels).toEqual(["Agent", "agent:disabled"]);
+      // …while target ids and the derived dependency graph are untouched (the
+      // regression saveTasks would have caused: a full target-dependency rebuild).
+      expect(db.taskMirror.getTargetsForTask("ENG-9001")[0]?.id).toEqual(dependentTargetBefore?.id);
+      expect(db.taskMirror.getTargetDependenciesForTask("ENG-9001")).toEqual(targetDepsBefore);
+    } finally {
+      db.close();
+    }
+  });
+
   test("mirrors multi-target tasks, persists metadata dependencies, and preserves target ids", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
