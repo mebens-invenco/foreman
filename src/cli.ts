@@ -90,14 +90,29 @@ const writeJson = (value: unknown): void => {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 };
 
-const withWorkspaceRepos = async <T>(
-  workspace: string,
-  handler: (repos: ReturnType<typeof createRepos>, paths: Awaited<ReturnType<typeof loadWorkspace>>["paths"]) => Promise<T>,
-): Promise<T> => {
+const withWorkspaceRepos = async <T>(workspace: string, handler: (repos: ReturnType<typeof createRepos>) => Promise<T>): Promise<T> => {
   const { paths } = await loadWorkspace(workspace);
   const repos = createRepos(await openSqliteDatabase(paths.dbPath));
   try {
     await repos.migrationRunner.runMigrations(paths.projectRoot);
+    return await handler(repos);
+  } finally {
+    repos.close();
+  }
+};
+
+// Read-only variant for commands that inspect a workspace a live server may
+// own (e.g. eval-harvest): opens the DB readonly (no create, no journal-mode
+// switch, no write locks) and REFUSES on pending migrations instead of
+// applying them under the running server.
+const withWorkspaceReposReadOnly = async <T>(
+  workspace: string,
+  handler: (repos: ReturnType<typeof createRepos>, paths: Awaited<ReturnType<typeof loadWorkspace>>["paths"]) => Promise<T>,
+): Promise<T> => {
+  const { paths } = await loadWorkspace(workspace);
+  const repos = createRepos(await openSqliteDatabase(paths.dbPath, { readonly: true }));
+  try {
+    await repos.migrationRunner.assertMigrationsCurrent(paths.projectRoot);
     return await handler(repos, paths);
   } finally {
     repos.close();
@@ -492,7 +507,7 @@ program
   .option("--limit <count>", "Max attempts to scan, most recent first", parsePositiveInteger, 500)
   .option("--summary-only", "Emit only the harvest summary counts, not the harvested traces")
   .action(async (workspace: string, options: { action: WorkerResultAction[]; limit: number; summaryOnly?: boolean }) => {
-    await withWorkspaceRepos(workspace, async (repos, paths) => {
+    await withWorkspaceReposReadOnly(workspace, async (repos, paths) => {
       const actions = options.action.length > 0 ? new Set(options.action) : undefined;
       const { traces, summary } = await harvestTraces({
         attempts: repos.attempts,
@@ -500,6 +515,7 @@ program
         workspaceRoot: paths.workspaceRoot,
         limit: options.limit,
         ...(actions ? { actions } : {}),
+        ...(options.summaryOnly ? { summaryOnly: true } : {}),
       });
       writeJson({ workspace, actions: options.action, summary, ...(options.summaryOnly ? {} : { traces }) });
     });

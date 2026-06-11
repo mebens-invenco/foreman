@@ -20,7 +20,16 @@ class SqliteDatabaseConnection implements SqliteForemanDatabase {
   }
 }
 
-export const openSqliteDatabase = async (dbPath: string): Promise<SqliteForemanDatabase> => {
+export const openSqliteDatabase = async (dbPath: string, options?: { readonly?: boolean }): Promise<SqliteForemanDatabase> => {
+  if (options?.readonly) {
+    // Read-only consumers (e.g. eval-harvest against a live workspace) must not
+    // create the DB, switch its journal mode, or take write locks. WAL reads
+    // work without setting the pragma (the mode is a property of the DB file).
+    const sqlite = new Database(dbPath, { readonly: true, fileMustExist: true });
+    sqlite.pragma("foreign_keys = ON");
+    return new SqliteDatabaseConnection(sqlite);
+  }
+
   await ensureDir(path.dirname(dbPath));
   const sqlite = new Database(dbPath);
   sqlite.pragma("journal_mode = WAL");

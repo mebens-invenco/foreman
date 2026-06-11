@@ -7,7 +7,8 @@ import { harvestTraces } from "../harvest.js";
 
 // harvestTraces reads from the workspace DB (attempts + artifacts) and the
 // artifact files on disk. These tests drive it with in-memory repos and an
-// injected readFile, so they assert the join/filter/parse logic without a DB.
+// injected readArtifactFile, so they assert the join/filter/parse/skip logic
+// without a DB or filesystem.
 
 const attempt = (id: string, over: Partial<AttemptRecord> = {}): AttemptRecord => ({
   id,
@@ -35,8 +36,13 @@ const attempt = (id: string, over: Partial<AttemptRecord> = {}): AttemptRecord =
   ...over,
 });
 
-const artifact = (ownerId: string, type: ArtifactRecord["artifactType"], relativePath: string): ArtifactRecord => ({
-  id: `${ownerId}-${type}`,
+const artifact = (
+  ownerId: string,
+  type: ArtifactRecord["artifactType"],
+  relativePath: string,
+  createdAt = "2026-06-01T00:00:00Z",
+): ArtifactRecord => ({
+  id: `${ownerId}-${type}-${createdAt}`,
   ownerType: "execution_attempt",
   ownerId,
   artifactType: type,
@@ -44,7 +50,7 @@ const artifact = (ownerId: string, type: ArtifactRecord["artifactType"], relativ
   mediaType: type === "parsed_result" ? "application/json" : "text/plain",
   sizeBytes: 1,
   sha256: null,
-  createdAt: "2026-06-01T00:00:00Z",
+  createdAt,
 });
 
 const result = (action: WorkerResult["action"], outcome: WorkerResult["outcome"] = "completed"): WorkerResult => ({
@@ -59,18 +65,24 @@ const result = (action: WorkerResult["action"], outcome: WorkerResult["outcome"]
   signals: [],
 });
 
+// Mirrors the real SqliteArtifactRepo contract: rows come back ordered
+// created_at DESC (newest first). Tests must encode that, or they bake in the
+// wrong ordering assumption the harvester is written against.
 const depsFor = (
   attempts: AttemptRecord[],
   artifactsByAttempt: Record<string, ArtifactRecord[]>,
   files: Record<string, string>,
 ) => ({
   attempts: { listAttempts: () => attempts },
-  artifacts: { listArtifacts: (_ownerType?: string, ownerId?: string) => artifactsByAttempt[ownerId ?? ""] ?? [] },
+  artifacts: {
+    listArtifacts: (_ownerType?: string, ownerId?: string) =>
+      [...(artifactsByAttempt[ownerId ?? ""] ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+  },
   workspaceRoot: "/ws",
-  readFile: (absolutePath: string) => {
-    const content = files[absolutePath];
+  readArtifactFile: (workspaceRoot: string, relativePath: string) => {
+    const content = files[`${workspaceRoot}/${relativePath}`];
     if (content === undefined) {
-      return Promise.reject(new Error(`no such file: ${absolutePath}`));
+      return Promise.reject(new Error(`no such file: ${workspaceRoot}/${relativePath}`));
     }
     return Promise.resolve(content);
   },
@@ -103,10 +115,54 @@ describe("harvestTraces", () => {
       runner: { name: "claude", model: "claude-sonnet-4-6" },
     });
     expect(traces[0]!.result.summary).toBe("execution summary");
-    expect(summary).toMatchObject({ scannedAttempts: 1, harvested: 1, skippedNoArtifacts: 0, skippedUnparseable: 0, filteredOutByAction: 0 });
+    expect(summary).toMatchObject({ scannedAttempts: 1, harvested: 1, skipped: [] });
   });
 
-  it("skips attempts missing either artifact and counts them", async () => {
+  it("picks the newest artifact of a type when duplicates exist (repo returns created_at DESC)", async () => {
+    const deps = depsFor(
+      [attempt("a1")],
+      {
+        a1: [
+          artifact("a1", "rendered_prompt", "artifacts/a1-prompt-old.md", "2026-06-01T00:00:00Z"),
+          artifact("a1", "rendered_prompt", "artifacts/a1-prompt-new.md", "2026-06-02T00:00:00Z"),
+          artifact("a1", "parsed_result", "artifacts/a1-result.json"),
+        ],
+      },
+      {
+        "/ws/artifacts/a1-prompt-old.md": "stale prompt",
+        "/ws/artifacts/a1-prompt-new.md": "fresh prompt",
+        "/ws/artifacts/a1-result.json": JSON.stringify(result("execution")),
+      },
+    );
+
+    const { traces } = await harvestTraces(deps);
+
+    expect(traces[0]!.prompt).toBe("fresh prompt");
+  });
+
+  it("skips running attempts without consulting artifacts and records their identity", async () => {
+    const deps = depsFor(
+      [attempt("a1", { status: "running", finishedAt: null }), attempt("a2")],
+      {
+        a2: [
+          artifact("a2", "rendered_prompt", "artifacts/a2-prompt.md"),
+          artifact("a2", "parsed_result", "artifacts/a2-result.json"),
+        ],
+      },
+      {
+        "/ws/artifacts/a2-prompt.md": "prompt",
+        "/ws/artifacts/a2-result.json": JSON.stringify(result("execution")),
+      },
+    );
+
+    const { traces, summary } = await harvestTraces(deps);
+
+    expect(traces).toHaveLength(1);
+    expect(summary.skippedNotFinished).toBe(1);
+    expect(summary.skipped).toEqual([{ attemptId: "a1", reason: "not_finished" }]);
+  });
+
+  it("skips attempts missing either artifact and records which one", async () => {
     const deps = depsFor(
       [attempt("a1"), attempt("a2")],
       {
@@ -121,10 +177,13 @@ describe("harvestTraces", () => {
 
     expect(traces).toHaveLength(0);
     expect(summary.skippedNoArtifacts).toBe(2);
-    expect(summary.harvested).toBe(0);
+    expect(summary.skipped).toEqual([
+      { attemptId: "a1", reason: "no_artifacts", detail: "missing parsed_result" },
+      { attemptId: "a2", reason: "no_artifacts", detail: "missing rendered_prompt + parsed_result" },
+    ]);
   });
 
-  it("counts a parsed_result that does not validate as skippedUnparseable", async () => {
+  it("counts a parsed_result that does not validate as unparseable, with the error detail", async () => {
     const deps = depsFor(
       [attempt("a1")],
       {
@@ -143,6 +202,38 @@ describe("harvestTraces", () => {
 
     expect(traces).toHaveLength(0);
     expect(summary.skippedUnparseable).toBe(1);
+    expect(summary.skipped[0]).toMatchObject({ attemptId: "a1", reason: "unparseable_result" });
+    expect(summary.skipped[0]!.detail).toBeTruthy();
+  });
+
+  it("skips (not crashes) when the prompt file is missing on disk", async () => {
+    const deps = depsFor(
+      [attempt("a1"), attempt("a2")],
+      {
+        a1: [
+          artifact("a1", "rendered_prompt", "artifacts/a1-prompt.md"),
+          artifact("a1", "parsed_result", "artifacts/a1-result.json"),
+        ],
+        a2: [
+          artifact("a2", "rendered_prompt", "artifacts/a2-prompt.md"),
+          artifact("a2", "parsed_result", "artifacts/a2-result.json"),
+        ],
+      },
+      {
+        // a1's prompt file is absent (DB row exists, file rotted away).
+        "/ws/artifacts/a1-result.json": JSON.stringify(result("execution")),
+        "/ws/artifacts/a2-prompt.md": "prompt",
+        "/ws/artifacts/a2-result.json": JSON.stringify(result("execution")),
+      },
+    );
+
+    const { traces, summary } = await harvestTraces(deps);
+
+    // The missing file must cost ONE attempt, not the whole harvest.
+    expect(traces).toHaveLength(1);
+    expect(traces[0]!.attemptId).toBe("a2");
+    expect(summary.skippedMissingPromptFile).toBe(1);
+    expect(summary.skipped[0]).toMatchObject({ attemptId: "a1", reason: "missing_prompt_file" });
   });
 
   it("filters to the requested actions and counts the rest", async () => {
@@ -176,8 +267,8 @@ describe("harvestTraces", () => {
   });
 
   it("does not read the prompt file for an attempt filtered out by action", async () => {
-    // The prompt file is intentionally absent: if harvest tried to read it for the
-    // filtered-out attempt, the injected readFile would reject and fail the run.
+    // The prompt file is intentionally absent: if harvest tried to read it for
+    // the filtered-out attempt, it would be (mis)counted as missing_prompt_file.
     const deps = depsFor(
       [attempt("a1")],
       {
@@ -193,5 +284,33 @@ describe("harvestTraces", () => {
 
     expect(traces).toHaveLength(0);
     expect(summary.filteredOutByAction).toBe(1);
+    expect(summary.skippedMissingPromptFile).toBe(0);
+  });
+
+  it("summaryOnly counts harvestable attempts without reading prompt files or accumulating traces", async () => {
+    // Prompt files are intentionally absent: summaryOnly must not read them.
+    const deps = depsFor(
+      [attempt("a1"), attempt("a2")],
+      {
+        a1: [
+          artifact("a1", "rendered_prompt", "artifacts/a1-prompt.md"),
+          artifact("a1", "parsed_result", "artifacts/a1-result.json"),
+        ],
+        a2: [
+          artifact("a2", "rendered_prompt", "artifacts/a2-prompt.md"),
+          artifact("a2", "parsed_result", "artifacts/a2-result.json"),
+        ],
+      },
+      {
+        "/ws/artifacts/a1-result.json": JSON.stringify(result("execution")),
+        "/ws/artifacts/a2-result.json": JSON.stringify(result("reviewer", "no_action_needed")),
+      },
+    );
+
+    const { traces, summary } = await harvestTraces({ ...deps, summaryOnly: true });
+
+    expect(traces).toHaveLength(0);
+    expect(summary.harvested).toBe(2);
+    expect(summary.skippedMissingPromptFile).toBe(0);
   });
 });

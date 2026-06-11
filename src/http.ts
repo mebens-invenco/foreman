@@ -24,6 +24,7 @@ import type {
   TaskTarget,
   TaskTargetStatus,
 } from "./domain/index.js";
+import { resolveArtifactContentPath } from "./lib/artifact-path.js";
 import { ForemanError, isForemanError } from "./lib/errors.js";
 import type { SchedulerService } from "./orchestration/index.js";
 import type { ForemanRepos } from "./repos/index.js";
@@ -86,37 +87,6 @@ const resolveTaskUrl = (deps: HttpServerDeps, taskId: string | null): string | n
   } catch {
     return null;
   }
-};
-
-const resolveArtifactContentPath = async (paths: WorkspacePaths, relativePath: string): Promise<string> => {
-  const workspaceRoot = path.resolve(paths.workspaceRoot);
-  const resolvedPath = path.resolve(workspaceRoot, relativePath);
-  const isWithinWorkspace = resolvedPath === workspaceRoot || resolvedPath.startsWith(`${workspaceRoot}${path.sep}`);
-  if (!isWithinWorkspace) {
-    throw new ForemanError("invalid_artifact_path", "Artifact path must resolve inside the workspace root.", 400);
-  }
-
-  let realWorkspaceRoot = workspaceRoot;
-  try {
-    realWorkspaceRoot = await fs.realpath(workspaceRoot);
-  } catch {
-    // Fall back to the resolved workspace root for tests or partially-created workspaces.
-  }
-
-  let realResolvedPath: string;
-  try {
-    realResolvedPath = await fs.realpath(resolvedPath);
-  } catch {
-    throw new ForemanError("artifact_file_not_found", "Artifact file not found.", 404);
-  }
-
-  const isRealPathWithinWorkspace =
-    realResolvedPath === realWorkspaceRoot || realResolvedPath.startsWith(`${realWorkspaceRoot}${path.sep}`);
-  if (!isRealPathWithinWorkspace) {
-    throw new ForemanError("invalid_artifact_path", "Artifact path must resolve inside the workspace root.", 400);
-  }
-
-  return realResolvedPath;
 };
 
 const writeSseEvent = (reply: { raw: NodeJS.WritableStream }, event: string, data: string): void => {
@@ -724,7 +694,7 @@ export const createHttpServer = (deps: HttpServerDeps) => {
   server.get("/api/artifacts/:artifactId/content", async (request, reply) => {
     const params = request.params as { artifactId: string };
     const artifact = deps.repos.artifacts.getArtifact(params.artifactId);
-    const artifactPath = await resolveArtifactContentPath(deps.paths, artifact.relativePath);
+    const artifactPath = await resolveArtifactContentPath(deps.paths.workspaceRoot, artifact.relativePath);
     reply.type(artifact.mediaType || "text/plain");
     return fs.readFile(artifactPath, "utf8");
   });
