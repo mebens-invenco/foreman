@@ -25,6 +25,9 @@ export const openSqliteDatabase = async (dbPath: string, options?: { readonly?: 
     // Read-only consumers (e.g. eval-harvest against a live workspace) must not
     // create the DB, switch its journal mode, or take write locks. WAL reads
     // work without setting the pragma (the mode is a property of the DB file).
+    // Boundary: read-only WAL access still needs the -shm file to be writable
+    // (run as the same user as the server) or the DB to have been cleanly
+    // closed — a different user opening a hot WAL DB fails here.
     const sqlite = new Database(dbPath, { readonly: true, fileMustExist: true });
     sqlite.pragma("foreign_keys = ON");
     return new SqliteDatabaseConnection(sqlite);

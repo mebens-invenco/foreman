@@ -127,13 +127,23 @@ export const harvestTraces = async (deps: HarvestDeps): Promise<{ traces: Harves
     filteredOutByAction: 0,
     skipped: [],
   };
+  // skip() owns both halves of the accounting — the per-reason counter and the
+  // identity entry — so a future reason cannot bump one without the other.
+  // (filteredOutByAction is deliberately a bare counter, not a skip: filtered
+  // attempts are healthy traces outside the requested slice, not lost corpus.)
+  const skipCounter: Record<HarvestSkipReason, "skippedNotFinished" | "skippedNoArtifacts" | "skippedUnparseable" | "skippedMissingPromptFile"> = {
+    not_finished: "skippedNotFinished",
+    no_artifacts: "skippedNoArtifacts",
+    unparseable_result: "skippedUnparseable",
+    missing_prompt_file: "skippedMissingPromptFile",
+  };
   const skip = (attemptId: string, reason: HarvestSkipReason, detail?: string): void => {
+    summary[skipCounter[reason]] += 1;
     summary.skipped.push({ attemptId, reason, ...(detail !== undefined ? { detail } : {}) });
   };
 
   for (const attempt of attempts) {
     if (attempt.status === "running") {
-      summary.skippedNotFinished += 1;
       skip(attempt.id, "not_finished");
       continue;
     }
@@ -142,7 +152,6 @@ export const harvestTraces = async (deps: HarvestDeps): Promise<{ traces: Harves
     const promptArtifact = latestArtifact(artifacts, "rendered_prompt");
     const resultArtifact = latestArtifact(artifacts, "parsed_result");
     if (!promptArtifact || !resultArtifact) {
-      summary.skippedNoArtifacts += 1;
       skip(attempt.id, "no_artifacts", `missing ${[!promptArtifact && "rendered_prompt", !resultArtifact && "parsed_result"].filter(Boolean).join(" + ")}`);
       continue;
     }
@@ -151,7 +160,6 @@ export const harvestTraces = async (deps: HarvestDeps): Promise<{ traces: Harves
     try {
       result = validateWorkerResult(JSON.parse(await readArtifact(resultArtifact.relativePath)));
     } catch (error) {
-      summary.skippedUnparseable += 1;
       skip(attempt.id, "unparseable_result", error instanceof Error ? error.message : String(error));
       continue;
     }
@@ -175,7 +183,6 @@ export const harvestTraces = async (deps: HarvestDeps): Promise<{ traces: Harves
     try {
       prompt = await readArtifact(promptArtifact.relativePath);
     } catch (error) {
-      summary.skippedMissingPromptFile += 1;
       skip(attempt.id, "missing_prompt_file", error instanceof Error ? error.message : String(error));
       continue;
     }

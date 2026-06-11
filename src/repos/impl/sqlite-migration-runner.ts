@@ -38,7 +38,20 @@ export class SqliteMigrationRunner implements MigrationRunner {
       throw new ForemanError("migrations_pending", "Workspace database has no applied migrations; start the server (or run a writable command) to migrate it first.", 409);
     }
 
-    const pending = migrationFiles.filter((fileName) => !applied.has(fileName));
+    const pending: string[] = [];
+    for (const fileName of migrationFiles) {
+      const appliedChecksum = applied.get(fileName);
+      if (appliedChecksum === undefined) {
+        pending.push(fileName);
+        continue;
+      }
+      // Same rule as runMigrations: a version name with diverged content is a
+      // different migration, not an applied one.
+      if (appliedChecksum !== (await sha256File(path.join(projectRoot, "migrations", fileName)))) {
+        throw new ForemanError("migration_checksum_mismatch", `Migration ${fileName} checksum mismatch`, 500);
+      }
+    }
+
     if (pending.length > 0) {
       throw new ForemanError(
         "migrations_pending",
@@ -46,6 +59,12 @@ export class SqliteMigrationRunner implements MigrationRunner {
         409,
       );
     }
+
+    // Intentionally NOT symmetric: a DB *ahead* of this checkout (applied
+    // versions the checkout doesn't ship) passes. Migrations are additive in
+    // practice, and the realistic read-only scenario is a stale checkout
+    // reading a newer live DB — hard-failing would block harmless reads. A
+    // genuinely breaking newer schema surfaces as a SQL error on the read.
   }
 
   async runMigrations(projectRoot: string): Promise<void> {
