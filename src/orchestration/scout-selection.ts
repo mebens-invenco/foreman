@@ -567,8 +567,8 @@ export const runScoutSelection = async (input: {
   const mirroredTasks = listedTasks.map((task) => input.foremanRepos.taskMirror.getTask(task.id) ?? task);
   // Hard-skip any issue carrying a configured exclude label at candidate intake.
   // This is the single chokepoint that removes excluded issues from every
-  // downstream action (state transitions, execution, review, retry, deployment,
-  // consolidation). Empty excludeLabels => identical to pre-filter behavior.
+  // downstream action (state transitions, execution, review, reviewer, retry,
+  // deployment, consolidation). Empty excludeLabels => identical to pre-filter behavior.
   const excludeLabels = configuredExcludeLabels(input.config);
   const allTasks =
     excludeLabels.length > 0
