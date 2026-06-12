@@ -1,0 +1,1211 @@
+{
+  "labels": [
+    {
+      "attemptId": "01KTTX0C84ET8D563SN1P0QTMV",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KTTWWR1EEYCE2XW92WBX9NC3",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KTTW25B8RKP84BZ72CBEP77J",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KTT17P6AP8Q85AMCM803FYMF",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "788c no_action summary re-narrates the full diff of an already-approved commit before concluding 'No action needed'. Continuation template carries no summary-policy fragment; over-long against the operator-surface bar."
+    },
+    {
+      "attemptId": "01KTR1C6A9CF09QNYEQTEXWXCT",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KTR0JCCEH25ZFR8JAPKDW460",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KTQQVM72HA1WTEDDA6X4K0ZS",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "706c summary verifies a human-performed master-merge file-by-file for a no-op pass."
+    },
+    {
+      "attemptId": "01KTQMV96FKJTTDTCWXBFR22KQ",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KTNXXG0CCS3J3NCXVP93K75F",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KTNWTMT60Q8Q4GZD0EMEB0XC",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KTNVAR4JQBW3JHF6C65T3HJH",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KTNSSJ3BTP52AK90QZD3BM7Z",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KTNRWTZW2V1FZQJEKSHJPBDF",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KTNKNMQV0J7XPJJ625TE2FGP",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KTNJMJ7VN1ZDYZ82B5HCG3KB",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KTNHX98FRWX161W0EGGG50Z0",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KTNHKWK09ATW6986A8WMBQ8W",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KTNGEWSD7SMJ6YFB3J4XMEJS",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KT8ZCBH7WWNFNVDN0YD21SMP",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KT8YTC0DP10J17GWQESCDS14",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KT6EK5CX1AK8NVVHS44WGNBG",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KT6648KDQ8G4JF1WG769VCC4",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KT5F72Q840N3MQTSAQHP4KC3",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KT5E2SJKXEJRTQPKE0BC1FZ0",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KT3BF1J6A31X0CZHR8ETPQCH",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KT3A5QBYH276RNDH1KEWAHCH",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KT123XYT7ZG1BQRAFXY64NR8",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KT11N5XXPPPNAQH2MWY42BNQ",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KT11FYD6B85CDFZSH9VJMVFR",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KT103HAXEVCWVWVS8G5BKRNX",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KT0ZWZ6EWDDZSYQVABRD9E59",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KT0YP8SVS8HZEXGEATXT9CZV",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KT0YNSHMQAR4DEHNPJE54F8X",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KT0BB62KC8WYXWSTC5MKARTX",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KT08KZYCT5X12EK2WBN8XRV5",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSS0B7RP6VD9QNMJ5182XXRM",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSS03W1FJ01WAE711VMV60NZ",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSRX7WTT400K9X1VAYRKK6W4",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSRX6HTG00E6CD32WKJ7BXAE",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSRX1BH4T9W7RC0G2BSCFKCJ",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSRT1Z07WJ2RXGGVQV3EAEX9",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSRQ3FR8MW182JDSWCHM3473",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSRPX2SXQN3985K4BM7PC1GC",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSRJ60HWQZHCDM5FSPMRYSY4",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSRGZTRSY7D1QFR7GMT1584P",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSRGKBR38FT34DWX10SGFAM9",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSQ5AYVD9T7Y0EDW8DDD61P4",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSQ4H2Y7V49QZ80WHF73PFZH",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KSQ4A79R4M5QER4XDDTXVQ20",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSQ3PHVA2BE0W4HJJYY82A2Y",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KSPM25CJNRFPV9W0QSVTJJKJ",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSPM1E4G1S7W5JR2NTZH83A9",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSPKGYXG1FS36FRBE5YVPT66",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSPJNTQF9VJRFVMM8K15X8V9",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KSPJC6WWJT5JDVX0MK8NA3S1",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSPJ92KPRVFC77PMAGF5HK4C",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSPHXV2RCB3HH911ESRMEN29",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSPHS4JQZC95MMYBBDF55RZD",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSPHMWC3JY7CY5AECT4337M9",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSPG4BARXDRRPCEHH5VV6PE0",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSPFRF69HPQC99JKY3T138NB",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSPFG4KCEJ4ZCTGS77SNZWHD",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSPF5WDH2C7F8PTK5H244S2H",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSPF2JK1RAE3R75MZW8XNK5P",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSPDZ6RWPAVNPP63VP4SA28M",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSPB3BSVBZCCM4EZG30XD7AR",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSP0BPPWT66585KC7RX5M2HE",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSNZY67JVJDSRMBP0CZMEHVC",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KSNXWK1BRHDG1CBEB7KS2MRY",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSM7VX182M988FGXMBAG4AMD",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSM46GTD2QX0VEDHHT7QP5ST",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSM01SA0HWMMX9QB7NQKE12T",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSKYTAJWCA7EGT07YB0QJYA3",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KSKV3NHCX6T8Z2PS8SV6X3A9",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSKSGAP5SPD8SS08VXP2T5N0",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSKDBK07GWFDW3648KTYYKK2",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSKBY6FPE4ECEBYKSHDTJM4R",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSHV9PWBXPY0AV2HDCMBV3CP",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSHV43PADDYZYJR3QSJJMB2H",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSHTZXZ76YSJ34SSJFWWQTW1",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSHREXG0WPS6CDHG0WY6H2ZM",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSHQNDTMY2DBJC5A3ZNME97V",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSHQHQTC74KTKHFAPW54Q2AM",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KSHPMV0PQ9977WNBKVGFRTVK",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSHNS1CA93YKNGRXV0SSEBQF",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSHMTK8T9E230GGA7YPJQGWP",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KSHMSXA12XDAGA8GWSYVRE3X",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSHM1GVVWVJYYAWTKRNQP8ZG",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSHJVWY0N0F2JYCWHFVPB252",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSHJBXVF0CXW1DJJ58TKX2CY",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSH7CZNRF38A3DP3DEFXG7RP",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSH6GQNG16T6838MH9PXDHT7",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KSH6BY13CWW5WKE0E0ZEP6V1",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KSH5Z79CEN2X96ESS1R3EBSV",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSH51B22P77W1111MNC6C818",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSH4H8FRTHXSH6ZRM12NSD1Q",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KSH05WR6PG56WGBREYHZX5BF",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSGYGC5WKVARA3FVW15WM592",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSGYC13J3WGX0HTQYZNS3B00",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSGXZEMRKP9KMA9MB4EXA00A",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KSGXH2PHSJPMMG8N0C4E6PQG",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KS6T9YKGKBNRYYJVM5KRDSG9",
+      "promptVariant": "continuation",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KS6SCP2BCPNPBQ9JP8E5JYK3",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KRJMN33XT8BSJ7J27YEQ1XDZ",
+      "promptVariant": "legacy",
+      "era": "legacy",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KRJJG7N7D369MG1827XVKTZB",
+      "promptVariant": "legacy",
+      "era": "legacy",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KRJGQYGXS8SV5CDGD1MZBK73",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KRJ9HKM683C86JEY4V7XEK8P",
+      "promptVariant": "legacy",
+      "era": "legacy",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KRJ8Q45N0RFQ606WR0ZNFF56",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "bad",
+      "reasons": [
+        "finding-in-body"
+      ],
+      "notes": "Body (1387c) enumerates two numbered findings plus a 'Minor:' item with full detail \u2014 duplicates the 3 inline threads. Body should be stance + thread count only (reviewer.md rule)."
+    },
+    {
+      "attemptId": "01KRHRZMTNCB1ST66C6E54M11N",
+      "promptVariant": "legacy",
+      "era": "legacy",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KRGAKZX4JPR87PN7ER1PR0YN",
+      "promptVariant": "legacy",
+      "era": "legacy",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KRG9YVQR2J7TAXZH03J0G4QF",
+      "promptVariant": "legacy",
+      "era": "legacy",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KRG9P5WFAN8CN6X01CHP987V",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "bad",
+      "reasons": [
+        "finding-in-body"
+      ],
+      "notes": "Body (1038c) restates both findings as bullets with location and fix \u2014 duplicates the 2 inline threads."
+    },
+    {
+      "attemptId": "01KRG99AR184AQ1DMRAK12KKQ2",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KR2PBPXPE5ZY5K4W91RXFRFJ",
+      "promptVariant": "legacy",
+      "era": "legacy",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KR2G66G2X2DB0B2053WKJWHB",
+      "promptVariant": "legacy",
+      "era": "legacy",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KR2FFJP0487RM8JSYPVMET7C",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Body states stance + thread count; actionable detail lives in inline thread(s)."
+    },
+    {
+      "attemptId": "01KR2CFG9P6BTT1RC6KZJS9D45",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KR2C5YFCC50M9DJKN0QF4PF5",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KR2BS9H1EDPSS0TE2WVYACKY",
+      "promptVariant": "legacy",
+      "era": "legacy",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KR2BNEAERSK2DZCD13X2BNTA",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "no_action_needed",
+      "label": "good",
+      "reasons": [],
+      "notes": "Legitimate stand-down: verdict consistent with described PR state; concise summary."
+    },
+    {
+      "attemptId": "01KR2B5TRSAQ1Z5JE8T33GESW8",
+      "promptVariant": "legacy",
+      "era": "legacy",
+      "outcome": "completed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KR0TFCSPHKY18X2C5G4GAHJC",
+      "promptVariant": "legacy",
+      "era": "legacy",
+      "outcome": "no_action_needed",
+      "label": "bad",
+      "reasons": [
+        "summary-overlong"
+      ],
+      "notes": "Over-long summary for a no_action/completed stand-down; telemetry/diff padding past the concise-outcome bar. Confirmed bad in the committed summary-policy analysis. Continuation variant carries no summary-policy fragment (template gap); legacy carries no policy at all."
+    },
+    {
+      "attemptId": "01KR0SMX2NMQTPB9EA22PRPP79",
+      "promptVariant": "first_pass",
+      "era": "current",
+      "outcome": "completed",
+      "label": "bad",
+      "reasons": [
+        "finding-in-body"
+      ],
+      "notes": "Body (1345c) spells out the tsconfig-divergence finding (location + consequence + fix) \u2014 the single inline thread is now redundant."
+    }
+  ],
+  "summary": {
+    "total": 123,
+    "byLabel": {
+      "good": 91,
+      "bad": 32
+    },
+    "byFailureMode": {
+      "summary-overlong": 29,
+      "finding-in-body": 3
+    },
+    "byVariant": {
+      "continuation": {
+        "good": 50,
+        "bad": 24
+      },
+      "first_pass": {
+        "good": 35,
+        "bad": 3
+      },
+      "legacy": {
+        "good": 6,
+        "bad": 5
+      }
+    },
+    "byEra": {
+      "current": {
+        "good": 85,
+        "bad": 27
+      },
+      "legacy": {
+        "good": 6,
+        "bad": 5
+      }
+    },
+    "provenance": "Graded against the template rules in force per promptVariant. summary-overlong reasons align 1:1 with the committed summary-policy analysis (harvest/summary-labels.json) intersected with the reviewer corpus (29 traces). finding-in-body is graded against reviewer.md 'Do not put actionable findings in the summary' (3 traces). Signals are NOT graded (harness/schema-era dependent, never prompt-requested). Verdict correctness spot-checked for internal consistency only \u2014 full code re-review out of scope."
+  }
+}
