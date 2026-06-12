@@ -3,7 +3,17 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewContext, type Task, type TaskComment, type TaskPullRequest } from "../../domain/index.js";
+import {
+  priorityToRank,
+  type ActionType,
+  type AttemptStatus,
+  type RepoRef,
+  type ResolvedPullRequest,
+  type ReviewContext,
+  type Task,
+  type TaskComment,
+  type TaskPullRequest,
+} from "../../domain/index.js";
 import { runScoutSelection } from "../index.js";
 import type { ReviewService } from "../../review/index.js";
 import { FileTaskSystem } from "../../tasking/index.js";
@@ -32,6 +42,10 @@ class FakeTaskSystem implements TaskSystem {
   }
 
   async listCandidates(): Promise<Task[]> {
+    return this.tasks;
+  }
+
+  async listAssignedIssues(): Promise<Task[]> {
     return this.tasks;
   }
 
@@ -199,6 +213,45 @@ const seedCompletedExecution = (
   });
   expect(attempt).not.toBeNull();
   db.attempts.finalizeAttempt(attempt!.id, "completed", { finishedAt: "2026-03-14T12:04:00Z" });
+};
+
+const seedBlockedOrdinaryJob = (
+  db: Awaited<ReturnType<typeof createMigratedDb>>,
+  blockedTask: Task,
+  action: Extract<ActionType, "execution" | "retry">,
+  options: { attemptStatus?: AttemptStatus; blockedTaskUpdatedAt?: string } = {},
+): void => {
+  db.workers.ensureWorkerSlots(1);
+  const worker = db.workers.listWorkers()[0];
+  expect(worker).toBeDefined();
+  db.taskMirror.saveTasks([blockedTask]);
+  const target = db.taskMirror.getTaskTarget(blockedTask.id, blockedTask.targets[0]?.repoKey ?? "repo-a");
+  expect(target).not.toBeNull();
+
+  const job = db.jobs.createJob({
+    taskId: blockedTask.id,
+    taskTargetId: target!.id,
+    taskProvider: blockedTask.provider,
+    action,
+    priorityRank: priorityToRank(blockedTask.priority),
+    repoKey: target!.repoKey,
+    baseBranch: "main",
+    dedupeKey: `${blockedTask.id}:${target!.repoKey}:${action}`,
+    selectionReason: "test blocked ordinary work",
+    selectionContext: { blockedTaskUpdatedAt: options.blockedTaskUpdatedAt ?? blockedTask.updatedAt },
+  });
+  const attempt = db.attempts.createAttemptWithLeases({
+    jobId: job.id,
+    workerId: worker!.id,
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-5.4",
+    runnerVariant: "high",
+    expiresAt: "2026-03-14T12:05:00Z",
+    leases: [],
+  });
+  expect(attempt).not.toBeNull();
+  db.attempts.finalizeAttempt(attempt!.id, options.attemptStatus ?? "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
+  db.jobs.updateJobStatus(job.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
 };
 
 const seedReviewerCheckpoint = (
@@ -1111,6 +1164,249 @@ describe("runScoutSelection", () => {
       expect(result.jobs).toHaveLength(1);
       expect(result.jobs[0]?.action).toBe("review");
       expect(result.jobs[0]?.task.id).toBe("TASK-0003");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not resume blocked in-progress execution targets until the task is updated", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-execution-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const blockedTask = task({
+      id: "TASK-BLOCKED-EXECUTION",
+      title: "Blocked execution task",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    seedBlockedOrdinaryJob(db, blockedTask, "execution");
+    const taskSystem = new FakeTaskSystem([blockedTask]);
+
+    try {
+      const blocked = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(blocked.jobs).toHaveLength(0);
+
+      blockedTask.updatedAt = "2999-01-01T00:00:00.000Z";
+      const unblocked = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(unblocked.jobs).toHaveLength(1);
+      expect(unblocked.jobs[0]?.action).toBe("execution");
+      expect(unblocked.jobs[0]?.task.id).toBe(blockedTask.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps blocked execution targets suppressed when provider timestamps are ahead of the job clock", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-execution-clock-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const blockedTask = task({
+      id: "TASK-BLOCKED-EXECUTION-CLOCK",
+      title: "Blocked execution with provider clock ahead",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2999-01-01T00:00:00.000Z",
+    });
+    seedBlockedOrdinaryJob(db, blockedTask, "execution");
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([blockedTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps blocked execution targets suppressed when task timestamps are malformed", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-execution-malformed-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const blockedTask = task({
+      id: "TASK-BLOCKED-EXECUTION-MALFORMED",
+      title: "Blocked execution with malformed timestamp",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "not-a-date",
+    });
+    seedBlockedOrdinaryJob(db, blockedTask, "execution");
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([blockedTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("resumes blocked jobs without worker-declared blocked markers", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-execution-missing-marker-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const blockedTask = task({
+      id: "TASK-BLOCKED-EXECUTION-MISSING-MARKER",
+      title: "Blocked execution without worker marker",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    seedBlockedOrdinaryJob(db, blockedTask, "execution");
+    const target = db.taskMirror.getTaskTarget(blockedTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    const seededJob = db.jobs.latestJobForTaskTarget(target!.id);
+    expect(seededJob).not.toBeNull();
+    db.jobs.updateJobSelectionContext(seededJob!.id, {});
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([blockedTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.task.id).toBe(blockedTask.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("resumes blocked jobs when the latest attempt is no longer blocked", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-execution-completed-attempt-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const blockedTask = task({
+      id: "TASK-BLOCKED-JOB-COMPLETED-ATTEMPT",
+      title: "Blocked job with completed latest attempt",
+      state: "in_progress",
+      providerState: "in_progress",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    seedBlockedOrdinaryJob(db, blockedTask, "execution", { attemptStatus: "completed" });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([blockedTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.task.id).toBe(blockedTask.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not retry blocked ordinary retry targets until the task is updated", async () => {
+    const tempDir = await createTempDir("foreman-scout-blocked-retry-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+
+    const retryTask = task({
+      id: "TASK-BLOCKED-RETRY",
+      title: "Blocked retry task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/3", source: "provider" } satisfies TaskPullRequest],
+    });
+    seedBlockedOrdinaryJob(db, retryTask, "retry");
+    const reviewService = new FakeReviewService({
+      [retryTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/3",
+        pullRequestNumber: 3,
+        state: "closed",
+        headBranch: "task-blocked-retry",
+        baseBranch: "main",
+      }),
+    });
+    const taskSystem = new FakeTaskSystem([retryTask]);
+
+    try {
+      const blocked = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(blocked.jobs).toHaveLength(0);
+
+      retryTask.updatedAt = "2999-01-01T00:00:00.000Z";
+      const unblocked = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+      expect(unblocked.jobs).toHaveLength(1);
+      expect(unblocked.jobs[0]?.action).toBe("retry");
+      expect(unblocked.jobs[0]?.task.id).toBe(retryTask.id);
     } finally {
       db.close();
     }
@@ -3092,6 +3388,165 @@ describe("runScoutSelection", () => {
         triggerType: "manual",
       });
       expect(eligible.jobs.map((job) => job.action)).toContain("deployment");
+    } finally {
+      db.close();
+    }
+  });
+
+  const EXCLUDE_LABEL = "agent:disabled";
+
+  // Builds one candidate per scout action (execution, review, retry, reviewer,
+  // deployment, consolidation). When `excluded` is set, each carries the
+  // configured exclude label so the intake chokepoint should drop them all.
+  const buildExclusionScenario = (options: { excluded: boolean }): { tasks: Task[]; reviewService: FakeReviewService } => {
+    const labels = options.excluded ? ["Agent", EXCLUDE_LABEL] : ["Agent"];
+    const base = {
+      priority: "normal" as const,
+      updatedAt: "2026-03-14T12:00:00Z",
+      labels,
+    };
+
+    const executionTask = task({ id: "TASK-EXC-EXEC", title: "Excludable execution task", state: "ready", providerState: "ready", ...base });
+    const reviewTask = task({ id: "TASK-EXC-REVIEW", title: "Excludable review task", state: "in_review", providerState: "in_review", ...base });
+    const retryTask = task({ id: "TASK-EXC-RETRY", title: "Excludable retry task", state: "in_review", providerState: "in_review", ...base });
+    const reviewerTask = task({ id: "TASK-EXC-REVIEWER", title: "Excludable reviewer task", state: "in_review", providerState: "in_review", ...base });
+    const deployableTask = task({ id: "TASK-EXC-DEPLOY", title: "Excludable deployment task", state: "deployable", providerState: "deployable", ...base });
+    const consolidationTask = task({ id: "TASK-EXC-DONE", title: "Excludable consolidation task", state: "done", providerState: "done", ...base });
+
+    const reviewService = new FakeReviewService({
+      [reviewTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/61",
+        pullRequestNumber: 61,
+        state: "open",
+        headBranch: "task-exc-review",
+        baseBranch: "main",
+        reviewSummaries: [
+          { id: "rev-exc-1", body: "Please fix", authorName: "reviewer", authoredByAgent: false, createdAt: "2026-03-14T12:01:00Z", commitId: "abc", isCurrentHead: true },
+        ],
+      }),
+      [retryTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/62",
+        pullRequestNumber: 62,
+        state: "closed",
+        headBranch: "task-exc-retry",
+        baseBranch: "main",
+      }),
+      [reviewerTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/63",
+        pullRequestNumber: 63,
+        state: "open",
+        isDraft: true,
+        headBranch: "task-exc-reviewer",
+        baseBranch: "main",
+      }),
+      [deployableTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/64",
+        pullRequestNumber: 64,
+        state: "merged",
+        headBranch: "task-exc-deploy",
+        baseBranch: "main",
+      }),
+    });
+
+    return { tasks: [executionTask, reviewTask, retryTask, reviewerTask, deployableTask, consolidationTask], reviewService };
+  };
+
+  test("hard-skips tasks carrying an exclude label across every action type", async () => {
+    const tempDir = await createTempDir("foreman-scout-exclude-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = [EXCLUDE_LABEL];
+    config.scheduler.workerConcurrency = 10;
+    const paths = createWorkspacePaths(projectRoot, tempDir);
+    await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
+
+    const scenario = buildExclusionScenario({ excluded: true });
+    const taskSystem = new FakeTaskSystem(scenario.tasks);
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: scenario.reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(result.excludedByLabelCount).toBe(6);
+      // Excluded tasks must not even be state-transitioned.
+      expect(taskSystem.transitions).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("still selects every action when the exclude label is absent", async () => {
+    const tempDir = await createTempDir("foreman-scout-exclude-absent-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = [EXCLUDE_LABEL];
+    config.scheduler.workerConcurrency = 10;
+    const paths = createWorkspacePaths(projectRoot, tempDir);
+    await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
+
+    const scenario = buildExclusionScenario({ excluded: false });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem(scenario.tasks),
+        reviewService: scenario.reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(new Set(result.jobs.map((job) => job.action))).toEqual(
+        new Set(["execution", "review", "retry", "reviewer", "deployment", "consolidation"]),
+      );
+      expect(result.excludedByLabelCount).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not filter when excludeLabels is empty", async () => {
+    const tempDir = await createTempDir("foreman-scout-exclude-empty-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    // excludeLabels defaults to [] — a task carrying the would-be exclude label is still selected.
+
+    const readyTask = task({
+      id: "TASK-EXC-EMPTY",
+      title: "Ready task with disabled-style label",
+      state: "ready",
+      providerState: "ready",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      labels: ["Agent", EXCLUDE_LABEL],
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([readyTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.task.id).toBe("TASK-EXC-EMPTY");
+      expect(result.excludedByLabelCount).toBe(0);
     } finally {
       db.close();
     }

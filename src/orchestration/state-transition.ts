@@ -4,8 +4,7 @@ import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord } from "../repos/index.js";
 import { getProviderStateForNormalized, type TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
-
-type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable";
+import type { TargetProgressState } from "./blocked-ordinary-work.js";
 
 export type StateTransitionTargetProgress = {
   latestJob: JobRecord | null;

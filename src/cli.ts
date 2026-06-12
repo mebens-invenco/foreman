@@ -34,6 +34,7 @@ import { createSelfRebootScheduler, runRebootSidecar } from "./system/reboot.js"
 import { createTaskSystem } from "./tasking/index.js";
 import { discoverGitRepos } from "./workspace/git-repo-discovery.js";
 import { initializeWorkspace, loadWorkspace } from "./workspace/index.js";
+import { harvestTraces } from "./eval/harvest.js";
 import { evalPromptNames } from "./eval/registry.js";
 import { formatEvalReport, runEval } from "./eval/run.js";
 import { isRunnerProvider, runnerProviders, type RunnerProvider } from "./domain/index.js";
@@ -60,6 +61,11 @@ const parseWorkerResultAction = (value: string): WorkerResultAction => {
 
   return value as WorkerResultAction;
 };
+
+const collectWorkerResultActions = (value: string, previous: WorkerResultAction[] = []): WorkerResultAction[] => [
+  ...previous,
+  parseWorkerResultAction(value),
+];
 
 const readStdin = async (): Promise<string> => {
   process.stdin.setEncoding("utf8");
@@ -90,6 +96,24 @@ const withWorkspaceRepos = async <T>(workspace: string, handler: (repos: ReturnT
   try {
     await repos.migrationRunner.runMigrations(paths.projectRoot);
     return await handler(repos);
+  } finally {
+    repos.close();
+  }
+};
+
+// Read-only variant for commands that inspect a workspace a live server may
+// own (e.g. eval-harvest): opens the DB readonly (no create, no journal-mode
+// switch, no write locks) and REFUSES on pending migrations instead of
+// applying them under the running server.
+const withWorkspaceReposReadOnly = async <T>(
+  workspace: string,
+  handler: (repos: ReturnType<typeof createRepos>, paths: Awaited<ReturnType<typeof loadWorkspace>>["paths"]) => Promise<T>,
+): Promise<T> => {
+  const { paths } = await loadWorkspace(workspace);
+  const repos = createRepos(await openSqliteDatabase(paths.dbPath, { readonly: true }));
+  try {
+    await repos.migrationRunner.assertMigrationsCurrent(paths.projectRoot);
+    return await handler(repos, paths);
   } finally {
     repos.close();
   }
@@ -474,6 +498,28 @@ program
       }
     },
   );
+
+program
+  .command("eval-harvest")
+  .description("Harvest (rendered prompt, worker result) pairs from a workspace's retained attempt artifacts, for eval corpus building")
+  .argument("<workspace>")
+  .option("--action <action>", "Restrict to a worker action (repeatable)", collectWorkerResultActions, [])
+  .option("--limit <count>", "Max attempts to scan, most recent first", parsePositiveInteger, 500)
+  .option("--summary-only", "Emit only the harvest summary counts, not the harvested traces")
+  .action(async (workspace: string, options: { action: WorkerResultAction[]; limit: number; summaryOnly?: boolean }) => {
+    await withWorkspaceReposReadOnly(workspace, async (repos, paths) => {
+      const actions = options.action.length > 0 ? new Set(options.action) : undefined;
+      const { traces, summary } = await harvestTraces({
+        attempts: repos.attempts,
+        artifacts: repos.artifacts,
+        workspaceRoot: paths.workspaceRoot,
+        limit: options.limit,
+        ...(actions ? { actions } : {}),
+        ...(options.summaryOnly ? { summaryOnly: true } : {}),
+      });
+      writeJson({ workspace, actions: options.action, summary, ...(options.summaryOnly ? {} : { traces }) });
+    });
+  });
 
 const scheduler = program.command("scheduler");
 for (const action of ["start", "pause", "stop"] as const) {

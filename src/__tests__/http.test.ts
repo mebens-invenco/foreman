@@ -3,10 +3,11 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { createDefaultWorkspaceConfig } from "../workspace/config.js";
+import { createDefaultWorkspaceConfig, type WorkspaceConfig } from "../workspace/config.js";
 import { createHttpServer } from "../http.js";
 import { createSelfRebootScheduler } from "../system/reboot.js";
-import type { Task } from "../domain/index.js";
+import { priorityToRank, type Task } from "../domain/index.js";
+import { parseLinearMetadata } from "../tasking/index.js";
 import { ForemanError } from "../lib/errors.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
 
@@ -209,6 +210,61 @@ describe("HTTP query validation", () => {
     }
   });
 
+  test("scope=assigned merges live assigned issues with mirrored candidates", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+
+    const candidate: Task = { ...sampleTask, id: "ENG-1", providerId: "ENG-1", labels: ["Agent"] };
+    // Assigned but untagged and never mirrored — only the live query knows it.
+    const assignedOnly: Task = { ...sampleTask, id: "ENG-2", providerId: "ENG-2", labels: [], targets: [] };
+    db.taskMirror.saveTasks([candidate]);
+
+    const taskSystem = {
+      listCandidates: vi.fn(async () => [candidate]),
+      listAssignedIssues: vi.fn(async () => [candidate, assignedOnly]),
+      getTask: vi.fn(async () => candidate),
+      listComments: vi.fn(async () => []),
+    } as any;
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "linear"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem,
+      reviewService: { resolvePullRequest: vi.fn(async () => null) } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      // Default scope serves only mirrored candidates; the live query is untouched.
+      const candidatesResponse = await server.inject({ method: "GET", url: "/api/tasks" });
+      expect(candidatesResponse.statusCode).toBe(200);
+      expect(candidatesResponse.json().tasks.map((task: { id: string }) => task.id)).toEqual(["ENG-1"]);
+      expect(taskSystem.listAssignedIssues).not.toHaveBeenCalled();
+
+      // Assigned scope unions the mirrored candidate with the untagged assigned issue.
+      const assignedResponse = await server.inject({ method: "GET", url: "/api/tasks?scope=assigned" });
+      expect(assignedResponse.statusCode).toBe(200);
+      const tasks = assignedResponse.json().tasks as Array<{ id: string; agentEnabled: boolean }>;
+      expect(tasks.map((task) => task.id).sort()).toEqual(["ENG-1", "ENG-2"]);
+      expect(taskSystem.listAssignedIssues).toHaveBeenCalledTimes(1);
+      // No exclude label on the untagged issue, so it reads as enabled.
+      expect(tasks.find((task) => task.id === "ENG-2")?.agentEnabled).toBe(true);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
   test("serves mirrored tasks and returns target projections for task APIs", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
     cleanupDirs.push(workspaceRoot);
@@ -390,6 +446,89 @@ describe("HTTP query validation", () => {
             { repoKey: "repo-a", status: "ready" },
             { repoKey: "repo-b", status: "blocked" },
           ],
+        },
+      ]);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("returns blocked target status for blocked ordinary execution progress", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const blockedTask: Task = {
+      ...sampleTask,
+      id: "TASK-BLOCKED-HTTP",
+      providerId: "TASK-BLOCKED-HTTP",
+      title: "Blocked ordinary task",
+      state: "in_progress",
+      providerState: "in_progress",
+      updatedAt: "2026-03-14T12:00:00Z",
+    };
+
+    db.workers.ensureWorkerSlots(1);
+    db.taskMirror.saveTasks([blockedTask]);
+    const target = db.taskMirror.getTaskTarget(blockedTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    const job = db.jobs.createJob({
+      taskId: blockedTask.id,
+      taskTargetId: target!.id,
+      taskProvider: blockedTask.provider,
+      action: "execution",
+      priorityRank: priorityToRank(blockedTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${blockedTask.id}:repo-a:execution`,
+      selectionReason: "test blocked ordinary work",
+      selectionContext: { blockedTaskUpdatedAt: blockedTask.updatedAt },
+    });
+    const worker = db.workers.listWorkers()[0];
+    expect(worker).toBeDefined();
+    const attempt = db.attempts.createAttemptWithLeases({
+      jobId: job.id,
+      workerId: worker!.id,
+      runnerName: "opencode",
+      runnerModel: "openai/gpt-5.4",
+      runnerVariant: "high",
+      expiresAt: "2026-03-14T12:05:00Z",
+      leases: [],
+    });
+    expect(attempt).not.toBeNull();
+    db.attempts.finalizeAttempt(attempt!.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
+    db.jobs.updateJobStatus(job.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [blockedTask]),
+        getTask: vi.fn(async () => blockedTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({ method: "GET", url: "/api/tasks" });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().tasks).toMatchObject([
+        {
+          id: blockedTask.id,
+          targets: [{ repoKey: "repo-a", status: "blocked", progressState: "blocked" }],
         },
       ]);
     } finally {
@@ -1802,6 +1941,307 @@ describe("HTTP attempts taskId filter", () => {
         "att-3",
       ]);
       expect(payload.attempts.every((attempt: { taskId: string }) => attempt.taskId === "ENG-1")).toBe(true);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+});
+
+describe("HTTP agent-enabled toggle", () => {
+  const linearConfig = (excludeLabels: string[]): WorkspaceConfig => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = excludeLabels;
+    return config;
+  };
+
+  const buildServer = async (options: { config: WorkspaceConfig; updateLabels: ReturnType<typeof vi.fn> }) => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const server = createHttpServer({
+      config: options.config,
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => []),
+        getTask: vi.fn(async () => sampleTask),
+        listComments: vi.fn(async () => []),
+        updateLabels: options.updateLabels,
+      } as any,
+      reviewService: { resolvePullRequest: vi.fn(async () => null) } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+    return { server, db };
+  };
+
+  test("disabling adds only the first exclude label and reports agentEnabled false", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const { server, db } = await buildServer({ config: linearConfig(["agent:disabled", "agent:paused"]), updateLabels });
+    db.taskMirror.saveTasks([{ ...sampleTask, id: "ENG-1", providerId: "ENG-1", labels: ["Agent"] }]);
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: false },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ agentEnabled: false });
+      expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-1", add: ["agent:disabled"], remove: [] });
+      // The mirror is updated so the UI's refetch derives agentEnabled fresh.
+      expect(db.taskMirror.getTask("ENG-1")?.labels).toEqual(["Agent", "agent:disabled"]);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("enabling removes every exclude label and reports agentEnabled true", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const { server, db } = await buildServer({ config: linearConfig(["agent:disabled", "agent:paused"]), updateLabels });
+    db.taskMirror.saveTasks([
+      { ...sampleTask, id: "ENG-1", providerId: "ENG-1", labels: ["Agent", "agent:disabled", "agent:paused"] },
+    ]);
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: true },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ agentEnabled: true });
+      // Enabling strips every exclude label. The agent label is already present,
+      // so it isn't re-added.
+      expect(updateLabels).toHaveBeenCalledWith({
+        taskId: "ENG-1",
+        add: [],
+        remove: ["agent:disabled", "agent:paused"],
+      });
+      expect(db.taskMirror.getTask("ENG-1")?.labels).toEqual(["Agent"]);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("marking an untagged issue adds the agent label so it becomes a candidate", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const { server, db } = await buildServer({ config: linearConfig(["agent:disabled"]), updateLabels });
+    db.taskMirror.saveTasks([{ ...sampleTask, id: "ENG-1", providerId: "ENG-1", labels: [] }]);
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: true },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ agentEnabled: true });
+      expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-1", add: ["Agent"], remove: ["agent:disabled"] });
+      expect(db.taskMirror.getTask("ENG-1")?.labels).toEqual(["Agent"]);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("enabling an issue tagged for another agent does not add the default agent label", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const config = linearConfig(["agent:disabled"]);
+    config.taskSystem.linear!.includeLabels = ["agent:tars", "agent:michael"];
+    const { server, db } = await buildServer({ config, updateLabels });
+    db.taskMirror.saveTasks([
+      { ...sampleTask, id: "ENG-1", providerId: "ENG-1", labels: ["agent:michael", "agent:disabled"] },
+    ]);
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: true },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ agentEnabled: true });
+      // Already agent-tagged (agent:michael), so includeLabels[0] (agent:tars) is
+      // not stamped on top — only the exclude label is cleared.
+      expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-1", add: [], remove: ["agent:disabled"] });
+      expect(db.taskMirror.getTask("ENG-1")?.labels).toEqual(["agent:michael"]);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("4xxs without calling updateLabels when excludeLabels is unconfigured", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const { server, db } = await buildServer({ config: linearConfig([]), updateLabels });
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: false },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("exclude_labels_not_configured");
+      expect(updateLabels).not.toHaveBeenCalled();
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("propagates the 404 when the task is unknown", async () => {
+    const updateLabels = vi.fn(async () => {
+      throw new ForemanError("task_not_found", "Linear task not found: ENG-404", 404);
+    });
+    const { server, db } = await buildServer({ config: linearConfig(["agent:disabled"]), updateLabels });
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-404/agent-enabled",
+        payload: { enabled: false },
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json().error.code).toBe("task_not_found");
+      expect(updateLabels).toHaveBeenCalledWith({ taskId: "ENG-404", add: ["agent:disabled"], remove: [] });
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("4xxs without calling updateLabels when the body lacks an enabled boolean", async () => {
+    const updateLabels = vi.fn(async () => undefined);
+    const { server, db } = await buildServer({ config: linearConfig(["agent:disabled"]), updateLabels });
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/api/tasks/ENG-1/agent-enabled",
+        payload: { enabled: "yes" },
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("invalid_request");
+      expect(updateLabels).not.toHaveBeenCalled();
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+});
+
+describe("HTTP task agentEnabled and frontmatter fields", () => {
+  // Each fixture stores empty `targets` while carrying its verdict purely in the
+  // description, proving the endpoint re-parses the fetched description rather
+  // than trusting the stale mirror targets.
+  const validTask: Task = {
+    ...sampleTask,
+    id: "ENG-1001",
+    provider: "linear",
+    providerId: "ENG-1001",
+    title: "Valid frontmatter",
+    description: "Summary line.\n\nAgent:\n  Repos: repo-a, repo-b",
+    labels: ["Agent"],
+    targets: [],
+    updatedAt: "2026-03-14T12:00:03Z",
+  };
+  const brokenTask: Task = {
+    ...sampleTask,
+    id: "ENG-1002",
+    provider: "linear",
+    providerId: "ENG-1002",
+    title: "Broken frontmatter, agent disabled",
+    description: "Agent:\n  Depends on tasks: ENG-1001",
+    labels: ["Agent", "agent:disabled"],
+    targets: [],
+    updatedAt: "2026-03-14T12:00:02Z",
+  };
+  const missingTask: Task = {
+    ...sampleTask,
+    id: "ENG-1003",
+    provider: "linear",
+    providerId: "ENG-1003",
+    title: "No metadata block",
+    description: "Plain description with no Agent metadata.",
+    labels: ["Agent"],
+    targets: [],
+    updatedAt: "2026-03-14T12:00:01Z",
+  };
+
+  test("derives agentEnabled from the exclude label and frontmatter from the parsed description", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = ["agent:disabled"];
+
+    db.taskMirror.saveTasks([validTask, brokenTask, missingTask]);
+
+    const server = createHttpServer({
+      config,
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => []),
+        getTask: vi.fn(async () => validTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: { resolvePullRequest: vi.fn(async () => null) } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({ method: "GET", url: "/api/tasks" });
+      expect(response.statusCode).toBe(200);
+      const byId = new Map(
+        (response.json().tasks as Array<{ id: string }>).map((task) => [task.id, task]),
+      );
+
+      expect(byId.get("ENG-1001")).toMatchObject({
+        agentEnabled: true,
+        frontmatter: { state: "valid", repos: ["repo-a", "repo-b"], detail: null },
+      });
+      expect(byId.get("ENG-1002")).toMatchObject({
+        agentEnabled: false,
+        frontmatter: { state: "broken", repos: [], detail: "Agent: block found, but no usable Repos:" },
+      });
+      expect(byId.get("ENG-1003")).toMatchObject({
+        agentEnabled: true,
+        frontmatter: { state: "missing", repos: [], detail: "No Agent: metadata block" },
+      });
+
+      // The frontmatter repos must agree with parseLinearMetadata run on the same fixture.
+      expect(parseLinearMetadata(validTask.description, validTask.id.toLowerCase()).targets.map((target) => target.repoKey)).toEqual([
+        "repo-a",
+        "repo-b",
+      ]);
     } finally {
       await server.close();
       db.close();

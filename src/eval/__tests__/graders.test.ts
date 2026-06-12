@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { WorkerResult } from "../../domain/index.js";
+import type { LearningExpect } from "../cases/learning-policy.js";
 import { learningPolicyCases } from "../cases/learning-policy.js";
 import { emitsExpectedGrader, schemaGrader, scopeGrader, structureGrader, tagsGrader } from "../graders.js";
 import type { EvalCase, GradeContext, Grader } from "../types.js";
@@ -10,7 +11,7 @@ import type { EvalCase, GradeContext, Grader } from "../types.js";
 // graders flag exactly what the loose worker-result schema lets through.
 
 const baseCase = learningPolicyCases[0]!;
-const makeCase = (over: Partial<EvalCase>): EvalCase => ({ ...baseCase, ...over });
+const makeCase = (over: Partial<EvalCase<LearningExpect>>): EvalCase<LearningExpect> => ({ ...baseCase, ...over });
 
 const makeResult = (learningMutations: WorkerResult["learningMutations"]): WorkerResult => ({
   schemaVersion: 1,
@@ -33,14 +34,14 @@ const goodAdd: WorkerResult["learningMutations"][number] = {
   tags: ["execution", "high-impact"],
 };
 
-const ctxFor = (evalCase: EvalCase, result: WorkerResult | null): GradeContext => ({
+const ctxFor = (evalCase: EvalCase<LearningExpect>, result: WorkerResult | null): GradeContext<LearningExpect> => ({
   evalCase,
   result,
   rawStdout: "",
   ...(result ? {} : { parseError: "parse failed" }),
 });
 
-const passOf = async (grader: Grader, ctx: GradeContext): Promise<boolean> => (await grader.grade(ctx)).pass;
+const passOf = async (grader: Grader<LearningExpect>, ctx: GradeContext<LearningExpect>): Promise<boolean> => (await grader.grade(ctx)).pass;
 
 describe("schemaGrader", () => {
   it("passes when the result parsed and validated", async () => {
@@ -53,8 +54,8 @@ describe("schemaGrader", () => {
 });
 
 describe("emitsExpectedGrader", () => {
-  const learningCase = makeCase({ expect: "learning" });
-  const noLearningCase = makeCase({ expect: "no_learning" });
+  const learningCase = makeCase({ expect: { decision: "learning" } });
+  const noLearningCase = makeCase({ expect: { decision: "no_learning" } });
 
   it("passes when a learning was expected and emitted", async () => {
     expect(await passOf(emitsExpectedGrader, ctxFor(learningCase, makeResult([goodAdd])))).toBe(true);
@@ -122,23 +123,23 @@ describe("scopeGrader", () => {
   });
 
   it("passes (n/a) when a scope is expected but no learning was emitted", async () => {
-    expect(await passOf(scopeGrader, ctxFor(makeCase({ expectScope: "shared" }), makeResult([])))).toBe(true);
+    expect(await passOf(scopeGrader, ctxFor(makeCase({ expect: { decision: "learning", scope: "shared" } }), makeResult([])))).toBe(true);
   });
 
   it("passes when shared is expected and the learning is scoped shared", async () => {
-    expect(await passOf(scopeGrader, ctxFor(makeCase({ expectScope: "shared" }), makeResult([goodAdd])))).toBe(true);
+    expect(await passOf(scopeGrader, ctxFor(makeCase({ expect: { decision: "learning", scope: "shared" } }), makeResult([goodAdd])))).toBe(true);
   });
 
   it("fails when shared is expected but the learning is scoped to a specific repo", async () => {
-    expect(await passOf(scopeGrader, ctxFor(makeCase({ expectScope: "shared" }), makeResult([repoAdd])))).toBe(false);
+    expect(await passOf(scopeGrader, ctxFor(makeCase({ expect: { decision: "learning", scope: "shared" } }), makeResult([repoAdd])))).toBe(false);
   });
 
   it("passes when repo-specific is expected and the learning is scoped to a repo", async () => {
-    expect(await passOf(scopeGrader, ctxFor(makeCase({ expectScope: "repo-specific" }), makeResult([repoAdd])))).toBe(true);
+    expect(await passOf(scopeGrader, ctxFor(makeCase({ expect: { decision: "learning", scope: "repo-specific" } }), makeResult([repoAdd])))).toBe(true);
   });
 
   it("fails when repo-specific is expected but the learning is scoped shared", async () => {
-    expect(await passOf(scopeGrader, ctxFor(makeCase({ expectScope: "repo-specific" }), makeResult([goodAdd])))).toBe(false);
+    expect(await passOf(scopeGrader, ctxFor(makeCase({ expect: { decision: "learning", scope: "repo-specific" } }), makeResult([goodAdd])))).toBe(false);
   });
 
   it("is advisory (does not gate a sample's pass)", () => {

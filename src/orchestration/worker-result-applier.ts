@@ -7,6 +7,7 @@ import type { AttemptRecord, ForemanRepos, JobRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
+import { blockedTaskUpdatedAtContextKey } from "./blocked-ordinary-work.js";
 
 const consolidationLabels = (config: WorkspaceConfig): { remove: string[]; add: string[] } => {
   if (config.taskSystem.type === "linear") {
@@ -29,6 +30,10 @@ const ensureReviewCommentPrefix = (body: string, prefix: string): string =>
   body.startsWith(prefix) ? body : `${prefix}${body}`;
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const blockedTaskReloadAttempts = 3;
+const blockedTaskReloadRetryDelayMs = 50;
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const deploymentRetryIntervalMinutes = (input: {
   retryCount: number;
@@ -90,6 +95,34 @@ export class WorkerResultApplier {
           body: `${this.deps.config.workspace.agentPrefix}${blocker}`,
         });
         logger.warn("posted blocker comment", { blocker });
+      }
+      if (input.job.action === "execution" || input.job.action === "retry") {
+        let blockedTaskUpdatedAt = input.task.updatedAt;
+        for (let attempt = 1; attempt <= blockedTaskReloadAttempts; attempt += 1) {
+          try {
+            const blockedTask = await this.deps.taskSystem.getTask(input.task.id);
+            blockedTaskUpdatedAt = blockedTask.updatedAt;
+            break;
+          } catch (error) {
+            if (attempt < blockedTaskReloadAttempts) {
+              logger.warn("failed to reload blocked task; retrying", {
+                attempt,
+                error: errorMessage(error),
+              });
+              await delay(blockedTaskReloadRetryDelayMs * attempt);
+              continue;
+            }
+            logger.error("failed to reload blocked task; using pre-result task timestamp", {
+              error: errorMessage(error),
+              blockedTaskUpdatedAt,
+            });
+          }
+        }
+        this.deps.foremanRepos.jobs.updateJobSelectionContext(input.job.id, {
+          ...input.job.selectionContext,
+          [blockedTaskUpdatedAtContextKey]: blockedTaskUpdatedAt,
+        });
+        logger.info("saved blocked ordinary work checkpoint", { blockedTaskUpdatedAt });
       }
       if (input.job.action === "review" && pullRequestUrl) {
         await this.applyReviewMutations(workerResult.reviewMutations, pullRequestUrl, logger);
