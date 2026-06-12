@@ -35,6 +35,10 @@ class FakeTaskSystem implements TaskSystem {
     return this.tasks;
   }
 
+  async listAssignedIssues(): Promise<Task[]> {
+    return this.tasks;
+  }
+
   async getTask(taskId: string): Promise<Task> {
     const task = this.tasks.find((item) => item.id === taskId);
     if (!task) {
@@ -2848,6 +2852,165 @@ describe("runScoutSelection", () => {
         triggerType: "manual",
       });
       expect(eligible.jobs.map((job) => job.action)).toContain("deployment");
+    } finally {
+      db.close();
+    }
+  });
+
+  const EXCLUDE_LABEL = "agent:disabled";
+
+  // Builds one candidate per scout action (execution, review, retry, reviewer,
+  // deployment, consolidation). When `excluded` is set, each carries the
+  // configured exclude label so the intake chokepoint should drop them all.
+  const buildExclusionScenario = (options: { excluded: boolean }): { tasks: Task[]; reviewService: FakeReviewService } => {
+    const labels = options.excluded ? ["Agent", EXCLUDE_LABEL] : ["Agent"];
+    const base = {
+      priority: "normal" as const,
+      updatedAt: "2026-03-14T12:00:00Z",
+      labels,
+    };
+
+    const executionTask = task({ id: "TASK-EXC-EXEC", title: "Excludable execution task", state: "ready", providerState: "ready", ...base });
+    const reviewTask = task({ id: "TASK-EXC-REVIEW", title: "Excludable review task", state: "in_review", providerState: "in_review", ...base });
+    const retryTask = task({ id: "TASK-EXC-RETRY", title: "Excludable retry task", state: "in_review", providerState: "in_review", ...base });
+    const reviewerTask = task({ id: "TASK-EXC-REVIEWER", title: "Excludable reviewer task", state: "in_review", providerState: "in_review", ...base });
+    const deployableTask = task({ id: "TASK-EXC-DEPLOY", title: "Excludable deployment task", state: "deployable", providerState: "deployable", ...base });
+    const consolidationTask = task({ id: "TASK-EXC-DONE", title: "Excludable consolidation task", state: "done", providerState: "done", ...base });
+
+    const reviewService = new FakeReviewService({
+      [reviewTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/61",
+        pullRequestNumber: 61,
+        state: "open",
+        headBranch: "task-exc-review",
+        baseBranch: "main",
+        reviewSummaries: [
+          { id: "rev-exc-1", body: "Please fix", authorName: "reviewer", authoredByAgent: false, createdAt: "2026-03-14T12:01:00Z", commitId: "abc", isCurrentHead: true },
+        ],
+      }),
+      [retryTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/62",
+        pullRequestNumber: 62,
+        state: "closed",
+        headBranch: "task-exc-retry",
+        baseBranch: "main",
+      }),
+      [reviewerTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/63",
+        pullRequestNumber: 63,
+        state: "open",
+        isDraft: true,
+        headBranch: "task-exc-reviewer",
+        baseBranch: "main",
+      }),
+      [deployableTask.id]: reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/64",
+        pullRequestNumber: 64,
+        state: "merged",
+        headBranch: "task-exc-deploy",
+        baseBranch: "main",
+      }),
+    });
+
+    return { tasks: [executionTask, reviewTask, retryTask, reviewerTask, deployableTask, consolidationTask], reviewService };
+  };
+
+  test("hard-skips tasks carrying an exclude label across every action type", async () => {
+    const tempDir = await createTempDir("foreman-scout-exclude-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = [EXCLUDE_LABEL];
+    config.scheduler.workerConcurrency = 10;
+    const paths = createWorkspacePaths(projectRoot, tempDir);
+    await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
+
+    const scenario = buildExclusionScenario({ excluded: true });
+    const taskSystem = new FakeTaskSystem(scenario.tasks);
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: scenario.reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(result.excludedByLabelCount).toBe(6);
+      // Excluded tasks must not even be state-transitioned.
+      expect(taskSystem.transitions).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("still selects every action when the exclude label is absent", async () => {
+    const tempDir = await createTempDir("foreman-scout-exclude-absent-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = [EXCLUDE_LABEL];
+    config.scheduler.workerConcurrency = 10;
+    const paths = createWorkspacePaths(projectRoot, tempDir);
+    await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
+
+    const scenario = buildExclusionScenario({ excluded: false });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem(scenario.tasks),
+        reviewService: scenario.reviewService,
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(new Set(result.jobs.map((job) => job.action))).toEqual(
+        new Set(["execution", "review", "retry", "reviewer", "deployment", "consolidation"]),
+      );
+      expect(result.excludedByLabelCount).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not filter when excludeLabels is empty", async () => {
+    const tempDir = await createTempDir("foreman-scout-exclude-empty-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    // excludeLabels defaults to [] — a task carrying the would-be exclude label is still selected.
+
+    const readyTask = task({
+      id: "TASK-EXC-EMPTY",
+      title: "Ready task with disabled-style label",
+      state: "ready",
+      providerState: "ready",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      labels: ["Agent", EXCLUDE_LABEL],
+    });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([readyTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("execution");
+      expect(result.jobs[0]?.task.id).toBe("TASK-EXC-EMPTY");
+      expect(result.excludedByLabelCount).toBe(0);
     } finally {
       db.close();
     }
