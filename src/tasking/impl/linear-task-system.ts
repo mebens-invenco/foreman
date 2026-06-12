@@ -65,6 +65,8 @@ const uniqueValues = (values: string[]): string[] => {
   return unique;
 };
 
+// Enumerates every configured Linear state bucket. Startup validation and the
+// candidate query filter both depend on this full mapped-state set staying in sync.
 const configuredLinearStateNames = (linear: NonNullable<WorkspaceConfig["taskSystem"]["linear"]>): string[] =>
   uniqueValues([
     ...linear.states.ready,
@@ -679,7 +681,8 @@ export class LinearTaskSystem implements TaskSystem {
 
   async listCandidates(): Promise<Task[]> {
     // Candidates = assigned issues narrowed to the configured agent labels.
-    return this.queryAssignedIssues({ labels: this.config.taskSystem.linear!.includeLabels });
+    const linear = this.config.taskSystem.linear!;
+    return this.queryAssignedIssues({ labels: linear.includeLabels, stateNames: configuredLinearStateNames(linear) });
   }
 
   async listAssignedIssues(): Promise<Task[]> {
@@ -688,35 +691,36 @@ export class LinearTaskSystem implements TaskSystem {
   }
 
   // Shared assignee+team query. `labels` narrows to issues carrying one of the
-  // given labels (candidate view); omit it for the full assigned set. The query
-  // is assembled rather than passing a whole IssueFilter variable so the proven
-  // candidate filter is unchanged when labels are present.
-  private async queryAssignedIssues(options: { labels?: string[] }): Promise<Task[]> {
+  // given labels and `stateNames` narrows to mapped provider states (candidate
+  // view); omit them for the full assigned set. The query is assembled rather
+  // than passing a whole IssueFilter variable so each optional filter is explicit.
+  private async queryAssignedIssues(options: { labels?: string[]; stateNames?: string[] }): Promise<Task[]> {
     const linear = this.config.taskSystem.linear!;
     const assigneeFilter = await this.resolveAssigneeFilter();
-    const stateNames = configuredLinearStateNames(linear);
     const useLabels = (options.labels?.length ?? 0) > 0;
+    const useStateNames = (options.stateNames?.length ?? 0) > 0;
     const assigneeVarDecl = assigneeFilter.assigneeId ? ", $assigneeId: ID!" : ", $assigneeName: String!";
     const assigneeClause = assigneeFilter.assigneeId
       ? "assignee: { id: { eq: $assigneeId } }"
       : "assignee: { name: { eq: $assigneeName } }";
     const labelsVarDecl = useLabels ? ", $labels: [String!]" : "";
     const labelsClause = useLabels ? ",\n            labels: { some: { name: { in: $labels } } }" : "";
+    const stateNamesVarDecl = useStateNames ? ", $stateNames: [String!]" : "";
+    const stateNamesClause = useStateNames ? ",\n            state: { name: { in: $stateNames } }" : "";
 
     this.logger.debug("listing Linear assigned issues", {
       team: linear.team,
       assignee: assigneeFilter.assigneeName ?? assigneeFilter.assigneeId,
       labelCount: options.labels?.length ?? 0,
-      stateCount: stateNames.length,
-      stateNames: stateNames.join(", "),
+      stateCount: options.stateNames?.length ?? 0,
+      stateNames: options.stateNames?.join(", ") ?? "",
     });
     const data = await this.client.request<{ issues: { nodes: LinearIssueNode[] } }>(
-      `query ForemanAssignedIssues($teamName: String!${assigneeVarDecl}${labelsVarDecl}, $stateNames: [String!]) {
+      `query ForemanAssignedIssues($teamName: String!${assigneeVarDecl}${labelsVarDecl}${stateNamesVarDecl}) {
         issues(
           filter: {
             team: { name: { eq: $teamName } },
-            ${assigneeClause}${labelsClause},
-            state: { name: { in: $stateNames } }
+            ${assigneeClause}${labelsClause}${stateNamesClause}
           },
           first: 250
         ) {
@@ -738,9 +742,9 @@ export class LinearTaskSystem implements TaskSystem {
       }`,
       {
         teamName: linear.team,
-        stateNames,
         ...(assigneeFilter.assigneeId ? { assigneeId: assigneeFilter.assigneeId } : { assigneeName: assigneeFilter.assigneeName! }),
         ...(useLabels ? { labels: options.labels } : {}),
+        ...(useStateNames ? { stateNames: options.stateNames } : {}),
       },
     );
 
@@ -760,6 +764,7 @@ export class LinearTaskSystem implements TaskSystem {
         try {
           return await this.linearIssueToTask(node);
         } catch (error) {
+          // Belt-and-suspenders for Linear/config races and unfiltered assigned-issue callers.
           if (!isUnknownProviderStateError(error)) {
             throw error;
           }
