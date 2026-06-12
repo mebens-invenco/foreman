@@ -93,12 +93,21 @@ export class WorkerResultApplier {
         logger.warn("posted blocker comment", { blocker });
       }
       if (input.job.action === "execution" || input.job.action === "retry") {
-        const blockedTask = await this.deps.taskSystem.getTask(input.task.id);
+        let blockedTaskUpdatedAt = input.task.updatedAt;
+        try {
+          const blockedTask = await this.deps.taskSystem.getTask(input.task.id);
+          blockedTaskUpdatedAt = blockedTask.updatedAt;
+        } catch (error) {
+          logger.error("failed to reload blocked task; using pre-result task timestamp", {
+            error: errorMessage(error),
+            blockedTaskUpdatedAt,
+          });
+        }
         this.deps.foremanRepos.jobs.updateJobSelectionContext(input.job.id, {
           ...input.job.selectionContext,
-          [blockedTaskUpdatedAtContextKey]: blockedTask.updatedAt,
+          [blockedTaskUpdatedAtContextKey]: blockedTaskUpdatedAt,
         });
-        logger.info("saved blocked ordinary work checkpoint", { blockedTaskUpdatedAt: blockedTask.updatedAt });
+        logger.info("saved blocked ordinary work checkpoint", { blockedTaskUpdatedAt });
       }
       if (input.job.action === "review" && pullRequestUrl) {
         await this.applyReviewMutations(workerResult.reviewMutations, pullRequestUrl, logger);

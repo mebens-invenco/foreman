@@ -23,6 +23,7 @@ class FakeTaskSystem implements TaskSystem {
   transitions: Array<{ taskId: string; toState: Task["state"] }> = [];
   comments: Array<{ taskId: string; body: string }> = [];
   commentUpdatedAt: string | null = null;
+  getTaskError: Error | null = null;
 
   constructor(private readonly tasks: Task[]) {}
 
@@ -35,6 +36,9 @@ class FakeTaskSystem implements TaskSystem {
   }
 
   async getTask(taskId: string): Promise<Task> {
+    if (this.getTaskError) {
+      throw this.getTaskError;
+    }
     const task = this.tasks.find((item) => item.id === taskId);
     if (!task) {
       throw new Error(`missing task ${taskId}`);
@@ -248,7 +252,7 @@ describe("WorkerResultApplier review result mutations", () => {
 });
 
 describe("WorkerResultApplier blocked ordinary work", () => {
-  test("saves the provider task timestamp observed after blocker comments", async () => {
+  test.each(["execution", "retry"] as const)("saves the provider task timestamp observed after %s blocker comments", async (action) => {
     const tempDir = await createTempDir("foreman-execution-applier-blocked-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
@@ -281,11 +285,11 @@ describe("WorkerResultApplier blocked ordinary work", () => {
         taskId: executionTask.id,
         taskTargetId: target!.id,
         taskProvider: executionTask.provider,
-        action: "execution",
+        action,
         priorityRank: priorityToRank(executionTask.priority),
         repoKey: "repo-a",
         baseBranch: "main",
-        dedupeKey: `${executionTask.id}:repo-a:execution`,
+        dedupeKey: `${executionTask.id}:repo-a:${action}`,
         selectionReason: "test",
         selectionContext: { existing: true },
       });
@@ -319,7 +323,7 @@ describe("WorkerResultApplier blocked ordinary work", () => {
         worktreePath: tempDir,
         workerResult: {
           schemaVersion: 1,
-          action: "execution",
+          action,
           outcome: "blocked",
           summary: "Waiting on dependency.",
           taskMutations: [],
@@ -334,6 +338,95 @@ describe("WorkerResultApplier blocked ordinary work", () => {
       expect(db.jobs.getJob(job.id).selectionContext).toMatchObject({
         existing: true,
         blockedTaskUpdatedAt: "2026-03-14T12:10:00Z",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("falls back to the pre-result task timestamp when blocked task reload fails", async () => {
+    const tempDir = await createTempDir("foreman-execution-applier-blocked-fallback-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const executionTask: Task = {
+      ...task(),
+      id: "TASK-BLOCKED-FALLBACK",
+      providerId: "TASK-BLOCKED-FALLBACK",
+      title: "Apply blocked execution fallback",
+      state: "in_progress",
+      providerState: "in_progress",
+      updatedAt: "2026-03-14T12:00:00Z",
+    };
+    const repo: RepoRef = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
+    const pullRequest: ResolvedPullRequest = {
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/69",
+      pullRequestNumber: 69,
+      state: "open",
+      isDraft: false,
+      headBranch: "task-blocked-fallback",
+      baseBranch: "main",
+    };
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      db.taskMirror.saveTasks([executionTask]);
+      const target = db.taskMirror.getTaskTarget(executionTask.id, "repo-a");
+      expect(target).not.toBeNull();
+      const job = db.jobs.createJob({
+        taskId: executionTask.id,
+        taskTargetId: target!.id,
+        taskProvider: executionTask.provider,
+        action: "execution",
+        priorityRank: priorityToRank(executionTask.priority),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: `${executionTask.id}:repo-a:execution`,
+        selectionReason: "test",
+      });
+      const worker = db.workers.listWorkers()[0];
+      expect(worker).toBeDefined();
+      const attempt = db.attempts.createAttempt({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerName: "opencode",
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+      });
+      const taskSystem = new FakeTaskSystem([executionTask]);
+      taskSystem.getTaskError = new Error("provider unavailable");
+      const applier = new WorkerResultApplier({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService(pullRequest),
+        repos: [repo],
+        logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
+        scheduleScout: () => undefined,
+      });
+
+      await applier.apply({
+        attempt,
+        job,
+        task: executionTask,
+        target: target!,
+        repo,
+        worktreePath: tempDir,
+        workerResult: {
+          schemaVersion: 1,
+          action: "execution",
+          outcome: "blocked",
+          summary: "Waiting on dependency.",
+          taskMutations: [],
+          reviewMutations: [],
+          learningMutations: [],
+          blockers: ["Dependency has not landed."],
+          signals: [],
+        },
+      });
+
+      expect(db.jobs.getJob(job.id).selectionContext).toMatchObject({
+        blockedTaskUpdatedAt: "2026-03-14T12:00:00Z",
       });
     } finally {
       db.close();

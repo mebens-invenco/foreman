@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createDefaultWorkspaceConfig } from "../workspace/config.js";
 import { createHttpServer } from "../http.js";
 import { createSelfRebootScheduler } from "../system/reboot.js";
-import type { Task } from "../domain/index.js";
+import { priorityToRank, type Task } from "../domain/index.js";
 import { ForemanError } from "../lib/errors.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
 
@@ -390,6 +390,89 @@ describe("HTTP query validation", () => {
             { repoKey: "repo-a", status: "ready" },
             { repoKey: "repo-b", status: "blocked" },
           ],
+        },
+      ]);
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
+  test("returns blocked target status for blocked ordinary execution progress", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    const blockedTask: Task = {
+      ...sampleTask,
+      id: "TASK-BLOCKED-HTTP",
+      providerId: "TASK-BLOCKED-HTTP",
+      title: "Blocked ordinary task",
+      state: "in_progress",
+      providerState: "in_progress",
+      updatedAt: "2026-03-14T12:00:00Z",
+    };
+
+    db.workers.ensureWorkerSlots(1);
+    db.taskMirror.saveTasks([blockedTask]);
+    const target = db.taskMirror.getTaskTarget(blockedTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    const job = db.jobs.createJob({
+      taskId: blockedTask.id,
+      taskTargetId: target!.id,
+      taskProvider: blockedTask.provider,
+      action: "execution",
+      priorityRank: priorityToRank(blockedTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${blockedTask.id}:repo-a:execution`,
+      selectionReason: "test blocked ordinary work",
+      selectionContext: { blockedTaskUpdatedAt: blockedTask.updatedAt },
+    });
+    const worker = db.workers.listWorkers()[0];
+    expect(worker).toBeDefined();
+    const attempt = db.attempts.createAttemptWithLeases({
+      jobId: job.id,
+      workerId: worker!.id,
+      runnerName: "opencode",
+      runnerModel: "openai/gpt-5.4",
+      runnerVariant: "high",
+      expiresAt: "2026-03-14T12:05:00Z",
+      leases: [],
+    });
+    expect(attempt).not.toBeNull();
+    db.attempts.finalizeAttempt(attempt!.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
+    db.jobs.updateJobStatus(job.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [blockedTask]),
+        getTask: vi.fn(async () => blockedTask),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+      } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const response = await server.inject({ method: "GET", url: "/api/tasks" });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().tasks).toMatchObject([
+        {
+          id: blockedTask.id,
+          targets: [{ repoKey: "repo-a", status: "blocked", progressState: "blocked" }],
         },
       ]);
     } finally {
