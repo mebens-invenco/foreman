@@ -49,6 +49,22 @@ type TargetProgress = {
 const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
 const stopIntentPhrases = ["abandon", "do not continue", "do not retry"];
 
+const latestRetryWasManuallyStopped = (input: { foremanRepos: ForemanRepos; target: TaskTarget }): boolean => {
+  const latestJob = input.foremanRepos.jobs.latestJobForTaskTarget(input.target.id);
+  if (!latestJob || latestJob.action !== "retry" || latestJob.status !== "canceled") {
+    return false;
+  }
+
+  const latestAttempt = input.foremanRepos.attempts.latestAttemptForTaskTarget(input.target.id);
+  if (!latestAttempt || latestAttempt.jobId !== latestJob.id || latestAttempt.status !== "canceled") {
+    return false;
+  }
+
+  return input.foremanRepos.attempts
+    .listAttemptEvents(latestAttempt.id)
+    .some((event) => event.eventType === "attempt_stop_requested");
+};
+
 const logBlockedOrdinaryWorkSkip = (logger: LoggerService | undefined, task: Task, target: TaskTarget, progress: TargetProgress): void => {
   const evaluation = evaluateBlockedOrdinaryWork(task, progress.latestJob, progress.latestAttempt);
   const context = {
@@ -808,6 +824,10 @@ export const runScoutSelection = async (input: {
 
           const reviewContext = await getReviewContext(task, target, repo);
           if (!reviewContext || reviewContext.state !== "closed") {
+            continue;
+          }
+
+          if (input.triggerType === "worker_finished" && latestRetryWasManuallyStopped({ foremanRepos: input.foremanRepos, target })) {
             continue;
           }
 
