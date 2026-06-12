@@ -301,12 +301,12 @@ describe("provider runners", () => {
 
     expect(JSON.parse(executionResult.stdout)).toEqual({
       provider: "opencode",
-      argv: ["run", "--model", "openai/gpt-5.5", "--variant", "high", "--format", "json"],
+      argv: ["run", "--dangerously-skip-permissions", "--model", "openai/gpt-5.5", "--variant", "high", "--format", "json"],
       stdin: "execution prompt",
     });
     expect(JSON.parse(reviewResult.stdout)).toEqual({
       provider: "opencode",
-      argv: ["run", "--model", "openai/gpt-5.5", "--variant", "high", "--format", "json"],
+      argv: ["run", "--dangerously-skip-permissions", "--model", "openai/gpt-5.5", "--variant", "high", "--format", "json"],
       stdin: "review prompt",
     });
     const reviewerInvocation = JSON.parse(reviewerResult.stdout) as { provider: string; argv: string[]; stdin: string };

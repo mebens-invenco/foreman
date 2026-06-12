@@ -21,6 +21,14 @@ export class OpenCodeRunner implements AgentRunner {
       command: process.env.FOREMAN_OPENCODE_BIN ?? "opencode",
       args: [
         "run",
+        // Foreman workers run unattended over a closed stdin, so an interactive
+        // permission prompt can never be answered. Without this flag opencode
+        // auto-rejects any permission whose policy is `ask` and disposes the
+        // session — notably `external_directory`, which fires the moment the run
+        // touches a cwd opencode does not recognize as a project (e.g. `foreman
+        // eval`'s throwaway repo dir), aborting before the model emits its final
+        // `<agent-result>`. Mirrors the claude runner's --dangerously-skip-permissions.
+        "--dangerously-skip-permissions",
         "--model",
         this.model,
         "--variant",
