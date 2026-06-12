@@ -1,5 +1,6 @@
-import type { Task, WorkerResult } from "../../domain/index.js";
+import type { WorkerResult } from "../../domain/index.js";
 import type { EvalCase } from "../types.js";
+import { fileTask } from "./task-fixtures.js";
 
 /**
  * The summary-policy expectation payload (the `Expect` of its `EvalCase`s).
@@ -17,9 +18,13 @@ import type { EvalCase } from "../types.js";
 export type SummaryExpect = {
   /** The outcome the session warrants, checked by `outcomeGrader`. */
   outcome: WorkerResult["outcome"];
-  /** Case-insensitive substrings the summary must contain (e.g. the blocker). */
+  /**
+   * Substrings the summary must contain (e.g. the blocker). Matching is
+   * case-insensitive and hyphen/whitespace-tolerant (see `normalizeForMention`
+   * in `../graders.ts`); anchor needles on durable tokens (e.g. "#72").
+   */
   mustMention?: string[];
-  /** Case-insensitive substrings the summary must NOT contain (e.g. jargon ids). */
+  /** Substrings the summary must NOT contain (e.g. jargon ids); same matching. */
   mustNotMention?: string[];
   /**
    * Which conciseness ceiling applies. `"standard"` is the empirical norm;
@@ -46,34 +51,6 @@ export type SummaryExpect = {
  * (blocked-but-vague; deferred-verification honesty) have no real negative in
  * the corpus and are marked SYNTHETIC where so.
  */
-
-const fileTask = (
-  id: string,
-  title: string,
-  description: string,
-  priority: Task["priority"],
-): Task => ({
-  id,
-  provider: "file",
-  providerId: id,
-  title,
-  description,
-  state: "ready",
-  providerState: "ready",
-  priority,
-  labels: ["Agent"],
-  assignee: null,
-  targets: [
-    { repoKey: "eval-repo", branchName: id.toLowerCase(), position: 0 },
-  ],
-  targetDependencies: [],
-  dependencies: { taskIds: [], baseTaskId: null },
-  baseBranch: null,
-  pullRequests: [],
-  runnerOverride: null,
-  updatedAt: "2026-06-01T00:00:00Z",
-  url: null,
-});
 
 export const summaryPolicyCases: EvalCase<SummaryExpect>[] = [
   {
@@ -215,7 +192,8 @@ export const summaryPolicyCases: EvalCase<SummaryExpect>[] = [
     ].join("\n"),
     expect: {
       outcome: "blocked",
-      mustMention: ["PR #72", "scope"],
+      // "#72" not "PR #72": the durable token survives "PR#72" / "pull request #72" phrasings.
+      mustMention: ["#72", "scope"],
       lengthBar: "standard",
     },
   },

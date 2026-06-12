@@ -10,9 +10,7 @@ import type { EvalDefinition } from "./types.js";
  * gate, a case set from one prompt could silently pair with graders from another
  * and only fail at runtime. Always build registry entries through this.
  */
-const defineEval = <Expect>(
-  definition: EvalDefinition<Expect>,
-): EvalDefinition => definition as EvalDefinition;
+const defineEval = <Expect>(definition: EvalDefinition<Expect>): EvalDefinition => definition as EvalDefinition;
 
 /**
  * The eval corpus, keyed by prompt. Adding a prompt is a `defineEval` entry + a
@@ -20,7 +18,7 @@ const defineEval = <Expect>(
  * prompt carries its own `EvalCase<Expect>` expectation shape, type-checked as a
  * consistent pairing by `defineEval`, then erased here (the core never reads
  * `expect`; only that prompt's graders do). Currently registers the
- * learning-policy write-back.
+ * learning-policy write-back and the summary-policy summary field.
  */
 export const EVAL_REGISTRY: Record<string, EvalDefinition> = {
   "learning-policy": defineEval({

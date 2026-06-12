@@ -226,6 +226,29 @@ describe("concisenessGrader", () => {
         ),
       ).toBe(false);
     });
+
+    it("enforces the 700-char ceiling: 698 chars passes (observed good max), 701 fails", async () => {
+      // Pins the ceiling to its provenance: the longest GOOD multi-part summary
+      // in the corpus is 698c/6 sent (01KSRH1WJPQ7ZSS30FKV2T8GZB), so 698 must
+      // pass and anything past the 700 ceiling must fail at the same 6 sentences.
+      const sixSentencesOfLength = (chars: number): string => {
+        const head = "One. Two. Three. Four. Five. ";
+        return `${head}${"x".repeat(chars - head.length - 1)}.`;
+      };
+      expect(sixSentencesOfLength(698)).toHaveLength(698);
+      expect(
+        await passOf(
+          concisenessGrader,
+          ctxFor(multiPartCase, makeResult(sixSentencesOfLength(698))),
+        ),
+      ).toBe(true);
+      expect(
+        await passOf(
+          concisenessGrader,
+          ctxFor(multiPartCase, makeResult(sixSentencesOfLength(701))),
+        ),
+      ).toBe(false);
+    });
   });
 
   it("fails when there is no parseable result", async () => {
@@ -265,6 +288,88 @@ describe("mentionGrader", () => {
           ctxFor(mustCase, makeResult("Blocked on PR #72.", "blocked")),
         ),
       ).toBe(false);
+    });
+  });
+
+  describe("hyphen/whitespace normalization", () => {
+    // The grader normalizes BOTH haystack and needle (lowercase + collapse
+    // hyphen/whitespace runs to one space) so a case needle doesn't fail on a
+    // legitimate rephrasing — the whole point of mention checks is durable
+    // facts, not exact wording.
+    const shadowCase = makeCase({
+      expect: {
+        outcome: "blocked",
+        lengthBar: "standard",
+        mustMention: ["shadow database"],
+      },
+    });
+
+    it("matches a hyphenated summary phrasing against a spaced needle", async () => {
+      expect(
+        await passOf(
+          mentionGrader,
+          ctxFor(
+            shadowCase,
+            makeResult("Blocked: the shadow-database is unreachable.", "blocked"),
+          ),
+        ),
+      ).toBe(true);
+    });
+
+    it("matches a '#72' needle across PR-reference phrasings", async () => {
+      const prCase = makeCase({
+        expect: {
+          outcome: "blocked",
+          lengthBar: "standard",
+          mustMention: ["#72"],
+        },
+      });
+      expect(
+        await passOf(
+          mentionGrader,
+          ctxFor(prCase, makeResult("Blocked: maintainer closed PR#72.", "blocked")),
+        ),
+      ).toBe(true);
+      expect(
+        await passOf(
+          mentionGrader,
+          ctxFor(prCase, makeResult("Blocked: pull request #72 was closed.", "blocked")),
+        ),
+      ).toBe(true);
+    });
+
+    it("applies the same normalization to mustNotMention (no asymmetry)", async () => {
+      const forbidCase = makeCase({
+        expect: {
+          outcome: "completed",
+          lengthBar: "standard",
+          mustNotMention: ["shadow database"],
+        },
+      });
+      expect(
+        await passOf(
+          mentionGrader,
+          ctxFor(forbidCase, makeResult("Mentioned the shadow-database in passing.")),
+        ),
+      ).toBe(false);
+    });
+
+    it("leaves underscore identifiers intact (normalization touches only hyphens/whitespace)", async () => {
+      // Exact-token needles (snake_case identifiers, PRRT_ ids) must keep
+      // matching: the collapse is limited to `[-\s]+` and applied symmetrically.
+      const idCase = makeCase({
+        expect: {
+          outcome: "completed",
+          lengthBar: "standard",
+          mustMention: ["carrier_rate_cache"],
+        },
+      });
+      expect(
+        await passOf(
+          mentionGrader,
+          ctxFor(idCase, makeResult("Added the composite index on carrier_rate_cache.")),
+        ),
+      ).toBe(true);
     });
   });
 
