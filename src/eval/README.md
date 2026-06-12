@@ -84,7 +84,7 @@ the meaningful outcome (not every step), prefer one sentence, name the blocker
 clearly when blocked.
 
 The case set is **derived from real traces**, error-analysed in
-[`harvest/summary-error-analysis.md`](../../harvest/summary-error-analysis.md)
+[`analysis/summary-policy-error-analysis.md`](analysis/summary-policy-error-analysis.md)
 across 296 live summaries (76.4% good). Each negative case is a scenario
 engineered to tempt an observed failure mode, sourced from the trace that
 exhibited it: a telemetry-rich no-action polling pass tempts the **over-long**

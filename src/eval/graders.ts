@@ -336,11 +336,11 @@ export const learningWritebackGraders: Grader<LearningExpect>[] = [
 // worker-result schema only enforces `summary` is non-empty (worker-result.ts),
 // so the bar — concise, names the meaningful outcome, no operator-hostile jargon
 // — is enforced here. The empirical constants are sourced from the error
-// analysis of 296 real summaries (`harvest/summary-error-analysis.md`).
+// analysis of 296 real summaries (`src/eval/analysis/summary-policy-error-analysis.md`).
 
 /**
  * Empirical conciseness ceilings from the GOOD-summary distribution
- * (`harvest/summary-error-analysis.md`, "Empirical conciseness bar"):
+ * (`src/eval/analysis/summary-policy-error-analysis.md`, "Empirical conciseness bar"):
  *   - standard: ≤3 sentences (216/226 good are 1–3 sent) and ≤450 chars
  *     (p95 of good = 444c). A no_action_needed summary over this is over-long.
  *   - multiPart: relaxed to ≤6 sentences / ≤700 chars for genuinely multi-part
@@ -354,8 +354,9 @@ const SUMMARY_LENGTH_BARS = {
 
 // Abbreviations whose trailing dot must not end a sentence. EMPIRICAL closed
 // set: a scan of the real 296-summary corpus
-// (`rg -o '\b(e\.g|i\.e|etc|vs|incl|approx)\.' harvest/summaries-all.json` plus a
-// broader dotted-letter sweep, ENG-5444 review) found exactly two abbreviation
+// (`rg -o '\b(e\.g|i\.e|etc|vs|incl|approx)\.'` over the 296 harvested summaries
+// — local corpus, regenerable via `foreman eval-harvest automation-pilot` — plus
+// a broader dotted-letter sweep, ENG-5444 review) found exactly two abbreviation
 // shapes in live summaries — `etc.` (×1) and `incl.` (×1). No e.g./i.e./vs./
 // approx./U.S.-style forms occur, so per the no-invented-bars rule we mask only
 // what is observed; extend this set only from corpus evidence.

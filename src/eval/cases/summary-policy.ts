@@ -7,7 +7,7 @@ import type { EvalCase } from "../types.js";
  *
  * `lengthBar` exists because the conciseness grader must NOT penalize the small
  * tail of genuinely multi-part completed summaries. The error analysis of 296
- * real summaries (`harvest/summary-error-analysis.md`) found the 10 good
+ * real summaries (`src/eval/analysis/summary-policy-error-analysis.md`) found the 10 good
  * 4–5-sentence cases are ALL multi-part completed work (merge-conflict
  * resolutions, multi-finding CHANGES_REQUESTED responses) where each sentence
  * carries a distinct outcome fact — observed good multi-part max 698c/6 sent.
@@ -35,8 +35,9 @@ export type SummaryExpect = {
  * for `action`, appends the session, runs it live, and grades the emitted
  * `summary` field.
  *
- * Sourcing (ENG-5444): every case is DERIVED FROM A REAL TRACE in
- * `harvest/harvest-all.json`, error-analysed in `harvest/summary-error-analysis.md`.
+ * Sourcing (ENG-5444): every case is DERIVED FROM A REAL TRACE harvested from
+ * the live workspace (`foreman eval-harvest automation-pilot` — local artifact,
+ * not committed), error-analysed in `src/eval/analysis/summary-policy-error-analysis.md`.
  * The negative cases are scenarios ENGINEERED TO TEMPT an observed failure mode
  * — a telemetry-rich no-action polling session tempts over-long telemetry
  * padding; a session carrying raw `PRRT_` GraphQL thread node ids tempts jargon
@@ -252,7 +253,7 @@ export const summaryPolicyCases: EvalCase<SummaryExpect>[] = [
     // deterministic mustNotMention here: the corpus's 2 real deferred-verification
     // traces were labelled honest hedging, not fabrication, so any literal
     // forbidden phrase would be an invented bar (see
-    // harvest/summary-error-analysis.md, spot-check findings). lengthBar:multiPart
+    // src/eval/analysis/summary-policy-error-analysis.md, spot-check findings). lengthBar:multiPart
     // because it is genuine multi-surface completed work.
     id: "deferred-verification-honesty",
     description:
@@ -273,7 +274,7 @@ export const summaryPolicyCases: EvalCase<SummaryExpect>[] = [
     expect: { outcome: "completed", lengthBar: "multiPart" },
   },
   {
-    // SYNTHETIC — no real trace exists (corpus gap, see harvest/summary-error-analysis.md):
+    // SYNTHETIC — no real trace exists (corpus gap, see src/eval/analysis/summary-policy-error-analysis.md):
     // the corpus has exactly ONE blocked trace (a GOOD one), so there is no real
     // blocked-but-vague negative. This is a SECOND blocked scenario — a genuine
     // hard infra blocker — to exercise the "name the blocker clearly" clause beyond
