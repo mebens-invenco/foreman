@@ -3,7 +3,22 @@ import { z } from "zod";
 import type { WorkerResult } from "../domain/index.js";
 import type { LearningExpect } from "./cases/learning-policy.js";
 import type { SummaryExpect } from "./cases/summary-policy.js";
-import type { Grader, GraderResult } from "./types.js";
+import type { EvalCase, Grader, GraderResult } from "./types.js";
+
+/**
+ * Narrows a case to its completed-session fixture and returns the session text.
+ * The learning-policy and summary-policy judges feed this synthetic session to
+ * the judge as ground truth; those evals only ever carry completed-session
+ * fixtures, so a wrong fixture type is a construction error — throwing here
+ * matches the repo's test-narrowing style (a misconfigured registry fails loud,
+ * not silently). The pr-review fixture has no single "session" to judge against.
+ */
+const completedSession = (evalCase: EvalCase): string => {
+  if (evalCase.fixture.type !== "completed-session") {
+    throw new Error(`judge grader requires a completed-session fixture, got "${evalCase.fixture.type}"`);
+  }
+  return evalCase.fixture.session;
+};
 
 /**
  * Graders for the learning-policy write-back.
@@ -244,7 +259,7 @@ export const judgeGrader: Grader<LearningExpect> = {
     }
 
     const add = adds[0]!;
-    const verdict = parseJudgeVerdict(await invokeModel(buildJudgePrompt(add, evalCase.syntheticSession)));
+    const verdict = parseJudgeVerdict(await invokeModel(buildJudgePrompt(add, completedSession(evalCase))));
     if (!verdict) {
       return fail("quality", "could not parse a judge verdict from the judge model output");
     }
@@ -272,7 +287,7 @@ export const learningWritebackGraders: Grader<LearningExpect>[] = [schemaGrader,
  *     completed work (observed good max 698c/6 sent). These ceilings are NEVER a
  *     floor — a 120c single sentence is the observed concision floor and good.
  */
-const SUMMARY_LENGTH_BARS = {
+export const SUMMARY_LENGTH_BARS = {
   standard: { maxSentences: 3, maxChars: 450 },
   multiPart: { maxSentences: 6, maxChars: 700 },
 } as const;
@@ -361,7 +376,7 @@ const OPAQUE_ID_PATTERN = /PRRT_\w+/;
 // "shadow database" still matches a summary that writes "shadow-database" (and
 // vice versa). Needles should additionally anchor on durable tokens (e.g. "#72"
 // rather than "PR #72") so legitimate rephrasings don't fail the case.
-const normalizeForMention = (text: string): string => text.toLowerCase().replace(/[-\s]+/g, " ");
+export const normalizeForMention = (text: string): string => text.toLowerCase().replace(/[-\s]+/g, " ");
 
 /**
  * The summary contains every `mustMention` substring and none of the
@@ -436,7 +451,7 @@ export const summaryJudgeGrader: Grader<SummaryExpect> = {
     if (!invokeModel) {
       return pass("fabrication", "judge skipped (--no-judge)");
     }
-    const verdict = parseSummaryJudgeVerdict(await invokeModel(buildSummaryJudgePrompt(evalCase.syntheticSession, result.summary)));
+    const verdict = parseSummaryJudgeVerdict(await invokeModel(buildSummaryJudgePrompt(completedSession(evalCase), result.summary)));
     if (!verdict) {
       return fail("fabrication", "could not parse a judge verdict from the judge model output");
     }

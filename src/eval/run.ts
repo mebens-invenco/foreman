@@ -10,7 +10,7 @@ import { parseWorkerResult, validateWorkerResultForAction } from "../execution/w
 import { createDefaultWorkspaceConfig, runnerProviderSchema, type WorkspaceConfig } from "../workspace/config.js";
 import { findProjectRoot, type WorkspacePaths } from "../workspace/workspace-paths.js";
 import { EVAL_REGISTRY } from "./registry.js";
-import type { CaseResult, EvalCase, EvalReport, GradeContext, Grader, SampleResult } from "./types.js";
+import type { CaseResult, EvalCase, EvalReport, GradeContext, Grader, PrReviewFixture, SampleResult } from "./types.js";
 
 export type RunEvalOptions = {
   prompt: string;
@@ -60,20 +60,56 @@ const buildEvalPaths = async (): Promise<{ paths: WorkspacePaths; cleanup: () =>
   return { paths, cleanup: () => fs.rm(workspaceRoot, { recursive: true, force: true }) };
 };
 
-const syntheticSessionBlock = (evalCase: EvalCase): string =>
+export const syntheticSessionBlock = (session: string): string =>
   [
     "## Eval Harness Directive (simulated session)",
     "",
     "You are being run inside an automated evaluation of the end-of-run steps, not a live task. The implementation work for the task above is COMPLETE. Treat the following as a faithful account of what happened in that session:",
     "",
-    evalCase.syntheticSession.trim(),
+    session.trim(),
     "",
     "Do not perform any further implementation, code changes, or git / task-provider / review-system actions — that work is already done. Now complete your END-OF-RUN steps exactly as instructed above: the learning review and the output validation. Run the `agent-result validate` command to check your final block as instructed, then emit exactly one final <agent-result> block with no prose after the closing tag.",
+  ].join("\n");
+
+// The reviewer analog of `syntheticSessionBlock`: the worktree holds no real PR
+// and there is no network/GitHub access, so the harness hands the reviewer the
+// complete, faithful result of the PR discovery it would otherwise perform via
+// `gh`. The reviewer reasons directly on that material — no `gh`/git discovery,
+// no subagent fan-out — and emits exactly one final <agent-result> block.
+export const syntheticPrReviewBlock = (fixture: PrReviewFixture): string =>
+  [
+    "## Eval Harness Directive (simulated PR review)",
+    "",
+    "You are being run inside an automated evaluation of the reviewer decision, not a live review. The worktree contains NO real PR and there is NO network or GitHub access. Treat the following as the complete, faithful result of the PR discovery you would otherwise perform via `gh` — do NOT run `gh` or any git discovery commands (they will not work here), and do not attempt to fetch the diff, threads, or checks yourself.",
+    "",
+    "Perform the review reasoning directly on this material yourself. Do not dispatch review subagents or fan out skills — reason over the discovery below and decide. Then run the `agent-result validate` command to check your final block as instructed, and emit exactly one final <agent-result> block with no prose after the closing tag.",
+    "",
+    "### PR discovery result",
+    "",
+    fixture.discovery.trim(),
   ].join("\n");
 
 const assembleCasePrompt = async (evalCase: EvalCase, paths: WorkspacePaths, config: WorkspaceConfig): Promise<string> => {
   const repoRoot = path.join(paths.workspaceRoot, EVAL_REPO_KEY);
   await fs.mkdir(repoRoot, { recursive: true });
+
+  const fixture = evalCase.fixture;
+  if (fixture.type === "pr-review") {
+    const rendered = await renderWorkerPrompt({
+      action: evalCase.action,
+      config,
+      paths,
+      task: evalCase.task,
+      repo: { key: EVAL_REPO_KEY, rootPath: repoRoot, defaultBranch: "main" },
+      worktreePath: repoRoot,
+      baseBranch: "main",
+      pullRequestReference: fixture.pullRequestReference,
+      ...(fixture.continuation ? { continuation: true } : {}),
+      ...(fixture.priorCheckpoint ? { priorCheckpoint: fixture.priorCheckpoint } : {}),
+    });
+    return `${rendered}\n\n${syntheticPrReviewBlock(fixture)}\n`;
+  }
+
   const rendered = await renderWorkerPrompt({
     action: evalCase.action,
     config,
@@ -83,7 +119,7 @@ const assembleCasePrompt = async (evalCase: EvalCase, paths: WorkspacePaths, con
     worktreePath: repoRoot,
     baseBranch: "main",
   });
-  return `${rendered}\n\n${syntheticSessionBlock(evalCase)}\n`;
+  return `${rendered}\n\n${syntheticSessionBlock(fixture.session)}\n`;
 };
 
 const buildJudgeInvoker =

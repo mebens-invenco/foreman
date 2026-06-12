@@ -229,8 +229,12 @@ const renderPriorCheckpoint = (input: {
   continuation: boolean | undefined;
   taskTargetId: string | null;
   foremanRepos: ForemanRepos | undefined;
+  // A pre-resolved checkpoint overrides the foremanRepos-resolved context (the
+  // eval harness injects a synthetic checkpoint with no repos backing it). The
+  // live path — foremanRepos + continuation + taskTargetId — is untouched.
+  priorCheckpoint?: Record<string, unknown>;
 }): string => {
-  const checkpoint = resolvePriorCheckpointContext(input);
+  const checkpoint = input.priorCheckpoint ?? resolvePriorCheckpointContext(input);
   return checkpoint ? jsonSection("Prior Checkpoint", checkpoint) : textSection("Prior Checkpoint", priorCheckpointPlaceholder);
 };
 
@@ -281,6 +285,9 @@ export const renderWorkerPrompt = async (input: {
   baseBranch: string;
   reviewContext?: ReviewContext;
   pullRequestReference?: WorkerPromptPullRequestReference;
+  // A pre-resolved prior checkpoint, rendered in place of the foremanRepos-resolved
+  // context (mirrors the `pullRequestReference` override). Used by the eval harness.
+  priorCheckpoint?: Record<string, unknown>;
   deploymentInstructionBody?: string;
   foremanRepos?: ForemanRepos;
   gitState?: {
@@ -316,6 +323,7 @@ export const renderWorkerPrompt = async (input: {
         continuation: input.continuation,
         taskTargetId: input.taskTarget?.id ?? null,
         foremanRepos: input.foremanRepos,
+        ...(input.priorCheckpoint ? { priorCheckpoint: input.priorCheckpoint } : {}),
       }),
       "workspace-plan": await renderWorkspacePlan(input.paths),
       "deployment-instructions": await renderDeploymentInstructions(input.paths, input.deploymentInstructionBody),

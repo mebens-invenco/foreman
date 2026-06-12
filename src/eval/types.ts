@@ -1,14 +1,53 @@
 import type { Task, WorkerResult } from "../domain/index.js";
+import type { WorkerPromptPullRequestReference } from "../execution/render-worker-prompt.js";
 import type { WorkerResultAction } from "../execution/worker-result.js";
+
+/**
+ * End-of-run fixture: a synthetic "completed session" the model reflects on.
+ * The harness renders the real worker prompt for `action`, appends the session,
+ * runs it through a live runner, and the prompt's graders inspect the emitted
+ * `<agent-result>`. Used by the learning-policy and summary-policy evals.
+ */
+export type CompletedSessionFixture = {
+  type: "completed-session";
+  /** Faithful account of the work that "just happened", injected post-render. */
+  session: string;
+};
+
+/**
+ * PR-review fixture: a synthetic PR-discovery context the reviewer reasons over
+ * directly. The harness renders the reviewer (or reviewer-continuation) prompt
+ * with the supplied `pullRequestReference` (and, for continuation cases, the
+ * pre-resolved `priorCheckpoint`), then appends `discovery` — the complete,
+ * faithful result of the `gh`/git PR discovery the reviewer would otherwise run.
+ * The reviewer reasons on that material with no network access.
+ */
+export type PrReviewFixture = {
+  type: "pr-review";
+  /** Rendered into `{{context:pull-request}}` (overrides the live resolver). */
+  pullRequestReference: WorkerPromptPullRequestReference;
+  /** Selects the reviewer-continuation template when true. */
+  continuation?: boolean;
+  /**
+   * Pre-resolved checkpoint for continuation cases, rendered into
+   * `{{context:prior-checkpoint}}` (overrides the foremanRepos-resolved path).
+   * Field names mirror `resolvePriorCheckpointContext` in render-worker-prompt.
+   */
+  priorCheckpoint?: Record<string, unknown>;
+  /** The complete synthetic discovery result (diff, commits, threads, checks). */
+  discovery: string;
+};
+
+/** The scenario a case feeds into the rendered prompt — see `assembleCasePrompt`. */
+export type EvalFixture = CompletedSessionFixture | PrReviewFixture;
 
 /**
  * A single behavioral eval case: a scenario engineered to elicit (or to
  * correctly NOT elicit) a specific prompt-driven behavior.
  *
- * The end-of-run prompts (learning-policy, summary-policy) carry a synthetic
- * "completed session" the model reflects on: the harness renders the real worker
- * prompt for `action`, appends the synthetic session, runs it through a live
- * runner, and the prompt's graders inspect the emitted `<agent-result>`.
+ * `fixture` is a discriminated union: a `completed-session` for the end-of-run
+ * reflection prompts (learning-policy, summary-policy), or a `pr-review` for the
+ * reviewer eval (a synthetic PR-discovery context the reviewer reasons over).
  *
  * `Expect` is the prompt-specific expectation payload. The harness core never
  * inspects it — only that prompt's graders do — so each prompt defines its own
@@ -23,8 +62,8 @@ export type EvalCase<Expect = unknown> = {
   provider: "file" | "linear";
   /** Task scenario rendered into the worker prompt. */
   task: Task;
-  /** Faithful account of the work that "just happened", injected post-render. */
-  syntheticSession: string;
+  /** The scenario fed into the rendered prompt. */
+  fixture: EvalFixture;
   /** Prompt-specific expectation, consumed only by that prompt's graders. */
   expect: Expect;
 };
