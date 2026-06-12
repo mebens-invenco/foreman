@@ -25,6 +25,7 @@ import type { WorkspaceConfig } from "../workspace/config.js";
 import { resolveDeploymentInstructions, type DeploymentInstructions } from "../workspace/deployment.js";
 import { branchExistsOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
+import { evaluateBlockedOrdinaryWork, isBlockedOrdinaryWorkPendingUnblock, type TargetProgressState } from "./blocked-ordinary-work.js";
 import { runStateTransitions } from "./state-transition.js";
 
 type Selection = {
@@ -38,8 +39,6 @@ type Selection = {
   selectionContext: Record<string, unknown>;
 };
 
-type TargetProgressState = "pending" | "active" | "in_review" | "merged" | "completed" | "retryable";
-
 type TargetProgress = {
   latestJob: JobRecord | null;
   latestAttempt: AttemptRecord | null;
@@ -49,6 +48,22 @@ type TargetProgress = {
 
 const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
 const stopIntentPhrases = ["abandon", "do not continue", "do not retry"];
+
+const logBlockedOrdinaryWorkSkip = (logger: LoggerService | undefined, task: Task, target: TaskTarget, progress: TargetProgress): void => {
+  const evaluation = evaluateBlockedOrdinaryWork(task, progress.latestJob, progress.latestAttempt);
+  const context = {
+    taskId: task.id,
+    repoKey: target.repoKey,
+    blockedTaskUpdatedAt: evaluation.blockedTaskUpdatedAt,
+    taskUpdatedAt: task.updatedAt,
+    reason: evaluation.reason,
+  };
+  if (evaluation.reason === "invalid_timestamp") {
+    logger?.warn("skipping blocked ordinary work with invalid unblock timestamp", context);
+    return;
+  }
+  logger?.info("skipping blocked ordinary work pending explicit unblock", context);
+};
 
 const reviewPriorityReason = (context: ReviewContext): string | null => {
   if (actionableReviewThreads(context).length > 0) {
@@ -254,6 +269,9 @@ const resolveTargetProgress = async (input: {
   }
   if (pullRequest?.state === "merged") {
     return { latestJob, latestAttempt, pullRequest, state: "merged" };
+  }
+  if (isBlockedOrdinaryWorkPendingUnblock(input.task, latestJob, latestAttempt)) {
+    return { latestJob, latestAttempt, pullRequest, state: "blocked" };
   }
   if (pullRequest?.state === "closed") {
     return { latestJob, latestAttempt, pullRequest, state: "retryable" };
@@ -793,6 +811,17 @@ export const runScoutSelection = async (input: {
             continue;
           }
 
+          const progress = await getTargetProgress(
+            task,
+            target,
+            repo,
+            new Set(jobs.map((job) => targetKey(job.task.id, job.target.repoKey))),
+          );
+          if (progress.state === "blocked") {
+            logBlockedOrdinaryWorkSkip(logger, task, target, progress);
+            continue;
+          }
+
           const taskComments = await input.taskSystem.listComments(task.id);
           const combinedComments = [
             ...taskComments,
@@ -975,6 +1004,10 @@ export const runScoutSelection = async (input: {
             repo,
             new Set(jobs.map((job) => targetKey(job.task.id, job.target.repoKey))),
           );
+          if (progress.state === "blocked") {
+            logBlockedOrdinaryWorkSkip(logger, task, target, progress);
+            continue;
+          }
           if (progress.state !== "pending") {
             continue;
           }

@@ -53,6 +53,7 @@ export interface JobRepo {
   latestJobForDedupeKey(dedupeKey: string): JobRecord | null;
   latestJobForTaskTarget(taskTargetId: string): JobRecord | null;
   getJob(jobId: string): JobRecord;
+  updateJobSelectionContext(jobId: string, selectionContext: Record<string, unknown>): void;
   updateJobStatus(
     jobId: string,
     status: JobStatus,
