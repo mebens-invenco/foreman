@@ -30,6 +30,10 @@ const ensureReviewCommentPrefix = (body: string, prefix: string): string =>
   body.startsWith(prefix) ? body : `${prefix}${body}`;
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+const blockedTaskReloadAttempts = 3;
+const blockedTaskReloadRetryDelayMs = 50;
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const deploymentRetryIntervalMinutes = (input: {
   retryCount: number;
@@ -94,14 +98,25 @@ export class WorkerResultApplier {
       }
       if (input.job.action === "execution" || input.job.action === "retry") {
         let blockedTaskUpdatedAt = input.task.updatedAt;
-        try {
-          const blockedTask = await this.deps.taskSystem.getTask(input.task.id);
-          blockedTaskUpdatedAt = blockedTask.updatedAt;
-        } catch (error) {
-          logger.error("failed to reload blocked task; using pre-result task timestamp", {
-            error: errorMessage(error),
-            blockedTaskUpdatedAt,
-          });
+        for (let attempt = 1; attempt <= blockedTaskReloadAttempts; attempt += 1) {
+          try {
+            const blockedTask = await this.deps.taskSystem.getTask(input.task.id);
+            blockedTaskUpdatedAt = blockedTask.updatedAt;
+            break;
+          } catch (error) {
+            if (attempt < blockedTaskReloadAttempts) {
+              logger.warn("failed to reload blocked task; retrying", {
+                attempt,
+                error: errorMessage(error),
+              });
+              await delay(blockedTaskReloadRetryDelayMs * attempt);
+              continue;
+            }
+            logger.error("failed to reload blocked task; using pre-result task timestamp", {
+              error: errorMessage(error),
+              blockedTaskUpdatedAt,
+            });
+          }
         }
         this.deps.foremanRepos.jobs.updateJobSelectionContext(input.job.id, {
           ...input.job.selectionContext,

@@ -10,6 +10,7 @@ import type { ReviewService } from "../../review/index.js";
 import type { TaskSystem } from "../../tasking/index.js";
 import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
 import { WorkerResultApplier } from "../worker-result-applier.js";
+import { runScoutSelection } from "../scout-selection.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 
 const cleanupDirs: string[] = [];
@@ -24,6 +25,7 @@ class FakeTaskSystem implements TaskSystem {
   comments: Array<{ taskId: string; body: string }> = [];
   commentUpdatedAt: string | null = null;
   getTaskError: Error | null = null;
+  getTaskFailuresRemaining = 0;
 
   constructor(private readonly tasks: Task[]) {}
 
@@ -40,6 +42,10 @@ class FakeTaskSystem implements TaskSystem {
   }
 
   async getTask(taskId: string): Promise<Task> {
+    if (this.getTaskFailuresRemaining > 0) {
+      this.getTaskFailuresRemaining -= 1;
+      throw this.getTaskError ?? new Error("transient provider failure");
+    }
     if (this.getTaskError) {
       throw this.getTaskError;
     }
@@ -348,7 +354,7 @@ describe("WorkerResultApplier blocked ordinary work", () => {
     }
   });
 
-  test("falls back to the pre-result task timestamp when blocked task reload fails", async () => {
+  test("retries blocked task reload and keeps the next scout suppressed after a transient failure", async () => {
     const tempDir = await createTempDir("foreman-execution-applier-blocked-fallback-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
@@ -398,7 +404,9 @@ describe("WorkerResultApplier blocked ordinary work", () => {
         runnerVariant: "high",
       });
       const taskSystem = new FakeTaskSystem([executionTask]);
+      taskSystem.commentUpdatedAt = "2026-03-14T12:10:00Z";
       taskSystem.getTaskError = new Error("provider unavailable");
+      taskSystem.getTaskFailuresRemaining = 1;
       const applier = new WorkerResultApplier({
         config,
         foremanRepos: db,
@@ -430,8 +438,24 @@ describe("WorkerResultApplier blocked ordinary work", () => {
       });
 
       expect(db.jobs.getJob(job.id).selectionContext).toMatchObject({
-        blockedTaskUpdatedAt: "2026-03-14T12:00:00Z",
+        blockedTaskUpdatedAt: "2026-03-14T12:10:00Z",
       });
+
+      db.attempts.finalizeAttempt(attempt.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
+      db.jobs.updateJobStatus(job.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
+      const scoutResult = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: {
+          resolvePullRequest: async () => null,
+          getContext: async () => null,
+          findLatestOpenPullRequestBranch: async () => null,
+        } as any,
+        repos: [repo],
+        triggerType: "manual",
+      });
+      expect(scoutResult.jobs).toHaveLength(0);
     } finally {
       db.close();
     }
