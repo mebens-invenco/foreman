@@ -161,27 +161,33 @@ export const parseWorkerResult = (stdout: string): unknown => {
     const closeTag = "</agent-result>";
     let searchEnd = trimmed.length;
 
+    // Contract: exactly one block, last one wins. The payload itself may embed
+    // the literal "<agent-result>" string (e.g. a learning describing this very
+    // mechanism), so the real opening tag is the OUTERMOST one before the close,
+    // not the last. For each close tag (latest first) try candidate opening tags
+    // outermost-first and accept the first slice that is valid JSON; only when
+    // none parse fall back to an earlier close tag. When two well-formed blocks
+    // exist, the outermost-open slice spans the intervening tags and fails to
+    // parse, so the last block still wins.
     while (searchEnd > 0) {
       const closeStart = trimmed.lastIndexOf(closeTag, searchEnd);
       if (closeStart === -1) {
         break;
       }
 
-      const openStart = trimmed.lastIndexOf(openTag, closeStart);
-      if (openStart === -1) {
-        searchEnd = closeStart;
-        continue;
+      let openStart = trimmed.indexOf(openTag);
+      while (openStart !== -1 && openStart < closeStart) {
+        const payload = trimmed.slice(openStart + openTag.length, closeStart).trim();
+        try {
+          return JSON.parse(payload);
+        } catch {
+          // This opening tag's slice isn't valid JSON (a tag mention in prose
+          // or inside the payload); try a later opening tag before this close.
+        }
+        openStart = trimmed.indexOf(openTag, openStart + openTag.length);
       }
 
-      const payload = trimmed.slice(openStart + openTag.length, closeStart).trim();
-
-      try {
-        return JSON.parse(payload);
-      } catch {
-        // Keep looking; earlier text can mention <agent-result> before the final answer block.
-      }
-
-      searchEnd = openStart;
+      searchEnd = closeStart - 1;
     }
 
     throw new Error("Worker output did not contain a valid <agent-result> block");

@@ -21,6 +21,37 @@ describe("parseWorkerResult", () => {
     ).toEqual(finalResult);
   });
 
+  test("extracts the block when the payload JSON embeds the literal agent-result tag", () => {
+    // Mirrors the real failure (ENG-5450): a reviewer recorded a learning whose
+    // content describes the agent-result mechanism, so the emitted JSON itself
+    // embeds the literal "<agent-result>" string. The backward scan latched onto
+    // that in-payload mention and dropped the otherwise-valid block.
+    const resultWithTagMention = {
+      ...workerResultExample,
+      outcome: "no_action_needed",
+      summary: "Recorded a learning about agent-result handling.",
+      learningMutations: [
+        {
+          type: "add",
+          title: "Tag mentions inside the payload",
+          repo: "foreman",
+          confidence: "emerging",
+          content:
+            "A worker documenting the <agent-result> wrapper emits JSON whose content " +
+            "embeds the literal <agent-result> string; parseWorkerResult must still " +
+            "return the enclosing block.",
+          tags: ["execution"],
+        },
+      ],
+    };
+
+    const payload = JSON.stringify(resultWithTagMention);
+    // Guard the regression intent: the payload really does embed the open tag.
+    expect(payload).toContain("<agent-result>");
+
+    expect(parseWorkerResult(`<agent-result>\n${payload}\n</agent-result>`)).toEqual(resultWithTagMention);
+  });
+
   test("skips invalid trailing blocks and falls back to an earlier valid block", () => {
     const finalResult = {
       ...workerResultExample,
