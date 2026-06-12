@@ -50,9 +50,9 @@ node dist/cli.js eval learning-policy --runner claude --model claude-opus-4-8 --
 
 ## Cases & sourcing (learning-policy write-back)
 
-Each case carries a `task` + a `syntheticSession` (a faithful "what just
-happened"); the harness renders the real worker prompt for the case's `action`,
-appends the session, and grades the emitted `learningMutations`.
+Each case carries a `task` + a `completed-session` fixture (a faithful "what
+just happened"); the harness renders the real worker prompt for the case's
+`action`, appends the session, and grades the emitted `learningMutations`.
 
 The case set is **seeded from real worker traces**, not imagined. The sourcing
 pass (ENG-5342) mined 244 retained prompt+output pairs from the live
@@ -112,6 +112,39 @@ Fidelity / gaps:
 - The `fabrication` judge is **advisory** (uncalibrated; never gates) — the
   honesty nuance it targets is a weak signal (2/40 execution traces).
 
+## Cases & sourcing (reviewer)
+
+The reviewer eval (ENG-5444) grades the reviewer action's *decision*, not an
+end-of-run reflection — so it carries a **`pr-review` fixture** instead of the
+completed-session scaffold: a synthetic `pullRequestReference` rendered into the
+real reviewer (or reviewer-continuation) template, a pre-resolved
+`priorCheckpoint` for continuation cases, and a `discovery` block handed over
+post-render as the complete, faithful result of the `gh` PR discovery the
+reviewer would otherwise run (the eval forbids live `gh`/git discovery and
+subagent fan-out — see `syntheticPrReviewBlock`).
+
+The case set is **derived from real traces**, error-analysed in
+[`analysis/reviewer-error-analysis.md`](analysis/reviewer-error-analysis.md)
+across 123 live reviewer attempts (74% good). The failure mass lives in exactly
+two prose modes — **summary-overlong** on continuation stand-downs (24/27
+current-era bads; root cause was the continuation template missing the
+summary-policy fragment, fixed alongside this eval) and **finding-in-body** on
+completed reviews (3 bads, 1038–1387c bodies vs a 682c good ceiling). The
+reviewer's *verdict* was never observed wrong, so the planted-bug case is marked
+`SYNTHETIC` (a missed finding can't be re-derived from the harvest — it carries
+PR metadata, not the diff).
+
+Graders (`reviewer-graders.ts`, all deterministic — no judge, no signals; both
+de-scoped by the analysis): `schema` (reused), `outcome`, `review-mutation`
+(structural conformance: zero mutations on a stand-down; exactly one
+`submit_pull_request_review` with `event: "COMMENT"`, ≥1 path+line-pinned inline
+comment, no task mutations — 100% clean across the 23 real completed traces, so
+this is a regression guard), `summary-conciseness` (stand-downs only; the
+summary-policy standard ceiling — reviewer first_pass good summaries max at
+363c), `body-discipline` (completed only; body ≤900c AND shorter than its
+largest inline comment — good reviews keep the weight in the thread), and
+`mentions` (durable path tokens pinned by inline comments).
+
 ## Judge calibration
 
 The `quality` judge is **advisory** (it never gates a sample) and was calibrated
@@ -165,7 +198,7 @@ as needed.
 harness core never inspects `expect` — only that prompt's graders do — so each
 prompt defines its own shape and narrows its graders to it (e.g. learning-policy
 uses `LearningExpect = { decision; scope? }` and types its graders
-`Grader<LearningExpect>`). The end-of-run prompts reuse the synthetic-session
-scaffold; a prompt whose behaviour isn't an end-of-run reflection (e.g. the
-reviewer, which grades a synthetic PR-review context) needs its own fixture, not
-this scaffold.
+`Grader<LearningExpect>`). The case's `fixture` is a discriminated union: the
+end-of-run prompts use the `completed-session` scaffold, the reviewer uses the
+`pr-review` fixture. A prompt whose behaviour fits neither shape adds a new
+fixture variant and a matching branch in `assembleCasePrompt`.
