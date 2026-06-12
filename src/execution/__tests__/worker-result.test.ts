@@ -52,6 +52,39 @@ describe("parseWorkerResult", () => {
     expect(parseWorkerResult(`<agent-result>\n${payload}\n</agent-result>`)).toEqual(resultWithTagMention);
   });
 
+  test("extracts the block when the payload JSON embeds the literal closing agent-result tag", () => {
+    // Strengthens the ENG-5450 coverage (PR #109 review): a learning that quotes the
+    // wrapper in full embeds the closing "</agent-result>" tag in its content too, not
+    // just the opening tag. Correctness then hinges on the close-tag search
+    // (worker-result.ts lastIndexOf(closeTag)) resolving to the real FINAL closing tag
+    // rather than the in-payload mention — pin it so a later change to the close-tag
+    // scan cannot silently regress payloads that mention the closing tag.
+    const resultWithClosingTagMention = {
+      ...workerResultExample,
+      outcome: "no_action_needed",
+      summary: "Recorded a learning about agent-result handling.",
+      learningMutations: [
+        {
+          type: "add",
+          title: "Closing-tag mentions inside the payload",
+          repo: "foreman",
+          confidence: "emerging",
+          content:
+            "A worker documenting the wrapper quotes it in full as " +
+            "<agent-result>{...}</agent-result>, so the JSON content embeds the literal " +
+            "</agent-result> closing tag; parseWorkerResult must still return the enclosing block.",
+          tags: ["execution"],
+        },
+      ],
+    };
+
+    const payload = JSON.stringify(resultWithClosingTagMention);
+    // Guard the regression intent: the payload embeds the closing tag before the real one.
+    expect(payload).toContain("</agent-result>");
+
+    expect(parseWorkerResult(`<agent-result>\n${payload}\n</agent-result>`)).toEqual(resultWithClosingTagMention);
+  });
+
   test("skips invalid trailing blocks and falls back to an earlier valid block", () => {
     const finalResult = {
       ...workerResultExample,
