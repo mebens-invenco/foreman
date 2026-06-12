@@ -2,6 +2,7 @@ import type { RepoRef, Task, TaskComment, TaskCreateMutation, TaskPullRequest, T
 import { ForemanError, isForemanError } from "../../lib/errors.js";
 import { createTimeoutSignal, isAbortLikeError, PROVIDER_REQUEST_TIMEOUT_MS } from "../../lib/fetch-timeout.js";
 import { exec } from "../../lib/process.js";
+import { sleep } from "../../lib/time.js";
 import { LoggerService } from "../../logger.js";
 import type { WorkspaceConfig } from "../../workspace/config.js";
 import { parseDotPathRunnerOverride } from "../task-runner-override.js";
@@ -204,82 +205,141 @@ export const parseLinearMetadata = (
   };
 };
 
+const LINEAR_REQUEST_MAX_ATTEMPTS = 3;
+const LINEAR_REQUEST_RETRY_BACKOFF_MS = [250, 1_000];
+const LINEAR_TRANSIENT_STATUS_CODES = new Set([502, 503, 504]);
+
+const retryDelayMs = (attempt: number): number => LINEAR_REQUEST_RETRY_BACKOFF_MS[Math.min(attempt - 1, LINEAR_REQUEST_RETRY_BACKOFF_MS.length - 1)]!;
+
+type LinearRequestOptions = {
+  retryTransient?: boolean;
+};
+
 export class LinearClient {
   constructor(
     private readonly apiKey: string,
     private readonly logger: LoggerService,
   ) {}
 
-  async request<T>(query: string, variables: Record<string, unknown> = {}): Promise<T> {
+  async request<T>(query: string, variables: Record<string, unknown> = {}, options: LinearRequestOptions = {}): Promise<T> {
     const startedAt = Date.now();
-    const operationName = query.match(/\b(?:query|mutation)\s+(\w+)/)?.[1] ?? "anonymous";
-    this.logger.debug("sending Linear GraphQL request", {
-      operationName,
-      variableKeys: Object.keys(variables).sort().join(","),
-    });
+    const operationMatch = query.match(/\b(query|mutation)(?:\s+(\w+))?/);
+    const operationKind = operationMatch?.[1] ?? "query";
+    const operationName = operationMatch?.[2] ?? "anonymous";
+    const variableKeys = Object.keys(variables).sort().join(",");
+    const maxAttempts = options.retryTransient && operationKind === "query" ? LINEAR_REQUEST_MAX_ATTEMPTS : 1;
 
-    let response: Response;
-    try {
-      response = await fetch("https://api.linear.app/graphql", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: this.apiKey,
-        },
-        body: JSON.stringify({ query, variables }),
-        signal: createTimeoutSignal(),
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      this.logger.debug("sending Linear GraphQL request", {
+        operationName,
+        variableKeys,
+        attempt,
+        maxAttempts,
       });
-    } catch (error) {
-      if (isAbortLikeError(error)) {
-        this.logger.error("Linear GraphQL request timed out", {
-          operationName,
-          durationMs: Date.now() - startedAt,
-          timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+
+      let response: Response;
+      try {
+        response = await fetch("https://api.linear.app/graphql", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: this.apiKey,
+          },
+          body: JSON.stringify({ query, variables }),
+          signal: createTimeoutSignal(),
         });
-        throw new ForemanError("linear_request_timeout", `Linear request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
+      } catch (error) {
+        if (isAbortLikeError(error)) {
+          if (attempt < maxAttempts) {
+            const delayMs = retryDelayMs(attempt);
+            this.logger.warn("Linear GraphQL request timed out; retrying", {
+              operationName,
+              attempt,
+              maxAttempts,
+              delayMs,
+              durationMs: Date.now() - startedAt,
+              timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+            });
+            await sleep(delayMs);
+            continue;
+          }
+
+          this.logger.error("Linear GraphQL request timed out", {
+            operationName,
+            attempt,
+            maxAttempts,
+            durationMs: Date.now() - startedAt,
+            timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
+          });
+          throw new ForemanError("linear_request_timeout", `Linear request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
+        }
+        throw error;
       }
-      throw error;
-    }
 
-    if (!response.ok) {
-      this.logger.error("Linear GraphQL request failed", {
+      if (!response.ok) {
+        if (LINEAR_TRANSIENT_STATUS_CODES.has(response.status) && attempt < maxAttempts) {
+          const delayMs = retryDelayMs(attempt);
+          this.logger.warn("Linear GraphQL request failed with transient status; retrying", {
+            operationName,
+            status: response.status,
+            attempt,
+            maxAttempts,
+            delayMs,
+            durationMs: Date.now() - startedAt,
+          });
+          await sleep(delayMs);
+          continue;
+        }
+
+        this.logger.error("Linear GraphQL request failed", {
+          operationName,
+          status: response.status,
+          statusText: response.statusText,
+          attempt,
+          maxAttempts,
+          durationMs: Date.now() - startedAt,
+        });
+        throw new ForemanError("linear_request_failed", `Linear request failed: ${response.status} ${response.statusText}`, 502);
+      }
+
+      const json = (await response.json()) as { data?: T; errors?: Array<{ message: string }> };
+      if (json.errors?.length) {
+        this.logger.error("Linear GraphQL request returned errors", {
+          operationName,
+          attempt,
+          maxAttempts,
+          durationMs: Date.now() - startedAt,
+          errorCount: json.errors.length,
+          errors: json.errors.map((error) => error.message).join("; "),
+        });
+        throw new ForemanError(
+          "linear_request_failed",
+          `Linear request failed: ${json.errors.map((error) => error.message).join("; ")}`,
+          502,
+        );
+      }
+
+      if (!json.data) {
+        this.logger.error("Linear GraphQL request returned no data", {
+          operationName,
+          attempt,
+          maxAttempts,
+          durationMs: Date.now() - startedAt,
+        });
+        throw new ForemanError("linear_request_failed", "Linear request returned no data", 502);
+      }
+
+      this.logger.debug("Linear GraphQL request completed", {
         operationName,
-        status: response.status,
-        statusText: response.statusText,
+        attempt,
+        maxAttempts,
         durationMs: Date.now() - startedAt,
       });
-      throw new ForemanError("linear_request_failed", `Linear request failed: ${response.status} ${response.statusText}`, 502);
+
+      return json.data;
     }
 
-    const json = (await response.json()) as { data?: T; errors?: Array<{ message: string }> };
-    if (json.errors?.length) {
-      this.logger.error("Linear GraphQL request returned errors", {
-        operationName,
-        durationMs: Date.now() - startedAt,
-        errorCount: json.errors.length,
-        errors: json.errors.map((error) => error.message).join("; "),
-      });
-      throw new ForemanError(
-        "linear_request_failed",
-        `Linear request failed: ${json.errors.map((error) => error.message).join("; ")}`,
-        502,
-      );
-    }
-
-    if (!json.data) {
-      this.logger.error("Linear GraphQL request returned no data", {
-        operationName,
-        durationMs: Date.now() - startedAt,
-      });
-      throw new ForemanError("linear_request_failed", "Linear request returned no data", 502);
-    }
-
-    this.logger.debug("Linear GraphQL request completed", {
-      operationName,
-      durationMs: Date.now() - startedAt,
-    });
-
-    return json.data;
+    throw new ForemanError("linear_request_failed", "Linear request failed after retry attempts", 502);
   }
 }
 
@@ -746,6 +806,7 @@ export class LinearTaskSystem implements TaskSystem {
         ...(useLabels ? { labels: options.labels } : {}),
         ...(useStateNames ? { stateNames: options.stateNames } : {}),
       },
+      { retryTransient: true },
     );
 
     // Linear serves this as a single 250-result page (no pagination here). The
