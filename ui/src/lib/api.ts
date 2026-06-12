@@ -322,6 +322,31 @@ export type TaskListItem = {
   targets: TaskTargetSummary[]
 }
 
+export type ForemanTaskFrontmatterState = "valid" | "broken" | "missing"
+
+// Health of an issue's `Agent:` metadata block, re-derived server-side from the
+// freshly-fetched description. Drives the Foreman manager's frontmatter column.
+export type ForemanTaskFrontmatter = {
+  state: ForemanTaskFrontmatterState
+  repos: string[]
+  detail: string | null
+}
+
+// The Foreman issue-manager view of a task: the agent on/off state and
+// frontmatter health on top of the core identity/state fields, as returned by
+// GET /api/tasks.
+export type ForemanTask = {
+  id: string
+  title: string
+  state: TaskState
+  providerState: string
+  labels: string[]
+  assignee: string | null
+  url: string | null
+  agentEnabled: boolean
+  frontmatter: ForemanTaskFrontmatter
+}
+
 export type LearningRecord = {
   id: string
   title: string
@@ -466,6 +491,7 @@ export function getArtifactContent(artifactId: string) {
 export function listAttempts(params: {
   status?: AttemptStatus
   jobId?: string
+  taskId?: string
   limit?: number
   offset?: number
 }) {
@@ -483,6 +509,32 @@ export function listTasks(params: {
   return requestJson<{ tasks: TaskListItem[] }>(
     `/api/tasks${buildSearch(params)}`
   ).then((payload) => payload.tasks)
+}
+
+// The Foreman manager lists the union of ready-state and agent-tagged issues;
+// it filters that union client-side, so it fetches the full default window.
+// `scope=assigned` broadens the fetch to every issue assigned to the user (a
+// live query), surfacing untagged issues that can be marked for Foreman.
+export function listForemanTasks(scope: "candidates" | "assigned" = "candidates") {
+  const query = scope === "assigned" ? "?scope=assigned" : ""
+  return requestJson<{ tasks: ForemanTask[] }>(`/api/tasks${query}`).then(
+    (payload) => payload.tasks
+  )
+}
+
+// Toggle whether the agent may pick up an issue (adds/removes the configured
+// exclude label server-side). Returns the reconciled agentEnabled state.
+export function setAgentEnabled(taskId: string, enabled: boolean) {
+  return requestJson<{ agentEnabled: boolean }>(
+    `/api/tasks/${encodeURIComponent(taskId)}/agent-enabled`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ enabled }),
+    }
+  )
 }
 
 export function listLearnings(params: {
@@ -542,6 +594,80 @@ export type UsageRollupResponse = {
 
 export function getUsage(params: { from?: string; to?: string; groupBy?: UsageGroupBy }) {
   return requestJson<UsageRollupResponse>(`/api/usage${buildSearch(params)}`)
+}
+
+// Task rollup types power the Tasks page. Cron rows are excluded
+// server-side; each bucket is one task enriched with attempt-derived data.
+export type TaskTargetStatus = {
+  target: string
+  status: AttemptStatus
+}
+
+export type TaskRollupBucket = {
+  taskId: string
+  taskUrl: string | null
+  targets: string[]
+  perTargetLatestStatus: TaskTargetStatus[]
+  effectiveStatus: AttemptStatus
+  attemptsCount: number
+  firstSeenInWindow: string
+  lastStartedAt: string
+  lastFinishedAt: string | null
+  tokens: {
+    inputTokens: number
+    outputTokens: number
+    cacheCreationInputTokens: number
+    cacheReadInputTokens: number
+    reasoningOutputTokens: number
+  }
+  cost: {
+    totalUsd: number
+    breakdown: {
+      input: number
+      output: number
+      cacheRead: number
+      cacheCreate: number
+      reasoning: number
+    }
+  }
+}
+
+export type TaskRollupResponse = {
+  fromDate: string
+  toDate: string
+  fromInclusive: string
+  toExclusive: string
+  buckets: TaskRollupBucket[]
+  totals: {
+    attemptsCount: number
+    tokens: {
+      inputTokens: number
+      outputTokens: number
+      cacheCreationInputTokens: number
+      cacheReadInputTokens: number
+      reasoningOutputTokens: number
+    }
+    cost: {
+      totalUsd: number
+      breakdown: {
+        input: number
+        output: number
+        cacheRead: number
+        cacheCreate: number
+        reasoning: number
+      }
+    }
+  }
+  rates: UsageRate[]
+}
+
+export function getTaskRollups(params: {
+  from?: string
+  to?: string
+  status?: AttemptStatus
+  search?: string
+}) {
+  return requestJson<TaskRollupResponse>(`/api/task-rollups${buildSearch(params)}`)
 }
 
 export function getRates() {

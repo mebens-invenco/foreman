@@ -4,7 +4,7 @@ import type { WorkspaceConfig, WorkspaceRunnerConfig } from "../workspace/config
 import {
   CLAUDE_EFFORT_VALUES,
   CODEX_EFFORT_VALUES,
-  runnerForAction,
+  runnerForActionAndContinuation,
   runnerRoleForAction,
 } from "../workspace/config.js";
 import type { AgentRunner } from "./agent-runner.js";
@@ -12,17 +12,23 @@ import { ClaudeRunner } from "./impl/claude-runner.js";
 import { CodexRunner } from "./impl/codex-runner.js";
 import { OpenCodeRunner } from "./impl/opencode-runner.js";
 
-const createProviderRunner = (config: WorkspaceRunnerConfig): AgentRunner => {
+const createProviderRunner = (config: WorkspaceRunnerConfig, options?: { excludeMcp?: boolean }): AgentRunner => {
+  const excludeMcp = options?.excludeMcp ?? false;
+
   if (config.type === "opencode") {
+    // OpenCode has no per-invocation MCP-disable flag (`opencode run` exposes
+    // none; `--pure` disables plugins, not MCP servers). Honouring excludeMcp
+    // would require swapping its config dir, so it is intentionally a no-op
+    // here — opencode-as-eval-judge keeps whatever MCP the operator configured.
     return new OpenCodeRunner(config.model, config.variant);
   }
 
   if (config.type === "claude") {
-    return new ClaudeRunner(config.model, config.effort, config.maxBudgetUsd);
+    return new ClaudeRunner(config.model, config.effort, config.maxBudgetUsd, excludeMcp);
   }
 
   if (config.type === "codex") {
-    return new CodexRunner(config.model, config.effort);
+    return new CodexRunner(config.model, config.effort, excludeMcp);
   }
 
   throw new Error(`Unsupported runner type: ${String((config as { type?: unknown }).type)}`);
@@ -80,8 +86,9 @@ export const resolveRunnerConfigForAction = (
   config: WorkspaceConfig,
   action: ActionType,
   task?: Pick<Task, "runnerOverride"> | null,
+  continuation = false,
 ): WorkspaceRunnerConfig => {
-  const baseConfig = runnerForAction(config, action);
+  const baseConfig = runnerForActionAndContinuation(config, action, continuation);
   const role = runnerRoleForAction(action);
   const override = task?.runnerOverride?.[role];
   return applyRoleOverride(baseConfig, override);
@@ -91,6 +98,14 @@ export const createAgentRunner = (input: {
   config: WorkspaceConfig;
   action: ActionType;
   task?: Pick<Task, "runnerOverride"> | null;
+  continuation?: boolean;
+  // Load no MCP servers (pure grading calls like the eval judge). Honoured by
+  // claude (--strict-mcp-config) and codex (mcp_servers={} override); a no-op
+  // for opencode, which has no per-invocation MCP-disable flag.
+  excludeMcp?: boolean;
 }): AgentRunner => {
-  return createProviderRunner(resolveRunnerConfigForAction(input.config, input.action, input.task));
+  return createProviderRunner(
+    resolveRunnerConfigForAction(input.config, input.action, input.task, input.continuation ?? false),
+    { excludeMcp: input.excludeMcp ?? false },
+  );
 };

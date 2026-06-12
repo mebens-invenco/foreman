@@ -77,6 +77,7 @@ Task body...
 Tickets become Foreman candidates when they satisfy the task-system filter and metadata requirements:
 
 - Linear tickets must be in the configured team, assigned to the configured assignee, and have one of `taskSystem.linear.includeLabels`.
+- Tickets carrying any `taskSystem.linear.excludeLabels` label are hard-skipped at candidate intake, removing them from every action (execution, review, reviewer, retry, deployment, consolidation). Defaults to `[]` (skip nothing).
 - File tickets must be valid markdown task files in the configured task directory, with an `id` matching the filename.
 - The ticket state must map to a configured Foreman state such as `ready`, `in_progress`, `in_review`, `deployable`, `done`, or `canceled`; unmapped states are skipped.
 - Execution requires at least one target repo via `targets` or `Agent: Repos`, and every repo key must match a discovered repo.
@@ -100,16 +101,42 @@ For `claude` runner blocks (either `runner.execution` or `runner.reviewer`), set
 runner:
   execution:
     type: claude
-    model: claude-opus-4-7
+    model: claude-opus-4-8
     effort: max
     timeoutMs: 3600000
     maxBudgetUsd: 100   # optional; omit to leave spend uncapped
   reviewer:
     type: claude
-    model: claude-opus-4-7
+    model: claude-opus-4-8
     effort: high
     timeoutMs: 3600000
     maxBudgetUsd: 50
 ```
 
 The cap is a **per-invocation** safety net, not an aggregate budget: each attempt and each reviewer run starts a fresh `claude` process with its own cap. The cap and `timeoutMs` are independent guards — whichever fires first terminates the run. Use it to bound runaway attempts; pick the value from observed normal spend plus headroom, not from cost-estimation rates. Omitting the field preserves current behavior (no cap).
+
+## Reducing Effort on Continuations
+
+Continuation dispatches — review and reviewer follow-ups that resume an existing runner session — often only need to return `no_action_needed` or reply to a single thread, yet they inherit the same `effort` as the first pass. Set the optional `continuationEffort` field to run those follow-ups at a lighter effort while leaving the first pass untouched:
+
+```yaml
+runner:
+  execution:
+    type: claude
+    model: claude-opus-4-8
+    effort: max
+    continuationEffort: high   # optional; used for review continuations
+  reviewer:
+    type: claude
+    model: claude-opus-4-8
+    effort: max
+    continuationEffort: high   # optional; used for reviewer continuations
+```
+
+`runner.execution` supplies the effort for continuations of execution-runner actions (a `review` reply resumes the implementation session); `runner.reviewer` supplies it for `reviewer` continuations. For `opencode` runners the parallel knob is `continuationVariant`.
+
+Behavior notes:
+
+- **Omitting the field preserves current behavior** — every dispatch uses `effort` (or `variant`).
+- It only takes effect on a **continuation** — a dispatch that resumes a live runner session, in practice a `review` or `reviewer` follow-up. A first-pass `execution` and a `retry` are never continuations (a `retry` always starts a fresh session), so they keep using the base `effort`/`variant`.
+- It **composes with `maxBudgetUsd`** rather than replacing it: `continuationEffort` lowers the thinking budget of continuation runs, while `maxBudgetUsd` still caps per-invocation spend. Use either or both.

@@ -20,6 +20,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
+import { formatStatusLabel, statusTone } from "@/lib/attempt-status"
 
 function workItemLabel(attempt: AttemptRecord) {
   return attempt.jobKind === "cron" ? attempt.cronJobId ?? "-" : attempt.taskId ?? "-"
@@ -31,26 +32,6 @@ function targetLabel(attempt: AttemptRecord) {
 
 function timestampLabel(attempt: AttemptRecord, now: number) {
   return formatRelativeTime(attempt.finishedAt ?? attempt.startedAt, now)
-}
-
-function statusTone(status: AttemptRecord["status"]) {
-  switch (status) {
-    case "running":
-      return "border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300"
-    case "completed":
-      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-    case "failed":
-    case "blocked":
-      return "border-rose-500/30 bg-rose-500/10 text-rose-700 dark:text-rose-300"
-    case "canceled":
-      return "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-    default:
-      return "border-slate-500/30 bg-slate-500/10 text-slate-700 dark:text-slate-300"
-  }
-}
-
-function formatStatusLabel(status: string) {
-  return status.replace(/_/g, " ")
 }
 
 function TableSectionShell({
@@ -71,7 +52,7 @@ function TableSectionShell({
 
 export function AttemptsTable({ now }: { now: number }) {
   const navigate = useNavigate()
-  const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery(12)
+  const { data: attempts = [], isLoading, isError, error } = useAttemptsQuery({ limit: 12 })
   const openAttempt = (attemptId: string) => {
     navigate(`/attempts?attemptId=${encodeURIComponent(attemptId)}`)
   }
@@ -93,7 +74,7 @@ export function AttemptsTable({ now }: { now: number }) {
           No execution attempts recorded yet.
         </div>
       ) : (
-        <Table className="w-full table-fixed">
+        <Table className="w-full min-w-[48rem] table-fixed">
           <colgroup>
             <col className="w-28" />
             <col className="w-44" />

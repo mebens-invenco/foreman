@@ -1,8 +1,10 @@
 import {
   ActivityIcon,
   BookOpenTextIcon,
+  BotIcon,
   ChartColumnIncreasingIcon,
   DollarSignIcon,
+  ListTodoIcon,
   SlidersHorizontalIcon,
   type LucideIcon,
 } from "lucide-react"
@@ -26,6 +28,18 @@ export const navigationItems: NavigationItem[] = [
     href: "/attempts",
     description: "Active execution flow, live state, and streaming log surfaces.",
     icon: ActivityIcon,
+  },
+  {
+    title: "Tasks",
+    href: "/tasks",
+    description: "One row per task — summed tokens, cost, and effective status across all attempts.",
+    icon: ListTodoIcon,
+  },
+  {
+    title: "Foreman",
+    href: "/foreman",
+    description: "Issue manager — every ready or agent-tagged issue, with a Foreman on/off toggle and frontmatter health.",
+    icon: BotIcon,
   },
   {
     title: "Learnings",

@@ -173,7 +173,6 @@ export class AttemptExecutor {
       jobLogger = jobLogger.child({ taskState: task.state, repo: repo.key });
       jobLogger.info("loaded task and resolved repo", { baseBranch: job.baseBranch ?? repo.defaultBranch });
       const leaseExpiresAt = addSeconds(new Date(), this.deps.config.scheduler.leaseTtlSeconds);
-      const runner = createAgentRunner({ config: this.deps.config, action: job.action, task });
 
       attempt = this.deps.foremanRepos.attempts.createAttemptWithLeases({
         jobId: job.id,
@@ -269,6 +268,13 @@ export class AttemptExecutor {
           continuation: isContinuation,
         });
 
+        // Build the runner only once the continuation flag is known: a
+        // continuation may run at the configured `continuationEffort`/
+        // `continuationVariant` instead of the base tuning. Session keys and the
+        // attempt record above still use the base `runnerConfig`, so continuity
+        // is unaffected.
+        const runner = createAgentRunner({ config: this.deps.config, action: job.action, task, continuation: isContinuation });
+
         const prompt = await renderWorkerPrompt({
           action: job.action,
           config: this.deps.config,
@@ -278,6 +284,7 @@ export class AttemptExecutor {
           taskTarget: target,
           worktreePath,
           baseBranch: job.baseBranch ?? repo.defaultBranch,
+          foremanRepos: this.deps.foremanRepos,
           gitState: {
             worktreeHeadSha: beforeSha,
             reviewHeadSha,

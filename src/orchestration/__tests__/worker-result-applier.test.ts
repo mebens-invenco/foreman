@@ -35,6 +35,10 @@ class FakeTaskSystem implements TaskSystem {
     return this.tasks;
   }
 
+  async listAssignedIssues(): Promise<Task[]> {
+    return this.tasks;
+  }
+
   async getTask(taskId: string): Promise<Task> {
     if (this.getTaskError) {
       throw this.getTaskError;

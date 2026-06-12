@@ -15,9 +15,13 @@ import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot 
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import { AttemptExecutor } from "../attempt-executor.js";
 
-const runnerMocks = vi.hoisted(() => ({
-  invoke: vi.fn(),
-}));
+const runnerMocks = vi.hoisted(() => {
+  const invoke = vi.fn();
+  return {
+    invoke,
+    createAgentRunner: vi.fn(() => ({ invoke })),
+  };
+});
 
 const worktreeMocks = vi.hoisted(() => ({
   worktreePath: "",
@@ -28,7 +32,7 @@ vi.mock("../../execution/index.js", async () => {
   const actual = await vi.importActual<typeof import("../../execution/index.js")>("../../execution/index.js");
   return {
     ...actual,
-    createAgentRunner: vi.fn(() => ({ invoke: runnerMocks.invoke })),
+    createAgentRunner: runnerMocks.createAgentRunner,
   };
 });
 
@@ -124,6 +128,7 @@ const createExecutorContext = async (options: { action?: ActionType; selectedTas
   const taskSystem: TaskSystem = {
     getProvider: () => "file",
     listCandidates: vi.fn(async () => []),
+    listAssignedIssues: vi.fn(async () => []),
     getTask: vi.fn(async () => selectedTask),
     createTask: vi.fn(async () => ({ id: "TASK-NEW", providerId: "TASK-NEW", url: null })),
     listComments: vi.fn(async () => []),
@@ -159,6 +164,9 @@ const createExecutorContext = async (options: { action?: ActionType; selectedTas
 
 afterEach(async () => {
   runnerMocks.invoke.mockReset();
+  // mockClear (not mockReset) keeps the factory implementation that returns
+  // { invoke }; we only need a clean call history between tests.
+  runnerMocks.createAgentRunner.mockClear();
   worktreeMocks.ensureTaskWorktree.mockReset();
   worktreeMocks.worktreePath = "";
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
@@ -230,6 +238,7 @@ describe("AttemptExecutor", () => {
       const taskSystem: TaskSystem = {
         getProvider: () => "file",
         listCandidates: vi.fn(async () => []),
+        listAssignedIssues: vi.fn(async () => []),
         getTask: vi.fn(async () => task),
         createTask: vi.fn(async () => ({ id: "TASK-NEW", providerId: "TASK-NEW", url: null })),
         listComments: vi.fn(async () => []),
@@ -646,6 +655,67 @@ describe("AttemptExecutor", () => {
           runnerVariant: "high",
         }),
       ).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("builds a first-pass runner with continuation false when no session is resumed", async () => {
+    const { db, claimedJob, executor, logger } = await createExecutorContext({ action: "execution" });
+
+    try {
+      const workerResult = createWorkerResult({ summary: "First pass." });
+      runnerMocks.invoke.mockResolvedValueOnce({
+        exitCode: 0,
+        signal: null,
+        startedAt: "2026-05-06T00:00:00.000Z",
+        finishedAt: "2026-05-06T00:01:00.000Z",
+        stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+        stderrBytes: 0,
+        stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+        stderr: "",
+        nativeSessionId: "native-session-fresh",
+      });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      expect(runnerMocks.createAgentRunner).toHaveBeenCalledWith(expect.objectContaining({ continuation: false }));
+    } finally {
+      db.close();
+    }
+  });
+
+  test("builds a continuation runner with continuation true when resuming an active session", async () => {
+    const { db, claimedJob, executor, logger, target, config } = await createExecutorContext({ action: "execution" });
+    db.runnerSessions.createSession({
+      taskTargetId: target.id,
+      role: "implementation",
+      runnerName: config.runner.execution.type,
+      runnerModel: config.runner.execution.model,
+      runnerVariant: "high",
+      isActive: true,
+      nativeSessionId: "implementation-native-session",
+    });
+
+    try {
+      const workerResult = createWorkerResult({ summary: "Continuation pass." });
+      runnerMocks.invoke.mockResolvedValueOnce({
+        exitCode: 0,
+        signal: null,
+        startedAt: "2026-05-06T00:00:00.000Z",
+        finishedAt: "2026-05-06T00:01:00.000Z",
+        stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+        stderrBytes: 0,
+        stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+        stderr: "",
+        nativeSessionId: "implementation-native-session",
+      });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      expect(runnerMocks.createAgentRunner).toHaveBeenCalledWith(expect.objectContaining({ continuation: true }));
     } finally {
       db.close();
     }

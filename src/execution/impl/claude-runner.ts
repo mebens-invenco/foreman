@@ -9,6 +9,11 @@ export class ClaudeRunner implements AgentRunner {
     private readonly model: string,
     private readonly effort: string,
     private readonly maxBudgetUsd?: number,
+    // When true, pass --strict-mcp-config with no --mcp-config so the CLI loads
+    // ZERO MCP servers. Used for pure grading calls (the eval judge) that need no
+    // tools and must not trigger per-call MCP auth prompts. Default off — normal
+    // worker runs keep their configured MCP servers.
+    private readonly excludeMcp: boolean = false,
   ) {}
 
   async invoke(request: AgentRunnerInvokeRequest): Promise<CapturedAgentRunResult> {
@@ -34,6 +39,7 @@ export class ClaudeRunner implements AgentRunner {
         this.effort,
         "--output-format",
         "json",
+        ...(this.excludeMcp ? ["--strict-mcp-config"] : []),
         ...(this.maxBudgetUsd !== undefined ? ["--max-budget-usd", String(this.maxBudgetUsd)] : []),
         ...(resume ? ["--resume", nativeSessionId] : ["--session-id", nativeSessionId]),
       ],

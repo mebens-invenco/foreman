@@ -41,6 +41,7 @@ export const linearSchema = z.object({
   team: z.string().min(1),
   assignee: z.string().min(1).default("me"),
   includeLabels: z.array(z.string().min(1)).default(["Agent"]),
+  excludeLabels: z.array(z.string().min(1)).default([]),
   agentCreatedLabel: z.string().min(1).default("Agent Created"),
   consolidatedLabel: z.string().min(1).default("Agent Consolidated"),
   states: z.object({
@@ -88,13 +89,18 @@ export const opencodeRunnerSchema = z.object({
   type: z.literal("opencode").default("opencode"),
   model: z.string().min(1).default("openai/gpt-5.5"),
   variant: z.string().min(1).default("high"),
+  // Optional variant for continuation dispatches; omit to reuse `variant`.
+  continuationVariant: z.string().min(1).optional(),
   timeoutMs: z.number().int().positive().default(3_600_000),
 });
 
 export const claudeRunnerSchema = z.object({
   type: z.literal("claude"),
-  model: z.string().min(1).default("claude-opus-4-7"),
+  model: z.string().min(1).default("claude-opus-4-8"),
   effort: z.preprocess(coerceToKnown(CLAUDE_EFFORT_VALUES), z.enum(CLAUDE_EFFORT_VALUES).default("high")),
+  // Optional effort for continuation dispatches; omit to reuse `effort`.
+  // Unknown values are rejected, not coerced like `effort`.
+  continuationEffort: z.enum(CLAUDE_EFFORT_VALUES).optional(),
   timeoutMs: z.number().int().positive().default(3_600_000),
   // Optional per-invocation USD budget cap forwarded to claude as
   // `--max-budget-usd <amount>`. Omit to leave spend uncapped (current
@@ -107,6 +113,8 @@ export const codexRunnerSchema = z.object({
   type: z.literal("codex"),
   model: z.string().min(1).default("gpt-5.5"),
   effort: z.preprocess(coerceToKnown(CODEX_EFFORT_VALUES), z.enum(CODEX_EFFORT_VALUES).default("high")),
+  // Optional effort for continuation dispatches; omit to reuse `effort`.
+  continuationEffort: z.enum(CODEX_EFFORT_VALUES).optional(),
   timeoutMs: z.number().int().positive().default(3_600_000),
 });
 
@@ -169,7 +177,7 @@ const defaultExecutionRunner = {
 
 const defaultReviewerRunner = {
   type: "claude",
-  model: "claude-opus-4-7",
+  model: "claude-opus-4-8",
   effort: "high",
   timeoutMs: 3_600_000,
 } as const;
@@ -295,6 +303,7 @@ export const createDefaultWorkspaceConfig = (
             team: "Engineering",
             assignee: "me",
             includeLabels: ["Agent"],
+            excludeLabels: [],
             agentCreatedLabel: "Agent Created",
             consolidatedLabel: "Agent Consolidated",
             states: {
@@ -383,3 +392,29 @@ export const runnerTuningValue = (runner: WorkspaceRunnerConfig): string => {
 
   return runner.effort;
 };
+
+// For a continuation dispatch, swap in the provider's optional continuation
+// knob. Session keys still use the base tuning, so this does not disturb
+// session continuity.
+export const applyContinuationTuning = (runner: WorkspaceRunnerConfig, continuation: boolean): WorkspaceRunnerConfig => {
+  if (!continuation) {
+    return runner;
+  }
+
+  if (runner.type === "opencode") {
+    return runner.continuationVariant === undefined ? runner : { ...runner, variant: runner.continuationVariant };
+  }
+
+  // claude and codex stay separate so TS narrows each provider's `effort` enum.
+  if (runner.type === "claude") {
+    return runner.continuationEffort === undefined ? runner : { ...runner, effort: runner.continuationEffort };
+  }
+
+  return runner.continuationEffort === undefined ? runner : { ...runner, effort: runner.continuationEffort };
+};
+
+export const runnerForActionAndContinuation = (
+  config: WorkspaceConfig,
+  action: ActionType,
+  continuation: boolean,
+): WorkspaceRunnerConfig => applyContinuationTuning(runnerForAction(config, action), continuation);

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import { ForemanError, isForemanError } from "../../../lib/errors.js";
 import { createDefaultWorkspaceConfig } from "../../../workspace/config.js";
 import { LinearTaskSystem, linearPriorityToNormalized, normalizedPriorityToLinear, parseLinearMetadata } from "../../index.js";
 
@@ -60,7 +61,7 @@ describe("LinearTaskSystem.listCandidates", () => {
         });
       }
 
-      if (body.query.includes("query ForemanIssueCandidates")) {
+      if (body.query.includes("query ForemanAssignedIssues")) {
         return new Response(JSON.stringify({ data: linearIssue([], "Test User") }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -91,7 +92,7 @@ describe("LinearTaskSystem.listCandidates", () => {
       const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
       requests.push(body);
 
-      if (body.query.includes("query ForemanIssueCandidates")) {
+      if (body.query.includes("query ForemanAssignedIssues")) {
         return new Response(JSON.stringify({ data: linearIssue([], "Jane Doe") }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -141,7 +142,7 @@ describe("LinearTaskSystem.listCandidates", () => {
         });
       }
 
-      if (body.query.includes("query ForemanIssueCandidates")) {
+      if (body.query.includes("query ForemanAssignedIssues")) {
         return new Response(
           JSON.stringify({
             data: {
@@ -180,12 +181,219 @@ describe("LinearTaskSystem.listCandidates", () => {
     const tasks = await taskSystem.listCandidates();
 
     expect(tasks.map((task) => task.id)).toEqual(["ENG-123"]);
-    expect(logger.info).toHaveBeenCalledWith("skipping Linear candidate with unmapped provider state", {
+    expect(logger.info).toHaveBeenCalledWith("skipping Linear issue with unmapped provider state", {
       provider: "linear",
       taskId: "ENG-124",
       providerId: "issue-2",
       providerState: "Blocked",
     });
+  });
+});
+
+describe("LinearTaskSystem.listAssignedIssues", () => {
+  test("omits the label filter and variable on the assigneeId path", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanViewer")) {
+        return new Response(JSON.stringify({ data: { viewer: { id: "user-123", name: "Test User" } } }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      if (body.query.includes("query ForemanAssignedIssues")) {
+        return new Response(JSON.stringify({ data: linearIssue([], "Test User") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const tasks = await taskSystem.listAssignedIssues();
+
+    expect(tasks).toHaveLength(1);
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.query).toContain("$assigneeId: ID!");
+    expect(requests[1]?.query).toContain("assignee: { id: { eq: $assigneeId } }");
+    // The no-label branch must drop both the $labels var-decl and the filter
+    // clause, so a malformed assembly (dangling comma / stray $labels) is caught.
+    expect(requests[1]?.query).not.toContain("$labels: [String!]");
+    expect(requests[1]?.query).not.toContain("labels: { some: { name: { in: $labels } } }");
+    // ...and send no labels variable at all.
+    expect(requests[1]?.variables).toEqual({
+      teamName: "Engineering",
+      assigneeId: "user-123",
+    });
+  });
+
+  test("omits the label filter and variable on the assigneeName path", async () => {
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+      requests.push(body);
+
+      if (body.query.includes("query ForemanAssignedIssues")) {
+        return new Response(JSON.stringify({ data: linearIssue([], "Jane Doe") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const tasks = await taskSystem.listAssignedIssues();
+
+    expect(tasks).toHaveLength(1);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.query).not.toContain("query ForemanViewer");
+    expect(requests[0]?.query).toContain("assignee: { name: { eq: $assigneeName } }");
+    expect(requests[0]?.query).not.toContain("$labels: [String!]");
+    expect(requests[0]?.query).not.toContain("labels: { some: { name: { in: $labels } } }");
+    expect(requests[0]?.variables).toEqual({
+      teamName: "Engineering",
+      assigneeName: "Jane Doe",
+    });
+  });
+});
+
+describe("LinearTaskSystem.validateStartup", () => {
+  const ALL_TEAM_STATES = ["Todo", "Ready", "In Progress", "In Review", "Ready to Deploy", "Done", "Canceled"];
+  const ALL_LABELS = ["Agent", "Agent Created", "Agent Consolidated"];
+
+  const jsonResponse = (data: unknown) =>
+    new Response(JSON.stringify({ data }), { status: 200, headers: { "content-type": "application/json" } });
+
+  const stubStartupFetch = (options: { teamName?: string; teamStates: string[]; labels: string[] }) => {
+    global.fetch = vi.fn(async (_url, init) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as { query: string };
+
+      if (body.query.includes("query ForemanTeamInfo")) {
+        return jsonResponse({
+          teams: {
+            nodes: [
+              {
+                id: "team-engineering",
+                name: options.teamName ?? "Engineering",
+                states: { nodes: options.teamStates.map((name, index) => ({ id: `state-${index}`, name })) },
+              },
+            ],
+          },
+        });
+      }
+
+      if (body.query.includes("query ValidateForemanStartup")) {
+        return jsonResponse({ issueLabels: { nodes: options.labels.map((name, index) => ({ id: `label-${index}`, name })) } });
+      }
+
+      if (body.query.includes("query ForemanViewer")) {
+        return jsonResponse({ viewer: { id: "user-123", name: "Test User" } });
+      }
+
+      throw new Error(`Unexpected query: ${body.query}`);
+    }) as typeof fetch;
+  };
+
+  const expectForemanError = async (run: Promise<unknown>, code: string): Promise<ForemanError> => {
+    const error = await run.then(
+      () => null,
+      (caught) => caught,
+    );
+    expect(isForemanError(error)).toBe(true);
+    const foremanError = error as ForemanError;
+    expect(foremanError.code).toBe(code);
+    return foremanError;
+  };
+
+  test("resolves when every configured label and state exists in Linear", async () => {
+    stubStartupFetch({ teamStates: ALL_TEAM_STATES, labels: ALL_LABELS });
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    await expect(taskSystem.validateStartup()).resolves.toBeUndefined();
+  });
+
+  test("throws linear_label_not_found naming a configured label missing from Linear", async () => {
+    stubStartupFetch({ teamStates: ALL_TEAM_STATES, labels: ["Agent Created", "Agent Consolidated"] });
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const error = await expectForemanError(taskSystem.validateStartup(), "linear_label_not_found");
+    expect(error.message).toContain("Agent");
+  });
+
+  test("treats a case-mismatched label as missing (strict match, not case-insensitive)", async () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.includeLabels = ["Agent:Tars"];
+    stubStartupFetch({ teamStates: ALL_TEAM_STATES, labels: ["agent:tars", "Agent Created", "Agent Consolidated"] });
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const error = await expectForemanError(taskSystem.validateStartup(), "linear_label_not_found");
+    expect(error.message).toContain("Agent:Tars");
+  });
+
+  test("names every missing label when several configured labels are absent", async () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.includeLabels = ["Agent", "Backend", "Frontend"];
+    stubStartupFetch({ teamStates: ALL_TEAM_STATES, labels: ["Agent", "Agent Created", "Agent Consolidated"] });
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const error = await expectForemanError(taskSystem.validateStartup(), "linear_label_not_found");
+    expect(error.message).toContain("Backend");
+    expect(error.message).toContain("Frontend");
+  });
+
+  test("throws linear_label_not_found when a configured exclude label is missing from Linear", async () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = ["agent:disabled"];
+    stubStartupFetch({ teamStates: ALL_TEAM_STATES, labels: ALL_LABELS });
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const error = await expectForemanError(taskSystem.validateStartup(), "linear_label_not_found");
+    expect(error.message).toContain("agent:disabled");
+  });
+
+  test("resolves when configured exclude labels exist in Linear", async () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = ["agent:disabled"];
+    stubStartupFetch({ teamStates: ALL_TEAM_STATES, labels: [...ALL_LABELS, "agent:disabled"] });
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    await expect(taskSystem.validateStartup()).resolves.toBeUndefined();
+  });
+
+  test("throws linear_state_not_found naming a configured state missing from the team", async () => {
+    stubStartupFetch({ teamStates: ALL_TEAM_STATES.filter((state) => state !== "Ready to Deploy"), labels: ALL_LABELS });
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const error = await expectForemanError(taskSystem.validateStartup(), "linear_state_not_found");
+    expect(error.message).toContain("Ready to Deploy");
+  });
+
+  test("treats a case-mismatched state as missing (strict match, not case-insensitive)", async () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.states.ready = ["todo"];
+    stubStartupFetch({ teamStates: ALL_TEAM_STATES, labels: ALL_LABELS });
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const error = await expectForemanError(taskSystem.validateStartup(), "linear_state_not_found");
+    expect(error.message).toContain("todo");
+  });
+
+  test("names every missing state when several configured states are absent", async () => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.states.ready = ["Backlog"];
+    config.taskSystem.linear!.states.deployable = ["Shippable"];
+    stubStartupFetch({ teamStates: ALL_TEAM_STATES, labels: ALL_LABELS });
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    const error = await expectForemanError(taskSystem.validateStartup(), "linear_state_not_found");
+    expect(error.message).toContain("Backlog");
+    expect(error.message).toContain("Shippable");
+  });
+
+  test("preserves linear_team_not_found when the configured team does not resolve", async () => {
+    stubStartupFetch({ teamName: "Different Team", teamStates: ALL_TEAM_STATES, labels: ALL_LABELS });
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+    await expectForemanError(taskSystem.validateStartup(), "linear_team_not_found");
   });
 });
 

@@ -3,10 +3,12 @@ import { Navigate, Route, Routes } from "react-router"
 import { defaultRoute, navigationItems } from "@/app/navigation"
 import { AppShell } from "@/layouts/app-shell"
 import { AttemptsPage } from "@/pages/attempts"
+import { ForemanPage } from "@/pages/foreman"
 import { LearningsPage } from "@/pages/learnings"
 import { NotFoundPage } from "@/pages/not-found"
 import { OverviewPage } from "@/pages/overview"
 import { SettingsPage } from "@/pages/settings"
+import { TasksPage } from "@/pages/tasks"
 import { UsagePage } from "@/pages/usage"
 
 export function AppRoutes() {
@@ -16,9 +18,11 @@ export function AppRoutes() {
       <Route element={<AppShell />}>
         <Route path={navigationItems[0].href} element={<OverviewPage />} />
         <Route path={navigationItems[1].href} element={<AttemptsPage />} />
-        <Route path={navigationItems[2].href} element={<LearningsPage />} />
-        <Route path={navigationItems[3].href} element={<UsagePage />} />
-        <Route path={navigationItems[4].href} element={<SettingsPage />} />
+        <Route path={navigationItems[2].href} element={<TasksPage />} />
+        <Route path={navigationItems[3].href} element={<ForemanPage />} />
+        <Route path={navigationItems[4].href} element={<LearningsPage />} />
+        <Route path={navigationItems[5].href} element={<UsagePage />} />
+        <Route path={navigationItems[6].href} element={<SettingsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

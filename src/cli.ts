@@ -17,10 +17,9 @@ import { isIsoDate, resolveUsageRange } from "./execution/cost/usage-range.js";
 import {
   formatWorkerResultValidationError,
   parseWorkerResult,
+  renderAgentResultSchemaHelp,
   validateWorkerResultForAction,
   workerResultActionValues,
-  workerResultExample,
-  workerResultSchema,
   type WorkerResultAction,
 } from "./execution/worker-result.js";
 import { ForemanVersionMonitor } from "./foreman-version.js";
@@ -35,6 +34,10 @@ import { createSelfRebootScheduler, runRebootSidecar } from "./system/reboot.js"
 import { createTaskSystem } from "./tasking/index.js";
 import { discoverGitRepos } from "./workspace/git-repo-discovery.js";
 import { initializeWorkspace, loadWorkspace } from "./workspace/index.js";
+import { harvestTraces } from "./eval/harvest.js";
+import { evalPromptNames } from "./eval/registry.js";
+import { formatEvalReport, runEval } from "./eval/run.js";
+import { isRunnerProvider, runnerProviders, type RunnerProvider } from "./domain/index.js";
 import type { LoggerLevelName } from "./logger.js";
 
 const program = new Command();
@@ -59,6 +62,11 @@ const parseWorkerResultAction = (value: string): WorkerResultAction => {
   return value as WorkerResultAction;
 };
 
+const collectWorkerResultActions = (value: string, previous: WorkerResultAction[] = []): WorkerResultAction[] => [
+  ...previous,
+  parseWorkerResultAction(value),
+];
+
 const readStdin = async (): Promise<string> => {
   process.stdin.setEncoding("utf8");
   let input = "";
@@ -78,47 +86,6 @@ const resolveHelpAction = (): WorkerResultAction | undefined => {
   return workerResultActionValues.includes(value as WorkerResultAction) ? (value as WorkerResultAction) : undefined;
 };
 
-const renderAgentResultValidateHelp = (): string => {
-  const action = resolveHelpAction();
-  const actionLiteral = action ?? `<${workerResultActionValues.join("|")}>`;
-  const schema = action ? workerResultSchema.safeExtend({ action: z.literal(action) }) : workerResultSchema;
-  const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, 2);
-  const exampleJson = JSON.stringify({
-    ...workerResultExample,
-    action: actionLiteral,
-    ...((action === "review" || action === "reviewer") ? { outcome: "no_action_needed" } : {}),
-  });
-  const reviewGuidance = action === "review" || action === "reviewer"
-    ? "\n- For no-op review results, use outcome `no_action_needed`; `completed` requires mutations or code changes."
-    : "";
-
-  return `
-Action-specific accepted output shape
-
-- Required action literal: \"${actionLiteral}\".
-- Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block containing JSON.
-- The final answer returned to Foreman must contain exactly one <agent-result> block and no prose after it.
-- The worker result JSON schema below is generated from Foreman's Zod worker result schema.
-${reviewGuidance}
-
-Worker result JSON schema:
-
-\`\`\`json
-${jsonSchema}
-\`\`\`
-
-Minimal raw JSON example:
-
-${exampleJson}
-
-Wrapped final answer example:
-
-<agent-result>
-${exampleJson}
-</agent-result>
-`;
-};
-
 const writeJson = (value: unknown): void => {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 };
@@ -129,6 +96,24 @@ const withWorkspaceRepos = async <T>(workspace: string, handler: (repos: ReturnT
   try {
     await repos.migrationRunner.runMigrations(paths.projectRoot);
     return await handler(repos);
+  } finally {
+    repos.close();
+  }
+};
+
+// Read-only variant for commands that inspect a workspace a live server may
+// own (e.g. eval-harvest): opens the DB readonly (no create, no journal-mode
+// switch, no write locks) and REFUSES on pending migrations instead of
+// applying them under the running server.
+const withWorkspaceReposReadOnly = async <T>(
+  workspace: string,
+  handler: (repos: ReturnType<typeof createRepos>, paths: Awaited<ReturnType<typeof loadWorkspace>>["paths"]) => Promise<T>,
+): Promise<T> => {
+  const { paths } = await loadWorkspace(workspace);
+  const repos = createRepos(await openSqliteDatabase(paths.dbPath, { readonly: true }));
+  try {
+    await repos.migrationRunner.assertMigrationsCurrent(paths.projectRoot);
+    return await handler(repos, paths);
   } finally {
     repos.close();
   }
@@ -447,7 +432,7 @@ agentResult
   .command("validate")
   .description("Validate raw JSON or a complete <agent-result> block from stdin")
   .requiredOption("--action <action>", "Expected worker action", parseWorkerResultAction)
-  .addHelpText("after", renderAgentResultValidateHelp)
+  .addHelpText("after", () => renderAgentResultSchemaHelp(resolveHelpAction()))
   .action(async (options: { action: WorkerResultAction }) => {
     try {
       const value = parseWorkerResult(await readStdin());
@@ -458,6 +443,82 @@ agentResult
       process.stderr.write(`Agent result is invalid for action \"${options.action}\":\n${message}\n`);
       process.exitCode = 1;
     }
+  });
+
+const parseRunnerProvider = (value: string): RunnerProvider => {
+  if (!isRunnerProvider(value)) {
+    throw new InvalidArgumentError(`Runner must be one of: ${runnerProviders.join(", ")}`);
+  }
+  return value;
+};
+
+program
+  .command("eval")
+  .description("Run a behavioral eval for a prompt against a live runner (opt-in; costs tokens, non-deterministic)")
+  .argument("<prompt>", `Prompt to evaluate (one of: ${evalPromptNames.join(", ")})`)
+  .option("--samples <count>", "Samples per case", parsePositiveInteger, 3)
+  .option("--runner <provider>", `Runner provider (${runnerProviders.join("|")}); defaults to the workspace default`, parseRunnerProvider)
+  .option("--model <model>", "Override the runner model")
+  .option("--case <id>", "Run only the case with this id")
+  .option("--timeout <ms>", "Per-sample timeout in milliseconds", parsePositiveInteger, 300_000)
+  .option("--no-judge", "Skip the LLM-as-judge quality grader (deterministic graders only)")
+  .option("--show-output", "Print each sample's raw runner stdout to stderr (debugging)")
+  .option("--json", "Emit the JSON report instead of the human-readable summary")
+  .action(
+    async (
+      prompt: string,
+      options: { samples: number; runner?: RunnerProvider; model?: string; case?: string; timeout: number; judge: boolean; showOutput?: boolean; json?: boolean },
+    ) => {
+      if (!evalPromptNames.includes(prompt)) {
+        process.stderr.write(`Unknown prompt "${prompt}". Known: ${evalPromptNames.join(", ")}\n`);
+        process.exitCode = 1;
+        return;
+      }
+
+      try {
+        const report = await runEval({
+          prompt,
+          samplesPerCase: options.samples,
+          timeoutMs: options.timeout,
+          judge: options.judge,
+          ...(options.runner ? { runner: options.runner } : {}),
+          ...(options.model ? { model: options.model } : {}),
+          ...(options.case ? { caseId: options.case } : {}),
+          ...(options.showOutput ? { showOutput: true } : {}),
+        });
+
+        if (options.json) {
+          writeJson(report);
+        } else {
+          process.stdout.write(`${formatEvalReport(report)}\n`);
+        }
+      } catch (error) {
+        process.stderr.write(`eval failed: ${error instanceof Error ? error.message : String(error)}\n`);
+        process.exitCode = 1;
+      }
+    },
+  );
+
+program
+  .command("eval-harvest")
+  .description("Harvest (rendered prompt, worker result) pairs from a workspace's retained attempt artifacts, for eval corpus building")
+  .argument("<workspace>")
+  .option("--action <action>", "Restrict to a worker action (repeatable)", collectWorkerResultActions, [])
+  .option("--limit <count>", "Max attempts to scan, most recent first", parsePositiveInteger, 500)
+  .option("--summary-only", "Emit only the harvest summary counts, not the harvested traces")
+  .action(async (workspace: string, options: { action: WorkerResultAction[]; limit: number; summaryOnly?: boolean }) => {
+    await withWorkspaceReposReadOnly(workspace, async (repos, paths) => {
+      const actions = options.action.length > 0 ? new Set(options.action) : undefined;
+      const { traces, summary } = await harvestTraces({
+        attempts: repos.attempts,
+        artifacts: repos.artifacts,
+        workspaceRoot: paths.workspaceRoot,
+        limit: options.limit,
+        ...(actions ? { actions } : {}),
+        ...(options.summaryOnly ? { summaryOnly: true } : {}),
+      });
+      writeJson({ workspace, actions: options.action, summary, ...(options.summaryOnly ? {} : { traces }) });
+    });
   });
 
 const scheduler = program.command("scheduler");

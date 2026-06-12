@@ -532,6 +532,82 @@ describe("SchedulerService scout timeout", () => {
   });
 });
 
+describe("SchedulerService scout exclusions", () => {
+  const scoutPaths = {
+    projectRoot: "/tmp/project",
+    workspaceRoot: "/tmp/workspace",
+    configPath: "/tmp/workspace/foreman.workspace.yml",
+    envPath: "/tmp/workspace/.env",
+    dbPath: "/tmp/workspace/foreman.db",
+    logsDir: "/tmp/workspace/logs",
+    attemptsLogDir: "/tmp/workspace/logs/attempts",
+    artifactsDir: "/tmp/workspace/artifacts",
+    worktreesDir: "/tmp/workspace/worktrees",
+    tasksDir: "/tmp/workspace/tasks",
+    planPath: "/tmp/workspace/plan.md",
+  };
+
+  // Drives a real scout pass through the scheduler with a single candidate and
+  // returns the completeScoutRun spy so callers can assert what landed on the
+  // persisted scout-run summary. excludeLabels is always configured so the only
+  // variable is whether the candidate carries the exclude label.
+  const runScoutWithCandidate = async (candidate: Task): Promise<ReturnType<typeof vi.fn>> => {
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.excludeLabels = ["agent:disabled"];
+    const completeScoutRun = vi.fn();
+    const foremanRepos = createMockRepos({
+      scoutRuns: { createScoutRun: vi.fn(() => "scout-1"), completeScoutRun, listScoutRuns: vi.fn(() => []) },
+    });
+    const scheduler = new SchedulerService({
+      config,
+      paths: scoutPaths,
+      foremanRepos,
+      taskSystem: {
+        listCandidates: vi.fn(async () => [candidate]),
+        listComments: vi.fn(async () => []),
+      } as any,
+      reviewService: {
+        resolvePullRequest: vi.fn(async () => null),
+        getContext: vi.fn(async () => null),
+      } as any,
+      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    try {
+      (scheduler as any).status = "running";
+      await (scheduler as any).runScout("poll");
+    } finally {
+      (scheduler as any).clearTimers();
+    }
+
+    return completeScoutRun;
+  };
+
+  test("records excludedByLabelCount on the completed scout-run summary", async () => {
+    // A done task carrying the exclude label is dropped at intake, so no job is
+    // scheduled and the count must still surface on the persisted summary.
+    const completeScoutRun = await runScoutWithCandidate(
+      sampleTask({ id: "TASK-EXC", state: "done", providerState: "done", labels: ["Agent", "agent:disabled"] }),
+    );
+
+    expect(completeScoutRun).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "scout-1", summary: { enqueued: 0, excludedByLabelCount: 1 } }),
+    );
+  });
+
+  test("omits excludedByLabelCount from the summary when nothing is excluded", async () => {
+    // An already-consolidated done task is a clean zero-job run; the `> 0` guard
+    // must keep the key out of the summary (an inverted guard would add it).
+    const completeScoutRun = await runScoutWithCandidate(
+      sampleTask({ id: "TASK-OK", state: "done", providerState: "done", labels: ["Agent", "Agent Consolidated"] }),
+    );
+
+    expect(completeScoutRun).toHaveBeenCalledWith(expect.objectContaining({ summary: { enqueued: 0 } }));
+  });
+});
+
 describe("SchedulerService applyWorkerResult", () => {
   test("swaps consolidation labels on completed consolidation jobs", async () => {
     const updateLabels = vi.fn(async () => undefined);
@@ -1984,7 +2060,7 @@ describe("SchedulerService applyWorkerResult", () => {
           "  fs.writeFileSync(process.env.FOREMAN_TEST_PROMPT_OUT, prompt);",
           "  const argv = process.argv.slice(2);",
           "  fs.writeFileSync(process.env.FOREMAN_TEST_ARGV_OUT, JSON.stringify(argv));",
-          "  const action = prompt.includes('# Retry Prompt') ? 'retry' : prompt.includes('# Reviewer Prompt') || prompt.includes('Review the latest PR changes.') ? 'reviewer' : 'review';",
+          "  const action = prompt.includes('# Retry Prompt') ? 'retry' : prompt.includes('# Reviewer Prompt') || prompt.includes('continuing a reviewer session') ? 'reviewer' : 'review';",
           "  const sessionFlag = argv.indexOf('--session');",
           "  const sessionID = sessionFlag >= 0 ? argv[sessionFlag + 1] : action + '-fresh-session';",
           "  const result = '<agent-result>' + JSON.stringify({ schemaVersion: 1, action, outcome: 'no_action_needed', summary: 'done', taskMutations: [], reviewMutations: [], learningMutations: [], blockers: [], signals: [] }) + '</agent-result>';",
@@ -2131,7 +2207,7 @@ describe("SchedulerService applyWorkerResult", () => {
       });
 
       expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).toContain("implementation-native-session");
-      expect(await fs.readFile(promptOut, "utf8")).toContain("Continue addressing current PR feedback");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("continuing a review session");
 
       await (scheduler as any).runJob(worker, {
         id: "job-reviewer",
@@ -2144,7 +2220,7 @@ describe("SchedulerService applyWorkerResult", () => {
       });
 
       expect(JSON.parse(await fs.readFile(argvOut, "utf8"))).toContain("reviewer-native-session");
-      expect(await fs.readFile(promptOut, "utf8")).toContain("Review the latest PR changes.");
+      expect(await fs.readFile(promptOut, "utf8")).toContain("continuing a reviewer session");
 
       getActiveSession.mockClear();
       await (scheduler as any).runJob(worker, {

@@ -127,11 +127,21 @@ const normalizeLinearTaskReference = (value: string): string => {
   return extractLinearIssueIdentifier(label) ?? extractLinearIssueIdentifier(target) ?? trimmed;
 };
 
+// Lenient detector for the `Agent:` metadata block (indent >= 2, any keys).
+// Shared by parseLinearMetadata and hasLinearAgentBlock so block detection has
+// exactly one definition — callers must never re-implement it.
+const LINEAR_AGENT_BLOCK_PATTERN = /(^|\n)Agent:\s*\n((?:\s{2,}.+\n?)*)/i;
+
+// True when a description carries an `Agent:` block, regardless of whether that
+// block yields usable targets. Lets callers distinguish a broken block (present
+// but no usable `Repos:`) from a missing one without parsing the repos again.
+export const hasLinearAgentBlock = (description: string): boolean => LINEAR_AGENT_BLOCK_PATTERN.test(description);
+
 export const parseLinearMetadata = (
   description: string,
   defaultBranchName?: string,
 ): Pick<Task, "targets" | "targetDependencies" | "dependencies" | "baseBranch" | "runnerOverride"> => {
-  const match = description.match(/(^|\n)Agent:\s*\n((?:\s{2,}.+\n?)*)/i);
+  const match = description.match(LINEAR_AGENT_BLOCK_PATTERN);
   const lines =
     match?.[2]
       ?.split(/\r?\n/)
@@ -600,35 +610,45 @@ export class LinearTaskSystem implements TaskSystem {
         issueLabels: { nodes: Array<{ id: string; name: string }> };
       }>(
         `query ValidateForemanStartup {
-          issueLabels {
+          issueLabels(first: 250) {
             nodes { id name }
           }
         }`,
         {},
       );
 
-      const configuredStates = [
+      const configuredStates = uniqueValues([
         ...linear.states.ready,
         ...linear.states.inProgress,
         ...linear.states.inReview,
+        ...linear.states.deployable,
         ...linear.states.done,
         ...linear.states.canceled,
-      ];
+      ]);
       const availableStates = new Set(team.states.map((state) => state.name));
-      for (const state of configuredStates) {
-        if (!availableStates.has(state)) {
-          this.logger.error("Linear startup validation failed because a configured state was not found", { state, team: linear.team });
-          throw new ForemanError("linear_state_not_found", `Configured Linear state not found: ${state}`);
-        }
+      const missingStates = configuredStates.filter((state) => !availableStates.has(state));
+      if (missingStates.length > 0) {
+        this.logger.error("Linear startup validation failed because configured states were not found", {
+          states: missingStates.join(", "),
+          team: linear.team,
+        });
+        throw new ForemanError("linear_state_not_found", `Configured Linear states not found: ${missingStates.join(", ")}`);
       }
 
-      const requiredLabels = [...linear.includeLabels, linear.agentCreatedLabel, linear.consolidatedLabel];
+      const requiredLabels = uniqueValues([
+        ...linear.includeLabels,
+        linear.agentCreatedLabel,
+        linear.consolidatedLabel,
+        ...linear.excludeLabels,
+      ]);
       const availableLabels = new Set(response.issueLabels.nodes.map((label) => label.name));
-      for (const label of requiredLabels) {
-        if (!availableLabels.has(label)) {
-          this.logger.error("Linear startup validation failed because a configured label was not found", { label, team: linear.team });
-          throw new ForemanError("linear_label_not_found", `Configured Linear label not found: ${label}`);
-        }
+      const missingLabels = requiredLabels.filter((label) => !availableLabels.has(label));
+      if (missingLabels.length > 0) {
+        this.logger.error("Linear startup validation failed because configured labels were not found", {
+          labels: missingLabels.join(", "),
+          team: linear.team,
+        });
+        throw new ForemanError("linear_label_not_found", `Configured Linear labels not found: ${missingLabels.join(", ")}`);
       }
 
       let resolvedAssignee: { id: string; name: string } | null = null;
@@ -655,46 +675,41 @@ export class LinearTaskSystem implements TaskSystem {
   }
 
   async listCandidates(): Promise<Task[]> {
+    // Candidates = assigned issues narrowed to the configured agent labels.
+    return this.queryAssignedIssues({ labels: this.config.taskSystem.linear!.includeLabels });
+  }
+
+  async listAssignedIssues(): Promise<Task[]> {
+    // The full assigned set — same query without the label narrowing.
+    return this.queryAssignedIssues({});
+  }
+
+  // Shared assignee+team query. `labels` narrows to issues carrying one of the
+  // given labels (candidate view); omit it for the full assigned set. The query
+  // is assembled rather than passing a whole IssueFilter variable so the proven
+  // candidate filter is unchanged when labels are present.
+  private async queryAssignedIssues(options: { labels?: string[] }): Promise<Task[]> {
     const linear = this.config.taskSystem.linear!;
     const assigneeFilter = await this.resolveAssigneeFilter();
-    this.logger.debug("listing Linear candidate issues", {
+    const useLabels = (options.labels?.length ?? 0) > 0;
+    const assigneeVarDecl = assigneeFilter.assigneeId ? ", $assigneeId: ID!" : ", $assigneeName: String!";
+    const assigneeClause = assigneeFilter.assigneeId
+      ? "assignee: { id: { eq: $assigneeId } }"
+      : "assignee: { name: { eq: $assigneeName } }";
+    const labelsVarDecl = useLabels ? ", $labels: [String!]" : "";
+    const labelsClause = useLabels ? ",\n            labels: { some: { name: { in: $labels } } }" : "";
+
+    this.logger.debug("listing Linear assigned issues", {
       team: linear.team,
       assignee: assigneeFilter.assigneeName ?? assigneeFilter.assigneeId,
-      labelCount: linear.includeLabels.length,
+      labelCount: options.labels?.length ?? 0,
     });
     const data = await this.client.request<{ issues: { nodes: LinearIssueNode[] } }>(
-      assigneeFilter.assigneeId
-        ? `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeId: ID!) {
+      `query ForemanAssignedIssues($teamName: String!${assigneeVarDecl}${labelsVarDecl}) {
         issues(
           filter: {
             team: { name: { eq: $teamName } },
-            assignee: { id: { eq: $assigneeId } },
-            labels: { some: { name: { in: $labels } } }
-          },
-          first: 250
-        ) {
-          nodes {
-            id
-            identifier
-            title
-            description
-            branchName
-            updatedAt
-            url
-            priorityLabel
-            state { id name }
-            assignee { name }
-            labels { nodes { id name } }
-            attachments { nodes { id title url } }
-          }
-        }
-      }`
-        : `query ForemanIssueCandidates($teamName: String!, $labels: [String!], $assigneeName: String!) {
-        issues(
-          filter: {
-            team: { name: { eq: $teamName } },
-            assignee: { name: { eq: $assigneeName } },
-            labels: { some: { name: { in: $labels } } }
+            ${assigneeClause}${labelsClause}
           },
           first: 250
         ) {
@@ -716,10 +731,21 @@ export class LinearTaskSystem implements TaskSystem {
       }`,
       {
         teamName: linear.team,
-        labels: linear.includeLabels,
         ...(assigneeFilter.assigneeId ? { assigneeId: assigneeFilter.assigneeId } : { assigneeName: assigneeFilter.assigneeName! }),
+        ...(useLabels ? { labels: options.labels } : {}),
       },
     );
+
+    // Linear serves this as a single 250-result page (no pagination here). The
+    // label-narrowed candidate set stays well under that, but the full assigned
+    // set can grow past it — warn so silently-dropped issues are at least
+    // visible in the logs rather than vanishing without a signal.
+    if (data.issues.nodes.length >= 250) {
+      this.logger.warn("Linear assigned-issues query hit the 250-result page cap; results may be truncated", {
+        team: linear.team,
+        labelFiltered: useLabels,
+      });
+    }
 
     const mappedTasks = await Promise.all(
       data.issues.nodes.map(async (node) => {
@@ -730,7 +756,7 @@ export class LinearTaskSystem implements TaskSystem {
             throw error;
           }
 
-          this.logger.info("skipping Linear candidate with unmapped provider state", {
+          this.logger.info("skipping Linear issue with unmapped provider state", {
             provider: "linear",
             taskId: node.identifier,
             providerId: node.id,
@@ -742,10 +768,11 @@ export class LinearTaskSystem implements TaskSystem {
     );
     const tasks = mappedTasks.flatMap((task) => (task ? [task] : []));
 
-    this.logger.debug("listed Linear candidate issues", {
+    this.logger.debug("listed Linear assigned issues", {
       count: data.issues.nodes.length,
       acceptedCount: tasks.length,
       skippedCount: data.issues.nodes.length - tasks.length,
+      labelFiltered: useLabels,
     });
     return tasks;
   }
