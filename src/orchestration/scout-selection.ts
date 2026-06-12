@@ -191,6 +191,9 @@ const resolvePersistedTaskTargets = (task: Task, foremanRepos: ForemanRepos): Ta
 const configuredAgentLabel = (config: WorkspaceConfig): string =>
   config.taskSystem.type === "linear" ? config.taskSystem.linear!.includeLabels[0]! : "Agent";
 
+const configuredExcludeLabels = (config: WorkspaceConfig): string[] =>
+  config.taskSystem.type === "linear" ? config.taskSystem.linear!.excludeLabels : [];
+
 const configuredConsolidatedLabel = (config: WorkspaceConfig): string | null =>
   config.taskSystem.type === "linear" ? config.taskSystem.linear!.consolidatedLabel : null;
 
@@ -557,11 +560,21 @@ export const runScoutSelection = async (input: {
   repos: RepoRef[];
   triggerType: ScoutRunTrigger;
   logger?: LoggerService;
-}): Promise<{ scoutRunId: string; jobs: Selection[] }> => {
+}): Promise<{ scoutRunId: string; jobs: Selection[]; excludedByLabelCount: number }> => {
   const logger = input.logger?.child({ component: "scout.selection", trigger: input.triggerType });
   const listedTasks = await input.taskSystem.listCandidates();
   input.foremanRepos.taskMirror.saveTasks(listedTasks);
-  const allTasks = listedTasks.map((task) => input.foremanRepos.taskMirror.getTask(task.id) ?? task);
+  const mirroredTasks = listedTasks.map((task) => input.foremanRepos.taskMirror.getTask(task.id) ?? task);
+  // Hard-skip any issue carrying a configured exclude label at candidate intake.
+  // This is the single chokepoint that removes excluded issues from every
+  // downstream action (state transitions, execution, review, reviewer, retry,
+  // deployment, consolidation). Empty excludeLabels => identical to pre-filter behavior.
+  const excludeLabels = configuredExcludeLabels(input.config);
+  const allTasks =
+    excludeLabels.length > 0
+      ? mirroredTasks.filter((task) => !task.labels.some((label) => excludeLabels.includes(label)))
+      : mirroredTasks;
+  const excludedByLabelCount = mirroredTasks.length - allTasks.length;
   const reposByKey = new Map(input.repos.map((repo) => [repo.key, repo]));
   const deploymentInstructions = input.paths ? await resolveDeploymentInstructions(input.paths) : null;
   const resolvedPullRequestCache = new Map<string, Promise<ResolvedPullRequest | null>>();
@@ -615,6 +628,14 @@ export const runScoutSelection = async (input: {
     activeCount: activeCandidates.length,
     terminalCount: terminalCandidates.length,
   });
+
+  if (excludedByLabelCount > 0) {
+    logger?.info("skipped tasks carrying an exclude label", {
+      scoutRunId,
+      excludedByLabelCount,
+      excludeLabels: excludeLabels.join(", "),
+    });
+  }
 
   const availableCapacity = Math.max(0, input.config.scheduler.workerConcurrency - input.foremanRepos.jobs.activeJobCount());
   const jobs: Selection[] = [];
@@ -1069,7 +1090,7 @@ export const runScoutSelection = async (input: {
   }
 
   logger?.info("completed scout selection", { scoutRunId, selectedJobs: jobs.length });
-  return { scoutRunId, jobs };
+  return { scoutRunId, jobs, excludedByLabelCount };
 };
 
 export const assertTaskActionableTarget = <T extends TaskTargetRef>(

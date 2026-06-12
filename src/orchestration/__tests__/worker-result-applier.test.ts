@@ -33,6 +33,10 @@ class FakeTaskSystem implements TaskSystem {
     return this.tasks;
   }
 
+  async listAssignedIssues(): Promise<Task[]> {
+    return this.tasks;
+  }
+
   async getTask(taskId: string): Promise<Task> {
     const task = this.tasks.find((item) => item.id === taskId);
     if (!task) {

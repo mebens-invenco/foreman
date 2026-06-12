@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { WorkerResult } from "../domain/index.js";
+import type { LearningExpect } from "./cases/learning-policy.js";
 import type { Grader, GraderResult } from "./types.js";
 
 /**
@@ -30,7 +31,7 @@ const pass = (dimension: string, detail: string): GraderResult => ({ dimension, 
 const fail = (dimension: string, detail: string): GraderResult => ({ dimension, pass: false, detail });
 
 /** Parsed + validated against the action-specific worker-result schema. */
-export const schemaGrader: Grader = {
+export const schemaGrader: Grader<LearningExpect> = {
   name: "schema",
   grade: ({ result, parseError }) =>
     result
@@ -39,14 +40,14 @@ export const schemaGrader: Grader = {
 };
 
 /** The learning-review decision matches what the case expects. */
-export const emitsExpectedGrader: Grader = {
+export const emitsExpectedGrader: Grader<LearningExpect> = {
   name: "emits-expected",
   grade: ({ evalCase, result }) => {
     if (!result) {
       return fail("emits-expected", "no parseable result to inspect");
     }
     const count = result.learningMutations.length;
-    if (evalCase.expect === "learning") {
+    if (evalCase.expect.decision === "learning") {
       return count > 0
         ? pass("emits-expected", "emitted a learning as expected")
         : fail("emits-expected", "expected a learning but learningMutations was empty");
@@ -58,7 +59,7 @@ export const emitsExpectedGrader: Grader = {
 };
 
 /** Every added learning carries exactly one action tag, matching the run action. */
-export const tagsGrader: Grader = {
+export const tagsGrader: Grader<LearningExpect> = {
   name: "tags",
   grade: ({ evalCase, result }) => {
     if (!result) {
@@ -89,7 +90,7 @@ export const tagsGrader: Grader = {
 };
 
 /** Every added learning uses the required Rule / When-to-apply content structure. */
-export const structureGrader: Grader = {
+export const structureGrader: Grader<LearningExpect> = {
   name: "structure",
   grade: ({ result }) => {
     if (!result) {
@@ -117,11 +118,12 @@ export const structureGrader: Grader = {
  * through unverified: "shared" must be the literal shared scope; "repo-specific"
  * must be any non-shared repo.
  */
-export const scopeGrader: Grader = {
+export const scopeGrader: Grader<LearningExpect> = {
   name: "scope",
   advisory: true,
   grade: ({ evalCase, result }) => {
-    if (!evalCase.expectScope) {
+    const expectScope = evalCase.expect.scope;
+    if (!expectScope) {
       return pass("scope", "n/a (no scope expectation)");
     }
     if (!result) {
@@ -133,14 +135,14 @@ export const scopeGrader: Grader = {
     }
     for (const add of adds) {
       const isShared = add.repo === "shared";
-      if (evalCase.expectScope === "shared" && !isShared) {
+      if (expectScope === "shared" && !isShared) {
         return fail("scope", `expected a shared (cross-repo) learning but "${add.title}" is scoped to repo "${add.repo}"`);
       }
-      if (evalCase.expectScope === "repo-specific" && isShared) {
+      if (expectScope === "repo-specific" && isShared) {
         return fail("scope", `expected a repo-specific learning but "${add.title}" used the "shared" scope`);
       }
     }
-    return pass("scope", `all ${adds.length} learning(s) match the expected ${evalCase.expectScope} scope`);
+    return pass("scope", `all ${adds.length} learning(s) match the expected ${expectScope} scope`);
   },
 };
 
@@ -209,11 +211,11 @@ export const buildJudgePrompt = (add: LearningAdd, syntheticSession: string): st
  * that expect a learning, and only when the harness injected a model call
  * (`--no-judge` disables it).
  */
-export const judgeGrader: Grader = {
+export const judgeGrader: Grader<LearningExpect> = {
   name: "quality",
   advisory: true,
   grade: async ({ evalCase, result, invokeModel }) => {
-    if (evalCase.expect !== "learning") {
+    if (evalCase.expect.decision !== "learning") {
       return pass("quality", "n/a (no learning expected)");
     }
     if (!result) {
@@ -237,4 +239,4 @@ export const judgeGrader: Grader = {
 };
 
 /** Graders applied to each learning-policy sample, deterministic first, advisory last. */
-export const learningWritebackGraders: Grader[] = [schemaGrader, emitsExpectedGrader, tagsGrader, structureGrader, scopeGrader, judgeGrader];
+export const learningWritebackGraders: Grader<LearningExpect>[] = [schemaGrader, emitsExpectedGrader, tagsGrader, structureGrader, scopeGrader, judgeGrader];

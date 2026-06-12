@@ -69,9 +69,11 @@ export function formatDuration(startedAt: string | null, finishedAt: string | nu
 }
 
 // Compact "short-number" rendering: 950 -> "950", 1_400 -> "1.4k", 23_000 -> "23k",
-// 2_300_000 -> "2.3m", 45_000_000 -> "45m". One fraction digit while the magnitude
-// is single-digit, then drops to zero — keeps the column narrow without losing
-// signal at the small end.
+// 2_300_000 -> "2.3M", 45_000_000 -> "45M", 2_300_000_000 -> "2.3B". One fraction
+// digit while the magnitude is single-digit, then drops to zero — keeps the column
+// narrow without losing signal at the small end. Millions and billions use an
+// uppercase "M"/"B" so a token count never reads as a duration, where lowercase "m"
+// means minutes (see formatDuration); "k" stays lowercase as it has no collision.
 export function formatShortNumber(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return "-"
@@ -87,8 +89,13 @@ export function formatShortNumber(value: number | null | undefined) {
     return `${thousands.toFixed(absolute < 10_000 ? 1 : 0)}k`
   }
 
-  const millions = value / 1_000_000
-  return `${millions.toFixed(absolute < 10_000_000 ? 1 : 0)}m`
+  if (absolute < 1_000_000_000) {
+    const millions = value / 1_000_000
+    return `${millions.toFixed(absolute < 10_000_000 ? 1 : 0)}M`
+  }
+
+  const billions = value / 1_000_000_000
+  return `${billions.toFixed(absolute < 10_000_000_000 ? 1 : 0)}B`
 }
 
 export function formatRelativeTime(value: string | null | undefined, now = Date.now()) {

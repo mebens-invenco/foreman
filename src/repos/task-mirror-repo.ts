@@ -25,6 +25,11 @@ export type TaskTargetDependencyRecord = {
 
 export interface TaskMirrorRepo {
   saveTasks(tasks: Task[]): void;
+  // Update only a task's labels. Unlike saveTasks this touches no targets or
+  // dependencies, so it's safe for a lightweight write (e.g. the agent-enabled
+  // toggle) without triggering a full target-dependency rebuild. No-op if the
+  // task isn't mirrored.
+  setTaskLabels(taskId: string, labels: string[]): void;
   upsertTaskPullRequest(input: { taskId: string; pullRequest: TaskPullRequest }): void;
   getTasks(options?: GetTasksOptions): Task[];
   getTask(taskId: string): Task | null;

@@ -6,8 +6,11 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-    --text-xxs: 0.625rem;
-    --text-xxs--line-height: calc(0.875 / 0.625);
+    /* Legibility floor: keep micro-labels at the text-xs size (0.75rem / 12px)
+       rather than a sub-11px value. Defined once here so every text-xxs usage
+       across all pages clears the floor. */
+    --text-xxs: 0.75rem;
+    --text-xxs--line-height: calc(1 / 0.75);
 }
 
 @theme inline {
@@ -53,6 +56,24 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+@utility scroll-shadow-x {
+    /* Pure-CSS horizontal scroll affordance for overflowing table containers.
+       Cover layers (background-attachment: local) travel with the content and
+       mask the shadow at each scroll extreme; shadow layers (scroll) stay
+       pinned to the visible edges. A shadow therefore fades in only at an edge
+       that has more content beyond it, and nothing shows when content fits.
+       The cover color matches the bg-card/75 backdrop these containers sit on. */
+    background-image:
+        linear-gradient(to right, var(--scroll-shadow-cover) 55%, transparent),
+        linear-gradient(to left, var(--scroll-shadow-cover) 55%, transparent),
+        linear-gradient(to right, var(--scroll-shadow-color), transparent),
+        linear-gradient(to left, var(--scroll-shadow-color), transparent);
+    background-position: 0 0, 100% 0, 0 0, 100% 0;
+    background-repeat: no-repeat;
+    background-size: 2rem 100%, 2rem 100%, 1rem 100%, 1rem 100%;
+    background-attachment: local, local, scroll, scroll;
+}
+
 :root {
     --background: oklch(1 0 0);
     --foreground: oklch(0.147 0.004 49.25);
@@ -78,6 +99,8 @@
     --chart-4: oklch(0.508 0.118 165.612);
     --chart-5: oklch(0.432 0.095 166.913);
     --radius: 0.625rem;
+    --scroll-shadow-cover: color-mix(in oklab, var(--card) 75%, var(--background));
+    --scroll-shadow-color: color-mix(in oklab, black 16%, transparent);
     --sidebar: oklch(0.985 0.001 106.423);
     --sidebar-foreground: oklch(0.147 0.004 49.25);
     --sidebar-primary: oklch(0.596 0.145 163.225);
@@ -125,6 +148,7 @@
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.553 0.013 58.071);
+    --scroll-shadow-color: color-mix(in oklab, black 55%, transparent);
     --chart-1: oklch(0.845 0.143 164.978);
     --chart-2: oklch(0.696 0.17 162.48);
     --chart-3: oklch(0.596 0.145 163.225);
