@@ -160,7 +160,7 @@ describe("LinearTaskSystem.listCandidates", () => {
     expect(logger.warn).toHaveBeenCalledWith(
       "Linear GraphQL request timed out; retrying",
       expect.objectContaining({
-        operationName: "ForemanIssueCandidates",
+        operationName: "ForemanAssignedIssues",
         attempt: 1,
         maxAttempts: 3,
         delayMs: 250,
@@ -195,7 +195,7 @@ describe("LinearTaskSystem.listCandidates", () => {
     expect(logger.warn).toHaveBeenCalledWith(
       "Linear GraphQL request failed with transient status; retrying",
       expect.objectContaining({
-        operationName: "ForemanIssueCandidates",
+        operationName: "ForemanAssignedIssues",
         status: 503,
         attempt: 1,
         maxAttempts: 3,
@@ -216,6 +216,34 @@ describe("LinearTaskSystem.listCandidates", () => {
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  test("surfaces candidate query transient status after bounded retries", async () => {
+    vi.useFakeTimers();
+    const logger = createSpyingLogger();
+    global.fetch = vi.fn(async () => new Response("Service Unavailable", { status: 503, statusText: "Service Unavailable" })) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], logger as any);
+
+    const tasksPromise = taskSystem.listCandidates();
+    const expectation = expect(tasksPromise).rejects.toMatchObject({ code: "linear_request_failed" });
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expectation;
+
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(logger.warn).toHaveBeenCalledTimes(2);
+    expect(logger.error).toHaveBeenCalledWith(
+      "Linear GraphQL request failed",
+      expect.objectContaining({
+        operationName: "ForemanAssignedIssues",
+        status: 503,
+        attempt: 3,
+        maxAttempts: 3,
+      }),
+    );
   });
 
   test("surfaces candidate query timeout after bounded retries", async () => {
@@ -239,7 +267,7 @@ describe("LinearTaskSystem.listCandidates", () => {
       2,
       "Linear GraphQL request timed out; retrying",
       expect.objectContaining({
-        operationName: "ForemanIssueCandidates",
+        operationName: "ForemanAssignedIssues",
         attempt: 2,
         maxAttempts: 3,
         delayMs: 1_000,
@@ -248,7 +276,7 @@ describe("LinearTaskSystem.listCandidates", () => {
     expect(logger.error).toHaveBeenCalledWith(
       "Linear GraphQL request timed out",
       expect.objectContaining({
-        operationName: "ForemanIssueCandidates",
+        operationName: "ForemanAssignedIssues",
         attempt: 3,
         maxAttempts: 3,
         timeoutMs: 60_000,
@@ -289,6 +317,25 @@ describe("LinearTaskSystem.listCandidates", () => {
         { retryTransient: true },
       ),
     ).rejects.toMatchObject({ code: "linear_request_timeout" });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  test("does not retry mutation transient statuses when transient retries are requested", async () => {
+    const logger = createSpyingLogger();
+    global.fetch = vi.fn(async () => new Response("Bad Gateway", { status: 502, statusText: "Bad Gateway" })) as typeof fetch;
+    const client = new LinearClient("test-key", logger as any);
+
+    await expect(
+      client.request(
+        `mutation ForemanMutation {
+          issueUpdate(id: "issue-1", input: { title: "Task" }) { success }
+        }`,
+        {},
+        { retryTransient: true },
+      ),
+    ).rejects.toMatchObject({ code: "linear_request_failed" });
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(logger.warn).not.toHaveBeenCalled();
@@ -439,6 +486,56 @@ describe("LinearTaskSystem.listAssignedIssues", () => {
       teamName: "Engineering",
       assigneeName: "Jane Doe",
     });
+  });
+
+  test("retries transient assigned-issues query statuses without adding label variables", async () => {
+    vi.useFakeTimers();
+    const logger = createSpyingLogger();
+    const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
+    global.fetch = vi
+      .fn(async (_url, init) => {
+        const body = JSON.parse(String(init?.body ?? "{}")) as { query: string; variables: Record<string, unknown> };
+        requests.push(body);
+
+        if (!body.query.includes("query ForemanAssignedIssues")) {
+          throw new Error(`Unexpected query: ${body.query}`);
+        }
+
+        if (requests.length === 1) {
+          return new Response("Service Unavailable", { status: 503, statusText: "Service Unavailable" });
+        }
+
+        return new Response(JSON.stringify({ data: linearIssue([], "Jane Doe") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], logger as any);
+
+    const tasksPromise = taskSystem.listAssignedIssues();
+    await vi.advanceTimersByTimeAsync(250);
+    const tasks = await tasksPromise;
+
+    expect(tasks.map((task) => task.id)).toEqual(["ENG-123"]);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(requests[1]?.query).not.toContain("$labels: [String!]");
+    expect(requests[1]?.variables).toEqual({
+      teamName: "Engineering",
+      assigneeName: "Jane Doe",
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Linear GraphQL request failed with transient status; retrying",
+      expect.objectContaining({
+        operationName: "ForemanAssignedIssues",
+        status: 503,
+        attempt: 1,
+        maxAttempts: 3,
+        delayMs: 250,
+      }),
+    );
   });
 });
 
