@@ -1,5 +1,6 @@
 import { learningPolicyCases } from "./cases/learning-policy.js";
-import { learningWritebackGraders } from "./graders.js";
+import { summaryPolicyCases } from "./cases/summary-policy.js";
+import { learningWritebackGraders, summaryPolicyGraders } from "./graders.js";
 import type { EvalDefinition } from "./types.js";
 
 /**
@@ -9,7 +10,9 @@ import type { EvalDefinition } from "./types.js";
  * gate, a case set from one prompt could silently pair with graders from another
  * and only fail at runtime. Always build registry entries through this.
  */
-const defineEval = <Expect>(definition: EvalDefinition<Expect>): EvalDefinition => definition as EvalDefinition;
+const defineEval = <Expect>(
+  definition: EvalDefinition<Expect>,
+): EvalDefinition => definition as EvalDefinition;
 
 /**
  * The eval corpus, keyed by prompt. Adding a prompt is a `defineEval` entry + a
@@ -24,6 +27,11 @@ export const EVAL_REGISTRY: Record<string, EvalDefinition> = {
     prompt: "learning-policy",
     cases: learningPolicyCases,
     graders: learningWritebackGraders,
+  }),
+  "summary-policy": defineEval({
+    prompt: "summary-policy",
+    cases: summaryPolicyCases,
+    graders: summaryPolicyGraders,
   }),
 };
 
