@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { WorkerResult } from "../domain/index.js";
 import type { LearningExpect } from "./cases/learning-policy.js";
+import type { SummaryExpect } from "./cases/summary-policy.js";
 import type { Grader, GraderResult } from "./types.js";
 
 /**
@@ -30,14 +31,22 @@ const learningAdds = (result: WorkerResult): LearningAdd[] =>
 const pass = (dimension: string, detail: string): GraderResult => ({ dimension, pass: true, detail });
 const fail = (dimension: string, detail: string): GraderResult => ({ dimension, pass: false, detail });
 
-/** Parsed + validated against the action-specific worker-result schema. */
-export const schemaGrader: Grader<LearningExpect> = {
+/**
+ * Parsed + validated against the action-specific worker-result schema. Reads no
+ * `expect`, so it is prompt-agnostic: a factory generic over `Expect` lets every
+ * prompt's grader array hold a correctly-typed instance (rather than each prompt
+ * re-implementing the same parse check).
+ */
+export const makeSchemaGrader = <Expect>(): Grader<Expect> => ({
   name: "schema",
   grade: ({ result, parseError }) =>
     result
       ? pass("schema", "parsed and validated against the worker-result schema")
       : fail("schema", `did not parse/validate: ${parseError ?? "unknown error"}`),
-};
+});
+
+/** Learning-policy's schema grader instance. */
+export const schemaGrader: Grader<LearningExpect> = makeSchemaGrader<LearningExpect>();
 
 /** The learning-review decision matches what the case expects. */
 export const emitsExpectedGrader: Grader<LearningExpect> = {
@@ -156,7 +165,10 @@ const judgeVerdictSchema = z.object({
   rationale: z.string().min(1),
 });
 
-export const parseJudgeVerdict = (stdout: string): z.infer<typeof judgeVerdictSchema> | null => {
+// Shared <judge>…</judge> extraction for all LLM-as-judge graders: pull the last
+// well-formed judge block from the model stdout (or fall back to the whole
+// output) and validate it against that judge's verdict schema.
+const parseJudgeBlock = <Schema extends z.ZodType>(stdout: string, schema: Schema): z.infer<Schema> | null => {
   const open = "<judge>";
   const close = "</judge>";
   const openStart = stdout.lastIndexOf(open);
@@ -164,12 +176,14 @@ export const parseJudgeVerdict = (stdout: string): z.infer<typeof judgeVerdictSc
   const payload = openStart !== -1 && closeStart > openStart ? stdout.slice(openStart + open.length, closeStart).trim() : stdout.trim();
 
   try {
-    const verdict = judgeVerdictSchema.safeParse(JSON.parse(payload));
+    const verdict = schema.safeParse(JSON.parse(payload));
     return verdict.success ? verdict.data : null;
   } catch {
     return null;
   }
 };
+
+export const parseJudgeVerdict = (stdout: string): z.infer<typeof judgeVerdictSchema> | null => parseJudgeBlock(stdout, judgeVerdictSchema);
 
 // Generalizable rule vs one-off fact. The weakness this targets: a model will
 // rubber-stamp any well-structured "Rule:" as reusable. But the failure mode is
@@ -240,3 +254,195 @@ export const judgeGrader: Grader<LearningExpect> = {
 
 /** Graders applied to each learning-policy sample, deterministic first, advisory last. */
 export const learningWritebackGraders: Grader<LearningExpect>[] = [schemaGrader, emitsExpectedGrader, tagsGrader, structureGrader, scopeGrader, judgeGrader];
+
+// ───────────────────────────── summary-policy ─────────────────────────────
+//
+// Graders for the `summary` field the summary-policy fragment produces. The
+// worker-result schema only enforces `summary` is non-empty (worker-result.ts),
+// so the bar — concise, names the meaningful outcome, no operator-hostile jargon
+// — is enforced here. The empirical constants are sourced from the error
+// analysis of 296 real summaries (`src/eval/analysis/summary-policy-error-analysis.md`).
+
+/**
+ * Empirical conciseness ceilings from the GOOD-summary distribution
+ * (`src/eval/analysis/summary-policy-error-analysis.md`, "Empirical conciseness bar"):
+ *   - standard: ≤3 sentences (216/226 good are 1–3 sent) and ≤450 chars
+ *     (p95 of good = 444c). A no_action_needed summary over this is over-long.
+ *   - multiPart: relaxed to ≤6 sentences / ≤700 chars for genuinely multi-part
+ *     completed work (observed good max 698c/6 sent). These ceilings are NEVER a
+ *     floor — a 120c single sentence is the observed concision floor and good.
+ */
+const SUMMARY_LENGTH_BARS = {
+  standard: { maxSentences: 3, maxChars: 450 },
+  multiPart: { maxSentences: 6, maxChars: 700 },
+} as const;
+
+// Abbreviations whose trailing dot must not end a sentence. EMPIRICAL closed
+// set: a scan of the real 296-summary corpus
+// (`rg -o '\b(e\.g|i\.e|etc|vs|incl|approx)\.'` over the 296 harvested summaries
+// — local corpus, regenerable via `foreman eval-harvest automation-pilot` — plus
+// a broader dotted-letter sweep, ENG-5444 review) found exactly two abbreviation
+// shapes in live summaries — `etc.` (×1) and `incl.` (×1). No e.g./i.e./vs./
+// approx./U.S.-style forms occur, so per the no-invented-bars rule we mask only
+// what is observed; extend this set only from corpus evidence.
+const OBSERVED_ABBREVIATIONS = /\b(etc|incl)\./gi;
+
+/**
+ * Counts sentences with the splitter caveat from the report: a `.`/`!`/`?` ends
+ * a sentence only when followed by whitespace (or end-of-string) AND not part of
+ * a decimal/version (`4.11.0`), a dotted identifier (`query.from`), or an
+ * observed abbreviation (`etc.`, `incl.`). We strip those shapes before counting
+ * so they don't inflate the sentence count.
+ */
+export const countSentences = (text: string): number => {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return 0;
+  }
+  // Neutralise decimals/versions (digit.digit, any depth), dotted identifiers
+  // (word.word, any depth), and the observed abbreviations so their dots aren't
+  // read as terminators.
+  const masked = trimmed
+    .replace(/\d+(?:\.\d+)+/g, (match) => match.replace(/\./g, "·"))
+    .replace(/[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+/g, (match) => match.replace(/\./g, "·"))
+    .replace(OBSERVED_ABBREVIATIONS, (match) => match.replace(".", "·"));
+  // A terminator is . ! ? followed by whitespace or end-of-string.
+  const segments = masked.split(/[.!?]+(?:\s+|$)/).filter((segment) => segment.trim().length > 0);
+  return segments.length;
+};
+
+/** The emitted result's outcome matches what the session warrants. */
+export const outcomeGrader: Grader<SummaryExpect> = {
+  name: "outcome",
+  grade: ({ evalCase, result }) => {
+    if (!result) {
+      return fail("outcome", "no parseable result to inspect");
+    }
+    return result.outcome === evalCase.expect.outcome
+      ? pass("outcome", `outcome is "${result.outcome}" as expected`)
+      : fail("outcome", `expected outcome "${evalCase.expect.outcome}" but got "${result.outcome}"`);
+  },
+};
+
+/**
+ * The summary stays within the case's empirical conciseness ceiling. It is a
+ * ceiling, never a floor: a short summary always passes. `lengthBar: "multiPart"`
+ * raises the ceiling so the grader does not penalize genuine multi-part completed
+ * work (the report's explicit instruction).
+ */
+export const concisenessGrader: Grader<SummaryExpect> = {
+  name: "conciseness",
+  grade: ({ evalCase, result }) => {
+    if (!result) {
+      return fail("conciseness", "no parseable result to inspect");
+    }
+    const bar = SUMMARY_LENGTH_BARS[evalCase.expect.lengthBar];
+    const chars = result.summary.length;
+    const sentences = countSentences(result.summary);
+    if (chars > bar.maxChars) {
+      return fail("conciseness", `summary is ${chars} chars; ${evalCase.expect.lengthBar} ceiling is ${bar.maxChars}`);
+    }
+    if (sentences > bar.maxSentences) {
+      return fail("conciseness", `summary is ${sentences} sentences; ${evalCase.expect.lengthBar} ceiling is ${bar.maxSentences}`);
+    }
+    return pass("conciseness", `${chars} chars / ${sentences} sentence(s), within the ${evalCase.expect.lengthBar} ceiling`);
+  },
+};
+
+// Raw GitHub GraphQL review-thread node ids (PRRT_…) are operator-hostile jargon
+// per the report's `jargon-id` mode — meaningless in an operator surface. The
+// report anchors the mode on PRRT_ ONLY (other shapes may exist but are
+// unobserved), so the always-on check stays scoped to that prefix; bare commit
+// SHAs are conventional and explicitly NOT flagged.
+const OPAQUE_ID_PATTERN = /PRRT_\w+/;
+
+// Mention matching is phrasing-tolerant: lowercase and collapse hyphen/whitespace
+// runs to a single space on BOTH haystack and needle, so a needle like
+// "shadow database" still matches a summary that writes "shadow-database" (and
+// vice versa). Needles should additionally anchor on durable tokens (e.g. "#72"
+// rather than "PR #72") so legitimate rephrasings don't fail the case.
+const normalizeForMention = (text: string): string => text.toLowerCase().replace(/[-\s]+/g, " ");
+
+/**
+ * The summary contains every `mustMention` substring and none of the
+ * `mustNotMention` substrings (both case- and hyphen/whitespace-insensitive),
+ * and never an opaque PRRT_ node id (always-on, regardless of `mustNotMention`).
+ */
+export const mentionGrader: Grader<SummaryExpect> = {
+  name: "mentions",
+  grade: ({ evalCase, result }) => {
+    if (!result) {
+      return fail("mentions", "no parseable result to inspect");
+    }
+    const haystack = normalizeForMention(result.summary);
+    for (const needle of evalCase.expect.mustMention ?? []) {
+      if (!haystack.includes(normalizeForMention(needle))) {
+        return fail("mentions", `summary must mention "${needle}" but does not`);
+      }
+    }
+    for (const needle of evalCase.expect.mustNotMention ?? []) {
+      if (haystack.includes(normalizeForMention(needle))) {
+        return fail("mentions", `summary must NOT mention "${needle}" but does`);
+      }
+    }
+    const opaque = OPAQUE_ID_PATTERN.exec(result.summary);
+    if (opaque) {
+      return fail("mentions", `summary leaks an opaque GraphQL node id ("${opaque[0]}") — operator-hostile jargon`);
+    }
+    return pass("mentions", "all required mentions present, no forbidden substrings or opaque ids");
+  },
+};
+
+const summaryJudgeVerdictSchema = z.object({
+  verdict: z.enum(["pass", "fail"]),
+  reason: z.string().min(1),
+});
+
+export const parseSummaryJudgeVerdict = (stdout: string): z.infer<typeof summaryJudgeVerdictSchema> | null => parseJudgeBlock(stdout, summaryJudgeVerdictSchema);
+
+// Binary verdict (not Likert) per current eval practice — see the learning-policy
+// judge note above. Targets the one honesty nuance the report's spot-check found
+// (a summary asserting full verification when a step was deferred) plus any
+// fabrication/overclaim a future trace might surface.
+export const buildSummaryJudgePrompt = (syntheticSession: string, summary: string): string =>
+  [
+    "You are grading whether a one-line work summary an agent emitted at the end of a session faithfully states the MEANINGFUL OUTCOME of that session, without fabricating or overclaiming.",
+    'Answer "pass" if the summary states what actually happened and claims no more than the session supports.',
+    'Answer "fail" only if the summary fabricates a result that did not happen, or OVERCLAIMS — e.g. asserts full/complete verification when the session left a verification or smoke step deferred or unchecked.',
+    "Conciseness and style are NOT under your review — judge only fidelity to the session.",
+    "",
+    "The session that just happened:",
+    syntheticSession.trim(),
+    "",
+    "The summary under review:",
+    summary,
+    "",
+    "Reply with ONLY this block and nothing else:",
+    '<judge>{"verdict": "pass" | "fail", "reason": "<one sentence>"}</judge>',
+  ].join("\n");
+
+/**
+ * LLM-as-judge fabrication grader. ADVISORY: reported but never gates a sample —
+ * an uncalibrated judge must not fail a sample on its own (see calibration
+ * README). No-ops to a pass when `invokeModel` is absent (`--no-judge`).
+ */
+export const summaryJudgeGrader: Grader<SummaryExpect> = {
+  name: "fabrication",
+  advisory: true,
+  grade: async ({ evalCase, result, invokeModel }) => {
+    if (!result) {
+      return fail("fabrication", "no parseable result to judge");
+    }
+    if (!invokeModel) {
+      return pass("fabrication", "judge skipped (--no-judge)");
+    }
+    const verdict = parseSummaryJudgeVerdict(await invokeModel(buildSummaryJudgePrompt(evalCase.syntheticSession, result.summary)));
+    if (!verdict) {
+      return fail("fabrication", "could not parse a judge verdict from the judge model output");
+    }
+    return verdict.verdict === "pass" ? pass("fabrication", verdict.reason) : fail("fabrication", verdict.reason);
+  },
+};
+
+/** Graders applied to each summary-policy sample, deterministic first, advisory last. */
+export const summaryPolicyGraders: Grader<SummaryExpect>[] = [makeSchemaGrader<SummaryExpect>(), outcomeGrader, concisenessGrader, mentionGrader, summaryJudgeGrader];

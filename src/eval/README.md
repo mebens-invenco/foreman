@@ -74,6 +74,44 @@ Fidelity notes:
   records that should have been updates; correct updates) and deferred to the
   seeded-store increment.
 
+## Cases & sourcing (summary-policy)
+
+The summary-policy eval (ENG-5444) grades the `summary` field the same
+synthetic-session scaffold produces — the harness renders the worker prompt,
+appends a session, and the graders inspect the emitted `summary` rather than the
+`learningMutations`. Bar (`prompts/fragments/summary-policy.md`): concise, names
+the meaningful outcome (not every step), prefer one sentence, name the blocker
+clearly when blocked.
+
+The case set is **derived from real traces**, error-analysed in
+[`analysis/summary-policy-error-analysis.md`](analysis/summary-policy-error-analysis.md)
+across 296 live summaries (76.4% good). Each negative case is a scenario
+engineered to tempt an observed failure mode, sourced from the trace that
+exhibited it: a telemetry-rich no-action polling pass tempts the **over-long**
+mode; a session carrying raw `PRRT_` GraphQL thread node ids tempts the
+**jargon-id** mode; a pure rename tempts file-by-file narration. The positive
+cases anchor the good shapes (clean completed, concise stand-down, multi-part
+merge-conflict resolution, a clearly-named blocker).
+
+Graders: `schema` (reused, prompt-agnostic), `outcome` (matches the warranted
+outcome), `conciseness` (the empirical ceiling — ≤3 sent / ≤450 chars standard,
+relaxed to ≤6 / ~700 for `lengthBar: "multiPart"` completed work, p95 of good =
+444c; a ceiling, never a floor), `mentions` (case-insensitive mustMention /
+mustNotMention plus an always-on `PRRT_` opaque-id check), and an **advisory**
+`fabrication` judge (binary PASS/FAIL on whether the summary overclaims, e.g.
+asserting full verification when a step was deferred). The conciseness sentence
+splitter protects decimals/versions and dotted identifiers per the report.
+
+Fidelity / gaps:
+- The conciseness constants are the empirical good-summary distribution, not an
+  invented cap. Provenance is commented on `SUMMARY_LENGTH_BARS`.
+- The corpus has only **one** blocked trace (a good one) and **no** vague /
+  fabricated / overclaimed negatives, so the `blocked-second-scenario` case is
+  marked `SYNTHETIC`. The `jargon-id` mode is anchored on `PRRT_` only — other
+  opaque-id shapes are unobserved and intentionally not invented.
+- The `fabrication` judge is **advisory** (uncalibrated; never gates) — the
+  honesty nuance it targets is a weak signal (2/40 execution traces).
+
 ## Judge calibration
 
 The `quality` judge is **advisory** (it never gates a sample) and was calibrated

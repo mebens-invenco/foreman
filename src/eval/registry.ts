@@ -1,5 +1,6 @@
 import { learningPolicyCases } from "./cases/learning-policy.js";
-import { learningWritebackGraders } from "./graders.js";
+import { summaryPolicyCases } from "./cases/summary-policy.js";
+import { learningWritebackGraders, summaryPolicyGraders } from "./graders.js";
 import type { EvalDefinition } from "./types.js";
 
 /**
@@ -17,13 +18,18 @@ const defineEval = <Expect>(definition: EvalDefinition<Expect>): EvalDefinition 
  * prompt carries its own `EvalCase<Expect>` expectation shape, type-checked as a
  * consistent pairing by `defineEval`, then erased here (the core never reads
  * `expect`; only that prompt's graders do). Currently registers the
- * learning-policy write-back.
+ * learning-policy write-back and the summary-policy summary field.
  */
 export const EVAL_REGISTRY: Record<string, EvalDefinition> = {
   "learning-policy": defineEval({
     prompt: "learning-policy",
     cases: learningPolicyCases,
     graders: learningWritebackGraders,
+  }),
+  "summary-policy": defineEval({
+    prompt: "summary-policy",
+    cases: summaryPolicyCases,
+    graders: summaryPolicyGraders,
   }),
 };
 

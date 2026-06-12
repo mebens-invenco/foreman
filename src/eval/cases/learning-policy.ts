@@ -1,5 +1,5 @@
-import type { Task } from "../../domain/index.js";
 import type { EvalCase } from "../types.js";
+import { fileTask } from "./task-fixtures.js";
 
 /**
  * The learning-policy expectation payload (the `Expect` of its `EvalCase`s).
@@ -34,27 +34,6 @@ export type LearningExpect = {
  * worker searches at runtime), so a stateless run starts empty. Deferred to the
  * seeded-store increment; the dedup behaviour is documented from real traces.
  */
-
-const fileTask = (id: string, title: string, description: string, priority: Task["priority"]): Task => ({
-  id,
-  provider: "file",
-  providerId: id,
-  title,
-  description,
-  state: "ready",
-  providerState: "ready",
-  priority,
-  labels: ["Agent"],
-  assignee: null,
-  targets: [{ repoKey: "eval-repo", branchName: id.toLowerCase(), position: 0 }],
-  targetDependencies: [],
-  dependencies: { taskIds: [], baseTaskId: null },
-  baseBranch: null,
-  pullRequests: [],
-  runnerOverride: null,
-  updatedAt: "2026-06-01T00:00:00Z",
-  url: null,
-});
 
 export const learningPolicyCases: EvalCase<LearningExpect>[] = [
   {

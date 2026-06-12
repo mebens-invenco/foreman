@@ -1,0 +1,2523 @@
+[
+  {
+    "attemptId": "01KTTX0C84ET8D563SN1P0QTMV",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTTWWR1EEYCE2XW92WBX9NC3",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTTWQYA7TP8PF5VEG1ZNKF9M",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTTWDTMEA6VH6XY0WTHGK5WQ",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTTW25B8RKP84BZ72CBEP77J",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTTVC2P4VZJSARR5SPHW27WX",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTT17P6AP8Q85AMCM803FYMF",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "5 sentences / 788 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTT0G6J4SKNCF7B0BGFHN8SG",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTR1C6A9CF09QNYEQTEXWXCT",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 505 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTR11KM4RENRDMJ1D7S8T3G8",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTR0JCCEH25ZFR8JAPKDW460",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTQYFR6JA3BSE5GWE0BGAHVF",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTQX6PV66G9G56XJA1HZHEJF",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTQQVM72HA1WTEDDA6X4K0ZS",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "5 sentences / 706 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTQQS5PSN7FFTY1RWTD4Q7B2",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "5 sentences / 438 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTQQM9RVXNZWM17VV90GQ5Z7",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "5 sentences / 487 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTQP4EV69NNT1WC1AZJF5TKZ",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 461 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTQP2DDNESJ820DAV6J0BJ2Y",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 461 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTQMX5EPZT854GVZ03KF6VM8",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 461 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTQMV96KN7SB5045P8BP6MD8",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 461 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTQMV96FKJTTDTCWXBFR22KQ",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTQMF7FS2ZX4BAV89YGAEH77",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTQKY3TSYQH9XMXMVFZ822EB",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 461 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTQKTBRV6HGK1N166QBQTBPQ",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 448 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTQARR3VW4VPSXV7K4T52FRX",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 482 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTQAN2GQPHMHZCJSXPWE7SWA",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 507 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTNXXG0CCS3J3NCXVP93K75F",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNXNW01HNCZXWANB5301Y2F",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNWTMT60Q8Q4GZD0EMEB0XC",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNVAR4JQBW3JHF6C65T3HJH",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNV9X8J3RZRQRXGKYAKFHVQ",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNT3F9V77T36B98YN0V4ZQK",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNSSJ3BTP52AK90QZD3BM7Z",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNSBN9R4PVE3EEPCJNX7A18",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNRWTZW2V1FZQJEKSHJPBDF",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNQMXR1AY0370874R3YPTK3",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNNG0KPGMRJ44BJXZTE6NX6",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNN7SW258Q2K2ATAZF91SB3",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNN64DD6EVGQH56Z7FXH0NP",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNMWSGEVZ5PJXSWMHHNC18Q",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNMNJF7RX3MHYV1XD4JKE4A",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNMGGJD0BBYVFS34WZ89GAN",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNMFJNGV359JSXNR3DZQ5XV",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNMAD7SRKQY5EMKRDHXG3KN",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNM8AQE1EYA75QQB62NN25S",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNM26MNZXDT3Y92K018BDCC",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNM0GK2E5DQHHD173PHPCM5",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNKTFZ2HGZ7W8G57BNVQJYE",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNKNMQV0J7XPJJ625TE2FGP",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNKM3E5ME3SA87TYVBARNT0",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNKC8FZERTDE5BZJTE59MMX",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNK1993NXS3HNB50YTQ7JAY",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNJT8S17J1A60AJY3AFMSHA",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNJMJ7VN1ZDYZ82B5HCG3KB",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNJ8WV7Q12R343P2A5HVX9F",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNJ1SGR0ETATV06RWWSDF09",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNHX98FRWX161W0EGGG50Z0",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNHKWK09ATW6986A8WMBQ8W",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNGJJZ7GJEJRDESVSXDSV3R",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNGEWTKB1DEZ13WPZW3D2KX",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNGEWSD7SMJ6YFB3J4XMEJS",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 677 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTNDKWWYQCD67QHAFJ3GMBBA",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTNDGRWAR45S87VE0XV4RJSZ",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 558 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTNDBT6EE75CFJB4RV1DJGX1",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "5 sentences / 778 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTNDBT5MQV2F9TS4Z79ZF17M",
+    "action": "retry",
+    "outcome": "blocked",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KTAFRD1CJS7MJN86SXBBKBPD",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "5 sentences / 829 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KTAEFDFNBD74XX8CN51EHZVW",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "2 sentences / 474 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KT907QPEAKHAWDKS52BQWWFJ",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "2 sentences / 501 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KT8ZCBH7WWNFNVDN0YD21SMP",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 495 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KT8YTC0DP10J17GWQESCDS14",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 685 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KT6EK5CX1AK8NVVHS44WGNBG",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 555 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KT6648KDQ8G4JF1WG769VCC4",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 541 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KT5F72Q840N3MQTSAQHP4KC3",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT5EQTDJX6DF61JKCJD2TMFT",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT5E2SJKXEJRTQPKE0BC1FZ0",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT3BF1J6A31X0CZHR8ETPQCH",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT3AVADTCH811ZCPNJC31HB2",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT3A5QBYH276RNDH1KEWAHCH",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT37GD1FK5X5F4QQFAPDP8V2",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT123XYT7ZG1BQRAFXY64NR8",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT11N5XXPPPNAQH2MWY42BNQ",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT11FYD6B85CDFZSH9VJMVFR",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT114FAQN936QZEVB5X8QQF6",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT109ZTF011E21ASMTQF1HZT",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT103HAXEVCWVWVS8G5BKRNX",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT102KGGKG91PVCSYNX0G5JH",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT0ZWZ6EWDDZSYQVABRD9E59",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT0ZJNZ7Q4DWVXWY9M0W6YMF",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT0Z9K9DX68TJT212M6T6NS6",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT0YP8SVS8HZEXGEATXT9CZV",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT0YNSHMQAR4DEHNPJE54F8X",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT0X83M6N4Q7THGGHE88WRBJ",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT0X5NZHH65Y1FZ9Q00KX0E1",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT0S7Q172ZB7F7W52S3W8Y5X",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT0BB62KC8WYXWSTC5MKARTX",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT0B66TD0243NH7EGDG3TPEH",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT08KZYCT5X12EK2WBN8XRV5",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KT08F7HZSCDCACMJ90CGBNN2",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSS0B7RP6VD9QNMJ5182XXRM",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 470 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSS080FEZGX87MNR41HKQTDQ",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "5 sentences / 384 chars for a trivial/no-change outcome; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSS03W1FJ01WAE711VMV60NZ",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 411 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSS01HAVFGSRBXH3MKP2H0PT",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSS00ZC3K87ZVTDV1P228DY3",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRZSZ6SM648PKGM66S4X2W6",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 625 chars"
+  },
+  {
+    "attemptId": "01KSRZSZ4VD2RD97WJ47FPT8Z2",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRX7WTT400K9X1VAYRKK6W4",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRX6HTG00E6CD32WKJ7BXAE",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRX5G9NA2YBRFJ4SFA982WX",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "5 sentences / 308 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSRX1BHV8409535MNPG5PXM4",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRX1BH4T9W7RC0G2BSCFKCJ",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRWHWZR19EXHTBX26YPBDXS",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "4 sentences / 395 chars for a no-action stand-down; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRWFQMZ236PPJB0HEQ2NPKA",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRWFDR1WCHRSQ2084K9E4PX",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "jargon-id"
+    ],
+    "note": "recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRWBKSBNTVW1M8T8RRNEATV",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "jargon-id"
+    ],
+    "note": "recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRTE8NM8NEDPFA682YEJZYQ",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "4 sentences / 339 chars for a no-action stand-down; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRTBSCYR6P2G1JVRJ7XVGXR",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "4 sentences / 428 chars for a no-action stand-down; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRT1Z07WJ2RXGGVQV3EAEX9",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 326 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSRSZG1S164K366J6ERG52S7",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "5 sentences / 434 chars for a no-action stand-down; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRSVT9MMSHQPFSA6KG214QE",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "6 sentences / 488 chars for a no-action stand-down; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRQ3FR8MW182JDSWCHM3473",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRPX2SXQN3985K4BM7PC1GC",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRPWX55Z65KFGBMX5FBK6WJ",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRPK59S80M5TCNHBHQQCQYF",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRJNZ99CCT2XV54D0A38YPA",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "4 sentences / 294 chars for a no-action stand-down; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRJJFBNYRQ0E19KD5X5VBVB",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "jargon-id"
+    ],
+    "note": "recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRJ60HWQZHCDM5FSPMRYSY4",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 494 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSRJ3ANR4DE9798N05M2ACGF",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "4 sentences / 373 chars for a no-action stand-down; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRJ0JAKXDYRCFMPGRWJGJCR",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "4 sentences / 363 chars for a no-action stand-down; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRHFRP5ZEK3XTSJ477Y65BD",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRH1WJPQ7ZSS30FKV2T8GZB",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "6 sentences / 698 chars"
+  },
+  {
+    "attemptId": "01KSRGZTRSY7D1QFR7GMT1584P",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRGZTQDJR0DKCQEZ8TSWT5V",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRGKBR38FT34DWX10SGFAM9",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRGH0Q9ACE7W579B9GH82NR",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRGEJZ12YQNVPGCVJX6E47M",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRG83VQ98N4G936NHZ5N2MW",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "jargon-id"
+    ],
+    "note": "recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRG839PH3T109Y1D72QRZ3S",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRG5B1X86PXNNJ6NXAWS8A6",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSRFZEJSEC0HS6MVR8GBK0AR",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "jargon-id"
+    ],
+    "note": "recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KSRF6S6DRQA5KC0E6VVM09DB",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSQ5AYVD9T7Y0EDW8DDD61P4",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSQ52F75EAX20DSW937KA44A",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSQ4H2Y7V49QZ80WHF73PFZH",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSQ4A79R4M5QER4XDDTXVQ20",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSQ43D4BHVCMKCH0WF9PWE4W",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSQ3PHVA2BE0W4HJJYY82A2Y",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSQ3NPZN392B29DZ4M1DZV9Q",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSQ2E5GJVVC27HGVSTS217EF",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPM25CJNRFPV9W0QSVTJJKJ",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 267 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSPM1E4G1S7W5JR2NTZH83A9",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 486 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSPKWNV6CM796A7MJ8VZ0CPT",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPKT4F89PT1GGCF7SSY2QFQ",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPKGYXG1FS36FRBE5YVPT66",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPK4AEJKCYY881ZHCER38P9",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPJNTQF9VJRFVMM8K15X8V9",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPJC6WWJT5JDVX0MK8NA3S1",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "5 sentences / 427 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSPJ92KPRVFC77PMAGF5HK4C",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPJ0NSG97BHAAX2XYJ92038",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPHXV2RCB3HH911ESRMEN29",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 384 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSPHS4JQZC95MMYBBDF55RZD",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "5 sentences / 489 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSPHMWC3JY7CY5AECT4337M9",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPHH355ZCRT3TKY9Q2KARWX",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPHCPARA45H779KKXGYCXK0",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPHAACXBEXQJDAEN41CVGZZ",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPG4BARXDRRPCEHH5VV6PE0",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 278 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSPFRF69HPQC99JKY3T138NB",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 566 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSPFG4KCEJ4ZCTGS77SNZWHD",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "6 sentences / 478 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSPF5WDH2C7F8PTK5H244S2H",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPF3JRJ4VXY047C21PEA5D2",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPF2JK1RAE3R75MZW8XNK5P",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPEY7JKPQD8GKMP6BAAJPEK",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPEVJRYG7S5TAWWT6GN3DK5",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPDZ6RWPAVNPP63VP4SA28M",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPDW84Z77P8AHK7NECF3WGM",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSPB3BSVBZCCM4EZG30XD7AR",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSP0BPPWT66585KC7RX5M2HE",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSP0402WT4ZCHCXEFCGDVKH9",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSNZY67JVJDSRMBP0CZMEHVC",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSNZN26BNYA9MFGMG834F9F7",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSNXWK1BRHDG1CBEB7KS2MRY",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSNXN476YR0W2RJNPSHSPTQW",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSM7VX182M988FGXMBAG4AMD",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 562 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSM46GTD2QX0VEDHHT7QP5ST",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 529 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSM33X520K6CRF2G0AAXQSF5",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSM0JFK95TQAYR4BCYXDTXDD",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSM01SA0HWMMX9QB7NQKE12T",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSKZNT02RC0KDFYNW0J6YM3V",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSKYTAJWCA7EGT07YB0QJYA3",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSKV3NHCX6T8Z2PS8SV6X3A9",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSKSGAP5SPD8SS08VXP2T5N0",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 370 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSKS2K35RG5P6Q2K8DT53ME0",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSKDBK07GWFDW3648KTYYKK2",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSKD088F10ASA38PASY3RXKA",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSKBY6FPE4ECEBYKSHDTJM4R",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSKBP2J62B3VET78D1Z7CV5W",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSK7HE1NKXA4MH6TCAD1VZAH",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSK7C0W02DNWZZ06SHTN0YN2",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHV9PWBXPY0AV2HDCMBV3CP",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHV43PADDYZYJR3QSJJMB2H",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHTZXZ76YSJ34SSJFWWQTW1",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHTT79DZDN4PD7K4743N2WD",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHTCBVY56EDTZGC73CMSS6W",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHSKZZJ2V2JP7THP95XK0XS",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHREXG0WPS6CDHG0WY6H2ZM",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHQX840TJ6K8ZN17G11YARK",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHQNDTMY2DBJC5A3ZNME97V",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHQHQTC74KTKHFAPW54Q2AM",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHPTZN08RPEDX09PWM5550P",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHPMV0PQ9977WNBKVGFRTVK",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHP80AA8HVZPEMC9KE6Q3MB",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHP7ZJJ8QCWVY5Z8PJ84W7S",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHNS1CA93YKNGRXV0SSEBQF",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHN8MY9DHZD2BNBAJ30E2FG",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHMTK8T9E230GGA7YPJQGWP",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHMSXA12XDAGA8GWSYVRE3X",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHM1GVVWVJYYAWTKRNQP8ZG",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHK01G3FHT4R89MZR4AYYWK",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHJVWY0N0F2JYCWHFVPB252",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHJERADZ8226700DXMXQV37",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHJBXVF0CXW1DJJ58TKX2CY",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSHJBXT7VHTMQ80K99KK6XV8",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH7CZNRF38A3DP3DEFXG7RP",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH6TKZAH35KS9RRFJ1J53WD",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH6GQNG16T6838MH9PXDHT7",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 334 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KSH6C9E4SZFWE9QZ023265SJ",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH6BY13CWW5WKE0E0ZEP6V1",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH5Z79CEN2X96ESS1R3EBSV",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH53Y8MYZTHVSFTN51T1JP9",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH53Y2FC9NEP50K9KZHTCFJ",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH51B22P77W1111MNC6C818",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH4V59K5CFTYNBHT4TTEKRE",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH4H8FRTHXSH6ZRM12NSD1Q",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH2NRHQNFZ97PX1MNXNQYQV",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH10Q3NRSF2BQG2WD0C75NZ",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSH05WR6PG56WGBREYHZX5BF",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSGZY81N0QZP0882HSR0Q3A0",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSGYGC5WKVARA3FVW15WM592",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSGYC13J3WGX0HTQYZNS3B00",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSGXZEMRKP9KMA9MB4EXA00A",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSGXZEMF3NKG6XFVZT3XE3J0",
+    "action": "consolidation",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSGXH2PHSJPMMG8N0C4E6PQG",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSGW4XQ7W8AFEAHCXCXK29X0",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KSGW4XN05664FYVYEH8C9FWS",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KS6YBVRS012F5SFTP0E6T5WA",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "5 sentences / 687 chars; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KS6WC46Y12N49BTXHNFAYS68",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "jargon-id"
+    ],
+    "note": "recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KS6T9YKGKBNRYYJVM5KRDSG9",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KS6T0AAQSC2VGXE2MZN34HZX",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "3 sentences / 851 chars"
+  },
+  {
+    "attemptId": "01KS6SCP2BCPNPBQ9JP8E5JYK3",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KS6RRSQTDVMB7T6FHK7MM76R",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRJMN33XT8BSJ7J27YEQ1XDZ",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRJMDXJ3SW9425HXCMF0YQ7M",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRJJG7N7D369MG1827XVKTZB",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "2 sentences / 442 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KRJHW9C3769XNG8491V5PQ6S",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRJGQYGXS8SV5CDGD1MZBK73",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRJFDMF2HQYJYD9FWTW2KMQC",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRJ9HKM683C86JEY4V7XEK8P",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 308 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KRJ99Q6Y7NP0EMX93KJR5Y7B",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRJ8Q45N0RFQ606WR0ZNFF56",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRJ8JMQVVF9HK362HCVA9V5Z",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRHRZMTNCB1ST66C6E54M11N",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRGAKZX4JPR87PN7ER1PR0YN",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRGAHQPRRPZQQNZY58Z02FZM",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRGA8HHBK13F999QBB4WS896",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRG9YVQR2J7TAXZH03J0G4QF",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRG9RW3P50FA759Q932BJRCN",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRG9P5WFAN8CN6X01CHP987V",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRG99AR184AQ1DMRAK12KKQ2",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRG8JCG5WSR4638SS6MW09K0",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KRG8JCFVM2ZB6K88Q4293RPS",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2PZJA05DH73FQ9XKKEM44E",
+    "action": "execution",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2PZJ554XW4HMF2KK9XB9GF",
+    "action": "execution",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2PBPXPE5ZY5K4W91RXFRFJ",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 477 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KR2P92V8T6P4H4ZK7GFHK6QQ",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "5 sentences / 479 chars for a no-action stand-down; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KR2NK5E0DN8QD4NV1XM4J1CT",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2NK5CQYYW53WX5SDRVWHBR",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2G66G2X2DB0B2053WKJWHB",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2FX0EXWYCVKBWW1H376VG5",
+    "action": "review",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2FFJP0487RM8JSYPVMET7C",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2EVY6E44548515AYPQ2CDV",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2EMG6ED2ZC8G69Q6X2S1RK",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 507 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KR2D4PRTKSZ5EZ1G76VQWBWZ",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2CFG9P6BTT1RC6KZJS9D45",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2C5YFCC50M9DJKN0QF4PF5",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2BV747J5MDTRSVMQSMCBQG",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2BSMBQ5B5GQPQD0YV7G84P",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2BS9H1EDPSS0TE2WVYACKY",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2BQ7PC1Z65ZVR02Z4WHZSX",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "6 sentences / 583 chars for a no-action stand-down; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KR2BNEAERSK2DZCD13X2BNTA",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2BM6S2M5ZQ5JGJ2WZF0V1M",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long",
+      "jargon-id"
+    ],
+    "note": "6 sentences / 706 chars for a no-action stand-down; recites raw PRRT_ thread node id (opaque to operator)"
+  },
+  {
+    "attemptId": "01KR2B8QS3KGAKMVW6WGT463CD",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR2B5TRSAQ1Z5JE8T33GESW8",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 762 chars \u2014 CI/PR-state telemetry padding past the outcome"
+  },
+  {
+    "attemptId": "01KR0TPGHFMSKZMCGZB718XW70",
+    "action": "review",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "5 sentences / 471 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KR0TFCSPHKY18X2C5G4GAHJC",
+    "action": "reviewer",
+    "outcome": "no_action_needed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "5 sentences / 617 chars for a no-action stand-down"
+  },
+  {
+    "attemptId": "01KR0T19NAE04S6VY9KP7K47PW",
+    "action": "review",
+    "outcome": "completed",
+    "label": "bad",
+    "modes": [
+      "over-long"
+    ],
+    "note": "4 sentences / 750 chars"
+  },
+  {
+    "attemptId": "01KR0SMX2NMQTPB9EA22PRPP79",
+    "action": "reviewer",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  },
+  {
+    "attemptId": "01KR0R8QDA81RF4J6DVQGXWV6Y",
+    "action": "execution",
+    "outcome": "completed",
+    "label": "good",
+    "modes": [],
+    "note": ""
+  }
+]
