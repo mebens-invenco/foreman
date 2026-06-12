@@ -816,10 +816,6 @@ export const runScoutSelection = async (input: {
             continue;
           }
 
-          if (input.triggerType === "worker_finished" && latestRetryWasManuallyStopped({ foremanRepos: input.foremanRepos, target })) {
-            continue;
-          }
-
           const repo = reposByKey.get(target.repoKey);
           if (!repo) {
             await recordBlocker(task.id, `Retry blocked because repo ${target.repoKey} was not discovered.`);
@@ -828,6 +824,10 @@ export const runScoutSelection = async (input: {
 
           const reviewContext = await getReviewContext(task, target, repo);
           if (!reviewContext || reviewContext.state !== "closed") {
+            continue;
+          }
+
+          if (input.triggerType === "worker_finished" && latestRetryWasManuallyStopped({ foremanRepos: input.foremanRepos, target })) {
             continue;
           }
 

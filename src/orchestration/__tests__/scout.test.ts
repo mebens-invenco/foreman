@@ -345,7 +345,7 @@ const seedReviewCheckpoint = (
 const seedCanceledRetryAttempt = (
   db: Awaited<ReturnType<typeof createMigratedDb>>,
   retryTask: Task,
-  options: { manuallyStopped: boolean },
+  options: { manuallyStopped: boolean; attemptStatus?: AttemptStatus; jobStatus?: "canceled" | "completed" | "failed" },
 ): { attemptId: string; jobId: string; targetId: string } => {
   db.workers.ensureWorkerSlots(1);
   const worker = db.workers.listWorkers()[0];
@@ -378,13 +378,13 @@ const seedCanceledRetryAttempt = (
   if (options.manuallyStopped) {
     db.attempts.addAttemptEvent(attempt!.id, "attempt_stop_requested", `Stop requested for attempt ${attempt!.id}`);
   }
-  db.attempts.finalizeAttempt(attempt!.id, "canceled", {
+  db.attempts.finalizeAttempt(attempt!.id, options.attemptStatus ?? "canceled", {
     finishedAt: "2026-03-14T12:04:00Z",
     signal: "SIGTERM",
     summary: "Runner exited with signal SIGTERM",
     errorMessage: "Runner exited with signal SIGTERM",
   });
-  db.jobs.updateJobStatus(retryJob.id, "canceled", {
+  db.jobs.updateJobStatus(retryJob.id, options.jobStatus ?? "canceled", {
     finishedAt: "2026-03-14T12:04:00Z",
     errorMessage: "Runner exited with signal SIGTERM",
   });
@@ -455,7 +455,7 @@ describe("runScoutSelection", () => {
     }
   });
 
-  test.each(["poll", "startup", "lease_change"] as const)(
+  test.each(["poll", "startup", "lease_change", "task_mutation", "manual"] as const)(
     "allows manually stopped retry targets on later %s scouts",
     async (triggerType) => {
       const tempDir = await createTempDir("foreman-scout-test-");
@@ -542,6 +542,55 @@ describe("runScoutSelection", () => {
       db.close();
     }
   });
+
+  test.each(["completed", "failed"] as const)(
+    "still selects retries when a stop-requested attempt finalized as %s",
+    async (status) => {
+      const tempDir = await createTempDir("foreman-scout-test-");
+      cleanupDirs.push(tempDir);
+      const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+      const config = createDefaultWorkspaceConfig("foo", "file");
+
+      const retryTask = task({
+        id: `TASK-STOP-RACE-${status.toUpperCase()}`,
+        title: `Stop race ${status} retry task`,
+        state: "in_review",
+        providerState: "in_review",
+        priority: "normal",
+        updatedAt: "2026-03-14T12:00:00Z",
+        pullRequests: [{ repoKey: "repo-a", url: `https://github.com/acme/repo-a/pull/${status === "completed" ? 105 : 106}`, source: "provider" } satisfies TaskPullRequest],
+      });
+      seedCanceledRetryAttempt(db, retryTask, {
+        manuallyStopped: true,
+        attemptStatus: status,
+        jobStatus: status,
+      });
+
+      try {
+        const result = await runScoutSelection({
+          config,
+          foremanRepos: db,
+          taskSystem: new FakeTaskSystem([retryTask]),
+          reviewService: new FakeReviewService({
+            [retryTask.id]: reviewContext({
+              pullRequestUrl: `https://github.com/acme/repo-a/pull/${status === "completed" ? 105 : 106}`,
+              pullRequestNumber: status === "completed" ? 105 : 106,
+              state: "closed",
+              headBranch: `task-stop-race-${status}`,
+              baseBranch: "main",
+            }),
+          }),
+          repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+          triggerType: "worker_finished",
+        });
+
+        expect(result.jobs).toHaveLength(1);
+        expect(result.jobs[0]?.action).toBe("retry");
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   test("does not suppress worker-finished retries when the stop event belongs to an older job", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
