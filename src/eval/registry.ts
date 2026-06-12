@@ -1,6 +1,8 @@
 import { learningPolicyCases } from "./cases/learning-policy.js";
+import { reviewerCases } from "./cases/reviewer.js";
 import { summaryPolicyCases } from "./cases/summary-policy.js";
 import { learningWritebackGraders, summaryPolicyGraders } from "./graders.js";
+import { reviewerGraders } from "./reviewer-graders.js";
 import type { EvalDefinition } from "./types.js";
 
 /**
@@ -30,6 +32,11 @@ export const EVAL_REGISTRY: Record<string, EvalDefinition> = {
     prompt: "summary-policy",
     cases: summaryPolicyCases,
     graders: summaryPolicyGraders,
+  }),
+  reviewer: defineEval({
+    prompt: "reviewer",
+    cases: reviewerCases,
+    graders: reviewerGraders,
   }),
 };
 
