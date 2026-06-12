@@ -1,27 +1,7 @@
-import path from "node:path";
-import { promises as fs } from "node:fs";
-
 import { afterEach, describe, expect, test } from "vitest";
 
 import { CodexRunner, isValidCodexThreadId } from "../codex-runner.js";
-import { createTempDir } from "../../../test-support/helpers.js";
-
-const cleanupDirs: string[] = [];
-const originalCodexBin = process.env.FOREMAN_CODEX_BIN;
-
-const writeExecutableScript = async (filePath: string, contents: string): Promise<void> => {
-  await fs.writeFile(filePath, contents, { mode: 0o755 });
-};
-
-afterEach(async () => {
-  if (originalCodexBin === undefined) {
-    delete process.env.FOREMAN_CODEX_BIN;
-  } else {
-    process.env.FOREMAN_CODEX_BIN = originalCodexBin;
-  }
-
-  await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
-});
+import { createFakeRunnerBin } from "../../../test-support/helpers.js";
 
 const echoArgvScript = [
   "#!/usr/bin/env node",
@@ -43,17 +23,21 @@ const echoArgvScript = [
   "});",
 ].join("\n");
 
+const fakeCodex = createFakeRunnerBin({
+  envVar: "FOREMAN_CODEX_BIN",
+  script: echoArgvScript,
+  scriptName: "fake-codex.js",
+});
+const setUpFakeCodex = (): Promise<string> => fakeCodex.setUp();
+
+afterEach(fakeCodex.cleanup);
+
 describe("CodexRunner", () => {
   test("passes the prompt over stdin and captures thread_id from thread.started events", async () => {
-    const tempDir = await createTempDir("foreman-runner-test-");
-    cleanupDirs.push(tempDir);
-
-    const codexScriptPath = path.join(tempDir, "fake-codex.js");
     // Mirror codex's `--json` JSONL output: thread.started, turn.started,
     // item.completed (agent_message), turn.completed (with usage). Echo the
     // command-line args and stdin so the test can assert on argv layout.
-    await writeExecutableScript(codexScriptPath, echoArgvScript);
-    process.env.FOREMAN_CODEX_BIN = codexScriptPath;
+    const tempDir = await setUpFakeCodex();
 
     const runner = new CodexRunner("gpt-5.5", "high");
     const freshResult = await runner.invoke({
@@ -118,12 +102,7 @@ describe("CodexRunner", () => {
   });
 
   test("TOML-escapes model and effort values via JSON.stringify so quotes and newlines do not break the -c payload", async () => {
-    const tempDir = await createTempDir("foreman-runner-test-");
-    cleanupDirs.push(tempDir);
-
-    const codexScriptPath = path.join(tempDir, "fake-codex.js");
-    await writeExecutableScript(codexScriptPath, echoArgvScript);
-    process.env.FOREMAN_CODEX_BIN = codexScriptPath;
+    const tempDir = await setUpFakeCodex();
 
     // Adversarial inputs: model contains a quote (TOML basic-string delimiter)
     // and effort contains a newline (TOML basic-strings forbid raw newlines).
@@ -147,12 +126,7 @@ describe("CodexRunner", () => {
   });
 
   test("excludeMcp appends a mcp_servers={} override so the invocation loads zero MCP servers", async () => {
-    const tempDir = await createTempDir("foreman-runner-test-");
-    cleanupDirs.push(tempDir);
-
-    const codexScriptPath = path.join(tempDir, "fake-codex.js");
-    await writeExecutableScript(codexScriptPath, echoArgvScript);
-    process.env.FOREMAN_CODEX_BIN = codexScriptPath;
+    const tempDir = await setUpFakeCodex();
 
     // The eval judge is a pure grading call: it needs no tools and must not
     // trigger per-call MCP auth prompts. excludeMcp must therefore clear the
@@ -184,12 +158,7 @@ describe("CodexRunner", () => {
   });
 
   test("omits the mcp_servers override when excludeMcp is not set so normal runs keep their MCP servers", async () => {
-    const tempDir = await createTempDir("foreman-runner-test-");
-    cleanupDirs.push(tempDir);
-
-    const codexScriptPath = path.join(tempDir, "fake-codex.js");
-    await writeExecutableScript(codexScriptPath, echoArgvScript);
-    process.env.FOREMAN_CODEX_BIN = codexScriptPath;
+    const tempDir = await setUpFakeCodex();
 
     const runner = new CodexRunner("gpt-5.5", "high");
     const result = await runner.invoke({
@@ -206,12 +175,7 @@ describe("CodexRunner", () => {
   });
 
   test("rejects option-shaped and otherwise-malformed nativeSessionId values", async () => {
-    const tempDir = await createTempDir("foreman-runner-test-");
-    cleanupDirs.push(tempDir);
-
-    const codexScriptPath = path.join(tempDir, "fake-codex.js");
-    await writeExecutableScript(codexScriptPath, echoArgvScript);
-    process.env.FOREMAN_CODEX_BIN = codexScriptPath;
+    const tempDir = await setUpFakeCodex();
 
     const runner = new CodexRunner("gpt-5.5", "high");
     const baseRequest = {

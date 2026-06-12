@@ -1,27 +1,7 @@
-import path from "node:path";
-import { promises as fs } from "node:fs";
-
 import { afterEach, describe, expect, test } from "vitest";
 
 import { ClaudeRunner } from "../claude-runner.js";
-import { createTempDir } from "../../../test-support/helpers.js";
-
-const cleanupDirs: string[] = [];
-const originalClaudeBin = process.env.FOREMAN_CLAUDE_BIN;
-
-const writeExecutableScript = async (filePath: string, contents: string): Promise<void> => {
-  await fs.writeFile(filePath, contents, { mode: 0o755 });
-};
-
-afterEach(async () => {
-  if (originalClaudeBin === undefined) {
-    delete process.env.FOREMAN_CLAUDE_BIN;
-  } else {
-    process.env.FOREMAN_CLAUDE_BIN = originalClaudeBin;
-  }
-
-  await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
-});
+import { createFakeRunnerBin } from "../../../test-support/helpers.js";
 
 // Fake claude binary that echoes its argv and stdin back through `result.result`
 // so the test can assert on what the runner actually spawned. session_id mirrors
@@ -44,14 +24,14 @@ const echoArgvScript = [
   "});",
 ].join("\n");
 
-const setUpFakeClaude = async (): Promise<string> => {
-  const tempDir = await createTempDir("foreman-runner-test-");
-  cleanupDirs.push(tempDir);
-  const claudeScriptPath = path.join(tempDir, "fake-claude.js");
-  await writeExecutableScript(claudeScriptPath, echoArgvScript);
-  process.env.FOREMAN_CLAUDE_BIN = claudeScriptPath;
-  return tempDir;
-};
+const fakeClaude = createFakeRunnerBin({
+  envVar: "FOREMAN_CLAUDE_BIN",
+  script: echoArgvScript,
+  scriptName: "fake-claude.js",
+});
+const setUpFakeClaude = (): Promise<string> => fakeClaude.setUp();
+
+afterEach(fakeClaude.cleanup);
 
 describe("ClaudeRunner", () => {
   test("spawns claude with --exclude-dynamic-system-prompt-sections for fresh sessions", async () => {

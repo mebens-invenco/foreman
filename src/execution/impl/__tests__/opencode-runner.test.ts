@@ -1,27 +1,7 @@
-import path from "node:path";
-import { promises as fs } from "node:fs";
-
 import { afterEach, describe, expect, test } from "vitest";
 
 import { OpenCodeRunner } from "../opencode-runner.js";
-import { createTempDir } from "../../../test-support/helpers.js";
-
-const cleanupDirs: string[] = [];
-const originalOpencodeBin = process.env.FOREMAN_OPENCODE_BIN;
-
-const writeExecutableScript = async (filePath: string, contents: string): Promise<void> => {
-  await fs.writeFile(filePath, contents, { mode: 0o755 });
-};
-
-afterEach(async () => {
-  if (originalOpencodeBin === undefined) {
-    delete process.env.FOREMAN_OPENCODE_BIN;
-  } else {
-    process.env.FOREMAN_OPENCODE_BIN = originalOpencodeBin;
-  }
-
-  await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
-});
+import { createFakeRunnerBin } from "../../../test-support/helpers.js";
 
 // Fake opencode binary that echoes its argv and stdin as a single JSON object
 // carrying no assistant-text fields (`type`/`text`/`part`/phase). With nothing
@@ -36,14 +16,14 @@ const echoArgvScript = [
   "process.stdin.on('end', () => { process.stdout.write(JSON.stringify({ argv: process.argv.slice(2), stdin })); });",
 ].join("\n");
 
-const setUpFakeOpencode = async (): Promise<string> => {
-  const tempDir = await createTempDir("foreman-runner-test-");
-  cleanupDirs.push(tempDir);
-  const opencodeScriptPath = path.join(tempDir, "fake-opencode.js");
-  await writeExecutableScript(opencodeScriptPath, echoArgvScript);
-  process.env.FOREMAN_OPENCODE_BIN = opencodeScriptPath;
-  return tempDir;
-};
+const fakeOpencode = createFakeRunnerBin({
+  envVar: "FOREMAN_OPENCODE_BIN",
+  script: echoArgvScript,
+  scriptName: "fake-opencode.js",
+});
+const setUpFakeOpencode = (): Promise<string> => fakeOpencode.setUp();
+
+afterEach(fakeOpencode.cleanup);
 
 describe("OpenCodeRunner", () => {
   // Regression pin for ENG-5447: foreman workers (and `foreman eval`) run
