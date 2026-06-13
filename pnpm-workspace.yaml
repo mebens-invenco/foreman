@@ -18,4 +18,6 @@ minimumReleaseAgeExclude:
 allowBuilds:
   better-sqlite3: true
   esbuild: true
+  # Vitest can resolve msw as a mocker peer, but Foreman does not use MSW's
+  # browser worker setup; keep its postinstall script explicitly denied.
   msw: false
