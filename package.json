@@ -2,22 +2,24 @@
   "name": "foreman",
   "version": "0.1.0",
   "private": true,
-  "workspaces": [
-    "ui"
-  ],
+  "packageManager": "pnpm@11.3.0",
+  "engines": {
+    "node": ">=24.14.0 <25",
+    "pnpm": "11.3.0"
+  },
   "type": "module",
   "bin": {
     "foreman": "dist/cli.js"
   },
   "scripts": {
-    "dev": "yarn build && yarn start",
-    "ui:dev": "yarn workspace @foreman/ui dev",
+    "dev": "pnpm run build && pnpm run start",
+    "ui:dev": "pnpm --filter @foreman/ui dev",
     "foreman": "node dist/cli.js",
     "start": "node dist/cli.js",
-    "build": "yarn build:server && yarn build:ui",
+    "build": "pnpm run build:server && pnpm run build:ui",
     "build:server": "tsc -p tsconfig.build.json",
-    "build:ui": "yarn workspace @foreman/ui build",
-    "check": "tsc -p tsconfig.build.json --noEmit && tsc -p tsconfig.json && yarn workspace @foreman/ui typecheck",
+    "build:ui": "pnpm --filter @foreman/ui build",
+    "check": "tsc -p tsconfig.build.json --noEmit && tsc -p tsconfig.json && pnpm --filter @foreman/ui typecheck",
     "test": "vitest run",
     "test:watch": "vitest",
     "setup:skills": "./scripts/install-skills.sh"

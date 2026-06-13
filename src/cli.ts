@@ -40,6 +40,8 @@ import { formatEvalReport, runEval } from "./eval/run.js";
 import { isRunnerProvider, runnerProviders, type RunnerProvider } from "./domain/index.js";
 import type { LoggerLevelName } from "./logger.js";
 
+const cliArgv =
+  process.argv[2] === "--" ? [process.argv[0]!, process.argv[1]!, ...process.argv.slice(3)] : process.argv;
 const program = new Command();
 const logLevels = ["debug", "info", "warn", "error"] as const satisfies readonly LoggerLevelName[];
 
@@ -78,10 +80,10 @@ const readStdin = async (): Promise<string> => {
 };
 
 const resolveHelpAction = (): WorkerResultAction | undefined => {
-  const actionArgIndex = process.argv.findIndex((arg) => arg === "--action" || arg.startsWith("--action="));
-  const value = process.argv[actionArgIndex]?.startsWith("--action=")
-    ? process.argv[actionArgIndex]!.slice("--action=".length)
-    : process.argv[actionArgIndex + 1];
+  const actionArgIndex = cliArgv.findIndex((arg) => arg === "--action" || arg.startsWith("--action="));
+  const value = cliArgv[actionArgIndex]?.startsWith("--action=")
+    ? cliArgv[actionArgIndex]!.slice("--action=".length)
+    : cliArgv[actionArgIndex + 1];
 
   return workerResultActionValues.includes(value as WorkerResultAction) ? (value as WorkerResultAction) : undefined;
 };
@@ -556,4 +558,4 @@ program
     });
   });
 
-await program.parseAsync(process.argv);
+await program.parseAsync(cliArgv);

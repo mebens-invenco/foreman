@@ -131,7 +131,7 @@ describe("learnings cli", () => {
     expect(await getLearningReadCount(workspaceRoot, "learn-b")).toBe(1);
   });
 
-  test("package.json exposes the built CLI through yarn foreman", async () => {
+  test("package.json exposes the built CLI through pnpm run foreman", async () => {
     const packageJson = JSON.parse(await fs.readFile(path.join(projectRoot, "package.json"), "utf8")) as {
       scripts?: Record<string, string>;
     };

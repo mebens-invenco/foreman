@@ -5,10 +5,11 @@ Foreman is a workspace-scoped orchestrator for agentic development work. It scou
 ## Quick Start: Set Up A Workspace
 
 ```bash
-yarn install
-yarn build
-yarn foreman init <workspace> --task-system linear
-# or: yarn foreman init <workspace> --task-system file
+corepack enable
+pnpm install
+pnpm run build
+pnpm run foreman -- init <workspace> --task-system linear
+# or: pnpm run foreman -- init <workspace> --task-system file
 ```
 
 Initialization creates `workspaces/<workspace>/` with `foreman.workspace.yml`, `.env`, `foreman.db`, logs, artifacts, and worktrees. File-backed workspaces also get a `tasks/` directory.
@@ -22,7 +23,7 @@ Before serving:
 Start Foreman with:
 
 ```bash
-yarn foreman serve <workspace>
+pnpm run foreman -- serve <workspace>
 ```
 
 The UI and API are served on the configured HTTP host/port, defaulting to `http://127.0.0.1:8765`.

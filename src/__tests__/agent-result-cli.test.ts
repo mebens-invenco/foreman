@@ -39,6 +39,13 @@ describe("agent-result cli", () => {
     expect(validateWorkerResultForAction(workerResultExample, "execution")).toEqual(workerResultExample);
   });
 
+  test("tolerates pnpm run script argument separator before global help", async () => {
+    const result = await runCli(["--", "--help"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Workspace-scoped orchestration system");
+  });
+
   test("accepts valid raw JSON and wrapped agent result blocks", async () => {
     const raw = await runCli(["agent-result", "validate", "--action", "execution"], JSON.stringify(validExecutionResult));
     expect(raw.code).toBe(0);

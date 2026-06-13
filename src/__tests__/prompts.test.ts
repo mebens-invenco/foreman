@@ -193,7 +193,7 @@ describe("prompt rendering", () => {
     expect(result.markdown).toContain("## Discovered Repositories");
     expect(result.markdown).toContain("## Learnings CLI");
     expect(result.markdown).toContain("foreman learnings search foo --repo shared --repo <repo-key>");
-    expect(result.markdown).toContain("yarn foreman learnings search foo");
+    expect(result.markdown).toContain("pnpm run foreman -- learnings search foo");
     expect(result.markdown).toContain("## Relevant Learnings");
     expect(result.markdown).toContain("No strong relevant learnings found in shared/<repo> scope.");
     expect(result.markdown).not.toContain("{{fragment:");
