@@ -46,8 +46,8 @@ Foreman is intended to be implemented from scratch in a new folder. It is a stan
 ## Technology
 
 - Language: TypeScript
-- Runtime: Node.js
-- Package manager: Yarn
+- Runtime: Node.js >=24.14.0 <25
+- Package manager: pnpm 11.3.0
 - DB: SQLite via `better-sqlite3`
 - Validation: `zod`
 - HTTP server: Fastify
@@ -106,7 +106,7 @@ Workers are logical in-process worker slots. Each worker may spawn a child proce
 
 Built CLI fallback script:
 
-- `yarn foreman ...` runs `node dist/cli.js` after a local build, so the CLI remains available without a global install
+- `pnpm run foreman -- ...` runs `node dist/cli.js` after a local build, so the CLI remains available without a global install
 
 ### Command Behavior
 

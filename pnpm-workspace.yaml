@@ -1,0 +1,23 @@
+packages:
+  - '.'
+  - 'ui'
+
+# Flat node_modules to match the previous Yarn v1 layout and reduce migration risk.
+nodeLinker: hoisted
+
+# Match Yarn behavior: never run an implicit install before scripts.
+verifyDepsBeforeRun: false
+
+# Supply-chain quarantine: never install a dependency version published less than 7 full days ago.
+# Value is in minutes: 7 * 24 * 60 = 10080.
+minimumReleaseAge: 10080
+minimumReleaseAgeExclude:
+  - '@invenco/*'
+
+# Dependencies allowed to run install/build scripts. pnpm blocks unapproved scripts by default.
+allowBuilds:
+  better-sqlite3: true
+  esbuild: true
+  # Vitest can resolve msw as a mocker peer, but Foreman does not use MSW's
+  # browser worker setup; keep its postinstall script explicitly denied.
+  msw: false

@@ -70,8 +70,8 @@ describe("runRebootUpdate", () => {
     const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: captureLog(logs) });
 
     expect(outcome).toMatchObject({ pullAttempted: true, pulled: false, installAttempted: false, buildAttempted: false });
-    expect(calls).not.toContain("yarn install");
-    expect(calls).not.toContain("yarn build");
+    expect(calls).not.toContain("pnpm install --frozen-lockfile");
+    expect(calls).not.toContain("pnpm run build");
     expect(logs).toEqual(["git pull --ff-only origin master failed: fatal: pull failed"]);
   });
 
@@ -87,8 +87,8 @@ describe("runRebootUpdate", () => {
     const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: captureLog(logs) });
 
     expect(outcome).toMatchObject({ pulled: true, headChanged: false, installAttempted: false, buildAttempted: false });
-    expect(calls).not.toContain("yarn install");
-    expect(calls).not.toContain("yarn build");
+    expect(calls).not.toContain("pnpm install --frozen-lockfile");
+    expect(calls).not.toContain("pnpm run build");
     expect(logs).toEqual(["git pull completed without changing HEAD"]);
   });
 
@@ -99,15 +99,18 @@ describe("runRebootUpdate", () => {
       "git status --porcelain": [result()],
       "git rev-parse HEAD": [result("before\n"), result("after\n")],
       "git pull --ff-only origin master": [result("Updating before..after\n")],
-      "yarn install": [result("", 1, "install failed")],
-      "yarn build": [result("", 1, "build failed")],
+      "pnpm install --frozen-lockfile": [result("", 1, "install failed")],
+      "pnpm run build": [result("", 1, "build failed")],
     });
 
     const outcome = await runRebootUpdate({ projectRoot: "/foreman", runCommand, log: captureLog(logs) });
 
     expect(outcome).toMatchObject({ pulled: true, headChanged: true, installAttempted: true, buildAttempted: true });
-    expect(calls.slice(-2)).toEqual(["yarn install", "yarn build"]);
-    expect(logs).toEqual(["yarn install failed: install failed", "yarn build failed: build failed"]);
+    expect(calls.slice(-2)).toEqual(["pnpm install --frozen-lockfile", "pnpm run build"]);
+    expect(logs).toEqual([
+      "pnpm install --frozen-lockfile failed: install failed",
+      "pnpm run build failed: build failed",
+    ]);
   });
 });
 

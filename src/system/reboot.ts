@@ -177,15 +177,15 @@ export const runRebootUpdate = async (input: {
   }
 
   outcome.installAttempted = true;
-  const install = await runCommand("yarn", ["install"], commandOptions);
+  const install = await runCommand("pnpm", ["install", "--frozen-lockfile"], commandOptions);
   if (install.exitCode !== 0) {
-    await logCommandFailure(log, "yarn install", install);
+    await logCommandFailure(log, "pnpm install --frozen-lockfile", install);
   }
 
   outcome.buildAttempted = true;
-  const build = await runCommand("yarn", ["build"], commandOptions);
+  const build = await runCommand("pnpm", ["run", "build"], commandOptions);
   if (build.exitCode !== 0) {
-    await logCommandFailure(log, "yarn build", build);
+    await logCommandFailure(log, "pnpm run build", build);
   }
 
   return outcome;
