@@ -40,4 +40,7 @@ SELECT id, task_id, task_target_id, repo_key, pr_url, pr_number, pr_head_branch,
 
 DROP TABLE deployment_old;
 
+CREATE INDEX idx_deployment_task_target ON deployment(task_id, task_target_id);
+CREATE INDEX idx_deployment_next_eligible ON deployment(next_eligible_at);
+
 PRAGMA foreign_keys=ON;
