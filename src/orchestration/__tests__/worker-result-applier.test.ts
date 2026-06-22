@@ -8,7 +8,7 @@ import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewCont
 import { LoggerService } from "../../logger.js";
 import type { ReviewService } from "../../review/index.js";
 import type { TaskSystem } from "../../tasking/index.js";
-import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
+import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
 import { WorkerResultApplier } from "../worker-result-applier.js";
 import { runScoutSelection } from "../scout-selection.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
@@ -650,6 +650,116 @@ describe("WorkerResultApplier deployment tracking", () => {
       expect(record!.retryCount).toBe(1);
       expect(Date.parse(record!.nextEligibleAt!)).toBeGreaterThanOrEqual(before + 15 * 60 * 1000 - 1000);
       expect(taskSystem.transitions).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("sets retry eligibility for failed deployment results", async () => {
+    const tempDir = await createTempDir("foreman-deployment-applier-failed-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.deployment.minRetryIntervalMinutes = 15;
+    config.deployment.maxRetryIntervalMinutes = 60;
+    await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
+    const paths = createWorkspacePaths(projectRoot, tempDir);
+    const instructionHash = "a693920f695b5bbbcf0933b6a015f6c66b48a443293437b762912ff637ab5e64";
+    const deployableTask = task();
+    const repo: RepoRef = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
+    const pullRequest: ResolvedPullRequest = {
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/70",
+      pullRequestNumber: 70,
+      state: "merged",
+      isDraft: false,
+      headBranch: "task-deploy-apply",
+      baseBranch: "main",
+    };
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      db.taskMirror.saveTasks([deployableTask]);
+      const target = db.taskMirror.getTaskTarget(deployableTask.id, "repo-a");
+      expect(target).not.toBeNull();
+      const job = db.jobs.createJob({
+        taskId: deployableTask.id,
+        taskTargetId: target!.id,
+        taskProvider: deployableTask.provider,
+        action: "deployment",
+        priorityRank: priorityToRank(deployableTask.priority),
+        repoKey: "repo-a",
+        baseBranch: "main",
+        dedupeKey: `${deployableTask.id}:repo-a:deployment`,
+        selectionReason: "test",
+        selectionContext: {
+          deployment: { instructionHash, instructionBody: "Check production once." },
+          pullRequestReference: {
+            provider: "github",
+            url: pullRequest.pullRequestUrl,
+            number: pullRequest.pullRequestNumber,
+            state: "merged",
+            headBranch: pullRequest.headBranch,
+            baseBranch: pullRequest.baseBranch,
+          },
+        },
+      });
+      const worker = db.workers.listWorkers()[0];
+      const attempt = db.attempts.createAttempt({
+        jobId: job.id,
+        workerId: worker!.id,
+        runnerName: "opencode",
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+      });
+      const taskSystem = new FakeTaskSystem([deployableTask]);
+      const reviewService = new FakeReviewService(pullRequest);
+      const applier = new WorkerResultApplier({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [repo],
+        logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
+        scheduleScout: () => undefined,
+      });
+      const before = Date.now();
+
+      await applier.apply({
+        attempt,
+        job,
+        task: deployableTask,
+        target: target!,
+        repo,
+        worktreePath: tempDir,
+        workerResult: {
+          schemaVersion: 1,
+          action: "deployment",
+          outcome: "failed",
+          summary: "CI failure already captured in a follow-up.",
+          taskMutations: [],
+          reviewMutations: [],
+          learningMutations: [],
+          blockers: [],
+          signals: [],
+        },
+      });
+
+      const record = db.deploymentTracking.getDeploymentRecord({ taskTargetId: target!.id, prUrl: pullRequest.pullRequestUrl, instructionHash });
+      expect(record).toMatchObject({ latestStatus: "failed", latestSummary: "CI failure already captured in a follow-up.", retryCount: 1, successful: false });
+      expect(Date.parse(record!.nextEligibleAt!)).toBeGreaterThanOrEqual(before + 15 * 60 * 1000 - 1000);
+
+      db.attempts.finalizeAttempt(attempt.id, "failed", { finishedAt: new Date().toISOString() });
+      db.jobs.updateJobStatus(job.id, "failed", { finishedAt: new Date().toISOString(), errorMessage: "CI failure already captured in a follow-up." });
+      const scoutResult = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [repo],
+        triggerType: "manual",
+      });
+      expect(scoutResult.jobs.some((selectedJob) => selectedJob.action === "deployment")).toBe(false);
     } finally {
       db.close();
     }
