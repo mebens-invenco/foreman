@@ -96,6 +96,7 @@ export type WorkspaceConfig = {
     staleLeaseReapIntervalSeconds: number
     schedulerLoopIntervalMs: number
     shutdownGracePeriodSeconds: number
+    consolidateTerminalTasks: boolean
   }
   http: {
     host: string

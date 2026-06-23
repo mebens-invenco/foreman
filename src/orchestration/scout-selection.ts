@@ -1074,7 +1074,7 @@ export const runScoutSelection = async (input: {
       }
     }
 
-    if (!chosen) {
+    if (!chosen && input.config.scheduler.consolidateTerminalTasks) {
       const agentLabel = configuredAgentLabel(input.config);
       const consolidatedLabel = configuredConsolidatedLabel(input.config);
 
@@ -1091,10 +1091,17 @@ export const runScoutSelection = async (input: {
             continue;
           }
 
+          // Consolidation is best-effort learning capture, capped to one attempt
+          // per terminal target. canSchedule already excludes active (queued/
+          // leased/running) consolidations, so a non-null latest job here is a
+          // prior attempt that already finished in some terminal status. Skip it
+          // regardless of outcome: a run that was canceled (e.g. the scheduler
+          // was paused mid-pass and SIGTERM'd the worker) or failed must NOT be
+          // re-picked, or a done task loops forever consuming worker slots.
           const previousConsolidation = input.foremanRepos.jobs.latestJobForDedupeKey(
             dedupeKeyForAction(task.id, target.repoKey, "consolidation"),
           );
-          if (previousConsolidation?.status === "completed") {
+          if (previousConsolidation) {
             continue;
           }
 

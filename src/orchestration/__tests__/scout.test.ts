@@ -708,6 +708,7 @@ describe("runScoutSelection", () => {
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
     config.repos.reposDoneOnMerge = ["repo-a"];
+    config.scheduler.consolidateTerminalTasks = true;
 
     const reviewTask = task({
       id: "TASK-5052B",
@@ -754,6 +755,7 @@ describe("runScoutSelection", () => {
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.consolidateTerminalTasks = true;
 
     const doneTask = task({
       id: "TASK-5052L",
@@ -809,6 +811,7 @@ describe("runScoutSelection", () => {
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
     const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.scheduler.consolidateTerminalTasks = true;
 
     const doneTask = task({
       id: "TASK-5052M",
@@ -841,6 +844,7 @@ describe("runScoutSelection", () => {
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
     const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.consolidateTerminalTasks = true;
 
     const doneTask = task({
       id: "TASK-5052N",
@@ -866,6 +870,89 @@ describe("runScoutSelection", () => {
       selectionReason: "test completed consolidation",
     });
     db.jobs.updateJobStatus(consolidationJob.id, "completed", { finishedAt: "2026-03-14T12:04:00Z" });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([doneTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not reschedule consolidation after a canceled consolidation attempt (no infinite re-pick loop)", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.consolidateTerminalTasks = true;
+
+    const doneTask = task({
+      id: "TASK-5052Q",
+      title: "Done task whose consolidation was canceled mid-run",
+      state: "done",
+      providerState: "done",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      labels: ["Agent"],
+    });
+    db.taskMirror.saveTasks([doneTask]);
+    const target = db.taskMirror.getTaskTarget(doneTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    // A consolidation that was killed by a scheduler pause (SIGTERM) ends
+    // "canceled", never swaps the labels, and must not be re-picked forever.
+    const consolidationJob = db.jobs.createJob({
+      taskId: doneTask.id,
+      taskTargetId: target!.id,
+      taskProvider: doneTask.provider,
+      action: "consolidation",
+      priorityRank: priorityToRank(doneTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${doneTask.id}:repo-a:consolidation`,
+      selectionReason: "test canceled consolidation",
+    });
+    db.jobs.updateJobStatus(consolidationJob.id, "canceled", { finishedAt: "2026-03-14T12:04:00Z" });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([doneTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not schedule terminal tasks for consolidation when consolidateTerminalTasks is off", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.scheduler.consolidateTerminalTasks = false;
+
+    const doneTask = task({
+      id: "TASK-5052P",
+      title: "Done task that must stay done",
+      state: "done",
+      providerState: "done",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      labels: ["Agent"],
+    });
 
     try {
       const result = await runScoutSelection({
@@ -3540,6 +3627,7 @@ describe("runScoutSelection", () => {
     const config = createDefaultWorkspaceConfig("foo", "linear");
     config.taskSystem.linear!.excludeLabels = [EXCLUDE_LABEL];
     config.scheduler.workerConcurrency = 10;
+    config.scheduler.consolidateTerminalTasks = true;
     const paths = createWorkspacePaths(projectRoot, tempDir);
     await fs.writeFile(path.join(tempDir, "deployment.md"), "Check production once.", "utf8");
 
