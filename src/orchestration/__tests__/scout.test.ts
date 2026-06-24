@@ -953,6 +953,14 @@ describe("runScoutSelection", () => {
       updatedAt: "2026-03-14T12:00:00Z",
       labels: ["Agent"],
     });
+    // Persist the task + assert a target exists so the consolidation loop is
+    // reachable: with the gate off the loop is skipped, with it on this task
+    // would be selected. (runScoutSelection also persists listed candidates at
+    // intake, but pre-saving makes the gate-dependence explicit rather than
+    // implicit.) Removing the `&& consolidateTerminalTasks` clause makes this
+    // assertion fail with one consolidation job.
+    db.taskMirror.saveTasks([doneTask]);
+    expect(db.taskMirror.getTaskTarget(doneTask.id, "repo-a")).not.toBeNull();
 
     try {
       const result = await runScoutSelection({
