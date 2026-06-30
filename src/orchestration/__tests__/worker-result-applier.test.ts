@@ -760,6 +760,37 @@ describe("WorkerResultApplier deployment tracking", () => {
         triggerType: "manual",
       });
       expect(scoutResult.jobs.some((selectedJob) => selectedJob.action === "deployment")).toBe(false);
+
+      db.deploymentTracking.upsertDeploymentRecord({
+        taskId: deployableTask.id,
+        taskTargetId: target!.id,
+        repoKey: "repo-a",
+        prUrl: pullRequest.pullRequestUrl,
+        prNumber: pullRequest.pullRequestNumber,
+        prHeadBranch: pullRequest.headBranch,
+        prBaseBranch: pullRequest.baseBranch,
+        instructionHash,
+        instructionBody: "Check production once.",
+        latestStatus: "failed",
+        latestSummary: "CI failure already captured in a follow-up.",
+        nextEligibleAt: "2000-01-01T00:00:00.000Z",
+        retryCount: record!.retryCount,
+        blockedRetryCount: record!.blockedRetryCount,
+        createdFollowUpTaskIds: [],
+        successful: false,
+        sourceAttemptId: attempt.id,
+      });
+
+      const eligibleScoutResult = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [repo],
+        triggerType: "manual",
+      });
+      expect(eligibleScoutResult.jobs.map((selectedJob) => selectedJob.action)).toEqual(["deployment"]);
     } finally {
       db.close();
     }
