@@ -47,11 +47,14 @@ export const learningPolicyCases: EvalCase<LearningExpect>[] = [
       "The nightly Linear bulk-sync intermittently fails. Make it resilient to transient API throttling.",
       "high",
     ),
-    syntheticSession: [
-      "Added exponential backoff to the bulk-sync client and verified it against a replayed throttle window.",
-      "The root cause was non-obvious: Linear's GraphQL API returns HTTP 200 with a top-level `errors[]` entry whose code is `RATELIMITED` when the query-complexity budget is exceeded — it does NOT return a 429. The existing retry logic keyed off HTTP status, so it never fired and the job just failed.",
-      "The fix keys retries off the `RATELIMITED` error code in the GraphQL body and backs off using the window in `extensions`. This applies to every Linear GraphQL caller in the codebase, not just bulk-sync.",
-    ].join("\n"),
+    fixture: {
+      type: "completed-session",
+      session: [
+        "Added exponential backoff to the bulk-sync client and verified it against a replayed throttle window.",
+        "The root cause was non-obvious: Linear's GraphQL API returns HTTP 200 with a top-level `errors[]` entry whose code is `RATELIMITED` when the query-complexity budget is exceeded — it does NOT return a 429. The existing retry logic keyed off HTTP status, so it never fired and the job just failed.",
+        "The fix keys retries off the `RATELIMITED` error code in the GraphQL body and backs off using the window in `extensions`. This applies to every Linear GraphQL caller in the codebase, not just bulk-sync.",
+      ].join("\n"),
+    },
     expect: { decision: "learning" },
   },
   {
@@ -65,10 +68,13 @@ export const learningPolicyCases: EvalCase<LearningExpect>[] = [
       "The dashboard header reads 'Overivew'. Correct the spelling.",
       "low",
     ),
-    syntheticSession: [
-      "Changed the string 'Overivew' to 'Overview' in DashboardHeader.tsx. One-line copy fix, no logic change.",
-      "Existing tests pass unchanged. Nothing here generalises beyond this exact string.",
-    ].join("\n"),
+    fixture: {
+      type: "completed-session",
+      session: [
+        "Changed the string 'Overivew' to 'Overview' in DashboardHeader.tsx. One-line copy fix, no logic change.",
+        "Existing tests pass unchanged. Nothing here generalises beyond this exact string.",
+      ].join("\n"),
+    },
     expect: { decision: "no_learning" },
   },
 
@@ -85,11 +91,14 @@ export const learningPolicyCases: EvalCase<LearningExpect>[] = [
       "Datadog logs/traces for this Lambda service show a stale `version` that never changes across deploys. Make the version reflect the deployed commit.",
       "high",
     ),
-    syntheticSession: [
-      "Fixed the frozen Datadog `version`. The root cause was non-obvious: Datadog sources the `version` field on logs and traces from the `DD_VERSION` environment variable on the Lambda — NOT from the CloudFormation stack's `tags.version` (which only flows to AWS billing/resource tags).",
-      "Added `DD_VERSION: ${env:GIT_COMMIT_HASH}` to `provider.environment` in serverless.yml, mirroring the value CI injects, and verified the version now refreshes per deploy.",
-      "This is the same mechanism for every Lynk Lambda service that ships the Datadog extension — not just this one. Anyone debugging a stale Datadog version on any service hits it.",
-    ].join("\n"),
+    fixture: {
+      type: "completed-session",
+      session: [
+        "Fixed the frozen Datadog `version`. The root cause was non-obvious: Datadog sources the `version` field on logs and traces from the `DD_VERSION` environment variable on the Lambda — NOT from the CloudFormation stack's `tags.version` (which only flows to AWS billing/resource tags).",
+        "Added `DD_VERSION: ${env:GIT_COMMIT_HASH}` to `provider.environment` in serverless.yml, mirroring the value CI injects, and verified the version now refreshes per deploy.",
+        "This is the same mechanism for every Lynk Lambda service that ships the Datadog extension — not just this one. Anyone debugging a stale Datadog version on any service hits it.",
+      ].join("\n"),
+    },
     expect: { decision: "learning", scope: "shared" },
   },
   {
@@ -103,11 +112,14 @@ export const learningPolicyCases: EvalCase<LearningExpect>[] = [
       "Review the PR adding an 'All services' option to the carrier-service Select on the accounts page.",
       "high",
     ),
-    syntheticSession: [
-      "Reviewed the PR. The new 'All' option was coded as `<SelectItem value=''>All</SelectItem>`. In this app's shadcn/radix Select an empty-string item value is forbidden — radix throws at runtime ('A <Select.Item /> must have a value prop that is not an empty string'), because empty string is reserved for the cleared/placeholder state.",
-      "Flagged it: define a sentinel constant (e.g. `ALL_SERVICES_VALUE = 'all-services'`), use it as the item value, and map it back to null on submit.",
-      "This recurs throughout this frontend repo because it is mid Ant-Design -> shadcn migration; any author or reviewer touching a shadcn Select with an all/none option will hit it.",
-    ].join("\n"),
+    fixture: {
+      type: "completed-session",
+      session: [
+        "Reviewed the PR. The new 'All' option was coded as `<SelectItem value=''>All</SelectItem>`. In this app's shadcn/radix Select an empty-string item value is forbidden — radix throws at runtime ('A <Select.Item /> must have a value prop that is not an empty string'), because empty string is reserved for the cleared/placeholder state.",
+        "Flagged it: define a sentinel constant (e.g. `ALL_SERVICES_VALUE = 'all-services'`), use it as the item value, and map it back to null on submit.",
+        "This recurs throughout this frontend repo because it is mid Ant-Design -> shadcn migration; any author or reviewer touching a shadcn Select with an all/none option will hit it.",
+      ].join("\n"),
+    },
     expect: { decision: "learning", scope: "repo-specific" },
   },
   {
@@ -121,10 +133,13 @@ export const learningPolicyCases: EvalCase<LearningExpect>[] = [
       "Update the e2e test files to import from `@invenco/automation-interface` instead of the old `@invenco/common-interface/automation` path.",
       "low",
     ),
-    syntheticSession: [
-      "Migrated 6 e2e test files from `@invenco/common-interface/automation` to the new `@invenco/automation-interface` package. Pure find-and-replace of the import path; no logic changed.",
-      "Ran lint, typecheck, and prettier — all clean. This is the same mechanical move already done across several sibling PRs; nothing here is non-obvious or transferable beyond following the established migration.",
-    ].join("\n"),
+    fixture: {
+      type: "completed-session",
+      session: [
+        "Migrated 6 e2e test files from `@invenco/common-interface/automation` to the new `@invenco/automation-interface` package. Pure find-and-replace of the import path; no logic changed.",
+        "Ran lint, typecheck, and prettier — all clean. This is the same mechanical move already done across several sibling PRs; nothing here is non-obvious or transferable beyond following the established migration.",
+      ].join("\n"),
+    },
     expect: { decision: "no_learning" },
   },
   {
@@ -138,10 +153,13 @@ export const learningPolicyCases: EvalCase<LearningExpect>[] = [
       "Re-review the open PR migrating import paths; check for anything actionable on the current head.",
       "low",
     ),
-    syntheticSession: [
-      "Re-reviewed the PR. The head SHA is unchanged since my previous reviewer pass. The one prior review thread (a tsconfig include) is already resolved and outdated. CI is green. There are no new commits and no new conversation comments.",
-      "Nothing new to react to — no_action_needed. A routine re-check that found no change since last time.",
-    ].join("\n"),
+    fixture: {
+      type: "completed-session",
+      session: [
+        "Re-reviewed the PR. The head SHA is unchanged since my previous reviewer pass. The one prior review thread (a tsconfig include) is already resolved and outdated. CI is green. There are no new commits and no new conversation comments.",
+        "Nothing new to react to — no_action_needed. A routine re-check that found no change since last time.",
+      ].join("\n"),
+    },
     expect: { decision: "no_learning" },
   },
   {
@@ -155,10 +173,13 @@ export const learningPolicyCases: EvalCase<LearningExpect>[] = [
       "Review the account detail page that renders one editor card per weight-bracket, each saving independently.",
       "high",
     ),
-    syntheticSession: [
-      "Reviewed the detail page that renders one editor card per weight-bracket. Confirmed that when one card saves and invalidates the shared query, the other cards' in-progress unsaved edits survive — but only because React Query's default `structuralSharing: true` keeps unchanged items' object references stable, so their `useEffect([config])` re-seed effect doesn't fire.",
-      "Verified this exact behaviour holds for this page's specific card layout and query-invalidation wiring. It is a precise property of how these particular cards are composed; there's no general rule here beyond this one page's arrangement.",
-    ].join("\n"),
+    fixture: {
+      type: "completed-session",
+      session: [
+        "Reviewed the detail page that renders one editor card per weight-bracket. Confirmed that when one card saves and invalidates the shared query, the other cards' in-progress unsaved edits survive — but only because React Query's default `structuralSharing: true` keeps unchanged items' object references stable, so their `useEffect([config])` re-seed effect doesn't fire.",
+        "Verified this exact behaviour holds for this page's specific card layout and query-invalidation wiring. It is a precise property of how these particular cards are composed; there's no general rule here beyond this one page's arrangement.",
+      ].join("\n"),
+    },
     expect: { decision: "no_learning" },
   },
   {
@@ -172,12 +193,15 @@ export const learningPolicyCases: EvalCase<LearningExpect>[] = [
       "Review the PR that makes the orchestrator's startup validation throw on a configured-value miss.",
       "high",
     ),
-    syntheticSession: [
-      "Reviewed the orchestrator PR. Two distinct, non-obvious lessons came up:",
-      "(1) This orchestrator surfaces failures by throwing a typed error by design — it is not a Lynk DDD domain service, so the Lynk Result<Happy,Sad> / never-throw guardrail does NOT apply here. I almost flagged the `throw` as a Result-discipline violation; that would have been wrong — the throw is intentional fail-loud, validated eagerly at startup.",
-      "(2) The worktree's local `master` ref lagged the PR's actual base by 100+ commits, so `git diff master...HEAD` showed a huge phantom diff. The real review diff has to come from `gh pr diff` (or against origin's base), or a reviewer wastes the pass on unrelated code.",
-      "Both recur on any review pass of this repo.",
-    ].join("\n"),
+    fixture: {
+      type: "completed-session",
+      session: [
+        "Reviewed the orchestrator PR. Two distinct, non-obvious lessons came up:",
+        "(1) This orchestrator surfaces failures by throwing a typed error by design — it is not a Lynk DDD domain service, so the Lynk Result<Happy,Sad> / never-throw guardrail does NOT apply here. I almost flagged the `throw` as a Result-discipline violation; that would have been wrong — the throw is intentional fail-loud, validated eagerly at startup.",
+        "(2) The worktree's local `master` ref lagged the PR's actual base by 100+ commits, so `git diff master...HEAD` showed a huge phantom diff. The real review diff has to come from `gh pr diff` (or against origin's base), or a reviewer wastes the pass on unrelated code.",
+        "Both recur on any review pass of this repo.",
+      ].join("\n"),
+    },
     expect: { decision: "learning", scope: "repo-specific" },
   },
   {
@@ -191,10 +215,13 @@ export const learningPolicyCases: EvalCase<LearningExpect>[] = [
       "Add a new operational runbook markdown file under `docs/runbooks/` in this service.",
       "low",
     ),
-    syntheticSession: [
-      "Added a runbook at `docs/runbooks/incident-x.md`. git silently ignored it — `git add` reported nothing untracked. The repo's `.gitignore` has `docs/*` followed by `!docs/*.md`, and that negation only matches top-level `.md` files, so any `docs/` subdirectory stays ignored.",
-      "Worked around it by placing the file flat under `docs/`. `git check-ignore -v` confirmed the original path matched the `docs/*` rule.",
-    ].join("\n"),
+    fixture: {
+      type: "completed-session",
+      session: [
+        "Added a runbook at `docs/runbooks/incident-x.md`. git silently ignored it — `git add` reported nothing untracked. The repo's `.gitignore` has `docs/*` followed by `!docs/*.md`, and that negation only matches top-level `.md` files, so any `docs/` subdirectory stays ignored.",
+        "Worked around it by placing the file flat under `docs/`. `git check-ignore -v` confirmed the original path matched the `docs/*` rule.",
+      ].join("\n"),
+    },
     expect: { decision: "no_learning" },
   },
   {
@@ -208,10 +235,13 @@ export const learningPolicyCases: EvalCase<LearningExpect>[] = [
       "Continuation review pass on a PR that a human maintainer has been actively developing.",
       "high",
     ),
-    syntheticSession: [
-      "A continuation review pass found the PR is now CONFLICTING. The branch is human-maintainer-owned and actively developed (13 human commits since my last push, already marked ready for review). The base (master) had advanced ~133 files across shared infra the maintainer's new code depends on; only one file conflicted textually.",
-      "I deferred the base-integration to the maintainer rather than checking out the head and force-pushing a large speculative merge I couldn't validate against their code — a clean textual merge could still semantically break their work. There was no other current-head review feedback I could safely act on.",
-    ].join("\n"),
+    fixture: {
+      type: "completed-session",
+      session: [
+        "A continuation review pass found the PR is now CONFLICTING. The branch is human-maintainer-owned and actively developed (13 human commits since my last push, already marked ready for review). The base (master) had advanced ~133 files across shared infra the maintainer's new code depends on; only one file conflicted textually.",
+        "I deferred the base-integration to the maintainer rather than checking out the head and force-pushing a large speculative merge I couldn't validate against their code — a clean textual merge could still semantically break their work. There was no other current-head review feedback I could safely act on.",
+      ].join("\n"),
+    },
     expect: { decision: "no_learning" },
   },
 ];

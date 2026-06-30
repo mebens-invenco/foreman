@@ -69,6 +69,14 @@ TNR bar — and likely an empirical-reuse signal alongside the content-judge, si
 content alone can't separate persuasively-written over-eager learnings from genuinely
 reusable ones.
 
+That labeling round is underway (ENG-5444 track): [`lp-judge-labeler.html`](./lp-judge-labeler.html)
+is a self-contained offline labeling bench over the 88 learning `add`s in the current
+harvest (vs 30 in this calibration). Open it in Chrome, set your labeler name, label
+each item `reusable` / `one-off` / `unsure` (keyboard: R/O/U, autosaves locally), and
+export `lp-judge-labels-<name>.json` with the write-to-disk button. Multiple labelers
+export separate files; agreement analysis adjudicates. Labelers must not read
+`results.json` or re-run the judge before finishing — independence is the point.
+
 ## Re-running
 
 The judge *prompt* lives in `graders.ts`; the *model* is supplied by the eval runner
