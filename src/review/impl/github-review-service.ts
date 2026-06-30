@@ -165,8 +165,21 @@ const isGitHubRateLimitResponse = (status: number, body: string, headers: GitHub
   );
 };
 
+const isGitHubBadCredentialsResponse = (status: number, body: string): boolean => {
+  if (status !== 401) {
+    return false;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return typeof parsed === "object" && parsed !== null && "message" in parsed && parsed.message === "Bad credentials";
+  } catch {
+    return false;
+  }
+};
+
 const isRetryableGitHubResponse = (status: number, body: string): boolean =>
-  GITHUB_TRANSIENT_STATUS_CODES.has(status) || (status === 401 && body.toLowerCase().includes("bad credentials"));
+  GITHUB_TRANSIENT_STATUS_CODES.has(status) || isGitHubBadCredentialsResponse(status, body);
 
 const areGitHubGraphqlRateLimitErrors = (errors: Array<{ message: string }>): boolean =>
   errors.some((error) => {

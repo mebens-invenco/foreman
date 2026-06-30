@@ -48,6 +48,15 @@ const jsonResponse = (body: unknown, status = 200, headers: Record<string, strin
     text: async () => JSON.stringify(body),
   }) as Response;
 
+const textResponse = (body: string, status = 200, headers: Record<string, string> = {}): Response =>
+  ({
+    ok: status >= 200 && status < 300,
+    status,
+    headers: new Headers(headers),
+    json: async () => JSON.parse(body),
+    text: async () => body,
+  }) as Response;
+
 const spyLogger = () => ({
   child() {
     return this;
@@ -425,13 +434,30 @@ describe("GitHubReviewService.getContext", () => {
   });
 
   test("surfaces persistent REST bad credentials failures after retries", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse({ message: "Bad credentials" }, 401)) as typeof fetch;
+
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      const result = expect(service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo)).rejects.toThrow("GitHub request failed: 401");
+      await vi.runAllTimersAsync();
+      await result;
+
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not retry non-JSON REST bad credentials text", async () => {
     vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
-    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ message: "Bad credentials" }, 401)) as typeof fetch;
+    global.fetch = vi.fn().mockResolvedValueOnce(textResponse("proxy echoed Bad credentials", 401)) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
     await expect(service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo)).rejects.toThrow("GitHub request failed: 401");
 
-    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   test("surfaces REST timeouts after exhausting retries", async () => {
@@ -1244,14 +1270,21 @@ describe("GitHubReviewService rate-limit handling", () => {
   });
 
   test("surfaces persistent GraphQL bad credentials failures after retries", async () => {
-    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ message: "Bad credentials" }, 401)) as typeof fetch;
+    vi.useFakeTimers();
+    try {
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse({ message: "Bad credentials" }, 401)) as typeof fetch;
 
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toThrow(
-      "GitHub GraphQL request failed: 401",
-    );
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      const result = expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toThrow(
+        "GitHub GraphQL request failed: 401",
+      );
+      await vi.runAllTimersAsync();
+      await result;
 
-    expect(global.fetch).toHaveBeenCalledTimes(3);
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   test("warns when GitHub reports low remaining quota", async () => {
