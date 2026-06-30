@@ -141,6 +141,10 @@ export const runAgentProcess = async (input: {
       }
 
       forcedResultTimeout = setTimeout(() => {
+        // At this point Foreman has done all it can for the runner's process
+        // group; an escaped descendant may still hold stdio open, but must not
+        // keep the attempt running forever.
+        closed = true;
         child.stdout.destroy();
         child.stderr.destroy();
         resolveOnce(exitedCode, exitedSignal);
