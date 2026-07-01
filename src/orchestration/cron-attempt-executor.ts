@@ -25,9 +25,12 @@ type CronAttemptExecutorDeps = {
   onWorkerFinished: () => void;
 };
 
-const cronAttemptStatus = (input: { exitCode: number | null; signal: string | null; aborted: boolean }): AttemptStatus => {
+const cronAttemptStatus = (input: { exitCode: number | null; signal: string | null; aborted: boolean; timedOut?: boolean }): AttemptStatus => {
   if (input.aborted) {
     return "canceled";
+  }
+  if (input.timedOut) {
+    return "timed_out";
   }
   if (input.exitCode === 0 && !input.signal) {
     return "completed";
@@ -162,7 +165,12 @@ export class CronAttemptExecutor {
           sha256: await sha256File(logAbsolutePath),
         });
 
-        const attemptStatus = cronAttemptStatus({ exitCode: runResult.exitCode, signal: runResult.signal, aborted: controller.signal.aborted });
+        const attemptStatus = cronAttemptStatus({
+          exitCode: runResult.exitCode,
+          signal: runResult.signal,
+          timedOut: runResult.timedOut === true,
+          aborted: controller.signal.aborted,
+        });
         const jobStatus = attemptStatus === "timed_out" ? "failed" : attemptStatus;
         const summary = summarizeOutput(runResult.stdout, attemptStatus);
         this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "runner_output_recorded", summary);

@@ -75,6 +75,62 @@ describe("provider runners", () => {
     expect(result.stdout).toBe("checkpoint\n");
   }, 10_000);
 
+  test("settles timed-out runner invocations when an escaped descendant keeps stdio open", async () => {
+    const tempDir = await createTempDir("foreman-runner-test-");
+    cleanupDirs.push(tempDir);
+
+    const scriptPath = path.join(tempDir, "fake-runner.js");
+    const descendantPidPath = path.join(tempDir, "descendant.pid");
+    await writeExecutableScript(
+      scriptPath,
+      [
+        "#!/usr/bin/env node",
+        "const fs = require('node:fs');",
+        "const { spawn } = require('node:child_process');",
+        "const descendant = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000);'], { detached: true, stdio: ['ignore', 'inherit', 'inherit'] });",
+        "fs.writeFileSync(process.argv[2], String(descendant.pid));",
+        "descendant.unref();",
+        "process.stdout.write('checkpoint\\n');",
+        "process.on('SIGTERM', () => { process.exit(0); });",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => { setInterval(() => {}, 1000); });",
+      ].join("\n"),
+    );
+
+    try {
+      const startedAt = Date.now();
+      const result = await runAgentProcess({
+        command: scriptPath,
+        args: [descendantPidPath],
+        request: {
+          attemptId: "attempt-timeout-stdio-held-open",
+          action: "cron",
+          cwd: tempDir,
+          env: {},
+          prompt: "test prompt",
+          timeoutMs: 200,
+        },
+      });
+
+      expect(Date.now() - startedAt).toBeLessThan(3_000);
+      expect(result.exitCode).toBeNull();
+      expect(result.timedOut).toBe(true);
+      expect(result.timeoutMs).toBe(200);
+      expect(result.stdout).toBe("checkpoint\n");
+    } finally {
+      const descendantPid = Number(await fs.readFile(descendantPidPath, "utf8").catch(() => "0"));
+      if (descendantPid > 0) {
+        try {
+          process.kill(-descendantPid, "SIGKILL");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
+            throw error;
+          }
+        }
+      }
+    }
+  }, 10_000);
+
   test("sets PWD to the requested cwd for spawned runners", async () => {
     const tempDir = await createTempDir("foreman-runner-test-");
     cleanupDirs.push(tempDir);
