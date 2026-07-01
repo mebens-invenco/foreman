@@ -937,6 +937,60 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test("reschedules consolidation after a blocked consolidation attempt (transient interruption is retried)", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.consolidateTerminalTasks = true;
+
+    const doneTask = task({
+      id: "TASK-5052R",
+      title: "Done task whose consolidation was blocked by a provider rate limit",
+      state: "done",
+      providerState: "done",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      labels: ["Agent"],
+    });
+    db.taskMirror.saveTasks([doneTask]);
+    const target = db.taskMirror.getTaskTarget(doneTask.id, "repo-a");
+    expect(target).not.toBeNull();
+    // A consolidation interrupted by a provider rate limit finalizes "blocked"
+    // (attempt-executor.ts). That is transient, not a real attempt outcome, and
+    // nothing else re-picks a blocked consolidation, so the loop guard must let
+    // it be retried rather than permanently dropping the learning harvest.
+    const consolidationJob = db.jobs.createJob({
+      taskId: doneTask.id,
+      taskTargetId: target!.id,
+      taskProvider: doneTask.provider,
+      action: "consolidation",
+      priorityRank: priorityToRank(doneTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${doneTask.id}:repo-a:consolidation`,
+      selectionReason: "test blocked consolidation",
+    });
+    db.jobs.updateJobStatus(consolidationJob.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([doneTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.task.id).toBe(doneTask.id);
+      expect(result.jobs[0]?.action).toBe("consolidation");
+    } finally {
+      db.close();
+    }
+  });
+
   test("does not schedule terminal tasks for consolidation when consolidateTerminalTasks is off", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);
