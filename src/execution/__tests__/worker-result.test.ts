@@ -22,10 +22,9 @@ describe("parseWorkerResult", () => {
   });
 
   test("extracts the block when the payload JSON embeds the literal agent-result tag", () => {
-    // Mirrors the real failure (ENG-5450): a reviewer recorded a learning whose
-    // content describes the agent-result mechanism, so the emitted JSON itself
-    // embeds the literal "<agent-result>" string. The backward scan latched onto
-    // that in-payload mention and dropped the otherwise-valid block.
+    // A learning whose content describes the agent-result mechanism makes the
+    // emitted JSON itself embed the literal "<agent-result>" string. The scan
+    // must not latch onto that in-payload mention and drop the valid block.
     const resultWithTagMention = {
       ...workerResultExample,
       outcome: "no_action_needed",
@@ -53,12 +52,10 @@ describe("parseWorkerResult", () => {
   });
 
   test("extracts the block when the payload JSON embeds the literal closing agent-result tag", () => {
-    // Strengthens the ENG-5450 coverage (PR #109 review): a learning that quotes the
-    // wrapper in full embeds the closing "</agent-result>" tag in its content too, not
-    // just the opening tag. Correctness then hinges on the close-tag search
-    // (worker-result.ts lastIndexOf(closeTag)) resolving to the real FINAL closing tag
-    // rather than the in-payload mention — pin it so a later change to the close-tag
-    // scan cannot silently regress payloads that mention the closing tag.
+    // A learning that quotes the wrapper in full embeds the closing
+    // "</agent-result>" tag in its content too, not just the opening tag.
+    // Correctness hinges on the close-tag search resolving to the real final
+    // closing tag rather than the in-payload mention.
     const resultWithClosingTagMention = {
       ...workerResultExample,
       outcome: "no_action_needed",
@@ -103,5 +100,50 @@ describe("parseWorkerResult", () => {
     expect(() => parseWorkerResult("Implemented the change and pushed the branch.")).toThrow(
       "Worker output did not contain a valid <agent-result> block",
     );
+  });
+
+  test("returns the block when a JSON string embeds an adjacent close+open tag sequence", () => {
+    // When an intervening "</agent-result><agent-result>" sits inside a JSON
+    // string, the outermost-open slice is itself valid JSON and is the single
+    // intended block — not two separate blocks. Pin that this stays correct.
+    const resultWithAdjacentTags = {
+      ...workerResultExample,
+      outcome: "no_action_needed",
+      summary: "Recorded a learning about agent-result handling.",
+      learningMutations: [
+        {
+          type: "add",
+          title: "Adjacent wrapper tags inside the payload",
+          repo: "foreman",
+          confidence: "emerging",
+          content:
+            "Some workers paste the wrapper as </agent-result><agent-result> when describing " +
+            "back-to-back blocks; parseWorkerResult must still return this single block.",
+          tags: ["execution"],
+        },
+      ],
+    };
+
+    const payload = JSON.stringify(resultWithAdjacentTags);
+    // Guard the regression intent: the payload embeds an adjacent close+open run.
+    expect(payload).toContain("</agent-result><agent-result>");
+
+    expect(parseWorkerResult(`<agent-result>\n${payload}\n</agent-result>`)).toEqual(resultWithAdjacentTags);
+  });
+
+  test("bounds parse attempts on a pathological many-mention payload (no quadratic blowup)", () => {
+    // The tag-scan must not degrade to a close×open cross-product when stdout
+    // echoes the tag many times without a valid block — parseWorkerResult runs
+    // synchronously on the orchestrator path. This no-valid-block payload has
+    // thousands of tag pairs: near-instant with the parse-attempt cap, but Θ(K²)
+    // parses (seconds) without it. The wall-clock guard keeps a wide margin to
+    // stay non-flaky while still catching a reintroduced quadratic scan.
+    const pathological = "<agent-result>x</agent-result>".repeat(4000);
+
+    const start = performance.now();
+    expect(() => parseWorkerResult(pathological)).toThrow(
+      "Worker output did not contain a valid <agent-result> block",
+    );
+    expect(performance.now() - start).toBeLessThan(1000);
   });
 });
