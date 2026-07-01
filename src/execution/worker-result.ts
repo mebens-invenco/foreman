@@ -159,29 +159,51 @@ export const parseWorkerResult = (stdout: string): unknown => {
   } catch {
     const openTag = "<agent-result>";
     const closeTag = "</agent-result>";
-    let searchEnd = trimmed.length;
 
-    while (searchEnd > 0) {
-      const closeStart = trimmed.lastIndexOf(closeTag, searchEnd);
-      if (closeStart === -1) {
-        break;
+    // Collect every tag offset once. Worker stdout is model output that can echo
+    // the tag many times, and pairing each close with each open is a Θ(K²)
+    // cross-product of JSON.parse calls. parseWorkerResult runs synchronously on
+    // the orchestrator path, so precompute positions and cap total parse attempts
+    // to keep the scan linear in stdout size however many times the tag appears.
+    const openStarts: number[] = [];
+    for (let i = trimmed.indexOf(openTag); i !== -1; i = trimmed.indexOf(openTag, i + openTag.length)) {
+      openStarts.push(i);
+    }
+    const closeStarts: number[] = [];
+    for (let i = trimmed.indexOf(closeTag); i !== -1; i = trimmed.indexOf(closeTag, i + closeTag.length)) {
+      closeStarts.push(i);
+    }
+
+    // Contract: exactly one block, last one wins. The payload may embed the
+    // literal tag strings (e.g. a learning describing this mechanism), so the
+    // real opening tag is the OUTERMOST one before the close, not the last. For
+    // each close tag (latest first) try opening tags outermost-first and accept
+    // the first slice that is valid JSON; only when none parse fall back to an
+    // earlier close tag. Two separate blocks can't be conflated: the outermost
+    // slice spans the raw intervening tags and fails to parse, so the last block
+    // wins. The outermost slice only parses when the inner tags sit inside a JSON
+    // string — a single block legitimately embedding the tag, which we want.
+    // Well-formed inputs succeed in a few attempts; the cap only bites
+    // pathological no-block payloads, where throwing is the correct outcome.
+    const maxParseAttempts = 200;
+    let attempts = 0;
+    for (let c = closeStarts.length - 1; c >= 0; c--) {
+      const closeStart = closeStarts[c]!;
+      for (const openStart of openStarts) {
+        if (openStart >= closeStart) {
+          break;
+        }
+        if (++attempts > maxParseAttempts) {
+          throw new Error("Worker output did not contain a valid <agent-result> block");
+        }
+        const payload = trimmed.slice(openStart + openTag.length, closeStart).trim();
+        try {
+          return JSON.parse(payload);
+        } catch {
+          // Not valid JSON (a tag mention in prose or inside the payload); try a
+          // later opening tag before this close.
+        }
       }
-
-      const openStart = trimmed.lastIndexOf(openTag, closeStart);
-      if (openStart === -1) {
-        searchEnd = closeStart;
-        continue;
-      }
-
-      const payload = trimmed.slice(openStart + openTag.length, closeStart).trim();
-
-      try {
-        return JSON.parse(payload);
-      } catch {
-        // Keep looking; earlier text can mention <agent-result> before the final answer block.
-      }
-
-      searchEnd = openStart;
     }
 
     throw new Error("Worker output did not contain a valid <agent-result> block");
