@@ -1,4 +1,4 @@
-export type DeploymentStatus = "succeeded" | "in_progress" | "follow_up_created" | "blocked";
+export type DeploymentStatus = "succeeded" | "in_progress" | "follow_up_created" | "blocked" | "failed";
 
 export type DeploymentRecord = {
   id: string;

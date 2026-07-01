@@ -338,11 +338,6 @@ export class WorkerResultApplier {
 
   private async applyDeploymentResult(input: ApplyWorkerResultInput, pullRequestUrl: string | null, logger: LoggerService): Promise<string | null> {
     const { workerResult } = input;
-    if (workerResult.outcome === "failed") {
-      logger.warn("deployment result marked attempt as failed; skipping deployment tracking side effects");
-      return pullRequestUrl;
-    }
-
     const context = this.readDeploymentSelectionContext(input.job.selectionContext);
     if (!context) {
       throw new ForemanError("missing_deployment_context", `Deployment job ${input.job.id} is missing deployment selection context.`);
@@ -395,7 +390,7 @@ export class WorkerResultApplier {
       }
     }
 
-    const shouldRetry = workerResult.outcome === "in_progress" || workerResult.outcome === "blocked";
+    const shouldRetry = workerResult.outcome === "in_progress" || workerResult.outcome === "blocked" || workerResult.outcome === "failed";
     const retryCount = shouldRetry ? (prior?.retryCount ?? 0) + 1 : 0;
     const nextEligibleAt = shouldRetry
       ? addSeconds(
