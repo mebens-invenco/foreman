@@ -165,6 +165,22 @@ const isGitHubRateLimitResponse = (status: number, body: string, headers: GitHub
   );
 };
 
+const isGitHubBadCredentialsResponse = (status: number, body: string): boolean => {
+  if (status !== 401) {
+    return false;
+  }
+
+  try {
+    const parsed: unknown = JSON.parse(body);
+    return typeof parsed === "object" && parsed !== null && "message" in parsed && parsed.message === "Bad credentials";
+  } catch {
+    return false;
+  }
+};
+
+const isRetryableGitHubResponse = (status: number, body: string): boolean =>
+  GITHUB_TRANSIENT_STATUS_CODES.has(status) || isGitHubBadCredentialsResponse(status, body);
+
 const areGitHubGraphqlRateLimitErrors = (errors: Array<{ message: string }>): boolean =>
   errors.some((error) => {
     const message = error.message.toLowerCase();
@@ -444,7 +460,7 @@ export class GitHubReviewService implements ReviewService {
           });
         }
 
-        if (GITHUB_TRANSIENT_STATUS_CODES.has(response.status) && attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
+        if (isRetryableGitHubResponse(response.status, body) && attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
           const delayMs = retryDelayMs(attempt);
           this.logger.warn("GitHub REST request failed with transient status; retrying", {
             method,
@@ -552,7 +568,7 @@ export class GitHubReviewService implements ReviewService {
           });
         }
 
-        if (GITHUB_TRANSIENT_STATUS_CODES.has(response.status) && attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
+        if (isRetryableGitHubResponse(response.status, body) && attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
           const delayMs = retryDelayMs(attempt);
           this.logger.warn("GitHub GraphQL request failed with transient status; retrying", {
             operationName,
