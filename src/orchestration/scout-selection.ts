@@ -1074,7 +1074,7 @@ export const runScoutSelection = async (input: {
       }
     }
 
-    if (!chosen) {
+    if (!chosen && input.config.scheduler.consolidateTerminalTasks) {
       const agentLabel = configuredAgentLabel(input.config);
       const consolidatedLabel = configuredConsolidatedLabel(input.config);
 
@@ -1091,10 +1091,24 @@ export const runScoutSelection = async (input: {
             continue;
           }
 
+          // Consolidation is best-effort learning capture, capped to one
+          // completed/failed/canceled attempt per terminal target. canSchedule
+          // already excludes active (queued/leased/running) consolidations, so a
+          // non-null latest job here is a prior attempt that has stopped running.
+          // Skip it: a run that was canceled (e.g. the scheduler was paused
+          // mid-pass and SIGTERM'd the worker) or failed must NOT be re-picked,
+          // or a done task loops forever consuming worker slots.
+          //
+          // `blocked` is the exception. It is a transient interruption signal
+          // (e.g. a provider rate limit — see attempt-executor.ts), not a real
+          // attempt outcome, and unlike execution/retry work nothing else
+          // re-picks a blocked consolidation (blocked-ordinary-work.ts is scoped
+          // to execution/retry). Allow it through so the transient failure can be
+          // retried rather than permanently dropping that task's learning harvest.
           const previousConsolidation = input.foremanRepos.jobs.latestJobForDedupeKey(
             dedupeKeyForAction(task.id, target.repoKey, "consolidation"),
           );
-          if (previousConsolidation?.status === "completed") {
+          if (previousConsolidation && previousConsolidation.status !== "blocked") {
             continue;
           }
 

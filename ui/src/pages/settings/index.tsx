@@ -748,6 +748,15 @@ export function SettingsPage() {
               patch({ agentTaskCreation: { enabled: !config.agentTaskCreation.enabled } })
             }
           />
+          <ToggleField
+            label="Consolidate learnings"
+            help="Runs one short agent pass over each Done or Canceled task to extract reusable learnings, then parks it. Does not change code or task state. Costs roughly one agent run per completed task. Turn off to make done mean done with no further scheduling."
+            enabled={config.scheduler.consolidateTerminalTasks}
+            disabled={disabled}
+            onToggle={() =>
+              patch({ scheduler: { consolidateTerminalTasks: !config.scheduler.consolidateTerminalTasks } })
+            }
+          />
         </div>
       </SectionCard>
 

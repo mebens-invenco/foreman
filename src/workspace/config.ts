@@ -13,6 +13,10 @@ export const schedulerSchema = z.object({
   staleLeaseReapIntervalSeconds: z.number().int().positive().default(15),
   schedulerLoopIntervalMs: z.number().int().positive().default(1000),
   shutdownGracePeriodSeconds: z.number().int().positive().default(10),
+  // When true (default), terminal (done/canceled) tasks get one consolidation
+  // learning-capture pass before being parked. Set false to make done mean done
+  // with no further scheduling.
+  consolidateTerminalTasks: z.boolean().default(true),
 });
 
 export const cronSchema = z.object({
@@ -260,6 +264,7 @@ export const workspaceConfigSchema = z.preprocess(
         staleLeaseReapIntervalSeconds: 15,
         schedulerLoopIntervalMs: 1000,
         shutdownGracePeriodSeconds: 10,
+        consolidateTerminalTasks: true,
       }),
       http: z.object({
         host: z.string().min(1).default("127.0.0.1"),
@@ -362,6 +367,7 @@ export const createDefaultWorkspaceConfig = (
     staleLeaseReapIntervalSeconds: 15,
     schedulerLoopIntervalMs: 1000,
     shutdownGracePeriodSeconds: 10,
+    consolidateTerminalTasks: true,
   },
   http: {
     host: "127.0.0.1",

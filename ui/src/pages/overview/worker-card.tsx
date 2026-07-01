@@ -58,6 +58,11 @@ export function WorkerCard({ worker, now }: WorkerCardProps) {
                     ? formatActionLabel(worker.currentJob.action)
                     : null}
                 </p>
+                {worker.currentJob?.action === "consolidation" ? (
+                  <p className="mt-1 text-sm leading-5 text-muted-foreground">
+                    Harvesting reusable learnings from a finished task. No code or task-state changes.
+                  </p>
+                ) : null}
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div>
