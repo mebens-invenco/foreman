@@ -37,6 +37,10 @@ export function formatActionLabel(value: string | null | undefined) {
     return "Cron job"
   }
 
+  if (value === "consolidation") {
+    return "Consolidate Learnings"
+  }
+
   return value.charAt(0).toUpperCase() + value.slice(1).replace(/_/g, " ")
 }
 
