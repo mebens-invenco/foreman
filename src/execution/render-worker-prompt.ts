@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { resolveTaskPullRequest, resolveTaskTargetRef, type RepoRef, type ReviewContext, type Task, type TaskTarget, type TaskTargetRef } from "../domain/index.js";
 import { isForemanError } from "../lib/errors.js";
+import { stripLearningsIndex } from "../planning/learnings-index.js";
 import { jsonSection, renderPromptTemplate, textSection, type WorkerPromptTemplateName } from "../prompts/template-renderer.js";
 import type { ForemanRepos } from "../repos/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
@@ -240,7 +241,9 @@ const renderPriorCheckpoint = (input: {
 
 const renderWorkspacePlan = async (paths: WorkspacePaths): Promise<string> => {
   const plan = await readWorkspacePlan(paths);
-  return textSection("Workspace Plan", plan || `No plan.md was found at ${paths.planPath}.`);
+  // The learnings index is a plan-authoring aid; strip it so execution attempts
+  // do not inherit the ~2-3K-token section embedded verbatim from plan.md.
+  return textSection("Workspace Plan", stripLearningsIndex(plan) || `No plan.md was found at ${paths.planPath}.`);
 };
 
 const renderDeploymentInstructions = async (paths: WorkspacePaths, instructionBody?: string): Promise<string> => {
