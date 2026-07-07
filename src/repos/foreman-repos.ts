@@ -4,6 +4,7 @@ import type { ArtifactRepo } from "./artifact-repo.js";
 import type { AttemptRepo } from "./attempt-repo.js";
 import type { JobRepo } from "./job-repo.js";
 import type { LearningRepo } from "./learning-repo.js";
+import type { LearningSearchEventRepo } from "./learning-search-event-repo.js";
 import type { LeaseRepo } from "./lease-repo.js";
 import type { MigrationRunner } from "./migration-runner.js";
 import type { ReviewCheckpointRepo } from "./review-checkpoint-repo.js";
@@ -28,5 +29,6 @@ export type ForemanRepos = {
   reviewerCheckpoints: ReviewerCheckpointRepo;
   runnerSessions: RunnerSessionRepo;
   learnings: LearningRepo;
+  learningSearchEvents: LearningSearchEventRepo;
   close(): void;
 };

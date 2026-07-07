@@ -1,0 +1,48 @@
+export type LearningSearchEventKind = "search" | "get";
+
+/**
+ * One recorded `foreman learnings search` / `learnings get` invocation. The
+ * `zeroHit` flag is derived from `hitIds` at write time, so it can never
+ * disagree with what actually came back.
+ */
+export type LearningSearchEventInput = {
+  kind: LearningSearchEventKind;
+  /** Optional pipeline stage that issued the query (e.g. `plan`, `execution`). */
+  caller?: string | null;
+  /** Full query strings for a `search`; empty for a `get`. */
+  queries?: string[];
+  /** Repo scopes the caller restricted the query to. */
+  repos?: string[];
+  /** Ids the caller asked for on a `get`; empty for a `search`. */
+  requestedIds?: string[];
+  /** Learning ids that came back. */
+  hitIds?: string[];
+  /** Relevance scores aligned with `hitIds` (search only; empty for `get`). */
+  hitScores?: number[];
+};
+
+export type LearningSearchEventRecord = {
+  id: string;
+  createdAt: string;
+  kind: LearningSearchEventKind;
+  caller: string | null;
+  queries: string[];
+  repos: string[];
+  requestedIds: string[];
+  hitIds: string[];
+  hitScores: number[];
+  zeroHit: boolean;
+};
+
+export type LearningSearchEventFilters = {
+  kind?: LearningSearchEventKind;
+  caller?: string;
+  zeroHit?: boolean;
+  limit?: number;
+  offset?: number;
+};
+
+export interface LearningSearchEventRepo {
+  recordEvent(input: LearningSearchEventInput): string;
+  listEvents(filters?: LearningSearchEventFilters): LearningSearchEventRecord[];
+}

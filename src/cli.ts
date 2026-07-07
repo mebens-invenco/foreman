@@ -28,6 +28,7 @@ import { LoggerService } from "./logger.js";
 import { SchedulerService } from "./orchestration/index.js";
 import { renderWorkspacePlan } from "./planning/render-workspace-plan.js";
 import { createRepos } from "./repos/index.js";
+import type { LearningSearchEventInput } from "./repos/index.js";
 import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
 import { createReviewService, resolveGitHubAuthEnv } from "./review/index.js";
 import { createSelfRebootScheduler, runRebootSidecar } from "./system/reboot.js";
@@ -118,6 +119,19 @@ const withWorkspaceReposReadOnly = async <T>(
     return await handler(repos, paths);
   } finally {
     repos.close();
+  }
+};
+
+// Telemetry for learning retrieval must never fail the underlying query: record
+// the event best-effort and swallow (log to stderr, keeping stdout clean JSON)
+// any error so the search/get result still returns.
+const recordLearningSearchEvent = (repos: ReturnType<typeof createRepos>, input: LearningSearchEventInput): void => {
+  try {
+    repos.learningSearchEvents.recordEvent(input);
+  } catch (error) {
+    process.stderr.write(
+      `warning: failed to record learning ${input.kind} telemetry: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
   }
 };
 
@@ -339,24 +353,36 @@ learnings
   .option("--repo <repo>", "Repo scope to include", collectRepeatedValues, [])
   .option("--query <query>", "Search query", collectRepeatedValues, [])
   .option("--limit <count>", "Maximum results to return", parsePositiveInteger, 20)
-  .action(async (workspace: string, options: { repo: string[]; query: string[]; limit: number }) => {
+  .option("--caller <stage>", "Optional pipeline stage recorded in retrieval telemetry")
+  .action(async (workspace: string, options: { repo: string[]; query: string[]; limit: number; caller?: string }) => {
     if (options.query.length === 0) {
       throw new InvalidArgumentError("At least one --query is required.");
     }
 
     await withWorkspaceRepos(workspace, async (repos) => {
+      const learnings = repos.learnings.searchLearnings(
+        {
+          queries: options.query,
+          ...(options.repo.length > 0 ? { repos: options.repo } : {}),
+          limit: options.limit,
+        },
+        { incrementReadCount: true },
+      );
+
+      recordLearningSearchEvent(repos, {
+        kind: "search",
+        caller: options.caller ?? null,
+        queries: options.query,
+        repos: options.repo,
+        hitIds: learnings.map((learning) => learning.id),
+        hitScores: learnings.map((learning) => learning.score),
+      });
+
       writeJson({
         workspace,
         repos: options.repo,
         queries: options.query,
-        learnings: repos.learnings.searchLearnings(
-          {
-            queries: options.query,
-            ...(options.repo.length > 0 ? { repos: options.repo } : {}),
-            limit: options.limit,
-          },
-          { incrementReadCount: true },
-        ),
+        learnings,
       });
     });
   });
@@ -365,10 +391,19 @@ learnings
   .command("get")
   .argument("<workspace>")
   .requiredOption("--id <id>", "Learning id to fetch", collectRepeatedValues, [])
-  .action(async (workspace: string, options: { id: string[] }) => {
+  .option("--caller <stage>", "Optional pipeline stage recorded in retrieval telemetry")
+  .action(async (workspace: string, options: { id: string[]; caller?: string }) => {
     await withWorkspaceRepos(workspace, async (repos) => {
       const learnings = repos.learnings.getLearningsByIds(options.id, { incrementReadCount: true });
       const foundIds = new Set(learnings.map((learning) => learning.id));
+
+      recordLearningSearchEvent(repos, {
+        kind: "get",
+        caller: options.caller ?? null,
+        requestedIds: options.id,
+        hitIds: learnings.map((learning) => learning.id),
+      });
+
       writeJson({
         workspace,
         ids: options.id,

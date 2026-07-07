@@ -6,6 +6,7 @@ export * from "./deployment-tracking-repo.js";
 export * from "./foreman-repos.js";
 export * from "./job-repo.js";
 export * from "./learning-repo.js";
+export * from "./learning-search-event-repo.js";
 export * from "./lease-repo.js";
 export * from "./migration-runner.js";
 export * from "./review-checkpoint-repo.js";
