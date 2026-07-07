@@ -3,7 +3,7 @@
 Before composing your final result, complete a learning review. This is a required step, not optional.
 
 1. **Recall:** did this task surface a non-obvious, reusable pattern, pitfall, or decision rule that a future agent would benefit from?
-2. **Search:** run `foreman learnings search {{workspace:name}} --repo shared --repo <repo-key> --query "<core topic>" --caller <action>` (set `<action>` to this run's action-type tag — `execution`, `consolidation`, `review`, `reviewer`, `retry`, or `deployment`) to find conceptually similar learnings before adding. If a match already covers the insight, prefer an `update` over a new `add`.
+2. **Search:** run `foreman learnings search {{workspace:name}} --repo shared --repo <repo-key> --query "<core topic>" --caller {{session:action}}` to find conceptually similar learnings before adding. If a match already covers the insight, prefer an `update` over a new `add`.
 3. **Emit:** include any new or updated learning in `learningMutations`. If no learning applies, return an empty array - but only after completing steps 1 and 2. An empty array is an explicit decision, not a default.
 
 Record a learning only when it is non-obvious, reusable, and likely to help future work.
