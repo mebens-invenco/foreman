@@ -183,15 +183,59 @@ const judgeVerdictSchema = z.object({
 // Shared <judge>…</judge> extraction for all LLM-as-judge graders: pull the last
 // well-formed judge block from the model stdout (or fall back to the whole
 // output) and validate it against that judge's verdict schema.
+//
+// The scan mirrors parseWorkerResult (ENG-5450). A judge verdict is model output
+// that can echo the literal <judge> delimiter — e.g. a rationale quoting the tag
+// it was told to emit — so a naive lastIndexOf(open) latches onto the in-payload
+// mention, slices a truncated fragment, and drops an otherwise valid verdict.
 const parseJudgeBlock = <Schema extends z.ZodType>(stdout: string, schema: Schema): z.infer<Schema> | null => {
   const open = "<judge>";
   const close = "</judge>";
-  const openStart = stdout.lastIndexOf(open);
-  const closeStart = stdout.lastIndexOf(close);
-  const payload = openStart !== -1 && closeStart > openStart ? stdout.slice(openStart + open.length, closeStart).trim() : stdout.trim();
+  const trimmed = stdout.trim();
 
+  // Collect every tag offset once. Pairing each close with each open is a Θ(K²)
+  // cross-product of parse attempts; precompute positions and cap total attempts
+  // so the scan stays linear in stdout size however many times the tag appears.
+  const openStarts: number[] = [];
+  for (let i = trimmed.indexOf(open); i !== -1; i = trimmed.indexOf(open, i + open.length)) {
+    openStarts.push(i);
+  }
+  const closeStarts: number[] = [];
+  for (let i = trimmed.indexOf(close); i !== -1; i = trimmed.indexOf(close, i + close.length)) {
+    closeStarts.push(i);
+  }
+
+  // For each close tag (latest first) try opening tags outermost-first and accept
+  // the first slice that is valid JSON AND validates against the schema; only when
+  // none do fall back to an earlier close tag. The payload may embed the literal
+  // tag strings, so the real opening tag is the OUTERMOST one before the close, not
+  // the last. Two separate blocks can't be conflated: the outermost slice spans the
+  // raw intervening tags and fails to parse, so the last well-formed block wins.
+  const maxParseAttempts = 200;
+  let attempts = 0;
+  for (let c = closeStarts.length - 1; c >= 0 && attempts <= maxParseAttempts; c--) {
+    const closeStart = closeStarts[c]!;
+    for (const openStart of openStarts) {
+      if (openStart >= closeStart || ++attempts > maxParseAttempts) {
+        break;
+      }
+      const payload = trimmed.slice(openStart + open.length, closeStart).trim();
+      try {
+        const verdict = schema.safeParse(JSON.parse(payload));
+        if (verdict.success) {
+          return verdict.data;
+        }
+      } catch {
+        // Not valid JSON (a tag mention in prose or inside the payload); try an
+        // earlier opening tag before this close.
+      }
+    }
+  }
+
+  // No well-formed judge block: fall back to parsing the whole output (a judge that
+  // replied with a bare verdict object and no wrapping tags).
   try {
-    const verdict = schema.safeParse(JSON.parse(payload));
+    const verdict = schema.safeParse(JSON.parse(trimmed));
     return verdict.success ? verdict.data : null;
   } catch {
     return null;
