@@ -226,8 +226,8 @@ const parseJudgeBlock = <Schema extends z.ZodType>(stdout: string, schema: Schem
           return verdict.data;
         }
       } catch {
-        // Not valid JSON (a tag mention in prose or inside the payload); try an
-        // earlier opening tag before this close.
+        // Not valid JSON (a tag mention in prose or inside the payload); try a
+        // later opening tag before this close.
       }
     }
   }
