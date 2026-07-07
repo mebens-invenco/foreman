@@ -157,6 +157,12 @@ export const reviewerBodyDisciplineGrader: Grader<ReviewerExpect> = {
       return fail("body-discipline", `review body is ${bodyChars} chars; the finding-in-body tripwire is ${BODY_MAX_CHARS} (good bodies max 682c)`);
     }
     const largestComment = submit.comments.reduce((max, comment) => Math.max(max, comment.body.length), 0);
+    // `largestComment > 0` is belt-and-suspenders — the conformance grader already
+    // requires ≥1 inline comment and the schema forces `body.min(1)`, so it is never 0
+    // here. The inversion is strict (`>=`) and empirically safe: good comments cluster
+    // at ≥498c, well above disciplined bodies. It could in principle fail a legitimately
+    // tiny review (e.g. a 200c body == a single 200c comment); no such case exists in the
+    // 123-trace corpus, so the strict bar stands until one does.
     if (largestComment > 0 && bodyChars >= largestComment) {
       return fail(
         "body-discipline",
