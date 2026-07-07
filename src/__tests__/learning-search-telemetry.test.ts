@@ -83,7 +83,7 @@ describe("learning search telemetry", () => {
   test("records a search event with the hits, scores, scopes, and caller", async () => {
     const { workspaceName, workspaceRoot } = await createCliWorkspace();
 
-    await runCli([
+    const output = (await runCli([
       "learnings",
       "search",
       workspaceName,
@@ -97,7 +97,7 @@ describe("learning search telemetry", () => {
       "learnings cli",
       "--caller",
       "plan",
-    ]);
+    ])) as { learnings: Array<{ id: string; score: number }> };
 
     const events = await readEvents(workspaceRoot);
     expect(events).toHaveLength(1);
@@ -107,8 +107,15 @@ describe("learning search telemetry", () => {
     expect(event.queries).toEqual(["planning prompt", "learnings cli"]);
     expect(event.repos).toEqual(["shared", "foreman"]);
     expect(event.requestedIds).toEqual([]);
-    expect([...event.hitIds].sort()).toEqual(["learn-a", "learn-b"]);
-    expect(event.hitScores).toHaveLength(event.hitIds.length);
+    // Both learnings match, and the event's parallel arrays mirror the CLI's returned
+    // (id, score) pairs position-for-position — pinning that hitScores[i] is the score of
+    // hitIds[i] through the DB round-trip, so a future re-rank/dedupe cannot silently
+    // misattribute scores to ids without failing here.
+    const returnedIds = output.learnings.map((learning) => learning.id);
+    expect(returnedIds).toContain("learn-a");
+    expect(returnedIds).toContain("learn-b");
+    expect(event.hitIds).toEqual(returnedIds);
+    expect(event.hitScores).toEqual(output.learnings.map((learning) => learning.score));
     expect(event.hitScores.every((score) => Number.isFinite(score))).toBe(true);
     expect(event.zeroHit).toBe(false);
   });
@@ -150,6 +157,22 @@ describe("learning search telemetry", () => {
     expect(event.requestedIds).toEqual(["learn-b", "learn-a", "missing"]);
     expect(event.hitIds).toEqual(["learn-b", "learn-a"]);
     expect(event.zeroHit).toBe(false);
+  });
+
+  test("records the caller on a get event when provided", async () => {
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
+
+    // `search` and `get` register `--caller` independently, so exercise it on `get` too:
+    // a regression in the get wiring would otherwise null every get caller with the suite green.
+    await runCli(["learnings", "get", workspaceName, "--id", "learn-a", "--caller", "reviewer"]);
+
+    const events = await readEvents(workspaceRoot);
+    expect(events).toHaveLength(1);
+    const event = events[0]!;
+    expect(event.kind).toBe("get");
+    expect(event.caller).toBe("reviewer");
+    expect(event.requestedIds).toEqual(["learn-a"]);
+    expect(event.hitIds).toEqual(["learn-a"]);
   });
 
   test("a telemetry insert failure does not fail the search", async () => {
