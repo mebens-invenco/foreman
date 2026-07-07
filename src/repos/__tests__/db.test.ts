@@ -1136,6 +1136,33 @@ describe("persistence repos", () => {
     }
   });
 
+  test("listLearnings never increments read counts", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.learnings.addLearning({ id: "learn-a", title: "First", repo: "foreman", confidence: "emerging", content: "planning prompt cli", tags: [] });
+      db.learnings.addLearning({ id: "learn-b", title: "Second", repo: "shared", confidence: "proven", content: "planning prompt cli", tags: ["planning"] });
+
+      // The plan-index render path lists the whole corpus and, with a search
+      // filter, funnels through the FTS path — neither is an agent read.
+      db.learnings.listLearnings();
+      db.learnings.listLearnings({ repo: "shared" });
+      db.learnings.listLearnings({ search: "planning prompt" });
+
+      const readCounts = db.database.sqlite
+        .prepare("SELECT id, read_count FROM learning WHERE id IN (?, ?) ORDER BY id ASC")
+        .all("learn-a", "learn-b") as Array<{ id: string; read_count: number }>;
+      expect(readCounts).toEqual([
+        { id: "learn-a", read_count: 0 },
+        { id: "learn-b", read_count: 0 },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("mirrors single-target tasks and derives target dependencies locally", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);

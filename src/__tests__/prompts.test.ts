@@ -12,8 +12,10 @@ import {
   workerResultSchema,
   type WorkerResultAction,
 } from "../execution/worker-result.js";
+import { LEARNINGS_INDEX_CAP, renderLearningsIndexSection, stripLearningsIndex } from "../planning/learnings-index.js";
 import { renderPlanPrompt } from "../planning/render-plan-prompt.js";
 import type { ForemanRepos } from "../repos/index.js";
+import type { LearningRecord } from "../repos/learning-repo.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
 
 const cleanupDirs: string[] = [];
@@ -51,6 +53,39 @@ const sampleTask: Task = {
   updatedAt: "2026-03-14T12:00:00Z",
   url: null,
 };
+
+const makeLearning = (overrides: Partial<LearningRecord> & Pick<LearningRecord, "id">): LearningRecord => ({
+  title: "Sample learning",
+  repo: "shared",
+  tags: [],
+  confidence: "established",
+  content: "Sample body",
+  appliedCount: 0,
+  readCount: 0,
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+  ...overrides,
+});
+
+// The proven entry has a lexicographically-later id and an OLDER updatedAt than
+// the emerging entry, so if it renders first only the confidence sort explains it.
+const provenLearning = makeLearning({
+  id: "01LRN00000000000000000PRVN",
+  title: "Prefer Result over throw at repo boundaries",
+  repo: "shared",
+  tags: ["execution", "architecture"],
+  confidence: "proven",
+  updatedAt: "2026-01-01T00:00:00Z",
+});
+const emergingLearning = makeLearning({
+  id: "01LRN00000000000000000EMRG",
+  title: "Mirror serverless-docker.yml when adding functions",
+  repo: "repo-a",
+  tags: ["review"],
+  confidence: "emerging",
+  updatedAt: "2026-06-01T00:00:00Z",
+});
+const sampleLearnings: LearningRecord[] = [emergingLearning, provenLearning];
 
 const sampleReviewContext: ReviewContext = {
   provider: "github",
@@ -184,16 +219,19 @@ describe("prompt rendering", () => {
     const config = createDefaultWorkspaceConfig("foo", "file");
     const paths = createWorkspacePaths(projectRoot, workspaceRoot);
 
-    const result = await renderPlanPrompt(config, paths, [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }]);
+    const result = await renderPlanPrompt(config, paths, [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }], sampleLearnings);
 
     expect(result.markdown).toContain("# Planning Prompt");
     expect(result.markdown).toContain("## File Task Planning Rules");
     expect(result.markdown).toContain("`targets`");
     expect(result.markdown).toContain("## Workspace Context");
     expect(result.markdown).toContain("## Discovered Repositories");
+    expect(result.markdown).toContain("## Workspace Learnings Index");
     expect(result.markdown).toContain("## Learnings CLI");
+    expect(result.markdown).toContain("foreman learnings get foo --id <learning-id>");
     expect(result.markdown).toContain("foreman learnings search foo --repo shared --repo <repo-key>");
-    expect(result.markdown).toContain("pnpm run foreman -- learnings search foo");
+    expect(result.markdown).toContain("pnpm run foreman -- learnings get foo");
+    expect(result.markdown).toContain("--caller plan");
     expect(result.markdown).toContain("## Relevant Learnings");
     expect(result.markdown).toContain("No strong relevant learnings found in shared/<repo> scope.");
     expect(result.markdown).not.toContain("{{fragment:");
@@ -207,7 +245,7 @@ describe("prompt rendering", () => {
     const config = createDefaultWorkspaceConfig("foo", "linear");
     const paths = createWorkspacePaths(projectRoot, workspaceRoot);
 
-    const result = await renderPlanPrompt(config, paths, [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }]);
+    const result = await renderPlanPrompt(config, paths, [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }], sampleLearnings);
 
     expect(result.markdown).toContain("## Linear Planning Rules");
     expect(result.markdown).toContain(
@@ -216,6 +254,126 @@ describe("prompt rendering", () => {
     expect(result.markdown).toContain("## Relevant Learnings");
     expect(result.markdown).toContain("- <learning-id>: <learning title>");
     expect(result.markdown).not.toContain("Base branch");
+  });
+
+  test("renders the workspace learnings index as a table ordered by confidence then recency", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-learnings-index-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+
+    const result = await renderPlanPrompt(config, paths, [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }], sampleLearnings);
+
+    expect(result.markdown).toContain("<!-- learnings-index:start -->");
+    expect(result.markdown).toContain("<!-- learnings-index:end -->");
+    expect(result.markdown).toContain("## Workspace Learnings Index");
+    expect(result.markdown).toContain("| id | title | repo | confidence | tags |");
+    expect(result.markdown).toContain("| --- | --- | --- | --- | --- |");
+    expect(result.markdown).toContain(
+      "| 01LRN00000000000000000PRVN | Prefer Result over throw at repo boundaries | shared | proven | execution, architecture |",
+    );
+    expect(result.markdown).toContain(
+      "| 01LRN00000000000000000EMRG | Mirror serverless-docker.yml when adding functions | repo-a | emerging | review |",
+    );
+    // Confidence wins over both recency and id order: proven (older, later id) before emerging.
+    expect(result.markdown.indexOf("01LRN00000000000000000PRVN")).toBeLessThan(result.markdown.indexOf("01LRN00000000000000000EMRG"));
+    // A small corpus is never truncated.
+    expect(result.markdown).not.toContain("omitted");
+  });
+
+  test("states the truncation cut when the corpus exceeds the index cap", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-learnings-truncation-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+
+    const keptProven: LearningRecord[] = Array.from({ length: LEARNINGS_INDEX_CAP }, (_, index) =>
+      makeLearning({ id: `01LRNPROVEN${String(index).padStart(15, "0")}`, confidence: "proven" }),
+    );
+    const droppedEmerging = makeLearning({
+      id: "01LRNEMERGINGDROPPED000000",
+      title: "Lowest-signal learning dropped by the cap",
+      confidence: "emerging",
+      updatedAt: "2020-01-01T00:00:00Z",
+    });
+
+    const result = await renderPlanPrompt(config, paths, [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }], [
+      droppedEmerging,
+      ...keptProven,
+    ]);
+
+    expect(result.markdown).toContain(`Showing the top ${LEARNINGS_INDEX_CAP} of ${LEARNINGS_INDEX_CAP + 1} learnings by confidence then recency; 1 omitted`);
+    // The lowest-confidence entry is the one dropped; a kept proven entry stays.
+    expect(result.markdown).not.toContain("01LRNEMERGINGDROPPED000000");
+    expect(result.markdown).toContain("01LRNPROVEN000000000000000");
+  });
+
+  test("renders an empty learnings index note when the corpus is empty", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-learnings-empty-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+
+    const result = await renderPlanPrompt(config, paths, [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }], []);
+
+    expect(result.markdown).toContain("<!-- learnings-index:start -->");
+    expect(result.markdown).toContain("<!-- learnings-index:end -->");
+    expect(result.markdown).toContain("## Workspace Learnings Index");
+    expect(result.markdown).toContain("No workspace learnings have been recorded yet.");
+    expect(result.markdown).not.toContain("| id | title | repo | confidence | tags |");
+  });
+
+  test("strips the learnings index from worker prompt embeds", async () => {
+    const workspaceRoot = await createTempDir("foreman-prompts-learnings-embed-");
+    cleanupDirs.push(workspaceRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const repo = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
+
+    // The deployment prompt is the worker template that embeds plan.md verbatim
+    // via {{context:workspace-plan}}, so it is where the index must be stripped.
+    const plan = await renderPlanPrompt(config, paths, [repo], sampleLearnings);
+    await fs.writeFile(paths.planPath, plan.markdown, "utf8");
+
+    const worker = await renderWorkerPrompt({
+      action: "deployment",
+      config,
+      paths,
+      task: { ...sampleTask, state: "deployable", providerState: "deployable" },
+      repo,
+      worktreePath: workspaceRoot,
+      baseBranch: "main",
+    });
+
+    // The plan is embedded, and its non-index content survives.
+    expect(worker).toContain("## Workspace Plan");
+    expect(worker).toContain("# Planning Prompt");
+    expect(worker).toContain("## Learnings CLI");
+    // The index section — markers, heading, and every row — is gone.
+    expect(worker).not.toContain("<!-- learnings-index:start -->");
+    expect(worker).not.toContain("<!-- learnings-index:end -->");
+    expect(worker).not.toContain("## Workspace Learnings Index");
+    expect(worker).not.toContain("01LRN00000000000000000PRVN");
+    expect(worker).not.toContain("Prefer Result over throw at repo boundaries");
+  });
+
+  test("render and strip share the index markers so they cannot drift", () => {
+    const section = renderLearningsIndexSection(sampleLearnings);
+    expect(section.startsWith("<!-- learnings-index:start -->")).toBe(true);
+    expect(section.trimEnd().endsWith("<!-- learnings-index:end -->")).toBe(true);
+
+    const plan = `# Plan\n\nintro\n\n${section}\n\n## After\n\ntail\n`;
+    const stripped = stripLearningsIndex(plan);
+
+    expect(stripped).not.toContain("<!-- learnings-index:start -->");
+    expect(stripped).not.toContain("## Workspace Learnings Index");
+    expect(stripped).not.toContain("Prefer Result over throw at repo boundaries");
+    expect(stripped).toContain("# Plan");
+    expect(stripped).toContain("## After");
+    // The strip consumes trailing newlines, so no blank gap is left behind.
+    expect(stripped).not.toContain("\n\n\n\n");
+    // A plan without the markers is returned unchanged.
+    expect(stripLearningsIndex("# Plan\n\nno index here\n")).toBe("# Plan\n\nno index here\n");
   });
 
   test("renders worker prompts with generated fragments and runtime context", async () => {

@@ -12,13 +12,15 @@ Do not start implementation work. Do not reprioritize outside the supplied works
 
 {{context:repos}}
 
+{{context:learnings-toc}}
+
 ## Learnings CLI
 
-- Search the workspace learnings database on demand before decomposition or ticket authoring; do not assume learnings are embedded in this prompt.
-- Use `foreman learnings search {{workspace:name}} --repo shared --repo <repo-key> --query "<topic>" [--query "<topic>" ...] --caller plan` to shortlist relevant learnings.
-- If `foreman` is not on your PATH, use `pnpm run foreman -- learnings search {{workspace:name}} ...` after a local build so the bundled CLI still works.
-- Use `foreman learnings get {{workspace:name}} --id <learning-id> [--id <learning-id> ...] --caller plan` to inspect shortlisted learnings before finalizing tasks.
-- When a task clearly belongs to a repo, search both `shared` and that repo's scope. If no strong relevant learnings are found, say so explicitly in the task's `Relevant Learnings` section.
+- The **Workspace Learnings Index** above lists every learning (id, title, repo, confidence, tags). Shortlist candidates from it by title, repo, and tags before decomposition or ticket authoring — do not guess search terms when a title already shows a learning is relevant.
+- Fetch the bodies of shortlisted learnings with `foreman learnings get {{workspace:name}} --id <learning-id> [--id <learning-id> ...] --caller plan` before finalizing tasks.
+- Use `foreman learnings search {{workspace:name}} --repo shared --repo <repo-key> --query "<topic>" [--query "<topic>" ...] --caller plan` as a fallback for topics not evident from the index titles, or when the index above states it was truncated.
+- If `foreman` is not on your PATH, use `pnpm run foreman -- learnings get {{workspace:name}} ...` after a local build so the bundled CLI still works.
+- When a task clearly belongs to a repo, consider both `shared` and that repo's scope. If no strong relevant learnings apply, say so explicitly in the task's `Relevant Learnings` section.
 - Generated tasks should cite only relevant learning IDs and titles, not the full learning bodies.
 
 {{fragment:task-system-planning}}
