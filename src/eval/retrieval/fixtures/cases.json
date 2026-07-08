@@ -1,0 +1,963 @@
+[
+  {
+    "taskId": "ENG-5074",
+    "queries": [
+      "scaffold Nx workspace",
+      "move service projects",
+      "automation Nx migration"
+    ],
+    "repos": [
+      "automation-service"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": [
+      "01KR0TF5Q07MM98B8YQT4RXB6P"
+    ]
+  },
+  {
+    "taskId": "ENG-5075",
+    "queries": [
+      "align CI/CD monorepo",
+      "circleci nx workflow",
+      "common-build-tools pipeline"
+    ],
+    "repos": [
+      "automation-service"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5076",
+    "queries": [
+      "create automation-interface package",
+      "extract DTOs enums events",
+      "interface package scaffold"
+    ],
+    "repos": [
+      "automation-service"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5077",
+    "queries": [
+      "create automation-gateway package",
+      "HttpAutomationGateway pact",
+      "gateway package scaffold"
+    ],
+    "repos": [
+      "automation-service"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5078",
+    "queries": [
+      "rewire automation-service imports",
+      "local interface gateway packages",
+      "import path migration"
+    ],
+    "repos": [
+      "automation-service"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5079",
+    "queries": [
+      "CI publish automation library",
+      "semantic-release lib",
+      "circleci release-libs"
+    ],
+    "repos": [
+      "automation-service"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5081",
+    "queries": [
+      "warehousing automation-interface",
+      "ReceiveWorkflow import",
+      "automation import migration"
+    ],
+    "repos": [
+      "warehousing-service"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5082",
+    "queries": [
+      "e2e automation imports",
+      "automation-interface gateway migration",
+      "automation test specs"
+    ],
+    "repos": [
+      "e2e"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5083",
+    "queries": [
+      "lynk-frontend automation imports",
+      "automation-interface migration",
+      "workflow view imports"
+    ],
+    "repos": [
+      "lynk-frontend"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5084",
+    "queries": [
+      "rewire common mappers automation-interface",
+      "automation fixtures import",
+      "common mapper migration"
+    ],
+    "repos": [
+      "common"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": [
+      "01KR2G5HCW1SC4C3N0HM247TYP"
+    ]
+  },
+  {
+    "taskId": "ENG-5087",
+    "queries": [
+      "surface linear issue link",
+      "task url UI",
+      "linkify task id"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5088",
+    "queries": [
+      "track tokens per attempt",
+      "usage token persist",
+      "normalizeClaudeJsonOutput usage"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5135",
+    "queries": [
+      "TGE cache activation",
+      "cache activation flag",
+      "carrier weight brackets gate"
+    ],
+    "repos": [],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5136",
+    "queries": [
+      "TgeCarrierGateway base cost",
+      "TGE fuel surcharge",
+      "carrierRateSurcharges IPEC"
+    ],
+    "repos": [
+      "shipping-service"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5137",
+    "queries": [
+      "seed TGE weight bracket",
+      "CarrierWeightBracket seed",
+      "idempotent-seed brackets"
+    ],
+    "repos": [
+      "shipping-service"
+    ],
+    "expected": [
+      {
+        "id": "01KTNNY01GR2X7M3P20175QFN8",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5138",
+    "queries": [
+      "TGE surcharge seed",
+      "carrier surcharge rules",
+      "revive PR"
+    ],
+    "repos": [],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5159",
+    "queries": [
+      "brackets_config column",
+      "CarrierWeightBracket backfill",
+      "cubicAllowance migration"
+    ],
+    "repos": [
+      "shipping-service"
+    ],
+    "expected": [
+      {
+        "id": "01KTNNM0RMZ61BB7TKAZQAZXWE",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNNM0RQYR643PQV1J0TDFTS",
+        "confidence": "low"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5160",
+    "queries": [
+      "read cubicAllowance brackets_config",
+      "quantize cache path",
+      "per-bracket cubic"
+    ],
+    "repos": [
+      "shipping-service"
+    ],
+    "expected": [
+      {
+        "id": "01KTNNM0RMZ61BB7TKAZQAZXWE",
+        "confidence": "low"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5225",
+    "queries": [
+      "Workflow validate QUOTE",
+      "WorkflowDataType QUOTE",
+      "common-domain workflow config"
+    ],
+    "repos": [
+      "common"
+    ],
+    "expected": [
+      {
+        "id": "01KSGY46BHXWYDM56D21VTJNWC",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5252",
+    "queries": [
+      "empty quote silent",
+      "shippingMethodIds filter zero",
+      "createQuote no rates"
+    ],
+    "repos": [
+      "shipping-service"
+    ],
+    "expected": [
+      {
+        "id": "01KTNNEZRVFT30EHN0D1DA3NBC",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNNEZRXPZ0HDQSMZ83PYTSE",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5256",
+    "queries": [
+      "DD_VERSION env var",
+      "datadog version tag stale",
+      "serverless deploy lambda"
+    ],
+    "repos": [
+      "shipping-service"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": [
+      "01KSGXZ1KV3ECZ06HQGAVHJNMC"
+    ]
+  },
+  {
+    "taskId": "ENG-5259",
+    "queries": [
+      "attempt activity substrate",
+      "activity migration seq",
+      "deterministic snapshot"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5260",
+    "queries": [
+      "deterministic status API",
+      "attempt activity endpoint",
+      "CLI status command"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5261",
+    "queries": [
+      "normalize claude activity",
+      "opencode activity stream",
+      "runner output fixtures"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5262",
+    "queries": [
+      "observer assessment",
+      "attempt assessment migration",
+      "fresh runner session"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KTWZD4HH830R2FAA72VE8QWR",
+        "confidence": "low"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5263",
+    "queries": [
+      "observer auto-fire stuck",
+      "scheduler maintenance tick",
+      "assessment cooldown"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5265",
+    "queries": [
+      "cache key grain",
+      "RateMatchMethod read write",
+      "CarrierRate cache postcode"
+    ],
+    "repos": [
+      "shipping-service"
+    ],
+    "expected": [
+      {
+        "id": "01KTNN515M1KBH5YSBXH48RQTM",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNN515PMKW8373P1PM2VTN3",
+        "confidence": "low"
+      },
+      {
+        "id": "01KTNN515PYPWYNYNJY96TYKNF",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNN515QQGBT43S0ZE3JK9SS",
+        "confidence": "low"
+      }
+    ],
+    "selfDerivedExcluded": [
+      "01KTNMW1HJQXKXYY5BVDVXWNSW"
+    ]
+  },
+  {
+    "taskId": "ENG-5266",
+    "queries": [
+      "shadow comparison cache",
+      "CarrierRate cache read",
+      "datadog delta event"
+    ],
+    "repos": [
+      "shipping-service"
+    ],
+    "expected": [
+      {
+        "id": "01KVSNXDVG32C23RZZT5MECCYD",
+        "confidence": "high"
+      },
+      {
+        "id": "01KVSNXDVHK0Z8T2DWTF5A9HYC",
+        "confidence": "high"
+      },
+      {
+        "id": "01KVSNXDVHZ3W156X2WADFHMJX",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5267",
+    "queries": [
+      "ShippingMethodRateMatchMethod enum",
+      "POSTCODE LOCALITY enum",
+      "common-domain publish"
+    ],
+    "repos": [
+      "common"
+    ],
+    "expected": [
+      {
+        "id": "01KTNMW1HJQXKXYY5BVDVXWNSW",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNMW1HMDC9GF9TFRSZ8S0GP",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5270",
+    "queries": [
+      "cost estimation rates",
+      "token USD cost",
+      "cost rate table"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KTNMMSSH94KKA68F5494496D",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNMMSSK3DFFRGCBM5W7BCES",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5271",
+    "queries": [
+      "exclude-dynamic-system-prompt",
+      "prompt cache reuse",
+      "claude runner flag"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KTNMFRTTWVBW1VX91AVGXJNY",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": [
+      "01KTNMEVB7JTF379WNG7WQE43G"
+    ]
+  },
+  {
+    "taskId": "ENG-5272",
+    "queries": [
+      "max-budget-usd cap",
+      "per-attempt budget",
+      "runner config budget"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KTNMEVB7JTF379WNG7WQE43G",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNMFRTTWVBW1VX91AVGXJNY",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5273",
+    "queries": [
+      "task runner model override",
+      "linear metadata override",
+      "per-task model"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KTNM9N6PMNBXPA5EGGXJ7B89",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNM9N6QE62MH01CMNGCRCHF",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5279",
+    "queries": [
+      "docker seed test-utils",
+      "warehousing seed module",
+      "prisma seed runtime import"
+    ],
+    "repos": [
+      "warehousing-service"
+    ],
+    "expected": [
+      {
+        "id": "01KTNM7K2HVPY6581JJS8J4AJ7",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5290",
+    "queries": [
+      "work items aggregation",
+      "cost rollup endpoint",
+      "per-ticket attempts"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KTNM1EFFNNNJGV5N74ZYZN4C",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNM1EFHTX2JW1GRYF09WMDB",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNMMSSH94KKA68F5494496D",
+        "confidence": "low"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5291",
+    "queries": [
+      "drill-in drawer",
+      "task detail drawer",
+      "attempt history URL state"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KTNKSTC3MAHP9HHXDP1RGPK4",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNKSTC453VXTSHZWB8AAJEF",
+        "confidence": "high"
+      },
+      {
+        "id": "01KTNM1EFFNNNJGV5N74ZYZN4C",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5292",
+    "queries": [
+      "default model config",
+      "opus rate card",
+      "model cost rates"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KVSNNYGN54PA5NGEVTTCP4R2",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": [
+      "01KTNMMSSH94KKA68F5494496D"
+    ]
+  },
+  {
+    "taskId": "ENG-5318",
+    "queries": [
+      "checkpoint state continuation prompt",
+      "review continuation template",
+      "prior-checkpoint block"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KTNKKFHH4VZ1200D8BQNP01M",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": [
+      "01KT0YN8XYQD5S0RHGN7MVFGK6",
+      "01KT0ZJE4X59QR63CBW27JTRNM"
+    ]
+  },
+  {
+    "taskId": "ENG-5319",
+    "queries": [
+      "continuationEffort config",
+      "reviewer runner effort",
+      "continuation dispatch"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": [
+      "01KT0YNKPM4AQTTS4236BD1SSA",
+      "01KT0ZWDGKJAE5QXP2R5SRYKQV"
+    ]
+  },
+  {
+    "taskId": "ENG-5320",
+    "queries": [
+      "inline agent-result schema",
+      "output-validator prompt",
+      "drop --help round-trip"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KTNK0ND3E6CD2A1X33D6ZACA",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": [
+      "01KT11MCNRCFVBJAD5KFZHRAJW",
+      "01KT5F65A02FAMRAA348HWP7DW"
+    ]
+  },
+  {
+    "taskId": "ENG-5321",
+    "queries": [
+      "validate linear labels startup",
+      "case-sensitive label filter",
+      "fail loud state names"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KTNDTE04GQQT9N1S3H47ZE0N",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": [
+      "01KT11441WRK66ZXZ8QC1APGRN",
+      "01KT124Y4W4XFZ7SH63N04C47P"
+    ]
+  },
+  {
+    "taskId": "ENG-5326",
+    "queries": [
+      "carrier-account UI create",
+      "CarrierWeightBracket editor",
+      "ShippingGateway create methods"
+    ],
+    "repos": [
+      "lynk-frontend"
+    ],
+    "expected": [
+      {
+        "id": "01KVSNHYK56K1HX4FQD8KY9QSG",
+        "confidence": "high"
+      },
+      {
+        "id": "01KVSNHYK5NRJ5S4WAKV3ZTG7C",
+        "confidence": "high"
+      },
+      {
+        "id": "01KVSNHYK60455PQD2Y8H5Y137",
+        "confidence": "high"
+      },
+      {
+        "id": "01KVSNHYK6S4E2FGVN8DDZKVFF",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": [
+      "01KT5E7Y7Y6D4GCZRFYA1C8CC3"
+    ]
+  },
+  {
+    "taskId": "ENG-5344",
+    "queries": [
+      "DFE per-consignment reclassify",
+      "PER_PACKAGE flag",
+      "carrier rate caching"
+    ],
+    "repos": [],
+    "expected": [],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5370",
+    "queries": [
+      "responsive data table",
+      "horizontal scroll affordance",
+      "mobile table reflow"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KVSNBKHRTN311JA2JHBY15QD",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": [
+      "01KTNHKJ7A077D93W4XCPGSBAQ",
+      "01KTNHKJ7ARB311414PWDZCT9H",
+      "01KTNJ16KJGDEXHMVEXCAYQ9CJ"
+    ]
+  },
+  {
+    "taskId": "ENG-5371",
+    "queries": [
+      "table cell long text",
+      "learnings page detail drawer",
+      "markdown truncate preview"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": [
+      "01KTNHWYQT8CBD3N8X7B3ZWHVW",
+      "01KTNHWYQXXS8KE3ARNVGXQHC4"
+    ]
+  },
+  {
+    "taskId": "ENG-5372",
+    "queries": [
+      "formatShortNumber suffix",
+      "token count formatting",
+      "duration format collision"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KVSN69NE1PYYS4MVXFXXJWVX",
+        "confidence": "low"
+      },
+      {
+        "id": "01KVSN69NF9X1A4F3CX3YV7VTX",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  },
+  {
+    "taskId": "ENG-5373",
+    "queries": [
+      "UI label legibility",
+      "settings grid alignment",
+      "mobile padding"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": [
+      "01KTNKMZTMGQ6JGEYRNSRFD9D2",
+      "01KTNKMZTNN1DGEZS3CY3Q61WP"
+    ]
+  },
+  {
+    "taskId": "ENG-5384",
+    "queries": [
+      "excludeLabels config",
+      "scout skip label",
+      "candidate intake filter"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": [
+      "01KTNRVZ88EGXEFX5ES9ZKAA5T",
+      "01KTNSRG6A00NC4BKRJFZT0ACK"
+    ]
+  },
+  {
+    "taskId": "ENG-5385",
+    "queries": [
+      "toggle agent label endpoint",
+      "task frontmatter fields",
+      "parseLinearMetadata"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": [
+      "01KTNV9D3C7Y1A475YE11K907H",
+      "01KTNV9D3F8K0YW90R076WNTGY"
+    ]
+  },
+  {
+    "taskId": "ENG-5386",
+    "queries": [
+      "issue manager page",
+      "agent on-off toggle",
+      "frontmatter filter"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [
+      {
+        "id": "01KVSJRMQTX7TGBENMH2D3943Z",
+        "confidence": "low"
+      },
+      {
+        "id": "01KVSJRMQVSMQ5M0EP6MPFSJ20",
+        "confidence": "high"
+      },
+      {
+        "id": "01KVSJRMQWB9TPKGT49A228REW",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": [
+      "01KTNWSJX9KX707XPHWSG0XQ98"
+    ]
+  },
+  {
+    "taskId": "ENG-5445",
+    "queries": [
+      "remove prisma default",
+      "CarrierService schema defaults",
+      "drop column default migration"
+    ],
+    "repos": [
+      "shipping-service"
+    ],
+    "expected": [
+      {
+        "id": "01KVSJQ76D49MDARB8JRMA0Y7J",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": [
+      "01KTWS42JMMK2907XC8CY8W573",
+      "01KTWS42JQBTDD7EYQV4YXAPHY"
+    ]
+  },
+  {
+    "taskId": "ENG-5447",
+    "queries": [
+      "opencode runner output",
+      "agent-result parse eval",
+      "runner stdout capture"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": [
+      "01KTWZD4HH830R2FAA72VE8QWR"
+    ]
+  },
+  {
+    "taskId": "ENG-5450",
+    "queries": [
+      "parseWorkerResult agent-result",
+      "tag scan parsing",
+      "worker output block"
+    ],
+    "repos": [
+      "foreman"
+    ],
+    "expected": [],
+    "selfDerivedExcluded": [
+      "01KTXAKSEWYDNDMFHR8Y9EJ6XB"
+    ]
+  },
+  {
+    "taskId": "ENG-5527",
+    "queries": [
+      "AsyncLocalStorage lazy init",
+      "browser-safe ddd-core",
+      "module-load side effect"
+    ],
+    "repos": [
+      "common"
+    ],
+    "expected": [
+      {
+        "id": "01KT11441WRK66ZXZ8QC1APGRN",
+        "confidence": "high"
+      }
+    ],
+    "selfDerivedExcluded": []
+  }
+]
