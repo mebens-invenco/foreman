@@ -34,10 +34,11 @@ import { createReviewService, resolveGitHubAuthEnv } from "./review/index.js";
 import { createSelfRebootScheduler, runRebootSidecar } from "./system/reboot.js";
 import { createTaskSystem } from "./tasking/index.js";
 import { discoverGitRepos } from "./workspace/git-repo-discovery.js";
-import { initializeWorkspace, loadWorkspace } from "./workspace/index.js";
+import { findProjectRoot, initializeWorkspace, loadWorkspace } from "./workspace/index.js";
 import { harvestTraces } from "./eval/harvest.js";
 import { evalPromptNames } from "./eval/registry.js";
 import { formatEvalReport, runEval } from "./eval/run.js";
+import { formatRetrievalReport, runRetrievalBench } from "./eval/retrieval/run.js";
 import { isRunnerProvider, runnerProviders, type RunnerProvider } from "./domain/index.js";
 import type { LoggerLevelName } from "./logger.js";
 
@@ -489,7 +490,7 @@ const parseRunnerProvider = (value: string): RunnerProvider => {
   return value;
 };
 
-program
+const evalCommand = program
   .command("eval")
   .description("Run a behavioral eval for a prompt against a live runner (opt-in; costs tokens, non-deterministic)")
   .argument("<prompt>", `Prompt to evaluate (one of: ${evalPromptNames.join(", ")})`)
@@ -535,6 +536,26 @@ program
       }
     },
   );
+
+evalCommand
+  .command("retrieval")
+  .description("Run the offline retrieval bench over committed fixtures (deterministic; no workspace or runner)")
+  .option("--json", "Emit the metrics object as JSON")
+  .action(async (_options: { json?: boolean }, command: Command) => {
+    try {
+      const result = runRetrievalBench({ projectRoot: await findProjectRoot() });
+      // The parent `eval` command also declares `--json`, so the flag binds to the
+      // parent; read it via optsWithGlobals rather than this subcommand's own opts.
+      if (command.optsWithGlobals().json) {
+        writeJson(result.metrics);
+      } else {
+        process.stdout.write(`${formatRetrievalReport(result)}\n`);
+      }
+    } catch (error) {
+      process.stderr.write(`retrieval bench failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    }
+  });
 
 program
   .command("eval-harvest")
