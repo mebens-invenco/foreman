@@ -42,15 +42,20 @@ Labeling working files (raw dual labels, consensus merge script, disagreement
 log) live outside the repo in the planning zone:
 `~/invenco/tasks/foreman-learning-system/bench/`.
 
-## Running the prototype
+## Running
 
 ```bash
-node src/eval/retrieval/baseline.mjs <dir-containing-fixtures>
+foreman eval retrieval          # metrics + per-case table
+foreman eval retrieval --json   # metrics object as JSON
 ```
 
-`baseline.mjs` is the reference implementation: in-memory SQLite, real
+Deterministic and offline — no workspace, no live runner. The harness
+(`run.ts` + `score.ts`) is the reference implementation: in-memory SQLite, real
 migrations (0004 + 0005), real `SqliteLearningRepo`, replayed queries, so it
 exercises `toSafeFtsQuery`'s exact-token quoting — the brittleness under test.
+`__tests__/retrieval-bench.test.ts` guards the committed numbers above against
+fixture or scoring drift; `__tests__/score.test.ts` covers the scorer's rank
+edge cases.
 
 ## Metrics
 
