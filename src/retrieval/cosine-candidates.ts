@@ -34,15 +34,23 @@ export const COSINE_Z_FLOOR = 2.0;
  *
  * A standard deviation needs spread to mean anything, so the arm falls silent on
  * a corpus too small to have an outlier: with `n` embeddings the largest
- * attainable z is `(n - 1) / sqrt(n)`, which stays under 2.0 until n reaches 6.
- * That is the intended behaviour during a partial backfill — a handful of
- * embedded rows must not outrank the unembedded majority they are drowning in.
+ * attainable z is `(n - 1) / sqrt(n)`, which stays under 2.0 until n reaches 6
+ * (1.79 at n = 5, 2.04 at n = 6). That is the intended behaviour during a partial
+ * backfill — a handful of embedded rows must not outrank the unembedded majority
+ * they are drowning in.
+ *
+ * That bound is the SAMPLE standard deviation's, which is why the variance below
+ * divides by `n - 1`. Dividing by `n` instead would bound z at `sqrt(n - 1)`,
+ * putting n = 5 at exactly 2.0 — flush against the floor, where whether the arm
+ * fires comes down to floating-point rounding rather than to the rule.
  */
 export const selectCosineCandidates = (
   queryVector: Float32Array,
   embeddings: readonly { learningId: string; vector: Float32Array }[],
 ): string[] => {
-  if (embeddings.length === 0) {
+  // A single embedding has no spread to be an outlier against, and the sample
+  // variance below would divide by zero.
+  if (embeddings.length < 2) {
     return [];
   }
 
@@ -52,11 +60,11 @@ export const selectCosineCandidates = (
   }));
 
   const mean = scored.reduce((total, candidate) => total + candidate.similarity, 0) / scored.length;
-  const variance = scored.reduce((total, candidate) => total + (candidate.similarity - mean) ** 2, 0) / scored.length;
+  const variance = scored.reduce((total, candidate) => total + (candidate.similarity - mean) ** 2, 0) / (scored.length - 1);
   const standardDeviation = Math.sqrt(variance);
 
-  // Every similarity identical (n = 1, or a degenerate corpus): no outlier exists,
-  // and dividing by zero would hand every row an infinite z.
+  // Every similarity identical: no outlier exists, and dividing by zero would
+  // hand every row an infinite z.
   if (standardDeviation === 0) {
     return [];
   }
