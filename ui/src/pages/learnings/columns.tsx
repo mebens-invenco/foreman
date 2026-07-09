@@ -22,6 +22,14 @@ export function confidenceTone(confidence: LearningRecord["confidence"]) {
   }
 }
 
+export function LearningDuplicateBadge() {
+  return (
+    <span className="inline-flex rounded-none border border-destructive/30 bg-destructive/10 px-2 py-1 text-xxs font-medium tracking-[0.18em] text-destructive uppercase">
+      duplicate
+    </span>
+  )
+}
+
 function buildLearningSearchText(learning: LearningRecord) {
   return [
     learning.id,
@@ -71,7 +79,10 @@ export const learningColumns: ColumnDef<LearningRecord>[] = [
     cell: ({ row }) => (
       <div className="space-y-1 whitespace-normal">
         <p className="text-xs text-foreground">{row.original.title}</p>
-        <p className="font-mono text-xs text-muted-foreground">{row.original.id}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-mono text-xs text-muted-foreground">{row.original.id}</p>
+          {row.original.duplicateOf ? <LearningDuplicateBadge /> : null}
+        </div>
       </div>
     ),
     enableGlobalFilter: true,
