@@ -54,8 +54,9 @@ const sharedLearningRepo = "shared";
  * re-derives it and fails if this value drifts out of the separating window.
  *
  * The five labelled near-identical pairs bottom out at 0.9151. The closest pair
- * that shares a topic but encodes a *distinct* rule scores 0.9067. 0.91 is the
- * midpoint of that window. Changing the embedding model invalidates it.
+ * that shares a topic but encodes a *distinct* rule scores 0.9067. 0.91 sits
+ * inside that window, clear of both ends. Changing the embedding model
+ * invalidates it.
  */
 export const NEAR_DUPLICATE_SIMILARITY_THRESHOLD = 0.91;
 
@@ -344,20 +345,8 @@ export class WorkerResultApplier {
 
         if (vector) {
           // Store before the next add's lookup so two near-identical adds in one
-          // worker result flag the second against the first. The row was created
-          // with exactly this text moments ago, so the freshness guard can only
-          // reject if something rewrote it in between — worth a loud warning.
-          const applied = this.deps.foremanRepos.learnings.upsertLearningEmbedding({
-            learningId,
-            model: this.deps.embedder.modelId,
-            dims: this.deps.embedder.dims,
-            vector,
-            embeddedTitle: mutation.title,
-            embeddedContent: mutation.content,
-          });
-          if (!applied) {
-            logger.warn("embedding for freshly added learning rejected by freshness guard", { learningId });
-          }
+          // worker result flag the second against the first.
+          this.storeLearningEmbedding(learningId, mutation, vector, logger);
         }
       }
       if (mutation.type === "update") {
@@ -413,6 +402,40 @@ export class WorkerResultApplier {
         error: errorMessage(error),
       });
       return texts.map(() => undefined);
+    }
+  }
+
+  /**
+   * Persists one add's vector. Never throws: the learning row is already
+   * committed, so a failing embedding write (`SQLITE_BUSY`, `SQLITE_FULL`, ...)
+   * must not abort the apply and strand the remaining mutations. The row is
+   * left for `foreman learnings backfill-embeddings`, matching `embedLearnings`.
+   */
+  private storeLearningEmbedding(
+    learningId: string,
+    text: { title: string; content: string },
+    vector: Float32Array,
+    logger: LoggerService,
+  ): void {
+    try {
+      const applied = this.deps.foremanRepos.learnings.upsertLearningEmbedding({
+        learningId,
+        model: this.deps.embedder.modelId,
+        dims: this.deps.embedder.dims,
+        vector,
+        embeddedTitle: text.title,
+        embeddedContent: text.content,
+      });
+      if (!applied) {
+        // The row was created with exactly this text moments ago, so the
+        // freshness guard can only reject if something rewrote it in between.
+        logger.warn("embedding for freshly added learning rejected by freshness guard", { learningId });
+      }
+    } catch (error) {
+      logger.warn("failed to store learning embedding; leaving row for backfill", {
+        learningId,
+        error: errorMessage(error),
+      });
     }
   }
 

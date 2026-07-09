@@ -669,6 +669,17 @@ export class SqliteLearningRepo implements LearningRepo {
     // keeps the first of any tie, so equally-similar neighbours resolve
     // deterministically.
     for (const candidate of this.getCurrentLearningEmbeddings(filters)) {
+      // Filtering by model should make every candidate the same width, so a
+      // mismatch is a corrupt row. Skip it rather than letting cosineSimilarity
+      // throw: one bad row would otherwise abort the whole scan, and since
+      // `listLearningIdsMissingEmbedding` cannot see a same-model wrong-width
+      // row, backfill would never repair it -- silently disabling near-duplicate
+      // detection for this scope forever.
+      if (candidate.vector.length !== vector.length) {
+        continue;
+      }
+
+
       const similarity = cosineSimilarity(vector, candidate.vector);
       if (!nearest || similarity > nearest.similarity) {
         nearest = { learningId: candidate.learningId, similarity };
