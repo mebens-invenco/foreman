@@ -319,19 +319,32 @@ export class SqliteLearningRepo implements LearningRepo {
       .map((row) => String((row as SqliteRow).id));
   }
 
-  getLearningEmbeddings(filters: { repos?: string[] } = {}): LearningEmbeddingRecord[] {
+  getLearningEmbeddings(filters: { repos?: string[]; model?: string } = {}): LearningEmbeddingRecord[] {
     const repos = normalizeFilterValues(filters.repos);
-    const repoWhere = repos.length > 0 ? `WHERE learning.repo IN (${repos.map(() => "?").join(", ")})` : "";
+    const model = filters.model?.trim();
+
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    if (repos.length > 0) {
+      clauses.push(`learning.repo IN (${repos.map(() => "?").join(", ")})`);
+      params.push(...repos);
+    }
+    if (model) {
+      clauses.push("learning_embedding.model = ?");
+      params.push(model);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
 
     return this.sqlite
       .prepare(
         `SELECT learning_embedding.learning_id, learning_embedding.model, learning_embedding.dims, learning_embedding.vector
            FROM learning_embedding
            JOIN learning ON learning.id = learning_embedding.learning_id
-           ${repoWhere}
+           ${where}
           ORDER BY learning_embedding.learning_id ASC`,
       )
-      .all(...repos)
+      .all(...params)
       .map(mapLearningEmbeddingRecord);
   }
 }

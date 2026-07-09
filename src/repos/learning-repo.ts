@@ -60,5 +60,11 @@ export interface LearningRepo {
   upsertLearningEmbedding(input: LearningEmbeddingRecord): void;
   /** Learnings with no vector, a vector from another model, or a vector older than the learning. */
   listLearningIdsMissingEmbedding(model: string): string[];
-  getLearningEmbeddings(filters?: { repos?: string[] }): LearningEmbeddingRecord[];
+  /**
+   * The table holds one vector per learning but spans model generations until a
+   * backfill completes. Pass `model` to read a single, comparable vector space;
+   * omitting it returns every generation, whose vectors differ in width and
+   * meaning and must not be compared to one another.
+   */
+  getLearningEmbeddings(filters?: { repos?: string[]; model?: string }): LearningEmbeddingRecord[];
 }

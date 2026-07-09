@@ -8,7 +8,8 @@ import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewCont
 import { LoggerService } from "../../logger.js";
 import type { ReviewService } from "../../review/index.js";
 import type { TaskSystem } from "../../tasking/index.js";
-import { FakeEmbedder } from "../../test-support/fake-embedder.js";
+import { learningEmbeddingText } from "../../embeddings/learning-embedding-text.js";
+import { FakeEmbedder, fakeEmbeddingVector } from "../../test-support/fake-embedder.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
 import { WorkerResultApplier } from "../worker-result-applier.js";
 import { runScoutSelection } from "../scout-selection.js";
@@ -1313,6 +1314,46 @@ describe("WorkerResultApplier learning embeddings", () => {
       expect(embedding).toMatchObject({ model: embedder.modelId, dims: embedder.dims });
       const [learning] = db.learnings.listLearnings();
       expect(embedding!.learningId).toBe(learning!.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("attaches each vector to the learning whose text produced it", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-embed-multi-");
+    const embedder = new FakeEmbedder();
+    const alpha = { title: "Pin the GHA runner", content: "Use ubuntu-24.04, not ubuntu-latest." };
+    const beta = { title: "Commit the lockfile", content: "Reviewers cannot verify resolution without it." };
+
+    try {
+      await applyLearningMutations(
+        db,
+        embedder,
+        [
+          { type: "add", ...alpha, repo: "foreman", confidence: "emerging", tags: [] },
+          { type: "add", ...beta, repo: "foreman", confidence: "emerging", tags: [] },
+        ],
+        tempDir,
+      );
+
+      // One batched embed call, in mutation order.
+      expect(embedder.calls).toHaveLength(1);
+      expect(embedder.embeddedTexts).toEqual([learningEmbeddingText(alpha), learningEmbeddingText(beta)]);
+
+      const idByTitle = new Map(db.learnings.listLearnings().map((learning) => [learning.title, learning.id]));
+      const vectorByLearningId = new Map(
+        db.learnings.getLearningEmbeddings().map((row) => [row.learningId, Array.from(row.vector)]),
+      );
+      expect(vectorByLearningId.size).toBe(2);
+
+      // A reversed or constant-index zip would survive any assertion that only
+      // counts rows; tie each stored vector back to its own source text.
+      expect(vectorByLearningId.get(idByTitle.get(alpha.title)!)).toEqual(
+        Array.from(fakeEmbeddingVector(learningEmbeddingText(alpha), 0)),
+      );
+      expect(vectorByLearningId.get(idByTitle.get(beta.title)!)).toEqual(
+        Array.from(fakeEmbeddingVector(learningEmbeddingText(beta), 1)),
+      );
     } finally {
       db.close();
     }

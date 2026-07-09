@@ -25,11 +25,17 @@ export class FakeEmbedder implements Embedder {
       throw this.failure;
     }
 
-    // Distinct per text and stable across runs, so assertions can tie a vector
-    // back to the exact text that produced it.
-    return texts.map((text, index) => Float32Array.from([text.length, index, checksum(text)]));
+    return texts.map((text, index) => fakeEmbeddingVector(text, index));
   }
 }
+
+/**
+ * Distinct per text and stable across runs, so assertions can tie a stored
+ * vector back to the exact text that produced it — which is what catches a
+ * caller zipping vectors onto the wrong records.
+ */
+export const fakeEmbeddingVector = (text: string, index: number): Float32Array =>
+  Float32Array.from([text.length, index, checksum(text)]);
 
 const checksum = (text: string): number => {
   let total = 0;

@@ -1097,6 +1097,39 @@ describe("persistence repos", () => {
     }
   });
 
+  test("scopes learning embeddings to one model generation, alone or combined with repo", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      // A mixed-generation table: exactly the state a model swap leaves behind
+      // until `backfill-embeddings` is run.
+      const rows = [
+        ["learn-new-f", "foreman", "new-model"],
+        ["learn-old-f", "foreman", "retired-model"],
+        ["learn-new-s", "shared", "new-model"],
+      ] as const;
+      for (const [id, repo, model] of rows) {
+        db.learnings.addLearning({ id, title: id, repo, confidence: "emerging", content: "body", tags: [] });
+        db.learnings.upsertLearningEmbedding({ learningId: id, model, dims: 2, vector: Float32Array.from([1, 2]) });
+      }
+
+      expect(db.learnings.getLearningEmbeddings({ model: "new-model" }).map((row) => row.learningId)).toEqual([
+        "learn-new-f",
+        "learn-new-s",
+      ]);
+      expect(db.learnings.getLearningEmbeddings({ model: "new-model", repos: ["foreman"] }).map((row) => row.learningId)).toEqual([
+        "learn-new-f",
+      ]);
+      expect(db.learnings.getLearningEmbeddings({ model: "absent-model" })).toEqual([]);
+      // Omitting the filter still returns every generation.
+      expect(db.learnings.getLearningEmbeddings()).toHaveLength(3);
+    } finally {
+      db.close();
+    }
+  });
+
   test("scopes learning embeddings by repo and cascades deletes from the learning row", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
