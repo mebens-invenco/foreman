@@ -55,6 +55,25 @@ export interface LearningRepo {
     filters?: { queries?: string[]; repos?: string[]; limit?: number; offset?: number },
     options?: LearningReadOptions,
   ): LearningSearchRecord[];
+  /**
+   * Hybrid retrieval: per query, an FTS bm25 candidate list and a cosine ranking
+   * of the in-scope corpus, fused with reciprocal rank fusion; the per-query
+   * fused scores are then merged across queries by taking each learning's best,
+   * as `searchLearnings` merges its bm25 scores.
+   *
+   * `queryEmbedding.vectors[i]` must embed `filters.queries[i]` — same length,
+   * same order. `queryEmbedding.model` selects the comparable vector space (see
+   * `getLearningEmbeddings`), so it must be the model that produced `vectors`.
+   *
+   * `score` on the returned records is the fused score, where HIGHER is better —
+   * the opposite of the raw bm25 `score` from `searchLearnings`. The two are not
+   * comparable to one another.
+   */
+  searchLearningsHybrid(
+    filters: { queries?: string[]; repos?: string[]; limit?: number; offset?: number },
+    queryEmbedding: { model: string; vectors: readonly Float32Array[] },
+    options?: LearningReadOptions,
+  ): LearningSearchRecord[];
   getLearningsByIds(ids: string[], options?: LearningReadOptions): LearningRecord[];
   listLearnings(filters?: { search?: string; repo?: string; limit?: number; offset?: number }): LearningRecord[];
   upsertLearningEmbedding(input: LearningEmbeddingRecord): void;
@@ -67,4 +86,6 @@ export interface LearningRepo {
    * meaning and must not be compared to one another.
    */
   getLearningEmbeddings(filters?: { repos?: string[]; model?: string }): LearningEmbeddingRecord[];
+  /** Same filters as `getLearningEmbeddings`, without decoding any vector. */
+  countLearningEmbeddings(filters?: { repos?: string[]; model?: string }): number;
 }
