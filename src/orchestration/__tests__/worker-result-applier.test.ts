@@ -1219,11 +1219,25 @@ describe("WorkerResultApplier deployment tracking", () => {
 });
 
 describe("WorkerResultApplier learning embeddings", () => {
+  /**
+   * Captures the applier's warn lines. A throwing embedding write and a write
+   * the freshness guard rejects both leave no vector behind, so only the
+   * distinct warning separates them -- and only asserting on it stops the two
+   * guards being collapsed back into one.
+   */
+  const captureWarnings = () => {
+    const stdout = new PassThrough();
+    const chunks: string[] = [];
+    stdout.on("data", (chunk: Buffer) => chunks.push(chunk.toString()));
+    return { stdout, warnings: () => chunks.join("") };
+  };
+
   const applyLearningMutations = async (
     db: Awaited<ReturnType<typeof createMigratedDb>>,
     embedder: FakeEmbedder,
     learningMutations: WorkerResult["learningMutations"],
     tempDir: string,
+    stdout: NodeJS.WritableStream = new PassThrough(),
   ): Promise<void> => {
     const executionTask: Task = { ...task(), state: "ready", providerState: "ready" };
     const repo: RepoRef = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
@@ -1265,7 +1279,7 @@ describe("WorkerResultApplier learning embeddings", () => {
       reviewService: new FakeReviewService(pullRequest),
       repos: [repo],
       embedder,
-      logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
+      logger: LoggerService.create({ stdout, minLevel: "warn" }),
       scheduleScout: () => undefined,
     });
 
@@ -1701,6 +1715,7 @@ describe("WorkerResultApplier learning embeddings", () => {
   test("keeps the learning and completes the apply when the embedding write throws", async () => {
     const { tempDir, db } = await setUp("foreman-learning-embed-write-fail-");
     const embedder = new FakeEmbedder();
+    const captured = captureWarnings();
 
     try {
       const neighbourId = seedNeighbour(db, embedder);
@@ -1712,13 +1727,42 @@ describe("WorkerResultApplier learning embeddings", () => {
       // The learning row commits before its vector is written, so a failing
       // embedding write must not abort the apply and strand later mutations.
       await expect(
-        applyLearningMutations(db, embedder, [addMutationAt(embedder, neighbourVector)], tempDir),
+        applyLearningMutations(db, embedder, [addMutationAt(embedder, neighbourVector)], tempDir, captured.stdout),
       ).resolves.toBeUndefined();
 
       const learning = addedLearning(db);
       expect(learning.duplicateOf).toBe(neighbourId);
       expect(learning.sourceTaskId).toBe("TASK-DEPLOY-APPLY");
       expect(db.learnings.listLearningIdsMissingEmbedding(embedder.modelId)).toContain(learning.id);
+      expect(captured.warnings()).toContain("failed to store learning embedding");
+      expect(captured.warnings()).not.toContain("rejected by freshness guard");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("warns rather than silently dropping when the freshness guard rejects the write", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-embed-guarded-");
+    const embedder = new FakeEmbedder();
+    const captured = captureWarnings();
+
+    try {
+      const neighbourId = seedNeighbour(db, embedder);
+      // The repo applies the write only while the learning's stored text still
+      // matches the snapshot. On the add path the row is inserted from this same
+      // mutation moments earlier, so a rejection means something rewrote it.
+      db.learnings.upsertLearningEmbedding = () => false;
+
+      await expect(
+        applyLearningMutations(db, embedder, [addMutationAt(embedder, neighbourVector)], tempDir, captured.stdout),
+      ).resolves.toBeUndefined();
+
+      const learning = addedLearning(db);
+      expect(learning.duplicateOf).toBe(neighbourId);
+      // A rejected write and a throwing write are different failures. Each keeps
+      // its own warning, so collapsing them into one branch is a visible loss.
+      expect(captured.warnings()).toContain("rejected by freshness guard");
+      expect(captured.warnings()).not.toContain("failed to store learning embedding");
     } finally {
       db.close();
     }

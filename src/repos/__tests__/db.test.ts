@@ -1284,6 +1284,51 @@ describe("persistence repos", () => {
     }
   });
 
+  test("never resolves a near duplicate against a vector whose learning has since changed", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    const seed = (id: string, vector: number[]) => {
+      db.learnings.addLearning({ id, title: id, repo: "foreman", confidence: "emerging", content: "body", tags: [] });
+      db.learnings.upsertLearningEmbedding({
+        learningId: id,
+        model: "m1",
+        dims: vector.length,
+        vector: Float32Array.from(vector),
+        embeddedTitle: id,
+        embeddedContent: "body",
+      });
+    };
+
+    try {
+      // `aaa-stale` sorts first and its vector matches the query exactly, so a
+      // scan over all vectors would always pick it over `fresh`.
+      seed("aaa-stale", [1, 0, 0]);
+      seed("fresh", [0.9, 0.4359, 0]);
+      db.learnings.updateLearning({ id: "aaa-stale", content: "rewritten body" });
+
+      const query = Float32Array.from([1, 0, 0]);
+      // The stale vector describes text the learning no longer carries, so a
+      // match against it is not evidence that this add duplicates anything.
+      expect(db.learnings.nearestLearningEmbedding(query, { model: "m1" })?.learningId).toBe("fresh");
+
+      // Re-embedding it against its current text makes it eligible again: the
+      // exclusion is freshness, not a permanent blacklist.
+      db.learnings.upsertLearningEmbedding({
+        learningId: "aaa-stale",
+        model: "m1",
+        dims: 3,
+        vector: Float32Array.from([1, 0, 0]),
+        embeddedTitle: "aaa-stale",
+        embeddedContent: "rewritten body",
+      });
+      expect(db.learnings.nearestLearningEmbedding(query, { model: "m1" })?.learningId).toBe("aaa-stale");
+    } finally {
+      db.close();
+    }
+  });
+
   test("round-trips learning embedding vectors through the BLOB column", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
