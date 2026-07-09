@@ -26,6 +26,13 @@ export type LearningReadOptions = {
   incrementReadCount?: boolean;
 };
 
+export type LearningEmbeddingRecord = {
+  learningId: string;
+  model: string;
+  dims: number;
+  vector: Float32Array;
+};
+
 export interface LearningRepo {
   addLearning(input: {
     id?: string;
@@ -50,4 +57,8 @@ export interface LearningRepo {
   ): LearningSearchRecord[];
   getLearningsByIds(ids: string[], options?: LearningReadOptions): LearningRecord[];
   listLearnings(filters?: { search?: string; repo?: string; limit?: number; offset?: number }): LearningRecord[];
+  upsertLearningEmbedding(input: LearningEmbeddingRecord): void;
+  /** Learnings with no vector, a vector from another model, or a vector older than the learning. */
+  listLearningIdsMissingEmbedding(model: string): string[];
+  getLearningEmbeddings(filters?: { repos?: string[] }): LearningEmbeddingRecord[];
 }

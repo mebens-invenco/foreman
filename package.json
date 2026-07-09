@@ -30,6 +30,7 @@
     "commander": "^14.0.0",
     "dotenv": "^17.4.2",
     "fast-glob": "^3.3.3",
+    "fastembed": "^2.1.0",
     "fastify": "^5.9.0",
     "gray-matter": "^4.0.3",
     "ulid": "^3.0.1",

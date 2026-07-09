@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 
 import { discoverCronJobs, type CronJobDefinition } from "../cron/index.js";
 import type { ActionType, RepoRef, ReviewContext, Task, TaskTarget, WorkerResult } from "../domain/index.js";
+import type { Embedder } from "../embeddings/embedder.js";
 import { ForemanError, isForemanError, isProviderRateLimitError, type ProviderRateLimitError } from "../lib/errors.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
@@ -53,6 +54,7 @@ type SchedulerDeps = {
   taskSystem: TaskSystem;
   reviewService: ReviewService;
   repos: RepoRef[];
+  embedder: Embedder;
   env: Record<string, string>;
   logger: LoggerService;
 };
@@ -88,6 +90,7 @@ export class SchedulerService extends EventEmitter {
       taskSystem: deps.taskSystem,
       reviewService: deps.reviewService,
       repos: deps.repos,
+      embedder: deps.embedder,
       logger: this.logger,
       scheduleScout: () => this.scheduleScout("task_mutation"),
     });

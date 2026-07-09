@@ -21,3 +21,6 @@ allowBuilds:
   # Vitest can resolve msw as a mocker peer, but Foreman does not use MSW's
   # browser worker setup; keep its postinstall script explicitly denied.
   msw: false
+  # fastembed's ONNX runtime; its install script fetches the prebuilt native
+  # binding, without which FlagEmbedding.init() cannot load the model.
+  onnxruntime-node: true

@@ -8,6 +8,7 @@ import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../
 import { ForemanError, ProviderRateLimitError } from "../../lib/errors.js";
 import { SchedulerService } from "../index.js";
 import * as worktrees from "../../workspace/git-worktrees.js";
+import { FakeEmbedder } from "../../test-support/fake-embedder.js";
 import { createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
 
 const sampleTask = (overrides: Partial<Task> = {}): Task => ({
@@ -216,6 +217,7 @@ describe("SchedulerService cron scheduling", () => {
     config.cron.enabled = false;
     const foremanRepos = createMockRepos();
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config,
       paths: createWorkspacePaths(testProjectRoot, workspaceRoot),
       foremanRepos,
@@ -242,6 +244,7 @@ describe("SchedulerService cron scheduling", () => {
       jobs: { hasActiveDedupeKey: vi.fn(() => true) },
     });
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config,
       paths: createWorkspacePaths(testProjectRoot, workspaceRoot),
       foremanRepos,
@@ -272,6 +275,7 @@ describe("SchedulerService orphan recovery", () => {
       return [{ attemptId: "attempt-1", jobId: "job-1", workerId: "worker-1" }];
     });
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -327,6 +331,7 @@ describe("SchedulerService orphan recovery", () => {
     const reapExpiredLeases = vi.fn(() => 1);
     const recoverOrphanedRunningAttempts = vi.fn(() => []);
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config,
       paths: {
         projectRoot: "/tmp/project",
@@ -401,6 +406,7 @@ describe("SchedulerService scout timeout", () => {
       },
     });
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config,
       paths: {
         projectRoot: "/tmp/project",
@@ -479,6 +485,7 @@ describe("SchedulerService scout timeout", () => {
     });
     const resetAt = new Date(Date.now() + 120_000).toISOString();
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config,
       paths: {
         projectRoot: "/tmp/project",
@@ -559,6 +566,7 @@ describe("SchedulerService scout exclusions", () => {
       scoutRuns: { createScoutRun: vi.fn(() => "scout-1"), completeScoutRun, listScoutRuns: vi.fn(() => []) },
     });
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config,
       paths: scoutPaths,
       foremanRepos,
@@ -612,6 +620,7 @@ describe("SchedulerService applyWorkerResult", () => {
   test("swaps consolidation labels on completed consolidation jobs", async () => {
     const updateLabels = vi.fn(async () => undefined);
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -664,6 +673,7 @@ describe("SchedulerService applyWorkerResult", () => {
   test("records checkpoint write warnings without failing the attempt", async () => {
     const addAttemptEvent = vi.fn();
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -731,6 +741,7 @@ describe("SchedulerService applyWorkerResult", () => {
       headSha: "different-head",
     }));
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -795,6 +806,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const resolveThreads = vi.fn(async () => undefined);
     const upsertReviewCheckpoint = vi.fn();
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -863,6 +875,7 @@ describe("SchedulerService applyWorkerResult", () => {
   test("submits reviewer comment reviews with the reviewer prefix", async () => {
     const submitPullRequestReview = vi.fn(async () => undefined);
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -931,6 +944,7 @@ describe("SchedulerService applyWorkerResult", () => {
       headSha: "different-head",
     }));
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -993,6 +1007,7 @@ describe("SchedulerService applyWorkerResult", () => {
 
   test("rejects execution results with code changes when no pull request mutation or artifact is present", async () => {
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1048,6 +1063,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const createPullRequest = vi.fn(async () => ({ url: "https://github.com/acme/repo-a/pull/2", number: 2 }));
     const transition = vi.fn(async () => undefined);
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1121,6 +1137,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const createTask = vi.fn(async () => ({ id: "TASK-0002", providerId: "TASK-0002", url: null }));
     const addAttemptEvent = vi.fn();
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1194,6 +1211,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const transition = vi.fn(async () => undefined);
     const warn = vi.fn();
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "linear"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1283,6 +1301,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const upsertTaskPullRequest = vi.fn();
     const resolvePullRequest = vi.fn(async () => ({ ...resolvedPullRequest, state: "open" as const }));
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1352,6 +1371,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const resolveThreads = vi.fn(async () => undefined);
     const resolvePullRequest = vi.fn(resolvePullRequestFromTask);
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1418,6 +1438,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const resolveThreads = vi.fn(async () => undefined);
     const resolvePullRequest = vi.fn(async () => resolvedPullRequest);
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1480,6 +1501,7 @@ describe("SchedulerService applyWorkerResult", () => {
   test("drains active worker runs during stop", async () => {
     const updateWorkerStatus = vi.fn();
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1540,6 +1562,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const updateWorkerStatus = vi.fn();
     const addAttemptEvent = vi.fn();
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1612,6 +1635,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const updateWorkerStatus = vi.fn();
     const addAttemptEvent = vi.fn();
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1670,6 +1694,7 @@ describe("SchedulerService applyWorkerResult", () => {
 
   test("rejects stopping a non-running attempt", () => {
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1701,6 +1726,7 @@ describe("SchedulerService applyWorkerResult", () => {
 
   test("rejects stopping a running attempt that is inactive in this scheduler", () => {
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1737,6 +1763,7 @@ describe("SchedulerService applyWorkerResult", () => {
 
   test("rejects stopping a missing attempt as inactive in this scheduler", () => {
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1773,6 +1800,7 @@ describe("SchedulerService applyWorkerResult", () => {
   test("does not redispatch workers that already have an in-flight run", async () => {
     const claimQueuedJobForWorker = vi.fn(() => true);
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1839,6 +1867,7 @@ describe("SchedulerService applyWorkerResult", () => {
   test("does not immediately dispatch queued jobs delayed after lease conflict", async () => {
     const claimQueuedJobForWorker = vi.fn(() => true);
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1897,6 +1926,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const returnLeasedJobToQueue = vi.fn();
     const releaseLeaseByResource = vi.fn();
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -1964,6 +1994,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const addAttemptEvent = vi.fn();
     const updateWorkerStatus = vi.fn();
     const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
       config: createDefaultWorkspaceConfig("foo", "file"),
       paths: {
         projectRoot: "/tmp/project",
@@ -2155,6 +2186,7 @@ describe("SchedulerService applyWorkerResult", () => {
         },
       };
       const scheduler = new SchedulerService({
+        embedder: new FakeEmbedder(),
         config,
         paths,
         foremanRepos: createMockRepos({
@@ -2298,6 +2330,7 @@ describe("SchedulerService applyWorkerResult", () => {
         },
       };
       const scheduler = new SchedulerService({
+        embedder: new FakeEmbedder(),
         config: createDefaultWorkspaceConfig("foo", "file"),
         paths,
         foremanRepos: createMockRepos({
