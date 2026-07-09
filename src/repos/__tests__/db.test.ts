@@ -1157,6 +1157,57 @@ describe("persistence repos", () => {
     }
   });
 
+  test("un-flags a duplicate when the learning it points at is deleted", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.learnings.addLearning({ id: "learn-original", title: "Original", repo: "foreman", confidence: "emerging", content: "b", tags: [] });
+      db.learnings.addLearning({
+        id: "learn-duplicate",
+        title: "Duplicate",
+        repo: "foreman",
+        confidence: "emerging",
+        content: "b",
+        tags: [],
+        duplicateOf: "learn-original",
+      });
+
+      // ON DELETE SET NULL: deleting the original must un-flag its duplicates,
+      // not be blocked by the FK (NO ACTION) nor delete them (CASCADE).
+      db.database.sqlite.prepare("DELETE FROM learning WHERE id = ?").run("learn-original");
+
+      const remaining = db.learnings.listLearnings();
+      expect(remaining.map((learning) => learning.id)).toEqual(["learn-duplicate"]);
+      expect(remaining[0]!.duplicateOf).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("rejects a duplicate_of pointing at a learning that does not exist", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      expect(() =>
+        db.learnings.addLearning({
+          id: "learn-duplicate",
+          title: "Duplicate",
+          repo: "foreman",
+          confidence: "emerging",
+          content: "b",
+          tags: [],
+          duplicateOf: "learn-missing",
+        }),
+      ).toThrow(/FOREIGN KEY constraint failed/);
+    } finally {
+      db.close();
+    }
+  });
+
   test("finds the nearest learning embedding by cosine within the model and repo scope", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
@@ -1189,6 +1240,31 @@ describe("persistence repos", () => {
       expect(db.learnings.nearestLearningEmbedding(query, { model: "m2", repos: ["foreman"] })?.learningId).toBe(
         "exact-other-model",
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips a corrupt wrong-width candidate instead of aborting the nearest-neighbour scan", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    const seed = (id: string, vector: number[]) => {
+      db.learnings.addLearning({ id, title: id, repo: "foreman", confidence: "emerging", content: "body", tags: [] });
+      db.learnings.upsertLearningEmbedding({ learningId: id, model: "m1", dims: vector.length, vector: Float32Array.from(vector) });
+    };
+
+    try {
+      // Sorts first by id, so an aborting scan would never reach `valid`. Nothing
+      // validates width on write, and backfill cannot see a same-model row, so
+      // this row is permanent -- it must not disable dedup for the whole scope.
+      seed("aaa-corrupt", [1, 0]);
+      seed("valid", [0.9, 0.4359, 0]);
+
+      const nearest = db.learnings.nearestLearningEmbedding(Float32Array.from([1, 0, 0]), { model: "m1" });
+      expect(nearest?.learningId).toBe("valid");
+      expect(nearest?.similarity).toBeCloseTo(0.9, 4);
     } finally {
       db.close();
     }
