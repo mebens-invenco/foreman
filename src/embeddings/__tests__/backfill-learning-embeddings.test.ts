@@ -45,6 +45,51 @@ describe("backfillLearningEmbeddings", () => {
     }
   });
 
+  test("re-embeds an edited learning once, then converges", async () => {
+    const db = await createDb();
+    const embedder = new FakeEmbedder();
+
+    try {
+      db.learnings.addLearning({ id: "learn-a", title: "Title", repo: "foreman", confidence: "emerging", content: "Body", tags: [] });
+      await backfillLearningEmbeddings({ learnings: db.learnings, embedder });
+
+      // Metadata churn must not send the model any work: the embedded text is
+      // untouched, and `worker-result-applier` would not re-embed for it either.
+      db.learnings.updateLearning({ id: "learn-a", markApplied: true, tags: ["x"], confidence: "proven" });
+      expect(await backfillLearningEmbeddings({ learnings: db.learnings, embedder })).toEqual({
+        model: embedder.modelId,
+        total: 1,
+        embedded: 0,
+        skipped: 1,
+      });
+      expect(embedder.calls).toHaveLength(1);
+
+      // A text edit does, exactly once. The re-embed has to refresh the stored
+      // text snapshot as well as the vector, or the row stays flagged and every
+      // later backfill embeds it again, forever.
+      db.learnings.updateLearning({ id: "learn-a", content: "Rewritten" });
+      expect(db.learnings.listLearningIdsMissingEmbedding(embedder.modelId)).toEqual(["learn-a"]);
+      expect(await backfillLearningEmbeddings({ learnings: db.learnings, embedder })).toEqual({
+        model: embedder.modelId,
+        total: 1,
+        embedded: 1,
+        skipped: 0,
+      });
+      expect(embedder.embeddedTexts).toEqual(["Title\nBody", "Title\nRewritten"]);
+
+      expect(db.learnings.listLearningIdsMissingEmbedding(embedder.modelId)).toEqual([]);
+      expect(await backfillLearningEmbeddings({ learnings: db.learnings, embedder })).toEqual({
+        model: embedder.modelId,
+        total: 1,
+        embedded: 0,
+        skipped: 1,
+      });
+      expect(embedder.calls).toHaveLength(2);
+    } finally {
+      db.close();
+    }
+  });
+
   test("re-embeds only the learnings whose vector is missing", async () => {
     const db = await createDb();
     const embedder = new FakeEmbedder();

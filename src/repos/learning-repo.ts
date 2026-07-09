@@ -101,9 +101,16 @@ export interface LearningRepo {
    * `embeddedTitle`/`embeddedContent`. Returns false when it no longer does —
    * a slower writer must not overwrite a newer vector and stamp it current,
    * which would hide the row from `listLearningIdsMissingEmbedding` forever.
+   *
+   * The matched text is snapshotted alongside the vector; it is what every
+   * freshness check keys on.
    */
   upsertLearningEmbedding(input: LearningEmbeddingUpsert): boolean;
-  /** Learnings with no vector, a vector from another model, or a vector older than the learning. */
+  /**
+   * Learnings with no vector, a vector from another model, or a vector computed
+   * from text the learning no longer carries. Metadata-only edits (tags,
+   * confidence, `applied_count`) leave a vector valid and are NOT reported here.
+   */
   listLearningIdsMissingEmbedding(model: string): string[];
   /**
    * The table holds one vector per learning but spans model generations until a
@@ -114,8 +121,8 @@ export interface LearningRepo {
   getLearningEmbeddings(filters?: { repos?: string[]; model?: string }): LearningEmbeddingRecord[];
   /**
    * The vectors `listLearningIdsMissingEmbedding` would NOT flag: present, from
-   * `model`, and no older than the learning they describe. Anything that reasons
-   * about whether a scope is usably embedded must read this rather than
+   * `model`, and computed from the text the learning still carries. Anything that
+   * reasons about whether a scope is usably embedded must read this rather than
    * `getLearningEmbeddings`, or it will count vectors describing text that has
    * since changed.
    */
