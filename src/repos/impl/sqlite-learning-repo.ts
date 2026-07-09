@@ -71,9 +71,14 @@ const normalizeFilterValues = (values: readonly string[] | undefined): string[] 
 // whether it is being counted or decoded.
 //
 // `currentOnly` adds the freshness half of `listLearningIdsMissingEmbedding`'s
-// definition (`:missing = absent OR other model OR older than the learning`), so
+// definition (`missing = absent OR other model OR embedded from other text`), so
 // callers that must agree with `backfill-embeddings` about what "embedded" means
 // cannot drift from it.
+//
+// Keyed on the text, never on `learning.updated_at`: that timestamp moves on
+// metadata-only writes (tags, confidence, `applied_count`), which leave the
+// vector perfectly valid. `IS` rather than `=` so the NULL snapshot on a row
+// this migration left stale reads as a mismatch instead of as unknown.
 const learningEmbeddingFilter = (
   filters: { repos?: string[]; model?: string },
   options: { currentOnly?: boolean } = {},
@@ -92,7 +97,8 @@ const learningEmbeddingFilter = (
     params.push(model);
   }
   if (options.currentOnly) {
-    clauses.push("learning_embedding.updated_at >= learning.updated_at");
+    clauses.push("learning_embedding.embedded_title IS learning.title");
+    clauses.push("learning_embedding.embedded_content IS learning.content");
   }
 
   return { where: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "", params };
@@ -441,10 +447,13 @@ export class SqliteLearningRepo implements LearningRepo {
     // statement: a learning edited between an embed and its write yields no
     // source row, so the stale vector is dropped instead of being stamped
     // newer than the text it no longer describes.
+    // The snapshot columns are selected from the very row the guard matched, so
+    // they cannot disagree with the text this vector was computed from — that is
+    // what makes them a sound key for freshness everywhere else.
     const result = this.sqlite
       .prepare(
-        `INSERT INTO learning_embedding(learning_id, model, dims, vector, updated_at)
-              SELECT learning.id, ?, ?, ?, ?
+        `INSERT INTO learning_embedding(learning_id, model, dims, vector, updated_at, embedded_title, embedded_content)
+              SELECT learning.id, ?, ?, ?, ?, learning.title, learning.content
                 FROM learning
                WHERE learning.id = ?
                  AND learning.title = ?
@@ -453,7 +462,9 @@ export class SqliteLearningRepo implements LearningRepo {
                  SET model = excluded.model,
                      dims = excluded.dims,
                      vector = excluded.vector,
-                     updated_at = excluded.updated_at`,
+                     updated_at = excluded.updated_at,
+                     embedded_title = excluded.embedded_title,
+                     embedded_content = excluded.embedded_content`,
       )
       .run(
         input.model,
@@ -469,6 +480,10 @@ export class SqliteLearningRepo implements LearningRepo {
   }
 
   listLearningIdsMissingEmbedding(model: string): string[] {
+    // Text, not `updated_at`: re-embedding a learning because someone bumped its
+    // `applied_count` burns the model on text that never changed, and — since
+    // the coverage gate reads the same rule — would take hybrid retrieval down
+    // with it. `worker-result-applier` has always compared the text this way.
     return this.sqlite
       .prepare(
         `SELECT learning.id AS id
@@ -476,7 +491,8 @@ export class SqliteLearningRepo implements LearningRepo {
            LEFT JOIN learning_embedding ON learning_embedding.learning_id = learning.id
           WHERE learning_embedding.learning_id IS NULL
              OR learning_embedding.model != ?
-             OR learning_embedding.updated_at < learning.updated_at
+             OR learning_embedding.embedded_title IS NOT learning.title
+             OR learning_embedding.embedded_content IS NOT learning.content
           ORDER BY learning.id ASC`,
       )
       .all(model)
