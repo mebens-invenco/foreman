@@ -32,6 +32,7 @@ import { renderWorkspacePlan } from "./planning/render-workspace-plan.js";
 import { createRepos } from "./repos/index.js";
 import type { LearningSearchEventInput } from "./repos/index.js";
 import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
+import { searchLearningsWithHybridFallback } from "./retrieval/hybrid-learning-search.js";
 import { createReviewService, resolveGitHubAuthEnv } from "./review/index.js";
 import { createSelfRebootScheduler, runRebootSidecar } from "./system/reboot.js";
 import { createTaskSystem } from "./tasking/index.js";
@@ -366,14 +367,18 @@ learnings
       throw new InvalidArgumentError("At least one --query is required.");
     }
 
-    await withWorkspaceRepos(workspace, async (repos) => {
-      const learnings = repos.learnings.searchLearnings(
+    await withWorkspaceRepos(workspace, async (repos, paths) => {
+      const learnings = await searchLearningsWithHybridFallback(
+        {
+          learnings: repos.learnings,
+          embedder: createEmbedder(paths.projectRoot),
+          warn: (message) => process.stderr.write(`warning: ${message}\n`),
+        },
         {
           queries: options.query,
           ...(options.repo.length > 0 ? { repos: options.repo } : {}),
           limit: options.limit,
         },
-        { incrementReadCount: true },
       );
 
       recordLearningSearchEvent(repos, {
@@ -561,14 +566,15 @@ const evalCommand = program
 evalCommand
   .command("retrieval")
   .description("Run the offline retrieval bench over committed fixtures (deterministic; no workspace or runner)")
-  .option("--json", "Emit the metrics object as JSON")
+  .option("--json", "Emit the metrics objects as JSON")
   .action(async (_options: { json?: boolean }, command: Command) => {
     try {
-      const result = runRetrievalBench({ projectRoot: await findProjectRoot() });
+      const projectRoot = await findProjectRoot();
+      const result = await runRetrievalBench({ projectRoot, embedder: createEmbedder(projectRoot) });
       // The parent `eval` command also declares `--json`, so the flag binds to the
       // parent; read it via optsWithGlobals rather than this subcommand's own opts.
       if (command.optsWithGlobals().json) {
-        writeJson(result.metrics);
+        writeJson({ model: result.model, fts: result.fts.metrics, hybrid: result.hybrid.metrics });
       } else {
         process.stdout.write(`${formatRetrievalReport(result)}\n`);
       }
