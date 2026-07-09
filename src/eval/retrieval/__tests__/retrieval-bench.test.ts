@@ -4,16 +4,23 @@ import { FakeEmbedder } from "../../../test-support/fake-embedder.js";
 import { testProjectRoot } from "../../../test-support/helpers.js";
 import { runRetrievalBench } from "../run.js";
 
-// Fixture-pinned guard: the committed corpus + cases + FTS pipeline produce an
-// exact baseline. Any accidental fixture edit or scoring drift changes these
-// numbers, which is precisely what this test is here to make loud. The values
-// mirror src/eval/retrieval/README.md — do NOT relax them to make a change pass;
-// a retrieval improvement should be measured against these, not overwrite them.
+// Fixture-pinned guard, always on and always offline. `FakeEmbedder` is a pure
+// function of text and index, so the whole bench reproduces exactly under it —
+// which makes it a real tripwire for the fusion, the cross-query merge, and the
+// pagination, none of which care what the vectors mean.
 //
-// The FTS half is model-free, so a fake embedder runs the bench offline here.
-// The hybrid numbers depend on the real bge-small model, which tests must never
-// download; `retrieval-bench-hybrid.test.ts` pins those behind an opt-in flag.
-describe("retrieval bench (committed FTS baseline)", () => {
+// Two rows are pinned here, and they say different things:
+//
+//   fts  — the historical baseline. Any accidental fixture edit or scoring drift
+//          moves it, which is precisely what this is here to make loud.
+//   null — the same hybrid pipeline driven by a SEMANTICS-FREE embedder. It is
+//          the padding floor: whatever recall this buys over `fts` was bought by
+//          filling the result window with arbitrary rows, not by retrieval. It
+//          must stay at zero, or the committed hybrid delta is partly a lottery.
+//
+// Do NOT relax these to make a change pass. The real-model accuracy numbers live
+// in `retrieval-bench-hybrid.test.ts`.
+describe("retrieval bench (committed FTS baseline and null-embedder floor)", () => {
   const runBench = () => runRetrievalBench({ projectRoot: testProjectRoot, embedder: new FakeEmbedder() });
 
   test("reproduces the fixture-pinned FTS baseline metrics exactly", async () => {
@@ -27,6 +34,26 @@ describe("retrieval bench (committed FTS baseline)", () => {
     });
   });
 
+  test("buys no recall from a semantics-free embedder", async () => {
+    const { model, fts, hybrid } = await runBench();
+
+    expect(model).toBe("fake-embedder-v1");
+    // Identical recall to `fts`, and the same 11 cases still retrieve nothing:
+    // the bounded cosine arm proposes only statistical outliers, and meaningless
+    // vectors produce none that help. An unbounded arm scored 0.513 / 0.561 / 8
+    // here — pure window padding.
+    expect(hybrid.metrics).toEqual({
+      labeledCases: 26,
+      recallAt5: 0.474,
+      recallAt10: 0.474,
+      // Below `fts`'s 0.546 only because RRF merges queries by best rank while
+      // `searchLearnings` merges by best bm25 score; the retrieved sets match.
+      mrr: 0.462,
+      zeroRecallCases: 11,
+    });
+    expect(hybrid.metrics.recallAt5).toBe(fts.metrics.recallAt5);
+  });
+
   test("scores every labeled case and no distractor (zero-expected) case, per pipeline", async () => {
     const { fts, hybrid } = await runBench();
     for (const perCase of [fts.perCase, hybrid.perCase]) {
@@ -37,18 +64,5 @@ describe("retrieval bench (committed FTS baseline)", () => {
     // Both pipelines answer the same cases in the same order, which is what lets
     // `formatRetrievalReport` zip them into one per-case row.
     expect(hybrid.perCase.map((row) => row.taskId)).toEqual(fts.perCase.map((row) => row.taskId));
-  });
-
-  test("reports a fully-formed metrics object for the hybrid pipeline", async () => {
-    const { model, hybrid } = await runBench();
-
-    expect(model).toBe("fake-embedder-v1");
-    expect(hybrid.metrics).toEqual({
-      labeledCases: 26,
-      recallAt5: expect.any(Number),
-      recallAt10: expect.any(Number),
-      mrr: expect.any(Number),
-      zeroRecallCases: expect.any(Number),
-    });
   });
 });
