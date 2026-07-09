@@ -7,6 +7,10 @@ export type LearningRecord = {
   content: string;
   appliedCount: number;
   readCount: number;
+  /** Nearest in-scope learning at write time, when the two were near-identical. */
+  duplicateOf: string | null;
+  /** Task whose attempt produced this learning. Null for rows written before provenance existed. */
+  sourceTaskId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -51,6 +55,8 @@ export interface LearningRepo {
     confidence: "emerging" | "established" | "proven";
     content: string;
     tags: string[];
+    sourceTaskId?: string;
+    duplicateOf?: string;
   }): string;
   updateLearning(input: {
     id: string;
@@ -129,4 +135,20 @@ export interface LearningRepo {
   getCurrentLearningEmbeddings(filters: { repos?: string[]; model: string }): LearningEmbeddingRecord[];
   /** Same rows as `getCurrentLearningEmbeddings`, without decoding any vector. */
   countCurrentLearningEmbeddings(filters: { repos?: string[]; model: string }): number;
+  /**
+   * Brute-force nearest neighbour of `vector` by cosine similarity, over the
+   * CURRENT embeddings in `filters` scope (see `getCurrentLearningEmbeddings` —
+   * a stale vector describes text the learning no longer carries, so a match
+   * against it is not evidence of a duplicate). `undefined` when the scope
+   * holds no current vectors.
+   *
+   * `model` is required, not optional: the table spans model generations, and a
+   * neighbour from another generation is a meaningless comparison rather than a
+   * distant one. Nothing is excluded within the scope — a near duplicate of an
+   * already-flagged duplicate still resolves to its own nearest neighbour.
+   */
+  nearestLearningEmbedding(
+    vector: Float32Array,
+    filters: { model: string; repos?: string[] },
+  ): { learningId: string; similarity: number } | undefined;
 }

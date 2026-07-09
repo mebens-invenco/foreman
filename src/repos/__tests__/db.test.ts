@@ -1114,6 +1114,86 @@ describe("persistence repos", () => {
     }
   });
 
+  test("round-trips duplicate_of and source_task_id through add, get, and list", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.learnings.addLearning({
+        id: "learn-original",
+        title: "Original",
+        repo: "foreman",
+        confidence: "emerging",
+        content: "body",
+        tags: [],
+      });
+      db.learnings.addLearning({
+        id: "learn-duplicate",
+        title: "Duplicate",
+        repo: "foreman",
+        confidence: "emerging",
+        content: "body",
+        tags: [],
+        duplicateOf: "learn-original",
+        sourceTaskId: "ENG-5636",
+      });
+
+      expect(db.learnings.getLearningsByIds(["learn-duplicate"])[0]).toMatchObject({
+        duplicateOf: "learn-original",
+        sourceTaskId: "ENG-5636",
+      });
+      // Both columns are nullable with no backfill, so history reads as null.
+      expect(db.learnings.getLearningsByIds(["learn-original"])[0]).toMatchObject({
+        duplicateOf: null,
+        sourceTaskId: null,
+      });
+
+      const listed = new Map(db.learnings.listLearnings().map((learning) => [learning.id, learning]));
+      expect(listed.get("learn-duplicate")).toMatchObject({ duplicateOf: "learn-original", sourceTaskId: "ENG-5636" });
+      expect(listed.get("learn-original")).toMatchObject({ duplicateOf: null, sourceTaskId: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("finds the nearest learning embedding by cosine within the model and repo scope", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    const seed = (id: string, repo: string, model: string, vector: number[]) => {
+      db.learnings.addLearning({ id, title: id, repo, confidence: "emerging", content: "body", tags: [] });
+      db.learnings.upsertLearningEmbedding({ learningId: id, model, dims: vector.length, vector: Float32Array.from(vector) });
+    };
+
+    try {
+      const query = Float32Array.from([1, 0, 0]);
+      expect(db.learnings.nearestLearningEmbedding(query, { model: "m1" })).toBeUndefined();
+
+      seed("far", "foreman", "m1", [0, 1, 0]);
+      seed("near", "foreman", "m1", [0.9, 0.4359, 0]);
+      seed("exact-other-repo", "warehousing-service", "m1", [1, 0, 0]);
+      seed("exact-other-model", "foreman", "m2", [1, 0, 0]);
+
+      // Magnitude must not beat direction: this is 10x longer but points at `far`.
+      seed("long-but-orthogonal", "foreman", "m1", [0, 10, 0]);
+
+      const nearest = db.learnings.nearestLearningEmbedding(query, { model: "m1", repos: ["foreman"] });
+      expect(nearest?.learningId).toBe("near");
+      expect(nearest?.similarity).toBeCloseTo(0.9, 4);
+
+      // Unscoped by repo, the identical vector in another repo wins.
+      expect(db.learnings.nearestLearningEmbedding(query, { model: "m1" })?.learningId).toBe("exact-other-repo");
+      // The identical vector under another model is never a candidate.
+      expect(db.learnings.nearestLearningEmbedding(query, { model: "m2", repos: ["foreman"] })?.learningId).toBe(
+        "exact-other-model",
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   test("round-trips learning embedding vectors through the BLOB column", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);

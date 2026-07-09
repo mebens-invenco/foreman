@@ -9,6 +9,11 @@ export class FakeEmbedder implements Embedder {
   readonly dims = 3;
   /** One entry per `embed` call, holding the texts that call received. */
   readonly calls: string[][] = [];
+  /**
+   * Pins the vector a text embeds to, overriding `fakeEmbeddingVector`. Near-
+   * duplicate tests need exact control over the cosine between two texts.
+   */
+  readonly vectorsByText = new Map<string, Float32Array>();
   failure: Error | null = null;
   /**
    * Runs inside `embed`, before it resolves. Lets a test interleave a
@@ -31,7 +36,7 @@ export class FakeEmbedder implements Embedder {
     }
 
     this.onEmbed?.(texts);
-    return texts.map((text, index) => fakeEmbeddingVector(text, index));
+    return texts.map((text, index) => this.vectorsByText.get(text) ?? fakeEmbeddingVector(text, index));
   }
 }
 
