@@ -10,6 +10,11 @@ export class FakeEmbedder implements Embedder {
   /** One entry per `embed` call, holding the texts that call received. */
   readonly calls: string[][] = [];
   failure: Error | null = null;
+  /**
+   * Runs inside `embed`, before it resolves. Lets a test interleave a
+   * concurrent write the way a real serve loop can while a vector is in flight.
+   */
+  onEmbed: ((texts: string[]) => void) | null = null;
 
   constructor(modelId = "fake-embedder-v1") {
     this.modelId = modelId;
@@ -25,6 +30,7 @@ export class FakeEmbedder implements Embedder {
       throw this.failure;
     }
 
+    this.onEmbed?.(texts);
     return texts.map((text, index) => fakeEmbeddingVector(text, index));
   }
 }

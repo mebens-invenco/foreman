@@ -39,13 +39,20 @@ export const backfillLearningEmbeddings = async (deps: {
         );
       }
 
-      learnings.upsertLearningEmbedding({
+      // `learning` is the snapshot the vector was computed from. A concurrent
+      // serve-loop write between the read and here means our vector is already
+      // stale; the repo drops it and the row stays flagged for the next run.
+      const applied = learnings.upsertLearningEmbedding({
         learningId: learning.id,
         model: embedder.modelId,
         dims: embedder.dims,
         vector,
+        embeddedTitle: learning.title,
+        embeddedContent: learning.content,
       });
-      embedded += 1;
+      if (applied) {
+        embedded += 1;
+      }
     });
   }
 
