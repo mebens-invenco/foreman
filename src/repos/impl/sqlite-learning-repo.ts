@@ -1,3 +1,4 @@
+import { cosineSimilarity } from "../../retrieval/cosine-similarity.js";
 import { ForemanError } from "../../lib/errors.js";
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
@@ -15,7 +16,10 @@ import type {
 } from "../learning-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
-const LEARNING_COLUMNS = "id, title, repo, tags, confidence, content, applied_count, read_count, created_at, updated_at";
+const LEARNING_COLUMNS =
+  "id, title, repo, tags, confidence, content, applied_count, read_count, duplicate_of, source_task_id, created_at, updated_at";
+
+const toNullableString = (value: unknown): string | null => (value === null || value === undefined ? null : String(value));
 
 const mapLearningRecord = (row: unknown): LearningRecord => {
   const mapped = row as SqliteRow;
@@ -28,6 +32,8 @@ const mapLearningRecord = (row: unknown): LearningRecord => {
     content: String(mapped.content),
     appliedCount: Number(mapped.applied_count),
     readCount: Number(mapped.read_count),
+    duplicateOf: toNullableString(mapped.duplicate_of),
+    sourceTaskId: toNullableString(mapped.source_task_id),
     createdAt: String(mapped.created_at),
     updatedAt: String(mapped.updated_at),
   };
@@ -189,13 +195,26 @@ export class SqliteLearningRepo implements LearningRepo {
     confidence: "emerging" | "established" | "proven";
     content: string;
     tags: string[];
+    sourceTaskId?: string;
+    duplicateOf?: string;
   }): string {
     const id = input.id ?? newId();
     this.sqlite
       .prepare(
-        "INSERT INTO learning(id, title, repo, tags, confidence, content, applied_count, read_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)",
+        "INSERT INTO learning(id, title, repo, tags, confidence, content, applied_count, read_count, duplicate_of, source_task_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)",
       )
-      .run(id, input.title, input.repo, JSON.stringify(input.tags), input.confidence, input.content, isoNow(), isoNow());
+      .run(
+        id,
+        input.title,
+        input.repo,
+        JSON.stringify(input.tags),
+        input.confidence,
+        input.content,
+        input.duplicateOf ?? null,
+        input.sourceTaskId ?? null,
+        isoNow(),
+        isoNow(),
+      );
     return id;
   }
 
@@ -636,5 +655,26 @@ export class SqliteLearningRepo implements LearningRepo {
     // vectors costs microseconds; a gate that counts a vector the ranking then
     // refuses to use costs a wrong answer.
     return this.getCurrentLearningEmbeddings(filters).length;
+  }
+
+  nearestLearningEmbedding(
+    vector: Float32Array,
+    filters: { model: string; repos?: string[] },
+  ): { learningId: string; similarity: number } | undefined {
+    let nearest: { learningId: string; similarity: number } | undefined;
+
+    // Current vectors only: a stale vector describes text the learning no
+    // longer carries, so a match against it is not evidence of a duplicate.
+    // `getCurrentLearningEmbeddings` orders by learning id, and a strict `>`
+    // keeps the first of any tie, so equally-similar neighbours resolve
+    // deterministically.
+    for (const candidate of this.getCurrentLearningEmbeddings(filters)) {
+      const similarity = cosineSimilarity(vector, candidate.vector);
+      if (!nearest || similarity > nearest.similarity) {
+        nearest = { learningId: candidate.learningId, similarity };
+      }
+    }
+
+    return nearest;
   }
 }

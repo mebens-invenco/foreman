@@ -107,7 +107,10 @@ export function LearningsPage() {
           }
         }}
       >
-        <LearningDetailSheet learning={selectedLearning} />
+        <LearningDetailSheet
+          learning={selectedLearning}
+          onSelectLearning={setSelectedLearningId}
+        />
       </Sheet>
     </>
   )

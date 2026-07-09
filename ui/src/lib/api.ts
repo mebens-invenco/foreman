@@ -357,6 +357,8 @@ export type LearningRecord = {
   content: string
   appliedCount: number
   readCount: number
+  duplicateOf: string | null
+  sourceTaskId: string | null
   createdAt: string
   updatedAt: string
 }

@@ -44,6 +44,21 @@ const errorMessage = (error: unknown): string => (error instanceof Error ? error
 const blockedTaskReloadAttempts = 3;
 const blockedTaskReloadRetryDelayMs = 50;
 
+/** Cross-repo learnings, in scope for every repo's near-duplicate check. */
+const sharedLearningRepo = "shared";
+
+/**
+ * Cosine similarity at or above which an added learning is flagged as a near
+ * duplicate of its nearest in-scope neighbour. Calibrated for bge-small-en-v1.5
+ * against the pinned corpus fixture; `learning-near-duplicate-calibration.test.ts`
+ * re-derives it and fails if this value drifts out of the separating window.
+ *
+ * The five labelled near-identical pairs bottom out at 0.9151. The closest pair
+ * that shares a topic but encodes a *distinct* rule scores 0.9067. 0.91 is the
+ * midpoint of that window. Changing the embedding model invalidates it.
+ */
+export const NEAR_DUPLICATE_SIMILARITY_THRESHOLD = 0.91;
+
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 const deploymentRetryIntervalMinutes = (input: {
@@ -239,7 +254,7 @@ export class WorkerResultApplier {
       logger.info("updated consolidation labels", { addCount: labels.add.length, removeCount: labels.remove.length });
     }
 
-    await this.applyLearningMutations(workerResult.learningMutations, logger);
+    await this.applyLearningMutations(workerResult.learningMutations, input.task.id, logger);
 
     if (
       input.job.action === "review" &&
@@ -293,14 +308,57 @@ export class WorkerResultApplier {
     return resolvedPullRequest?.pullRequestUrl ?? null;
   }
 
-  private async applyLearningMutations(mutations: LearningMutation[], logger: LoggerService): Promise<void> {
+  private async applyLearningMutations(
+    mutations: LearningMutation[],
+    sourceTaskId: string,
+    logger: LoggerService,
+  ): Promise<void> {
     const pending: PendingLearningEmbedding[] = [];
+    // Adds are embedded before their rows exist, because the near-duplicate
+    // lookup needs the new vector to find a neighbour to point at. Updates keep
+    // using the deferred path below, so a mixed result costs two embed calls.
+    const addVectors = await this.embedAddedLearnings(mutations, logger);
+    let addIndex = 0;
 
     for (const mutation of mutations) {
       if (mutation.type === "add") {
-        const learningId = this.deps.foremanRepos.learnings.addLearning(mutation);
-        pending.push({ learningId, title: mutation.title, content: mutation.content });
+        const vector = addVectors[addIndex];
+        addIndex += 1;
+
+        const nearDuplicate = vector ? this.findNearDuplicate(vector, mutation.repo, logger) : undefined;
+        const learningId = this.deps.foremanRepos.learnings.addLearning({
+          ...mutation,
+          sourceTaskId,
+          ...(nearDuplicate ? { duplicateOf: nearDuplicate.learningId } : {}),
+        });
         logger.info("added learning mutation", { learningTitle: mutation.title, repo: mutation.repo });
+
+        if (nearDuplicate) {
+          logger.info("flagged learning as a near duplicate", {
+            learningId,
+            duplicateOf: nearDuplicate.learningId,
+            similarity: nearDuplicate.similarity,
+            threshold: NEAR_DUPLICATE_SIMILARITY_THRESHOLD,
+          });
+        }
+
+        if (vector) {
+          // Store before the next add's lookup so two near-identical adds in one
+          // worker result flag the second against the first. The row was created
+          // with exactly this text moments ago, so the freshness guard can only
+          // reject if something rewrote it in between — worth a loud warning.
+          const applied = this.deps.foremanRepos.learnings.upsertLearningEmbedding({
+            learningId,
+            model: this.deps.embedder.modelId,
+            dims: this.deps.embedder.dims,
+            vector,
+            embeddedTitle: mutation.title,
+            embeddedContent: mutation.content,
+          });
+          if (!applied) {
+            logger.warn("embedding for freshly added learning rejected by freshness guard", { learningId });
+          }
+        }
       }
       if (mutation.type === "update") {
         // Read before the write: deciding whether to re-embed needs the pre-update text.
@@ -322,6 +380,66 @@ export class WorkerResultApplier {
     }
 
     await this.embedLearnings(pending, logger);
+  }
+
+  /**
+   * One vector per `add` mutation, in mutation order. A failed embed yields
+   * `undefined` for every add rather than throwing: the learning still lands
+   * un-flagged, and `foreman learnings backfill-embeddings` picks up the row.
+   * Losing dedup on one apply is cheaper than losing the learning.
+   */
+  private async embedAddedLearnings(
+    mutations: LearningMutation[],
+    logger: LoggerService,
+  ): Promise<(Float32Array | undefined)[]> {
+    const texts = mutations.filter((mutation) => mutation.type === "add").map(learningEmbeddingText);
+    if (texts.length === 0) {
+      return [];
+    }
+
+    try {
+      const vectors = await this.deps.embedder.embed(texts);
+      if (vectors.length !== texts.length) {
+        throw new ForemanError(
+          "embedding_count_mismatch",
+          `Embedder returned ${vectors.length} vectors for ${texts.length} learnings`,
+          500,
+        );
+      }
+      return vectors;
+    } catch (error) {
+      logger.warn("failed to embed added learnings; skipping near-duplicate check", {
+        learningCount: texts.length,
+        error: errorMessage(error),
+      });
+      return texts.map(() => undefined);
+    }
+  }
+
+  /**
+   * The nearest neighbour in the mutation's repo plus `shared`, when it is close
+   * enough to call a near duplicate. Never throws: a corrupt vector must not
+   * cost us the learning, so a failed lookup degrades to storing it un-flagged.
+   */
+  private findNearDuplicate(
+    vector: Float32Array,
+    repo: string,
+    logger: LoggerService,
+  ): { learningId: string; similarity: number } | undefined {
+    try {
+      const nearest = this.deps.foremanRepos.learnings.nearestLearningEmbedding(vector, {
+        model: this.deps.embedder.modelId,
+        repos: Array.from(new Set([repo, sharedLearningRepo])),
+      });
+
+      return nearest && nearest.similarity >= NEAR_DUPLICATE_SIMILARITY_THRESHOLD ? nearest : undefined;
+    } catch (error) {
+      logger.warn("near-duplicate lookup failed; storing learning unflagged", {
+        repo,
+        error: errorMessage(error),
+      });
+      return undefined;
+    }
   }
 
   private async embedLearnings(pending: PendingLearningEmbedding[], logger: LoggerService): Promise<void> {
@@ -517,7 +635,7 @@ export class WorkerResultApplier {
       logger.info("transitioned task to done after all relevant deployments succeeded");
     }
 
-    await this.applyLearningMutations(workerResult.learningMutations, logger);
+    await this.applyLearningMutations(workerResult.learningMutations, input.task.id, logger);
 
     this.deps.scheduleScout();
     return pullRequestUrl;
