@@ -1215,7 +1215,14 @@ describe("persistence repos", () => {
 
     const seed = (id: string, repo: string, model: string, vector: number[]) => {
       db.learnings.addLearning({ id, title: id, repo, confidence: "emerging", content: "body", tags: [] });
-      db.learnings.upsertLearningEmbedding({ learningId: id, model, dims: vector.length, vector: Float32Array.from(vector) });
+      db.learnings.upsertLearningEmbedding({
+        learningId: id,
+        model,
+        dims: vector.length,
+        vector: Float32Array.from(vector),
+        embeddedTitle: id,
+        embeddedContent: "body",
+      });
     };
 
     try {
@@ -1252,7 +1259,14 @@ describe("persistence repos", () => {
 
     const seed = (id: string, vector: number[]) => {
       db.learnings.addLearning({ id, title: id, repo: "foreman", confidence: "emerging", content: "body", tags: [] });
-      db.learnings.upsertLearningEmbedding({ learningId: id, model: "m1", dims: vector.length, vector: Float32Array.from(vector) });
+      db.learnings.upsertLearningEmbedding({
+        learningId: id,
+        model: "m1",
+        dims: vector.length,
+        vector: Float32Array.from(vector),
+        embeddedTitle: id,
+        embeddedContent: "body",
+      });
     };
 
     try {
