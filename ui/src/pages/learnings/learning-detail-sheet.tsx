@@ -10,10 +10,11 @@ import { MarkdownView } from "@/components/markdown-view"
 import { formatTimestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { LearningRecord } from "@/lib/api"
-import { confidenceTone } from "@/pages/learnings/columns"
+import { confidenceTone, LearningDuplicateBadge } from "@/pages/learnings/columns"
 
 type LearningDetailSheetProps = {
   learning: LearningRecord | null
+  onSelectLearning: (learningId: string) => void
 }
 
 function DetailRow({ label, value }: { label: string; value: ReactNode }) {
@@ -46,7 +47,28 @@ function LearningConfidenceBadge({
   )
 }
 
-export function LearningDetailSheet({ learning }: LearningDetailSheetProps) {
+function DuplicateOfLink({
+  duplicateOf,
+  onSelectLearning,
+}: {
+  duplicateOf: string
+  onSelectLearning: (learningId: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      className="font-mono underline underline-offset-4 hover:text-muted-foreground"
+      onClick={() => onSelectLearning(duplicateOf)}
+    >
+      {duplicateOf}
+    </button>
+  )
+}
+
+export function LearningDetailSheet({
+  learning,
+  onSelectLearning,
+}: LearningDetailSheetProps) {
   return (
     <SheetContent
       side="right"
@@ -61,7 +83,10 @@ export function LearningDetailSheet({ learning }: LearningDetailSheetProps) {
             </SheetDescription>
           </div>
           {learning ? (
-            <LearningConfidenceBadge confidence={learning.confidence} />
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              {learning.duplicateOf ? <LearningDuplicateBadge /> : null}
+              <LearningConfidenceBadge confidence={learning.confidence} />
+            </div>
           ) : null}
         </div>
       </SheetHeader>
@@ -76,6 +101,18 @@ export function LearningDetailSheet({ learning }: LearningDetailSheetProps) {
               <DetailRow label="Confidence" value={learning.confidence} />
               <DetailRow label="Created" value={formatTimestamp(learning.createdAt)} />
               <DetailRow label="Updated" value={formatTimestamp(learning.updatedAt)} />
+              <DetailRow label="Source task" value={learning.sourceTaskId ?? "-"} />
+              {learning.duplicateOf ? (
+                <DetailRow
+                  label="Duplicate of"
+                  value={
+                    <DuplicateOfLink
+                      duplicateOf={learning.duplicateOf}
+                      onSelectLearning={onSelectLearning}
+                    />
+                  }
+                />
+              ) : null}
             </section>
 
             <section className="space-y-2">

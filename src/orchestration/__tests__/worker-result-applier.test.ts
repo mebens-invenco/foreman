@@ -1451,4 +1451,210 @@ describe("WorkerResultApplier learning embeddings", () => {
       db.close();
     }
   });
+
+  /** Unit vector whose cosine against [1, 0, 0] is exactly `cosine`. */
+  const unitVectorAt = (cosine: number): Float32Array =>
+    Float32Array.from([cosine, Math.sqrt(1 - cosine * cosine), 0]);
+
+  const neighbourVector = unitVectorAt(1);
+
+  const seedNeighbour = (
+    db: Awaited<ReturnType<typeof createMigratedDb>>,
+    embedder: FakeEmbedder,
+    overrides: { id?: string; repo?: string; model?: string } = {},
+  ): string => {
+    const id = overrides.id ?? "learn-neighbour";
+    db.learnings.addLearning({
+      id,
+      title: "Neighbour",
+      repo: overrides.repo ?? "foreman",
+      confidence: "emerging",
+      content: "Neighbour body",
+      tags: [],
+    });
+    db.learnings.upsertLearningEmbedding({
+      learningId: id,
+      model: overrides.model ?? embedder.modelId,
+      dims: embedder.dims,
+      vector: neighbourVector,
+    });
+    return id;
+  };
+
+  /** An `add` mutation whose text the fake embedder maps to `vector`. */
+  const addMutationAt = (
+    embedder: FakeEmbedder,
+    vector: Float32Array,
+    overrides: { title?: string; repo?: string } = {},
+  ): Extract<WorkerResult["learningMutations"][number], { type: "add" }> => {
+    const mutation = {
+      type: "add" as const,
+      title: overrides.title ?? "Candidate",
+      repo: overrides.repo ?? "foreman",
+      confidence: "emerging" as const,
+      content: "Candidate body",
+      tags: [],
+    };
+    embedder.vectorsByText.set(learningEmbeddingText(mutation), vector);
+    return mutation;
+  };
+
+  const addedLearning = (db: Awaited<ReturnType<typeof createMigratedDb>>) =>
+    db.learnings.listLearnings().find((learning) => learning.title === "Candidate")!;
+
+  test("stores and flags an added learning that near-duplicates its nearest in-scope neighbour", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-dup-flag-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      const neighbourId = seedNeighbour(db, embedder);
+      await applyLearningMutations(db, embedder, [addMutationAt(embedder, unitVectorAt(0.92))], tempDir);
+
+      // D3: store + flag. The learning must never be dropped.
+      expect(db.learnings.listLearnings()).toHaveLength(2);
+      expect(addedLearning(db).duplicateOf).toBe(neighbourId);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("never flags an added learning against itself", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-dup-self-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      // Nothing else is stored, so the only vector that could match is the
+      // learning's own -- which the lookup must run before persisting.
+      await applyLearningMutations(db, embedder, [addMutationAt(embedder, neighbourVector)], tempDir);
+
+      expect(addedLearning(db).duplicateOf).toBeNull();
+      expect(db.learnings.getLearningEmbeddings()).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("stores an added learning below the threshold without a duplicate flag", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-dup-clean-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      seedNeighbour(db, embedder);
+      // 0.90 sits just under the 0.91 threshold, so this pins the boundary
+      // rather than merely showing an orthogonal vector goes unflagged.
+      await applyLearningMutations(db, embedder, [addMutationAt(embedder, unitVectorAt(0.9))], tempDir);
+
+      expect(addedLearning(db).duplicateOf).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("stores the learning unflagged when the embedder fails, and never fails the apply", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-dup-embed-fail-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      seedNeighbour(db, embedder);
+      const mutation = addMutationAt(embedder, neighbourVector);
+      embedder.failure = new Error("model unavailable");
+
+      await applyLearningMutations(db, embedder, [mutation], tempDir);
+
+      const learning = addedLearning(db);
+      expect(learning.duplicateOf).toBeNull();
+      expect(learning.sourceTaskId).toBe("TASK-DEPLOY-APPLY");
+      expect(db.learnings.listLearningIdsMissingEmbedding(embedder.modelId)).toContain(learning.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records the source task on every added learning", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-source-task-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      await applyLearningMutations(
+        db,
+        embedder,
+        [
+          { type: "add", title: "First", repo: "foreman", confidence: "emerging", content: "One", tags: [] },
+          { type: "add", title: "Second", repo: "shared", confidence: "proven", content: "Two", tags: [] },
+        ],
+        tempDir,
+      );
+
+      expect(db.learnings.listLearnings().map((learning) => learning.sourceTaskId)).toEqual([
+        "TASK-DEPLOY-APPLY",
+        "TASK-DEPLOY-APPLY",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("flags the second of two near-identical adds in one worker result", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-dup-same-batch-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      const first = addMutationAt(embedder, neighbourVector, { title: "First" });
+      const second = addMutationAt(embedder, neighbourVector, { title: "Candidate" });
+
+      await applyLearningMutations(db, embedder, [first, second], tempDir);
+
+      const firstLearning = db.learnings.listLearnings().find((learning) => learning.title === "First")!;
+      // The first add has no neighbour to point at; its vector is stored before
+      // the second add's lookup runs, so only the second is flagged.
+      expect(firstLearning.duplicateOf).toBeNull();
+      expect(addedLearning(db).duplicateOf).toBe(firstLearning.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("flags against a shared-repo neighbour", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-dup-shared-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      const neighbourId = seedNeighbour(db, embedder, { repo: "shared" });
+      await applyLearningMutations(db, embedder, [addMutationAt(embedder, neighbourVector)], tempDir);
+
+      expect(addedLearning(db).duplicateOf).toBe(neighbourId);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("ignores an identical neighbour in an unrelated repo", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-dup-other-repo-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      seedNeighbour(db, embedder, { repo: "warehousing-service" });
+      await applyLearningMutations(db, embedder, [addMutationAt(embedder, neighbourVector)], tempDir);
+
+      expect(addedLearning(db).duplicateOf).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("ignores an identical neighbour embedded by a different model", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-dup-other-model-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      // Mid-backfill the table holds two model generations. Their vectors share
+      // no space, so a 1.0 cosine across them is a coincidence, not a duplicate.
+      seedNeighbour(db, embedder, { model: "superseded-embedder-v0" });
+      await applyLearningMutations(db, embedder, [addMutationAt(embedder, neighbourVector)], tempDir);
+
+      expect(addedLearning(db).duplicateOf).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
 });
