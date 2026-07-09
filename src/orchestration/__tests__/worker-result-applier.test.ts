@@ -1370,6 +1370,8 @@ describe("WorkerResultApplier learning embeddings", () => {
         model: embedder.modelId,
         dims: embedder.dims,
         vector: Float32Array.from([0, 0, 0]),
+        embeddedTitle: "Title",
+        embeddedContent: "Old body",
       });
 
       await applyLearningMutations(db, embedder, [{ type: "update", id: "learn-a", content: "New body" }], tempDir);
@@ -1397,6 +1399,31 @@ describe("WorkerResultApplier learning embeddings", () => {
 
       expect(embedder.calls).toHaveLength(0);
       expect(db.learnings.getLearningsByIds(["learn-a"])[0]!.appliedCount).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("discards its vector when another writer edits the learning mid-embed", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-embed-race-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      db.learnings.addLearning({ id: "learn-a", title: "Title", repo: "foreman", confidence: "emerging", content: "Old body", tags: [] });
+
+      // A concurrent writer lands a newer edit while our vector is in flight.
+      embedder.onEmbed = () => {
+        embedder.onEmbed = null;
+        db.learnings.updateLearning({ id: "learn-a", content: "Newer body from another writer" });
+      };
+
+      await applyLearningMutations(db, embedder, [{ type: "update", id: "learn-a", content: "New body" }], tempDir);
+
+      // Our vector described "New body", which is no longer the stored text.
+      expect(db.learnings.getLearningEmbeddings()).toEqual([]);
+      // Dropping it leaves the row visible to the backfill, which is the point.
+      expect(db.learnings.listLearningIdsMissingEmbedding(embedder.modelId)).toEqual(["learn-a"]);
+      expect(db.learnings.getLearningsByIds(["learn-a"])[0]!.content).toBe("Newer body from another writer");
     } finally {
       db.close();
     }

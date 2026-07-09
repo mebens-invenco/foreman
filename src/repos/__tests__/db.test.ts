@@ -1074,7 +1074,14 @@ describe("persistence repos", () => {
       });
 
       const vector = Float32Array.from([-1.5, 0, 0.25, 1e-8, 3.4e38]);
-      db.learnings.upsertLearningEmbedding({ learningId: "learn-vec", model: "test-model", dims: vector.length, vector });
+      db.learnings.upsertLearningEmbedding({
+        learningId: "learn-vec",
+        model: "test-model",
+        dims: vector.length,
+        vector,
+        embeddedTitle: "Vector",
+        embeddedContent: "body",
+      });
 
       const [stored] = db.learnings.getLearningEmbeddings();
       expect(stored).toEqual({ learningId: "learn-vec", model: "test-model", dims: 5, vector });
@@ -1087,6 +1094,8 @@ describe("persistence repos", () => {
         model: "other-model",
         dims: replacement.length,
         vector: replacement,
+        embeddedTitle: "Vector",
+        embeddedContent: "body",
       });
       const embeddings = db.learnings.getLearningEmbeddings();
       expect(embeddings).toHaveLength(1);
@@ -1112,7 +1121,14 @@ describe("persistence repos", () => {
       ] as const;
       for (const [id, repo, model] of rows) {
         db.learnings.addLearning({ id, title: id, repo, confidence: "emerging", content: "body", tags: [] });
-        db.learnings.upsertLearningEmbedding({ learningId: id, model, dims: 2, vector: Float32Array.from([1, 2]) });
+        db.learnings.upsertLearningEmbedding({
+          learningId: id,
+          model,
+          dims: 2,
+          vector: Float32Array.from([1, 2]),
+          embeddedTitle: id,
+          embeddedContent: "body",
+        });
       }
 
       expect(db.learnings.getLearningEmbeddings({ model: "new-model" }).map((row) => row.learningId)).toEqual([
@@ -1138,7 +1154,14 @@ describe("persistence repos", () => {
     try {
       for (const [id, repo] of [["learn-f", "foreman"], ["learn-s", "shared"]] as const) {
         db.learnings.addLearning({ id, title: id, repo, confidence: "emerging", content: "body", tags: [] });
-        db.learnings.upsertLearningEmbedding({ learningId: id, model: "m", dims: 2, vector: Float32Array.from([1, 2]) });
+        db.learnings.upsertLearningEmbedding({
+          learningId: id,
+          model: "m",
+          dims: 2,
+          vector: Float32Array.from([1, 2]),
+          embeddedTitle: id,
+          embeddedContent: "body",
+        });
       }
 
       expect(db.learnings.getLearningEmbeddings({ repos: ["foreman"] }).map((row) => row.learningId)).toEqual(["learn-f"]);
@@ -1162,9 +1185,30 @@ describe("persistence repos", () => {
       }
 
       const vector = Float32Array.from([1, 2]);
-      db.learnings.upsertLearningEmbedding({ learningId: "learn-other-model", model: "old-model", dims: 2, vector });
-      db.learnings.upsertLearningEmbedding({ learningId: "learn-stale", model: "current-model", dims: 2, vector });
-      db.learnings.upsertLearningEmbedding({ learningId: "learn-current", model: "current-model", dims: 2, vector });
+      db.learnings.upsertLearningEmbedding({
+        learningId: "learn-other-model",
+        model: "old-model",
+        dims: 2,
+        vector,
+        embeddedTitle: "learn-other-model",
+        embeddedContent: "body",
+      });
+      db.learnings.upsertLearningEmbedding({
+        learningId: "learn-stale",
+        model: "current-model",
+        dims: 2,
+        vector,
+        embeddedTitle: "learn-stale",
+        embeddedContent: "body",
+      });
+      db.learnings.upsertLearningEmbedding({
+        learningId: "learn-current",
+        model: "current-model",
+        dims: 2,
+        vector,
+        embeddedTitle: "learn-current",
+        embeddedContent: "body",
+      });
 
       // Bump only the stale learning past its embedding's timestamp. An explicit
       // offset keeps this deterministic: two isoNow() calls can land on the same

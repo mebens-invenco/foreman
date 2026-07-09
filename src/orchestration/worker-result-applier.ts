@@ -68,7 +68,8 @@ type WorkerResultApplierDeps = {
 
 type PendingLearningEmbedding = {
   learningId: string;
-  text: string;
+  title: string;
+  content: string;
 };
 
 type ApplyWorkerResultInput = {
@@ -298,7 +299,7 @@ export class WorkerResultApplier {
     for (const mutation of mutations) {
       if (mutation.type === "add") {
         const learningId = this.deps.foremanRepos.learnings.addLearning(mutation);
-        pending.push({ learningId, text: learningEmbeddingText(mutation) });
+        pending.push({ learningId, title: mutation.title, content: mutation.content });
         logger.info("added learning mutation", { learningTitle: mutation.title, repo: mutation.repo });
       }
       if (mutation.type === "update") {
@@ -308,13 +309,13 @@ export class WorkerResultApplier {
         logger.info("updated learning mutation", { learningId: mutation.id });
 
         if (previous) {
-          const text = learningEmbeddingText({
+          const next = {
             title: mutation.title ?? previous.title,
             content: mutation.content ?? previous.content,
-          });
+          };
           // A tags/confidence/markApplied-only update leaves the vector valid.
-          if (text !== learningEmbeddingText(previous)) {
-            pending.push({ learningId: mutation.id, text });
+          if (learningEmbeddingText(next) !== learningEmbeddingText(previous)) {
+            pending.push({ learningId: mutation.id, ...next });
           }
         }
       }
@@ -329,7 +330,8 @@ export class WorkerResultApplier {
     }
 
     try {
-      const vectors = await this.deps.embedder.embed(pending.map((target) => target.text));
+      const vectors = await this.deps.embedder.embed(pending.map(learningEmbeddingText));
+      const raced: string[] = [];
       for (const [index, target] of pending.entries()) {
         const vector = vectors[index];
         if (!vector) {
@@ -340,14 +342,25 @@ export class WorkerResultApplier {
           );
         }
 
-        this.deps.foremanRepos.learnings.upsertLearningEmbedding({
+        const applied = this.deps.foremanRepos.learnings.upsertLearningEmbedding({
           learningId: target.learningId,
           model: this.deps.embedder.modelId,
           dims: this.deps.embedder.dims,
           vector,
+          embeddedTitle: target.title,
+          embeddedContent: target.content,
         });
+        if (!applied) {
+          raced.push(target.learningId);
+        }
       }
-      logger.info("embedded learning mutations", { learningCount: pending.length });
+
+      logger.info("embedded learning mutations", { learningCount: pending.length - raced.length });
+      if (raced.length > 0) {
+        // The learning changed while we were embedding. Dropping the vector is
+        // the safe outcome: the row stays stale-flagged for backfill.
+        logger.warn("discarded embeddings for learnings edited mid-embed", { learningIds: raced.join(",") });
+      }
     } catch (error) {
       // The learning write is the priority. A failed embed leaves the row for
       // `foreman learnings backfill-embeddings` rather than failing the apply.

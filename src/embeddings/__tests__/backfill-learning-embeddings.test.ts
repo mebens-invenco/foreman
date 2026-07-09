@@ -58,6 +58,8 @@ describe("backfillLearningEmbeddings", () => {
         model: embedder.modelId,
         dims: embedder.dims,
         vector: Float32Array.from([0, 0, 0]),
+        embeddedTitle: "learn-a",
+        embeddedContent: "body",
       });
 
       const result = await backfillLearningEmbeddings({ learnings: db.learnings, embedder });
@@ -83,6 +85,8 @@ describe("backfillLearningEmbeddings", () => {
         model: "retired-model",
         dims: 3,
         vector: Float32Array.from([1, 1, 1]),
+        embeddedTitle: "t",
+        embeddedContent: "c",
       });
 
       const result = await backfillLearningEmbeddings({ learnings: db.learnings, embedder });
@@ -123,6 +127,41 @@ describe("backfillLearningEmbeddings", () => {
       const second = await backfillLearningEmbeddings({ learnings: db.learnings, embedder });
       expect(second).toEqual({ model: embedder.modelId, total: 33, embedded: 0, skipped: 33 });
       expect(embedder.calls).toHaveLength(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("drops its vector when the serve loop edits the learning mid-embed", async () => {
+    const db = await createDb();
+    const embedder = new FakeEmbedder();
+
+    try {
+      db.learnings.addLearning({ id: "learn-a", title: "T", repo: "foreman", confidence: "emerging", content: "A", tags: [] });
+
+      // Backfill has already read text "A" and is embedding it. Meanwhile the
+      // serve loop rewrites the learning to "B" and stores B's vector.
+      embedder.onEmbed = () => {
+        embedder.onEmbed = null;
+        db.learnings.updateLearning({ id: "learn-a", content: "B" });
+        const applied = db.learnings.upsertLearningEmbedding({
+          learningId: "learn-a",
+          model: embedder.modelId,
+          dims: embedder.dims,
+          vector: Float32Array.from([9, 9, 9]),
+          embeddedTitle: "T",
+          embeddedContent: "B",
+        });
+        expect(applied).toBe(true);
+      };
+
+      const result = await backfillLearningEmbeddings({ learnings: db.learnings, embedder });
+
+      // Backfill's vector describes text "A", which no longer exists. Writing it
+      // would stamp learning_embedding.updated_at newer than learning.updated_at
+      // and hide the row from listLearningIdsMissingEmbedding forever.
+      expect(result).toEqual({ model: embedder.modelId, total: 1, embedded: 0, skipped: 1 });
+      expect(Array.from(db.learnings.getLearningEmbeddings()[0]!.vector)).toEqual([9, 9, 9]);
     } finally {
       db.close();
     }
