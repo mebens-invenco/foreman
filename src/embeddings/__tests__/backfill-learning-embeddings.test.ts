@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
-import { FakeEmbedder } from "../../test-support/fake-embedder.js";
+import { FakeEmbedder, fakeEmbeddingVector } from "../../test-support/fake-embedder.js";
 import { backfillLearningEmbeddings } from "../backfill-learning-embeddings.js";
 import { learningEmbeddingText } from "../learning-embedding-text.js";
 
@@ -89,6 +89,40 @@ describe("backfillLearningEmbeddings", () => {
 
       expect(result).toEqual({ model: "new-model", total: 1, embedded: 1, skipped: 0 });
       expect(db.learnings.getLearningEmbeddings()[0]!.model).toBe("new-model");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("carries every learning across the batch boundary", async () => {
+    const db = await createDb();
+    const embedder = new FakeEmbedder();
+    // One past BATCH_SIZE (32), so the slice loop runs twice. Zero-padded ids
+    // keep `listLearningIdsMissingEmbedding`'s `ORDER BY id ASC` predictable.
+    const ids = Array.from({ length: 33 }, (_, index) => `learn-${String(index).padStart(2, "0")}`);
+
+    try {
+      for (const id of ids) {
+        db.learnings.addLearning({ id, title: id, repo: "foreman", confidence: "emerging", content: `body ${id}`, tags: [] });
+      }
+
+      const result = await backfillLearningEmbeddings({ learnings: db.learnings, embedder });
+
+      expect(result).toEqual({ model: embedder.modelId, total: 33, embedded: 33, skipped: 0 });
+      expect(embedder.calls.map((call) => call.length)).toEqual([32, 1]);
+      // Every seeded learning got a row — nothing dropped at the 32/33 seam.
+      expect(db.learnings.getLearningEmbeddings().map((row) => row.learningId)).toEqual(ids);
+
+      // The last id is index 0 of the *second* batch, so a stored vector whose
+      // index component is 32 would mean the batches were flattened wrongly.
+      const last = db.learnings.getLearningEmbeddings().at(-1)!;
+      expect(Array.from(last.vector)).toEqual(
+        Array.from(fakeEmbeddingVector(learningEmbeddingText({ title: "learn-32", content: "body learn-32" }), 0)),
+      );
+
+      const second = await backfillLearningEmbeddings({ learnings: db.learnings, embedder });
+      expect(second).toEqual({ model: embedder.modelId, total: 33, embedded: 0, skipped: 33 });
+      expect(embedder.calls).toHaveLength(2);
     } finally {
       db.close();
     }

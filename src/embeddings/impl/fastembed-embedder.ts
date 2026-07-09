@@ -9,7 +9,8 @@ const MODEL_DIMS = 384;
 
 /**
  * In-process embedder backed by fastembed's ONNX runtime. No network is used
- * after the first init, which downloads the ~30MB model into `cacheDir`.
+ * after the first init, which downloads the ~133MB model into `cacheDir`
+ * (fastembed ships this model as an unquantized fp32 ONNX).
  */
 export class FastembedEmbedder implements Embedder {
   readonly modelId = MODEL_ID;
@@ -60,6 +61,19 @@ export class FastembedEmbedder implements Embedder {
       throw new ForemanError(
         "embedding_count_mismatch",
         `Embedder returned ${vectors.length} vectors for ${texts.length} texts`,
+        500,
+      );
+    }
+
+    // Callers persist `dims` from this port alongside a BLOB built from the
+    // vector itself. If the model's true width ever drifts from MODEL_DIMS,
+    // every row would claim a width it does not have and readers striding by
+    // `dims` would silently decode garbage.
+    const widthMismatch = vectors.find((vector) => vector.length !== this.dims);
+    if (widthMismatch) {
+      throw new ForemanError(
+        "embedding_dims_mismatch",
+        `Embedder ${this.modelId} produced a ${widthMismatch.length}-dim vector but declares ${this.dims} dims`,
         500,
       );
     }
