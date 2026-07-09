@@ -41,38 +41,55 @@ const syncSingleTargetTask = (db: Awaited<ReturnType<typeof createMigratedDb>>, 
   return target!;
 };
 
-// Hand-picked orthogonal vectors, so cosine rank is exactly "which learning does
-// this query point at" and the fusion under test is not confounded by a model.
+// Three orthogonal directions, so a query vector's cosine rank is exactly "which
+// learning does this point at". `selectCosineCandidates` only admits statistical
+// outliers, so a corpus needs padding before the cosine arm can fire at all —
+// with n embeddings the largest attainable z is (n - 1) / sqrt(n), which stays
+// under COSINE_Z_FLOOR until n reaches 6.
 const HYBRID_MODEL = "hybrid-test-model";
 const LOCKFILE_VECTOR = Float32Array.from([0, 1, 0]);
-const NOISE_VECTOR = Float32Array.from([0, 0, 1]);
+const RUNNER_VECTOR = Float32Array.from([0, 0, 1]);
+/** Points at the padding, which is the corpus majority — so nothing is an outlier. */
+const FLAT_VECTOR = Float32Array.from([1, 0, 0]);
 // Shares no token with any seeded learning, so bm25 returns nothing for it.
 const PARAPHRASE_QUERY = "vendored manifest snapshot discipline";
 
-const seedHybridCorpus = (db: Awaited<ReturnType<typeof createMigratedDb>>) => {
-  const corpus = [
-    { id: "learn-runner", title: "Pin the GHA runner", content: "workflows must declare ubuntu-24.04", vector: [1, 0, 0] },
-    { id: "learn-lockfile", title: "Ship the lockfile", content: "reviewers cannot verify resolution without it", vector: [0, 1, 0] },
-    { id: "learn-noise", title: "Unrelated", content: "prisma migrate reset drops every table", vector: [0, 0, 1] },
-  ];
+type HybridDoc = { id: string; content: string; vector: number[] };
 
-  for (const learning of corpus) {
+/** Neutral filler: never bm25-matches a test query, and always points at FLAT. */
+const padding = (count: number, from = 0): HybridDoc[] =>
+  Array.from({ length: count }, (_unused, index) => ({
+    id: `pad-${String(from + index).padStart(2, "0")}`,
+    content: `filler ${from + index} prisma migrate reset drops every table`,
+    vector: [1, 0, 0],
+  }));
+
+const seedHybridDocs = (db: Awaited<ReturnType<typeof createMigratedDb>>, docs: readonly HybridDoc[]) => {
+  for (const doc of docs) {
     db.learnings.addLearning({
-      id: learning.id,
-      title: learning.title,
+      id: doc.id,
+      title: doc.id,
       repo: "shared",
       confidence: "established",
-      content: learning.content,
+      content: doc.content,
       tags: [],
     });
     db.learnings.upsertLearningEmbedding({
-      learningId: learning.id,
+      learningId: doc.id,
       model: HYBRID_MODEL,
       dims: 3,
-      vector: Float32Array.from(learning.vector),
+      vector: Float32Array.from(doc.vector),
     });
   }
 };
+
+/** `learn-runner` answers "ubuntu-24.04" on bm25; `learn-lockfile` only on cosine. */
+const seedHybridCorpus = (db: Awaited<ReturnType<typeof createMigratedDb>>) =>
+  seedHybridDocs(db, [
+    { id: "learn-runner", content: "workflows must declare ubuntu-24.04", vector: [0, 0, 1] },
+    { id: "learn-lockfile", content: "reviewers cannot verify resolution without it", vector: [0, 1, 0] },
+    ...padding(8),
+  ]);
 
 afterEach(async () => {
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
@@ -1169,7 +1186,7 @@ describe("persistence repos", () => {
     }
   });
 
-  test("fuses a cosine hit FTS cannot reach with a bm25 hit cosine ranks low", async () => {
+  test("reaches a paraphrase bm25 cannot, and admits only outliers as cosine candidates", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
@@ -1177,30 +1194,29 @@ describe("persistence repos", () => {
     try {
       seedHybridCorpus(db);
 
-      // Paraphrase: not one token in common with `learn-lockfile`, so bm25 sees
-      // nothing at all. Its query vector points straight at the lockfile vector.
+      // Not one token in common with `learn-lockfile`, so bm25 sees nothing.
       expect(db.learnings.searchLearnings({ queries: [PARAPHRASE_QUERY], repos: ["shared"] })).toEqual([]);
       const paraphrase = db.learnings.searchLearningsHybrid(
         { queries: [PARAPHRASE_QUERY], repos: ["shared"] },
         { model: HYBRID_MODEL, vectors: [LOCKFILE_VECTOR] },
       );
-      expect(paraphrase.map((learning) => learning.id)[0]).toBe("learn-lockfile");
+      // Exactly one candidate: the cosine arm proposes outliers, not a ranking of
+      // the corpus. A total ranking would return all 10 rows here.
+      expect(paraphrase.map((learning) => learning.id)).toEqual(["learn-lockfile"]);
 
-      // Exact token: bm25 alone matches `learn-runner`, while the query vector
-      // points at an unrelated learning. Agreement is not required — a strong
-      // bm25 rank still leads the fusion.
+      // Exact token: bm25 finds `learn-runner`, cosine agrees, and the two arms
+      // together outrank anything a single arm proposes.
       const exactToken = db.learnings.searchLearningsHybrid(
         { queries: ["ubuntu-24.04"], repos: ["shared"] },
-        { model: HYBRID_MODEL, vectors: [NOISE_VECTOR] },
+        { model: HYBRID_MODEL, vectors: [RUNNER_VECTOR] },
       );
-      expect(exactToken.map((learning) => learning.id)[0]).toBe("learn-runner");
-      expect(exactToken.map((learning) => learning.id)).toContain("learn-noise");
+      expect(exactToken.map((learning) => learning.id)).toEqual(["learn-runner"]);
     } finally {
       db.close();
     }
   });
 
-  test("ranks hybrid results by descending fused score and paginates after fusion", async () => {
+  test("returns nothing when neither arm produces a candidate", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
@@ -1208,20 +1224,102 @@ describe("persistence repos", () => {
     try {
       seedHybridCorpus(db);
 
-      const ranked = db.learnings.searchLearningsHybrid(
+      // FLAT points at the padding majority, so no learning stands out. With an
+      // unbounded cosine arm every embedded learning would carry RRF weight and
+      // an empty result would be unreachable — taking `zero_hit` telemetry and
+      // the meaning of `[]` with it.
+      const nothing = db.learnings.searchLearningsHybrid(
         { queries: [PARAPHRASE_QUERY], repos: ["shared"] },
-        { model: HYBRID_MODEL, vectors: [LOCKFILE_VECTOR] },
+        { model: HYBRID_MODEL, vectors: [FLAT_VECTOR] },
       );
-      // Fused score is a relevance score: unlike raw bm25, higher wins.
-      expect(ranked).toHaveLength(3);
-      expect(ranked.map((learning) => learning.score)).toEqual([...ranked.map((learning) => learning.score)].sort((left, right) => right - left));
+      expect(nothing).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
 
-      // `limit`/`offset` cut the fused ranking, not the per-pipeline candidates.
-      const page = db.learnings.searchLearningsHybrid(
-        { queries: [PARAPHRASE_QUERY], repos: ["shared"], limit: 1, offset: 1 },
-        { model: HYBRID_MODEL, vectors: [LOCKFILE_VECTOR] },
+  test("keeps the cosine arm silent on a corpus too sparse to have an outlier", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      // Five embeddings: max attainable z is 4/sqrt(5) = 1.79, under the floor.
+      // A lone embedded learning must not pin itself to rank 1 of every search
+      // just because it is the only row the cosine arm can see.
+      seedHybridDocs(db, [{ id: "learn-lockfile", content: "reviewers cannot verify resolution", vector: [0, 1, 0] }, ...padding(4)]);
+
+      expect(
+        db.learnings.searchLearningsHybrid(
+          { queries: [PARAPHRASE_QUERY], repos: ["shared"] },
+          { model: HYBRID_MODEL, vectors: [LOCKFILE_VECTOR] },
+        ),
+      ).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("merges across queries by best fused score, not by whichever query ran last", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      // `alpha` matches both; `beta` matches only `learn-beta`. `learn-alpha` is
+      // the shorter doc, so bm25 ranks it first for `alpha`.
+      seedHybridDocs(db, [
+        { id: "learn-alpha", content: "alpha", vector: [0, 0, 1] },
+        { id: "learn-beta", content: "alpha beta gamma delta epsilon zeta", vector: [0, 1, 0] },
+        ...padding(8),
+      ]);
+
+      // Query 1 gives `learn-beta` both arms (bm25 rank 1 + cosine rank 1).
+      // Query 2 gives it bm25 rank 2 only, behind `learn-alpha` at rank 1.
+      // Best-score merge keeps query 1's higher score, so `learn-beta` leads.
+      // Last-query-wins would overwrite it with query 2's and flip the order.
+      const merged = db.learnings.searchLearningsHybrid(
+        { queries: ["beta", "alpha"], repos: ["shared"] },
+        { model: HYBRID_MODEL, vectors: [LOCKFILE_VECTOR, FLAT_VECTOR] },
       );
-      expect(page.map((learning) => learning.id)).toEqual([ranked[1]!.id]);
+
+      expect(merged.map((learning) => learning.id)).toEqual(["learn-beta", "learn-alpha"]);
+      expect(merged[0]!.score).toBeGreaterThan(merged[1]!.score);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("paginates the fused ranking by row offset, not by page number", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      // Six bm25 matches of increasing length, so bm25 ranks them page-00 first
+      // and every fused score is distinct.
+      seedHybridDocs(
+        db,
+        Array.from({ length: 6 }, (_unused, index) => ({
+          id: `page-${String(index).padStart(2, "0")}`,
+          content: `paginate${" filler".repeat(index)}`,
+          vector: [1, 0, 0],
+        })),
+      );
+
+      const ranked = db.learnings.searchLearningsHybrid(
+        { queries: ["paginate"], repos: ["shared"] },
+        { model: HYBRID_MODEL, vectors: [FLAT_VECTOR] },
+      );
+      expect(ranked).toHaveLength(6);
+
+      // `limit: 1, offset: 1` cannot tell `slice(offset, …)` from
+      // `slice(offset * limit, …)`; any `limit !== 1` separates them.
+      const page = db.learnings.searchLearningsHybrid(
+        { queries: ["paginate"], repos: ["shared"], limit: 2, offset: 2 },
+        { model: HYBRID_MODEL, vectors: [FLAT_VECTOR] },
+      );
+      expect(page.map((learning) => learning.id)).toEqual(ranked.slice(2, 4).map((learning) => learning.id));
     } finally {
       db.close();
     }
@@ -1270,14 +1368,13 @@ describe("persistence repos", () => {
       // A blank query drops out with its vector, keeping the rest aligned.
       const aligned = db.learnings.searchLearningsHybrid(
         { queries: ["   ", PARAPHRASE_QUERY], repos: ["shared"] },
-        { model: HYBRID_MODEL, vectors: [NOISE_VECTOR, LOCKFILE_VECTOR] },
+        { model: HYBRID_MODEL, vectors: [FLAT_VECTOR, LOCKFILE_VECTOR] },
       );
-      expect(aligned.map((learning) => learning.id)[0]).toBe("learn-lockfile");
+      expect(aligned.map((learning) => learning.id)).toEqual(["learn-lockfile"]);
     } finally {
       db.close();
     }
   });
-
   test("scopes learning embeddings by repo and cascades deletes from the learning row", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);

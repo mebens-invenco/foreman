@@ -76,6 +76,8 @@ export interface LearningRepo {
   ): LearningSearchRecord[];
   getLearningsByIds(ids: string[], options?: LearningReadOptions): LearningRecord[];
   listLearnings(filters?: { search?: string; repo?: string; limit?: number; offset?: number }): LearningRecord[];
+  /** How many learnings the given repo scope holds, embedded or not. */
+  countLearnings(filters?: { repos?: string[] }): number;
   upsertLearningEmbedding(input: LearningEmbeddingRecord): void;
   /** Learnings with no vector, a vector from another model, or a vector older than the learning. */
   listLearningIdsMissingEmbedding(model: string): string[];

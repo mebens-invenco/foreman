@@ -13,27 +13,63 @@ fusion and nothing else:
 Scoring is exact match against the consensus labels — no live judge in the loop,
 unlike the prompt evals.
 
-## Committed numbers (2026-07-09, fixture-pinned, `bge-small-en-v1.5`)
+## Committed numbers (2026-07-09, fixture-pinned)
 
 ```
 pipeline  cases    r@5   r@10    mrr  zeroRecall   (26 labeled of 54 cases;
 fts          26  0.474  0.474  0.546          11    28 are zero-expected
-hybrid       26  0.663  0.737  0.708           3    distractors)
+null         26  0.474  0.474  0.462          11    distractors)
+hybrid       26  0.676  0.696  0.721           3
 ```
 
-Hybrid beats the FTS baseline on every metric: +0.189 recall@5, +0.263 recall@10,
-+0.162 MRR, and 8 of the 11 zero-recall cases now retrieve something relevant. No
-labeled case regressed on recall or MRR.
+- **fts** — the historical baseline (committed 2026-07-08), and the control. It
+  must keep reproducing exactly, or the hybrid delta below is measuring fixture
+  drift rather than the fusion.
+- **null** — the *same* hybrid pipeline driven by `FakeEmbedder`, whose vectors
+  are `[text.length, index, checksum(text)]` and carry no semantics at all. This
+  is the **padding floor**: any recall it buys over `fts` was bought by filling
+  the result window with arbitrary rows.
+- **hybrid** — the real `bge-small-en-v1.5` model.
 
-`recallAt10 > recallAt5` for hybrid because cosine ranks the whole in-scope
-corpus, landing relevant learnings at ranks 6–10 rather than nowhere. Under FTS
-the two were identical: exact-token matching hits immediately or never.
+The null row buys **zero** recall over `fts`, so the whole of hybrid's
+**+0.202 recall@5 / +0.222 recall@10 / +0.175 MRR** and its 11 → 3 zero-recall
+drop is attributable to the model rather than to window padding. No labeled case
+regressed on recall or MRR.
 
-The **fts** row is the historical baseline (committed 2026-07-08) and stays as
-the control — it must keep reproducing exactly, or the hybrid delta is measuring
-fixture drift rather than the fusion. Any further retrieval change (query
-expansion, re-ranking, sqlite-vec) must beat these on the SAME fixtures. Do not
-regenerate fixtures to make a number move.
+That is a property of the bounded cosine arm, and it is worth stating plainly
+because an earlier revision of this pipeline did not have it. When the cosine arm
+ranked the *entire* in-scope corpus, `null` scored `r@5 0.513 / r@10 0.561 /
+zeroRecall 8` — a semantics-free embedder converting 3 of 11 zero-recall cases
+purely by chance, with hybrid reading a flattering `0.663 / 0.737`. `recall@k`
+cannot distinguish a lucky window from a good one, so the null row exists to.
+
+`null` trails `fts` on MRR only because RRF merges multiple queries by best rank
+while `searchLearnings` merges by best bm25 score; the retrieved sets are
+identical, as `recallAt5` shows.
+
+Any further retrieval change (query expansion, re-ranking, sqlite-vec) must beat
+these on the SAME fixtures, and must keep `null` at the `fts` recall floor. Do
+not regenerate fixtures to make a number move.
+
+### Why the cosine arm is bounded, and not floored on similarity
+
+`selectCosineCandidates` admits a learning only if its similarity is ≥ 2.0
+standard deviations above the mean similarity of that query against the in-scope
+corpus, capped at the 10 best. A **relative** bar, not an absolute one, because
+bge-small's similarity scale is far too compressed for a fixed floor. Measured
+over this corpus:
+
+```
+relevant pairs    p05 0.518   p50 0.590   p95 0.744
+irrelevant pairs  p50 0.549   p95 0.621   p99 0.657
+an unrelated query's nearest neighbour scores 0.637
+```
+
+Any absolute floor that rejects that nearest neighbour discards most genuinely
+relevant pairs. The z-bar also falls silent on a corpus too sparse to *have* an
+outlier: with `n` embeddings the largest attainable z is `(n - 1) / sqrt(n)`,
+which stays under 2.0 until `n` reaches 6 — so a handful of freshly-embedded rows
+cannot outrank the unembedded majority they are drowning in.
 
 ## Fixtures — provenance
 
@@ -79,12 +115,16 @@ brittleness the fusion exists to cover.
 Guard tests:
 
 - `__tests__/retrieval-bench.test.ts` — runs on every `pnpm test`, offline with a
-  fake embedder. Pins the **fts** numbers exactly and asserts the hybrid metrics
-  are structurally complete. The fake embedder's vectors are meaningless, so its
-  hybrid *numbers* are not pinned here.
-- `__tests__/retrieval-bench-hybrid.test.ts` — pins the **hybrid** numbers with
-  the real model. Skipped by default so `pnpm test` never downloads a model; run
-  it whenever ranking, fusion, or the embedded text changes:
+  fake embedder. Pins the **fts** and **null** rows exactly. `FakeEmbedder` is a
+  pure function of text and index, so the bench reproduces under it — which makes
+  this a real tripwire for the fusion, the cross-query merge, and the pagination,
+  none of which care what the vectors mean. It is what catches a merge or
+  bounding regression that the unit tests alone would miss.
+- `__tests__/retrieval-bench-hybrid.test.ts` — pins the **hybrid** row with the
+  real model. This is the *accuracy* guard: whether the ranking is any good is
+  the one thing a fake embedder cannot tell you. Skipped by default so `pnpm test`
+  never downloads a model; run it whenever ranking, fusion, or the embedded text
+  changes:
 
   ```bash
   FOREMAN_BENCH_REAL_EMBEDDER=1 pnpm test retrieval-bench-hybrid
