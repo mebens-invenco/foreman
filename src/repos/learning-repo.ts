@@ -33,6 +33,16 @@ export type LearningEmbeddingRecord = {
   vector: Float32Array;
 };
 
+export type LearningEmbeddingUpsert = LearningEmbeddingRecord & {
+  /**
+   * The title and content the vector was computed from. Embedding is async, so
+   * the learning can change while a vector is in flight; the write is applied
+   * only while the stored text still matches these.
+   */
+  embeddedTitle: string;
+  embeddedContent: string;
+};
+
 export interface LearningRepo {
   addLearning(input: {
     id?: string;
@@ -78,7 +88,13 @@ export interface LearningRepo {
   listLearnings(filters?: { search?: string; repo?: string; limit?: number; offset?: number }): LearningRecord[];
   /** How many learnings the given repo scope holds, embedded or not. */
   countLearnings(filters?: { repos?: string[] }): number;
-  upsertLearningEmbedding(input: LearningEmbeddingRecord): void;
+  /**
+   * Writes the vector only while the learning's embedded text still matches
+   * `embeddedTitle`/`embeddedContent`. Returns false when it no longer does —
+   * a slower writer must not overwrite a newer vector and stamp it current,
+   * which would hide the row from `listLearningIdsMissingEmbedding` forever.
+   */
+  upsertLearningEmbedding(input: LearningEmbeddingUpsert): boolean;
   /** Learnings with no vector, a vector from another model, or a vector older than the learning. */
   listLearningIdsMissingEmbedding(model: string): string[];
   /**

@@ -5,6 +5,7 @@ import { selectCosineCandidates } from "../../retrieval/cosine-candidates.js";
 import { fuseByReciprocalRank } from "../../retrieval/reciprocal-rank-fusion.js";
 import type {
   LearningEmbeddingRecord,
+  LearningEmbeddingUpsert,
   LearningReadOptions,
   LearningRecord,
   LearningRepo,
@@ -419,18 +420,36 @@ export class SqliteLearningRepo implements LearningRepo {
     return Number(row.count);
   }
 
-  upsertLearningEmbedding(input: LearningEmbeddingRecord): void {
-    this.sqlite
+  upsertLearningEmbedding(input: LearningEmbeddingUpsert): boolean {
+    // Selecting the row rather than VALUES makes the guard and the write one
+    // statement: a learning edited between an embed and its write yields no
+    // source row, so the stale vector is dropped instead of being stamped
+    // newer than the text it no longer describes.
+    const result = this.sqlite
       .prepare(
         `INSERT INTO learning_embedding(learning_id, model, dims, vector, updated_at)
-              VALUES (?, ?, ?, ?, ?)
+              SELECT learning.id, ?, ?, ?, ?
+                FROM learning
+               WHERE learning.id = ?
+                 AND learning.title = ?
+                 AND learning.content = ?
          ON CONFLICT(learning_id) DO UPDATE
                  SET model = excluded.model,
                      dims = excluded.dims,
                      vector = excluded.vector,
                      updated_at = excluded.updated_at`,
       )
-      .run(input.learningId, input.model, input.dims, toVectorBlob(input.vector), isoNow());
+      .run(
+        input.model,
+        input.dims,
+        toVectorBlob(input.vector),
+        isoNow(),
+        input.learningId,
+        input.embeddedTitle,
+        input.embeddedContent,
+      );
+
+    return result.changes > 0;
   }
 
   listLearningIdsMissingEmbedding(model: string): string[] {

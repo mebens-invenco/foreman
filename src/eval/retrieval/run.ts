@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 
 import { backfillLearningEmbeddings } from "../../embeddings/backfill-learning-embeddings.js";
 import type { Embedder } from "../../embeddings/embedder.js";
+import { ForemanError } from "../../lib/errors.js";
 import { SqliteLearningRepo } from "../../repos/impl/sqlite-learning-repo.js";
 import { aggregateMetrics, scoreCase, type BenchMetrics, type CaseScore } from "./score.js";
 
@@ -140,7 +141,18 @@ export const runRetrievalBench = async ({
   const db = seedDatabase(projectRoot, corpus);
   try {
     const repo = new SqliteLearningRepo(db);
-    await backfillLearningEmbeddings({ learnings: repo, embedder });
+    // `upsertLearningEmbedding` drops a write whose learning changed under it, so
+    // a backfill can come back partial. The bench must score hybrid at full
+    // coverage or the delta against `fts` is measuring a half-embedded corpus —
+    // fail loudly rather than let that reach the committed numbers as a shortfall.
+    const backfill = await backfillLearningEmbeddings({ learnings: repo, embedder });
+    if (backfill.embedded !== backfill.total) {
+      throw new ForemanError(
+        "bench_corpus_not_embedded",
+        `Bench embedded ${backfill.embedded}/${backfill.total} learnings with ${backfill.model}`,
+        500,
+      );
+    }
 
     const labeled = cases.filter((benchCase) => benchCase.expected.length > 0);
 

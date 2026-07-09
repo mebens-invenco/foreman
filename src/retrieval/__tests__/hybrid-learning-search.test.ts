@@ -29,12 +29,17 @@ const seedLearning = (
     tags: [],
   });
   if (input.vector) {
-    db.learnings.upsertLearningEmbedding({
+    // Guarded on the text the vector was computed from: pass what `addLearning`
+    // just stored, or the seed silently no-ops and the corpus reads as unembedded.
+    const applied = db.learnings.upsertLearningEmbedding({
       learningId: input.id,
       model: input.model ?? "fake-embedder-v1",
       dims: input.vector.length,
       vector: Float32Array.from(input.vector),
+      embeddedTitle: input.id,
+      embeddedContent: input.content,
     });
+    expect(applied).toBe(true);
   }
 };
 
@@ -185,12 +190,18 @@ describe("searchLearningsWithHybridFallback", () => {
       // A vector of the wrong width under the right model name: a truncated blob
       // or schema drift. `searchLearnings` never reads `learning_embedding`, so a
       // silent fallback here would go unnoticed indefinitely.
-      db.learnings.upsertLearningEmbedding({
-        learningId: "pad-0",
+      const corrupted = db.learnings.getLearningsByIds(["pad-0"])[0]!;
+      const applied = db.learnings.upsertLearningEmbedding({
+        learningId: corrupted.id,
         model: "fake-embedder-v1",
         dims: 2,
         vector: Float32Array.from([1, 0]),
+        embeddedTitle: corrupted.title,
+        embeddedContent: corrupted.content,
       });
+      // Without this the guarded write could no-op and the test would assert
+      // nothing about the corrupt vector it means to plant.
+      expect(applied).toBe(true);
 
       await expect(
         searchLearningsWithHybridFallback(
