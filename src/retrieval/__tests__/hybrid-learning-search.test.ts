@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { afterEach, describe, expect, test } from "vitest";
 
 import { ForemanError } from "../../lib/errors.js";
+import { addSeconds, isoNow } from "../../lib/time.js";
 import { FakeEmbedder } from "../../test-support/fake-embedder.js";
 import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
 import { searchLearningsWithHybridFallback } from "../hybrid-learning-search.js";
@@ -109,6 +110,74 @@ describe("searchLearningsWithHybridFallback", () => {
       expect(warnings).toHaveLength(1);
       expect(warnings[0]).toMatch(/falling back to FTS/);
       expect(warnings[0]).toMatch(/backfill-embeddings/);
+    });
+  });
+
+  test("answers a query that trims to nothing from FTS, without embedding anything", async () => {
+    await withDb(async (db) => {
+      seedCorpus(db);
+      const embedder = new FakeEmbedder();
+      const warnings: string[] = [];
+
+      const result = await searchLearningsWithHybridFallback(
+        { learnings: db.learnings, embedder, warn: (message) => warnings.push(message) },
+        { queries: ["   "], repos: ["shared"] },
+      );
+
+      // Labelling a recency listing `hybrid` would put `0.0` scores under a field
+      // that promises fused RRF scores, on stdout and in `learning_search_event`.
+      expect(result.pipeline).toBe("fts");
+      expect(result.learnings.every((learning) => learning.score === 0)).toBe(true);
+      // In production that call is a 133MB model download, for a query that could
+      // never have reached the cosine arm.
+      expect(embedder.embeddedTexts).toEqual([]);
+      // Nothing degraded; there was simply nothing to fuse.
+      expect(warnings).toEqual([]);
+    });
+  });
+
+  test("degrades when the scope's vectors are stale, not merely present", async () => {
+    await withDb(async (db) => {
+      seedCorpus(db);
+      const warnings: string[] = [];
+
+      // Every learning keeps a vector row — the guarded upsert leaves it in place
+      // — but none of them describes the text any more. A presence count reports
+      // 100% coverage over a corpus the cosine arm has gone completely blind to.
+      // The explicit offset keeps this deterministic: two isoNow() calls can land
+      // on the same millisecond, and an equal timestamp means "current".
+      db.database.sqlite
+        .prepare("UPDATE learning SET content = content || ' rewritten', updated_at = ?")
+        .run(addSeconds(isoNow(), 60));
+      expect(db.learnings.getLearningEmbeddings({ model: "fake-embedder-v1" })).toHaveLength(9);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "fake-embedder-v1" })).toBe(0);
+
+      const result = await searchLearningsWithHybridFallback(
+        { learnings: db.learnings, embedder: new FakeEmbedder(), warn: (message) => warnings.push(message) },
+        { queries: ["rewritten learn-target"], repos: ["shared"] },
+      );
+
+      expect(result.pipeline).toBe("fts");
+      expect(warnings[0]).toMatch(/only 0\/9 in-scope learnings carry a fake-embedder-v1 vector/);
+    });
+  });
+
+  test("keeps answering via hybrid after a search has incremented read counts", async () => {
+    await withDb(async (db) => {
+      seedCorpus(db);
+      const warnings: string[] = [];
+      const search = () =>
+        searchLearningsWithHybridFallback(
+          { learnings: db.learnings, embedder: new FakeEmbedder(), warn: (message) => warnings.push(message) },
+          { queries: ["planning prompt"], repos: ["shared"] },
+        );
+
+      // The first search increments `read_count` on its hits. Before migration
+      // 0029 that bumped `learning.updated_at`, so the freshness gate saw its own
+      // reads as content edits and fell back to FTS for good.
+      expect((await search()).pipeline).toBe("hybrid");
+      expect((await search()).pipeline).toBe("hybrid");
+      expect(warnings).toEqual([]);
     });
   });
 

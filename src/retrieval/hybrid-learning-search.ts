@@ -56,6 +56,14 @@ export const searchLearningsWithHybridFallback = async (
     return { pipeline: "fts", learnings: learnings.searchLearnings(filters, options) };
   };
 
+  // A query that trims to nothing reaches neither arm, and `searchLearningsHybrid`
+  // refuses it. Answer from FTS — whose no-query branch is a recency listing —
+  // and label it honestly, rather than embedding a blank string (in production,
+  // a 133MB model download) to fuse nothing.
+  if (!filters.queries.some((query) => query.trim().length > 0)) {
+    return { pipeline: "fts", learnings: learnings.searchLearnings(filters, options) };
+  }
+
   // Checked before embedding, so the fallback never pays for a model download
   // that could not have changed the answer.
   const learningCount = learnings.countLearnings(scope);
@@ -63,7 +71,11 @@ export const searchLearningsWithHybridFallback = async (
     return { pipeline: "fts", learnings: [] };
   }
 
-  const embeddingCount = learnings.countLearningEmbeddings({ ...scope, model: embedder.modelId });
+  // `countCurrent…`, not a bare presence count: a vector whose learning has been
+  // edited since is one `backfill-embeddings` still owes, and the cosine arm
+  // cannot see it. Counting it would hold the gate open over a corpus hybrid has
+  // largely gone blind to.
+  const embeddingCount = learnings.countCurrentLearningEmbeddings({ ...scope, model: embedder.modelId });
   const coverage = embeddingCount / learningCount;
   if (coverage < MIN_EMBEDDING_COVERAGE) {
     return fallBackToFts(
