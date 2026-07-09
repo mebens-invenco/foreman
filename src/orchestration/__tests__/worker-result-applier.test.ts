@@ -1477,6 +1477,8 @@ describe("WorkerResultApplier learning embeddings", () => {
       model: overrides.model ?? embedder.modelId,
       dims: embedder.dims,
       vector: neighbourVector,
+      embeddedTitle: "Neighbour",
+      embeddedContent: "Neighbour body",
     });
     return id;
   };
