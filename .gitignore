@@ -4,3 +4,5 @@ coverage/
 workspaces/
 *.log
 .pr-screenshots/
+# fastembed's downloaded ONNX model cache (see src/embeddings/create-embedder.ts).
+/.cache/

@@ -1058,6 +1058,98 @@ describe("persistence repos", () => {
     }
   });
 
+  test("round-trips learning embedding vectors through the BLOB column", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.learnings.addLearning({
+        id: "learn-vec",
+        title: "Vector",
+        repo: "foreman",
+        confidence: "emerging",
+        content: "body",
+        tags: [],
+      });
+
+      const vector = Float32Array.from([-1.5, 0, 0.25, 1e-8, 3.4e38]);
+      db.learnings.upsertLearningEmbedding({ learningId: "learn-vec", model: "test-model", dims: vector.length, vector });
+
+      const [stored] = db.learnings.getLearningEmbeddings();
+      expect(stored).toEqual({ learningId: "learn-vec", model: "test-model", dims: 5, vector });
+      expect(Array.from(stored!.vector)).toEqual(Array.from(vector));
+
+      // Upsert replaces rather than duplicating the primary-key row.
+      const replacement = Float32Array.from([9, 8, 7]);
+      db.learnings.upsertLearningEmbedding({
+        learningId: "learn-vec",
+        model: "other-model",
+        dims: replacement.length,
+        vector: replacement,
+      });
+      const embeddings = db.learnings.getLearningEmbeddings();
+      expect(embeddings).toHaveLength(1);
+      expect(embeddings[0]!.model).toBe("other-model");
+      expect(Array.from(embeddings[0]!.vector)).toEqual([9, 8, 7]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("scopes learning embeddings by repo and cascades deletes from the learning row", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      for (const [id, repo] of [["learn-f", "foreman"], ["learn-s", "shared"]] as const) {
+        db.learnings.addLearning({ id, title: id, repo, confidence: "emerging", content: "body", tags: [] });
+        db.learnings.upsertLearningEmbedding({ learningId: id, model: "m", dims: 2, vector: Float32Array.from([1, 2]) });
+      }
+
+      expect(db.learnings.getLearningEmbeddings({ repos: ["foreman"] }).map((row) => row.learningId)).toEqual(["learn-f"]);
+      expect(db.learnings.getLearningEmbeddings().map((row) => row.learningId)).toEqual(["learn-f", "learn-s"]);
+
+      db.database.sqlite.prepare("DELETE FROM learning WHERE id = ?").run("learn-f");
+      expect(db.learnings.getLearningEmbeddings().map((row) => row.learningId)).toEqual(["learn-s"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("lists learning ids whose embedding is absent, from another model, or stale", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      for (const id of ["learn-absent", "learn-other-model", "learn-stale", "learn-current"]) {
+        db.learnings.addLearning({ id, title: id, repo: "foreman", confidence: "emerging", content: "body", tags: [] });
+      }
+
+      const vector = Float32Array.from([1, 2]);
+      db.learnings.upsertLearningEmbedding({ learningId: "learn-other-model", model: "old-model", dims: 2, vector });
+      db.learnings.upsertLearningEmbedding({ learningId: "learn-stale", model: "current-model", dims: 2, vector });
+      db.learnings.upsertLearningEmbedding({ learningId: "learn-current", model: "current-model", dims: 2, vector });
+
+      // Bump only the stale learning past its embedding's timestamp. An explicit
+      // offset keeps this deterministic: two isoNow() calls can land on the same
+      // millisecond, and an equal timestamp means "current", not "stale".
+      db.database.sqlite
+        .prepare("UPDATE learning SET updated_at = ? WHERE id = ?")
+        .run(addSeconds(isoNow(), 60), "learn-stale");
+
+      expect(db.learnings.listLearningIdsMissingEmbedding("current-model")).toEqual([
+        "learn-absent",
+        "learn-other-model",
+        "learn-stale",
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("retrieves learnings by id in requested order", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);

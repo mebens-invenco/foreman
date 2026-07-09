@@ -1,7 +1,13 @@
 import { ForemanError } from "../../lib/errors.js";
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
-import type { LearningReadOptions, LearningRecord, LearningRepo, LearningSearchRecord } from "../learning-repo.js";
+import type {
+  LearningEmbeddingRecord,
+  LearningReadOptions,
+  LearningRecord,
+  LearningRepo,
+  LearningSearchRecord,
+} from "../learning-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 const LEARNING_COLUMNS = "id, title, repo, tags, confidence, content, applied_count, read_count, created_at, updated_at";
@@ -33,6 +39,25 @@ const mapLearningSearchRecord = (row: unknown): LearningSearchRecord => {
     createdAt: String(mapped.created_at),
     updatedAt: String(mapped.updated_at),
     score: Number(mapped.score),
+  };
+};
+
+const toVectorBlob = (vector: Float32Array): Buffer =>
+  Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength);
+
+// `slice` copies into a fresh, 4-byte-aligned ArrayBuffer. Wrapping the pooled
+// buffer in place would throw whenever better-sqlite3 hands back a Buffer at an
+// unaligned offset.
+const fromVectorBlob = (blob: Buffer): Float32Array =>
+  new Float32Array(blob.buffer.slice(blob.byteOffset, blob.byteOffset + blob.byteLength));
+
+const mapLearningEmbeddingRecord = (row: unknown): LearningEmbeddingRecord => {
+  const mapped = row as SqliteRow;
+  return {
+    learningId: String(mapped.learning_id),
+    model: String(mapped.model),
+    dims: Number(mapped.dims),
+    vector: fromVectorBlob(mapped.vector as Buffer),
   };
 };
 
@@ -263,5 +288,50 @@ export class SqliteLearningRepo implements LearningRepo {
       )
       .all(...params, ...paginationParams)
       .map(mapLearningRecord);
+  }
+
+  upsertLearningEmbedding(input: LearningEmbeddingRecord): void {
+    this.sqlite
+      .prepare(
+        `INSERT INTO learning_embedding(learning_id, model, dims, vector, updated_at)
+              VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(learning_id) DO UPDATE
+                 SET model = excluded.model,
+                     dims = excluded.dims,
+                     vector = excluded.vector,
+                     updated_at = excluded.updated_at`,
+      )
+      .run(input.learningId, input.model, input.dims, toVectorBlob(input.vector), isoNow());
+  }
+
+  listLearningIdsMissingEmbedding(model: string): string[] {
+    return this.sqlite
+      .prepare(
+        `SELECT learning.id AS id
+           FROM learning
+           LEFT JOIN learning_embedding ON learning_embedding.learning_id = learning.id
+          WHERE learning_embedding.learning_id IS NULL
+             OR learning_embedding.model != ?
+             OR learning_embedding.updated_at < learning.updated_at
+          ORDER BY learning.id ASC`,
+      )
+      .all(model)
+      .map((row) => String((row as SqliteRow).id));
+  }
+
+  getLearningEmbeddings(filters: { repos?: string[] } = {}): LearningEmbeddingRecord[] {
+    const repos = normalizeFilterValues(filters.repos);
+    const repoWhere = repos.length > 0 ? `WHERE learning.repo IN (${repos.map(() => "?").join(", ")})` : "";
+
+    return this.sqlite
+      .prepare(
+        `SELECT learning_embedding.learning_id, learning_embedding.model, learning_embedding.dims, learning_embedding.vector
+           FROM learning_embedding
+           JOIN learning ON learning.id = learning_embedding.learning_id
+           ${repoWhere}
+          ORDER BY learning_embedding.learning_id ASC`,
+      )
+      .all(...repos)
+      .map(mapLearningEmbeddingRecord);
   }
 }

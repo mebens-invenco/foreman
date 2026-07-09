@@ -5,6 +5,8 @@ import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { z } from "zod";
 
+import { backfillLearningEmbeddings } from "./embeddings/backfill-learning-embeddings.js";
+import { createEmbedder } from "./embeddings/create-embedder.js";
 import { listRunnerRates } from "./execution/cost/rates.js";
 import {
   isUsageGroupBy,
@@ -94,12 +96,15 @@ const writeJson = (value: unknown): void => {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 };
 
-const withWorkspaceRepos = async <T>(workspace: string, handler: (repos: ReturnType<typeof createRepos>) => Promise<T>): Promise<T> => {
+const withWorkspaceRepos = async <T>(
+  workspace: string,
+  handler: (repos: ReturnType<typeof createRepos>, paths: Awaited<ReturnType<typeof loadWorkspace>>["paths"]) => Promise<T>,
+): Promise<T> => {
   const { paths } = await loadWorkspace(workspace);
   const repos = createRepos(await openSqliteDatabase(paths.dbPath));
   try {
     await repos.migrationRunner.runMigrations(paths.projectRoot);
-    return await handler(repos);
+    return await handler(repos, paths);
   } finally {
     repos.close();
   }
@@ -267,6 +272,7 @@ program
       taskSystem,
       reviewService,
       repos: repoRefs,
+      embedder: createEmbedder(paths.projectRoot),
       env: resolvedEnv,
       logger: logger.child({ component: "scheduler" }),
     });
@@ -411,6 +417,21 @@ learnings
         learnings,
         missingIds: options.id.filter((id) => !foundIds.has(id)),
       });
+    });
+  });
+
+learnings
+  .command("backfill-embeddings")
+  .description("Embed learnings whose vector is missing or stale for the current embedding model")
+  .argument("<workspace>")
+  .action(async (workspace: string) => {
+    await withWorkspaceRepos(workspace, async (repos, paths) => {
+      const result = await backfillLearningEmbeddings({
+        learnings: repos.learnings,
+        embedder: createEmbedder(paths.projectRoot),
+      });
+
+      writeJson({ workspace, ...result });
     });
   });
 

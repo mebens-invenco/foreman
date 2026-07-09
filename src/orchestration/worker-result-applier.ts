@@ -1,4 +1,15 @@
-import type { RepoRef, ReviewContext, ReviewMutation, Task, TaskPullRequest, TaskTarget, WorkerResult } from "../domain/index.js";
+import type {
+  LearningMutation,
+  RepoRef,
+  ReviewContext,
+  ReviewMutation,
+  Task,
+  TaskPullRequest,
+  TaskTarget,
+  WorkerResult,
+} from "../domain/index.js";
+import type { Embedder } from "../embeddings/embedder.js";
+import { learningEmbeddingText } from "../embeddings/learning-embedding-text.js";
 import { ForemanError } from "../lib/errors.js";
 import { addSeconds } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
@@ -50,8 +61,14 @@ type WorkerResultApplierDeps = {
   taskSystem: TaskSystem;
   reviewService: ReviewService;
   repos: RepoRef[];
+  embedder: Embedder;
   logger: LoggerService;
   scheduleScout: () => void;
+};
+
+type PendingLearningEmbedding = {
+  learningId: string;
+  text: string;
 };
 
 type ApplyWorkerResultInput = {
@@ -221,16 +238,7 @@ export class WorkerResultApplier {
       logger.info("updated consolidation labels", { addCount: labels.add.length, removeCount: labels.remove.length });
     }
 
-    for (const mutation of workerResult.learningMutations) {
-      if (mutation.type === "add") {
-        this.deps.foremanRepos.learnings.addLearning(mutation);
-        logger.info("added learning mutation", { learningTitle: mutation.title, repo: mutation.repo });
-      }
-      if (mutation.type === "update") {
-        this.deps.foremanRepos.learnings.updateLearning(mutation);
-        logger.info("updated learning mutation", { learningId: mutation.id });
-      }
-    }
+    await this.applyLearningMutations(workerResult.learningMutations, logger);
 
     if (
       input.job.action === "review" &&
@@ -282,6 +290,72 @@ export class WorkerResultApplier {
   private async resolveCurrentPullRequestUrl(task: Task, repo: RepoRef, target: TaskTarget): Promise<string | null> {
     const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(task, repo, target);
     return resolvedPullRequest?.pullRequestUrl ?? null;
+  }
+
+  private async applyLearningMutations(mutations: LearningMutation[], logger: LoggerService): Promise<void> {
+    const pending: PendingLearningEmbedding[] = [];
+
+    for (const mutation of mutations) {
+      if (mutation.type === "add") {
+        const learningId = this.deps.foremanRepos.learnings.addLearning(mutation);
+        pending.push({ learningId, text: learningEmbeddingText(mutation) });
+        logger.info("added learning mutation", { learningTitle: mutation.title, repo: mutation.repo });
+      }
+      if (mutation.type === "update") {
+        // Read before the write: deciding whether to re-embed needs the pre-update text.
+        const previous = this.deps.foremanRepos.learnings.getLearningsByIds([mutation.id])[0];
+        this.deps.foremanRepos.learnings.updateLearning(mutation);
+        logger.info("updated learning mutation", { learningId: mutation.id });
+
+        if (previous) {
+          const text = learningEmbeddingText({
+            title: mutation.title ?? previous.title,
+            content: mutation.content ?? previous.content,
+          });
+          // A tags/confidence/markApplied-only update leaves the vector valid.
+          if (text !== learningEmbeddingText(previous)) {
+            pending.push({ learningId: mutation.id, text });
+          }
+        }
+      }
+    }
+
+    await this.embedLearnings(pending, logger);
+  }
+
+  private async embedLearnings(pending: PendingLearningEmbedding[], logger: LoggerService): Promise<void> {
+    if (pending.length === 0) {
+      return;
+    }
+
+    try {
+      const vectors = await this.deps.embedder.embed(pending.map((target) => target.text));
+      for (const [index, target] of pending.entries()) {
+        const vector = vectors[index];
+        if (!vector) {
+          throw new ForemanError(
+            "embedding_count_mismatch",
+            `Embedder returned ${vectors.length} vectors for ${pending.length} learnings`,
+            500,
+          );
+        }
+
+        this.deps.foremanRepos.learnings.upsertLearningEmbedding({
+          learningId: target.learningId,
+          model: this.deps.embedder.modelId,
+          dims: this.deps.embedder.dims,
+          vector,
+        });
+      }
+      logger.info("embedded learning mutations", { learningCount: pending.length });
+    } catch (error) {
+      // The learning write is the priority. A failed embed leaves the row for
+      // `foreman learnings backfill-embeddings` rather than failing the apply.
+      logger.warn("failed to embed learnings; leaving rows for backfill", {
+        learningIds: pending.map((target) => target.learningId).join(","),
+        error: errorMessage(error),
+      });
+    }
   }
 
   private async applyReviewMutations(mutations: ReviewMutation[], pullRequestUrl: string | null, logger: LoggerService): Promise<void> {
@@ -430,16 +504,7 @@ export class WorkerResultApplier {
       logger.info("transitioned task to done after all relevant deployments succeeded");
     }
 
-    for (const mutation of workerResult.learningMutations) {
-      if (mutation.type === "add") {
-        this.deps.foremanRepos.learnings.addLearning(mutation);
-        logger.info("added learning mutation", { learningTitle: mutation.title, repo: mutation.repo });
-      }
-      if (mutation.type === "update") {
-        this.deps.foremanRepos.learnings.updateLearning(mutation);
-        logger.info("updated learning mutation", { learningId: mutation.id });
-      }
-    }
+    await this.applyLearningMutations(workerResult.learningMutations, logger);
 
     this.deps.scheduleScout();
     return pullRequestUrl;

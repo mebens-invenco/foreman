@@ -4,10 +4,11 @@ import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, test } from "vitest";
 
-import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewContext, type Task, type TaskComment } from "../../domain/index.js";
+import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewContext, type Task, type TaskComment, type WorkerResult } from "../../domain/index.js";
 import { LoggerService } from "../../logger.js";
 import type { ReviewService } from "../../review/index.js";
 import type { TaskSystem } from "../../tasking/index.js";
+import { FakeEmbedder } from "../../test-support/fake-embedder.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
 import { WorkerResultApplier } from "../worker-result-applier.js";
 import { runScoutSelection } from "../scout-selection.js";
@@ -222,6 +223,7 @@ describe("WorkerResultApplier review result mutations", () => {
         taskSystem,
         reviewService,
         repos: [repo],
+        embedder: new FakeEmbedder(),
         logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
         scheduleScout: () => undefined,
       });
@@ -320,6 +322,7 @@ describe("WorkerResultApplier blocked ordinary work", () => {
         taskSystem,
         reviewService: new FakeReviewService(pullRequest),
         repos: [repo],
+        embedder: new FakeEmbedder(),
         logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
         scheduleScout: () => undefined,
       });
@@ -413,6 +416,7 @@ describe("WorkerResultApplier blocked ordinary work", () => {
         taskSystem,
         reviewService: new FakeReviewService(pullRequest),
         repos: [repo],
+        embedder: new FakeEmbedder(),
         logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
         scheduleScout: () => undefined,
       });
@@ -525,6 +529,7 @@ describe("WorkerResultApplier deployment tracking", () => {
         taskSystem,
         reviewService: new FakeReviewService(pullRequest),
         repos: [repo],
+        embedder: new FakeEmbedder(),
         logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
         scheduleScout: () => undefined,
       });
@@ -620,6 +625,7 @@ describe("WorkerResultApplier deployment tracking", () => {
         taskSystem,
         reviewService: new FakeReviewService(pullRequest),
         repos: [repo],
+        embedder: new FakeEmbedder(),
         logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
         scheduleScout: () => undefined,
       });
@@ -719,6 +725,7 @@ describe("WorkerResultApplier deployment tracking", () => {
         taskSystem,
         reviewService,
         repos: [repo],
+        embedder: new FakeEmbedder(),
         logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
         scheduleScout: () => undefined,
       });
@@ -853,6 +860,7 @@ describe("WorkerResultApplier deployment tracking", () => {
         taskSystem: new FakeTaskSystem([deployableTask]),
         reviewService: new FakeReviewService(pullRequest),
         repos: [repo],
+        embedder: new FakeEmbedder(),
         logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
         scheduleScout: () => undefined,
       });
@@ -940,6 +948,7 @@ describe("WorkerResultApplier deployment tracking", () => {
         taskSystem: new FakeTaskSystem([deployableTask]),
         reviewService: new FakeReviewService(pullRequest),
         repos: [repo],
+        embedder: new FakeEmbedder(),
         logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
         scheduleScout: () => undefined,
       });
@@ -1060,6 +1069,7 @@ describe("WorkerResultApplier deployment tracking", () => {
         taskSystem,
         reviewService: new FakeReviewService(pullRequest),
         repos: [repo],
+        embedder: new FakeEmbedder(),
         logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
         scheduleScout: () => undefined,
       });
@@ -1140,6 +1150,7 @@ describe("WorkerResultApplier deployment tracking", () => {
         taskSystem,
         reviewService: new FakeReviewService(pullRequests),
         repos,
+        embedder: new FakeEmbedder(),
         logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
         scheduleScout: () => undefined,
       });
@@ -1200,6 +1211,174 @@ describe("WorkerResultApplier deployment tracking", () => {
       }
 
       expect(taskSystem.transitions).toEqual([{ taskId: deployableTask.id, toState: "done" }]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe("WorkerResultApplier learning embeddings", () => {
+  const applyLearningMutations = async (
+    db: Awaited<ReturnType<typeof createMigratedDb>>,
+    embedder: FakeEmbedder,
+    learningMutations: WorkerResult["learningMutations"],
+    tempDir: string,
+  ): Promise<void> => {
+    const executionTask: Task = { ...task(), state: "ready", providerState: "ready" };
+    const repo: RepoRef = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
+    const pullRequest: ResolvedPullRequest = {
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/12",
+      pullRequestNumber: 12,
+      state: "open",
+      isDraft: false,
+      headBranch: "task-deploy-apply",
+      baseBranch: "main",
+    };
+
+    db.workers.ensureWorkerSlots(1);
+    db.taskMirror.saveTasks([executionTask]);
+    const target = db.taskMirror.getTaskTarget(executionTask.id, "repo-a");
+    const job = db.jobs.createJob({
+      taskId: executionTask.id,
+      taskTargetId: target!.id,
+      taskProvider: executionTask.provider,
+      action: "execution",
+      priorityRank: priorityToRank(executionTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${executionTask.id}:repo-a:execution`,
+      selectionReason: "test",
+    });
+    const worker = db.workers.listWorkers()[0];
+    const attempt = db.attempts.createAttempt({
+      jobId: job.id,
+      workerId: worker!.id,
+      runnerName: "opencode",
+      runnerModel: "openai/gpt-5.4",
+      runnerVariant: "high",
+    });
+    const applier = new WorkerResultApplier({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      foremanRepos: db,
+      taskSystem: new FakeTaskSystem([executionTask]),
+      reviewService: new FakeReviewService(pullRequest),
+      repos: [repo],
+      embedder,
+      logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
+      scheduleScout: () => undefined,
+    });
+
+    await applier.apply({
+      attempt,
+      job,
+      task: executionTask,
+      target: target!,
+      repo,
+      worktreePath: tempDir,
+      workerResult: {
+        schemaVersion: 1,
+        action: "execution",
+        outcome: "no_action_needed",
+        summary: "Applied learnings.",
+        taskMutations: [],
+        reviewMutations: [],
+        learningMutations,
+        blockers: [],
+        signals: [],
+      },
+    });
+  };
+
+  const setUp = async (prefix: string) => {
+    const tempDir = await createTempDir(prefix);
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    return { tempDir, db };
+  };
+
+  test("embeds the title and content of an added learning", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-embed-add-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      await applyLearningMutations(
+        db,
+        embedder,
+        [{ type: "add", title: "Pin the runner", repo: "foreman", confidence: "emerging", content: "Use ubuntu-24.04.", tags: ["ci"] }],
+        tempDir,
+      );
+
+      expect(embedder.embeddedTexts).toEqual(["Pin the runner\nUse ubuntu-24.04."]);
+      const [embedding] = db.learnings.getLearningEmbeddings();
+      expect(embedding).toMatchObject({ model: embedder.modelId, dims: embedder.dims });
+      const [learning] = db.learnings.listLearnings();
+      expect(embedding!.learningId).toBe(learning!.id);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("re-embeds an update that changes the content", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-embed-update-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      db.learnings.addLearning({ id: "learn-a", title: "Title", repo: "foreman", confidence: "emerging", content: "Old body", tags: [] });
+      db.learnings.upsertLearningEmbedding({
+        learningId: "learn-a",
+        model: embedder.modelId,
+        dims: embedder.dims,
+        vector: Float32Array.from([0, 0, 0]),
+      });
+
+      await applyLearningMutations(db, embedder, [{ type: "update", id: "learn-a", content: "New body" }], tempDir);
+
+      expect(embedder.embeddedTexts).toEqual(["Title\nNew body"]);
+      expect(Array.from(db.learnings.getLearningEmbeddings()[0]!.vector)).not.toEqual([0, 0, 0]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("skips embedding an update that leaves title and content unchanged", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-embed-noop-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      db.learnings.addLearning({ id: "learn-a", title: "Title", repo: "foreman", confidence: "emerging", content: "Body", tags: [] });
+
+      await applyLearningMutations(
+        db,
+        embedder,
+        [{ type: "update", id: "learn-a", markApplied: true, tags: ["ci"], content: "Body" }],
+        tempDir,
+      );
+
+      expect(embedder.calls).toHaveLength(0);
+      expect(db.learnings.getLearningsByIds(["learn-a"])[0]!.appliedCount).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("writes the learning and leaves it for backfill when the embedder throws", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-embed-fail-");
+    const embedder = new FakeEmbedder();
+    embedder.failure = new Error("model unavailable");
+
+    try {
+      await applyLearningMutations(
+        db,
+        embedder,
+        [{ type: "add", title: "Pin the runner", repo: "foreman", confidence: "emerging", content: "Use ubuntu-24.04.", tags: [] }],
+        tempDir,
+      );
+
+      const learnings = db.learnings.listLearnings();
+      expect(learnings).toHaveLength(1);
+      expect(db.learnings.getLearningEmbeddings()).toEqual([]);
+      // The row is exactly what `foreman learnings backfill-embeddings` picks up.
+      expect(db.learnings.listLearningIdsMissingEmbedding(embedder.modelId)).toEqual([learnings[0]!.id]);
     } finally {
       db.close();
     }
