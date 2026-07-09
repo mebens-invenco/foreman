@@ -1288,15 +1288,55 @@ describe("persistence repos", () => {
       expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(1);
 
       // The trigger still stamps a writer that changes content and forgets
-      // `updated_at` — that is the case it exists for.
+      // `updated_at` — that is the case it exists for. And because freshness is
+      // keyed on the text rather than that stamp, the edit stales the vector
+      // outright, with no dependence on millisecond resolution.
       db.database.sqlite.prepare("UPDATE learning SET content = ? WHERE id = ?").run("different", "learn-read");
       expect(updatedAt() > backdated).toBe(true);
-
-      // And a content edit that lands after the vector was written stales it.
-      // Stamped explicitly: the trigger writes `now`, which can share a
-      // millisecond with the embedding's own `now`, and equal means "current".
-      db.database.sqlite.prepare("UPDATE learning SET updated_at = ? WHERE id = ?").run(addSeconds(isoNow(), 60), "learn-read");
       expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual(["learn-read"]);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps a vector current across metadata-only edits that leave the text alone", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.learnings.addLearning({ id: "learn-meta", title: "T", repo: "shared", confidence: "emerging", content: "planning prompt", tags: ["a"] });
+      const learning = db.learnings.getLearningsByIds(["learn-meta"])[0]!;
+      db.learnings.upsertLearningEmbedding({
+        learningId: "learn-meta",
+        model: "m",
+        dims: 2,
+        vector: Float32Array.from([1, 0]),
+        embeddedTitle: learning.title,
+        embeddedContent: learning.content,
+      });
+
+      // `updateLearning` stamps `updated_at` for every field, so each of these
+      // moved it. None touched the embedded text, and `worker-result-applier`
+      // deliberately does not re-embed for any of them — a timestamp rule made
+      // all three look stale, burning the model and dropping hybrid's coverage.
+      db.learnings.updateLearning({ id: "learn-meta", markApplied: true });
+      db.learnings.updateLearning({ id: "learn-meta", tags: ["b", "c"] });
+      db.learnings.updateLearning({ id: "learn-meta", confidence: "proven" });
+
+      const updated = db.learnings.getLearningsByIds(["learn-meta"])[0]!;
+      expect(updated.appliedCount).toBe(1);
+      expect(updated.updatedAt > learning.updatedAt || updated.updatedAt === learning.updatedAt).toBe(true);
+      expect(updated.content).toBe("planning prompt");
+
+      expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual([]);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(1);
+      expect(db.learnings.getCurrentLearningEmbeddings({ model: "m" }).map((row) => row.learningId)).toEqual(["learn-meta"]);
+
+      // Renaming the title is a text change, and does stale it.
+      db.learnings.updateLearning({ id: "learn-meta", title: "T2" });
+      expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual(["learn-meta"]);
       expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(0);
     } finally {
       db.close();
@@ -1577,12 +1617,14 @@ describe("persistence repos", () => {
         embeddedContent: "body",
       });
 
-      // Bump only the stale learning past its embedding's timestamp. An explicit
-      // offset keeps this deterministic: two isoNow() calls can land on the same
-      // millisecond, and an equal timestamp means "current", not "stale".
+      // Stale means the embedded TEXT moved on, not that a timestamp did. Bumping
+      // `updated_at` alone no longer flags a row: `updateLearning` stamps it for
+      // every field, so a timestamp rule re-embedded learnings whose only change
+      // was `applied_count`.
       db.database.sqlite
         .prepare("UPDATE learning SET updated_at = ? WHERE id = ?")
-        .run(addSeconds(isoNow(), 60), "learn-stale");
+        .run(addSeconds(isoNow(), 60), "learn-current");
+      db.learnings.updateLearning({ id: "learn-stale", content: "rewritten body" });
 
       expect(db.learnings.listLearningIdsMissingEmbedding("current-model")).toEqual([
         "learn-absent",

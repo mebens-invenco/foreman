@@ -162,6 +162,36 @@ describe("searchLearningsWithHybridFallback", () => {
     });
   });
 
+  test("keeps answering via hybrid after metadata-only edits across the corpus", async () => {
+    await withDb(async (db) => {
+      seedCorpus(db);
+      const warnings: string[] = [];
+      const search = () =>
+        searchLearningsWithHybridFallback(
+          { learnings: db.learnings, embedder: new FakeEmbedder(), warn: (message) => warnings.push(message) },
+          { queries: ["planning prompt"], repos: ["shared"] },
+        );
+
+      expect((await search()).pipeline).toBe("hybrid");
+
+      // `markApplied: true` is what Foreman's own learning-review step emits on a
+      // worker run that applies a learning. Under a timestamp-keyed freshness rule
+      // these three edits alone dropped coverage to 7/10 and pinned retrieval to
+      // FTS until someone re-embedded text that had never changed.
+      db.learnings.updateLearning({ id: "learn-target", markApplied: true });
+      db.learnings.updateLearning({ id: "pad-0", tags: ["reclassified"] });
+      db.learnings.updateLearning({ id: "pad-1", confidence: "proven" });
+
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "fake-embedder-v1" })).toBe(9);
+      expect((await search()).pipeline).toBe("hybrid");
+      expect(warnings).toEqual([]);
+
+      // A real text edit still counts against coverage.
+      db.learnings.updateLearning({ id: "pad-2", content: "rewritten entirely" });
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "fake-embedder-v1" })).toBe(8);
+    });
+  });
+
   test("keeps answering via hybrid after a search has incremented read counts", async () => {
     await withDb(async (db) => {
       seedCorpus(db);

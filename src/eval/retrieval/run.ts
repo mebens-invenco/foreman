@@ -10,9 +10,15 @@ import { SqliteLearningRepo } from "../../repos/impl/sqlite-learning-repo.js";
 import { aggregateMetrics, scoreCase, type BenchMetrics, type CaseScore } from "./score.js";
 
 // The bench schema is pinned to the migrations that define the learning table,
-// its FTS index, and the embedding table. Later migrations don't touch retrieval
-// ranking; pinning keeps the committed baseline reproducible even if one would.
-const BENCH_MIGRATIONS = ["0004_memory_tables.sql", "0005_learning_fts.sql", "0027_learning_embedding.sql"] as const;
+// its FTS index, the embedding table, and the text snapshot every freshness
+// check keys on. Later migrations don't touch retrieval ranking; pinning keeps
+// the committed baseline reproducible even if one would.
+const BENCH_MIGRATIONS = [
+  "0004_memory_tables.sql",
+  "0005_learning_fts.sql",
+  "0027_learning_embedding.sql",
+  "0030_learning_embedding_text_snapshot.sql",
+] as const;
 
 // Fixtures and migrations are read from the on-disk checkout, resolved against
 // the project root the same way the migration runner resolves it. They are NOT
