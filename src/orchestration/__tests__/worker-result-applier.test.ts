@@ -1657,4 +1657,68 @@ describe("WorkerResultApplier learning embeddings", () => {
       db.close();
     }
   });
+
+  test("zips vectors onto adds by add position, not mutation position", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-interleaved-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      db.learnings.addLearning({ id: "learn-x", title: "X", repo: "foreman", confidence: "emerging", content: "x", tags: [] });
+      db.learnings.addLearning({ id: "learn-y", title: "Y", repo: "foreman", confidence: "emerging", content: "y", tags: [] });
+
+      const alphaVector = Float32Array.from([2, 0, 0]);
+      const betaVector = Float32Array.from([0, 3, 0]);
+      const alpha = addMutationAt(embedder, alphaVector, { title: "Alpha" });
+      const beta = addMutationAt(embedder, betaVector, { title: "Beta" });
+
+      // Interleaving is the only shape where an add's index diverges from its
+      // position in `mutations`. An all-add batch makes the two identical, so a
+      // loop-position bug would zip correctly there and land `undefined` here.
+      await applyLearningMutations(
+        db,
+        embedder,
+        [{ type: "update", id: "learn-x", content: "x2" }, alpha, { type: "update", id: "learn-y", content: "y2" }, beta],
+        tempDir,
+      );
+
+      const idByTitle = new Map(db.learnings.listLearnings().map((learning) => [learning.title, learning.id]));
+      const vectorByLearningId = new Map(
+        db.learnings.getLearningEmbeddings().map((row) => [row.learningId, Array.from(row.vector)]),
+      );
+
+      expect(vectorByLearningId.get(idByTitle.get("Alpha")!)).toEqual([2, 0, 0]);
+      expect(vectorByLearningId.get(idByTitle.get("Beta")!)).toEqual([0, 3, 0]);
+      // Adds are embedded up front; the two content-changing updates re-embed in
+      // a second batched call.
+      expect(embedder.calls).toHaveLength(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps the learning and completes the apply when the embedding write throws", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-embed-write-fail-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      const neighbourId = seedNeighbour(db, embedder);
+      const failing = new Error("SQLITE_BUSY: database is locked");
+      db.learnings.upsertLearningEmbedding = () => {
+        throw failing;
+      };
+
+      // The learning row commits before its vector is written, so a failing
+      // embedding write must not abort the apply and strand later mutations.
+      await expect(
+        applyLearningMutations(db, embedder, [addMutationAt(embedder, neighbourVector)], tempDir),
+      ).resolves.toBeUndefined();
+
+      const learning = addedLearning(db);
+      expect(learning.duplicateOf).toBe(neighbourId);
+      expect(learning.sourceTaskId).toBe("TASK-DEPLOY-APPLY");
+      expect(db.learnings.listLearningIdsMissingEmbedding(embedder.modelId)).toContain(learning.id);
+    } finally {
+      db.close();
+    }
+  });
 });
