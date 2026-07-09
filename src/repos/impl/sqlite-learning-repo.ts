@@ -1,7 +1,7 @@
 import { ForemanError } from "../../lib/errors.js";
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
-import { cosineSimilarity } from "../../retrieval/cosine-similarity.js";
+import { selectCosineCandidates } from "../../retrieval/cosine-candidates.js";
 import { fuseByReciprocalRank } from "../../retrieval/reciprocal-rank-fusion.js";
 import type {
   LearningEmbeddingRecord,
@@ -306,16 +306,14 @@ export class SqliteLearningRepo implements LearningRepo {
 
     // One read of the vector space, reused across queries. Learnings with no
     // vector simply never enter the cosine list; their bm25 rank still counts.
+    // `selectCosineCandidates` bounds that list rather than ranking the whole
+    // corpus, so an empty result stays possible and bm25 hits are not displaced
+    // by arbitrary near-neighbours.
     const embeddings = this.getLearningEmbeddings({ repos, model: queryEmbedding.model });
-    const rankByCosine = (vector: Float32Array): string[] =>
-      embeddings
-        .map((embedding) => ({ id: embedding.learningId, similarity: cosineSimilarity(vector, embedding.vector) }))
-        .sort((left, right) => right.similarity - left.similarity || left.id.localeCompare(right.id))
-        .map((candidate) => candidate.id);
 
     const bestScores = new Map<string, number>();
     for (const query of queries) {
-      for (const [id, score] of fuseByReciprocalRank([rankByBm25(query.text), rankByCosine(query.vector)])) {
+      for (const [id, score] of fuseByReciprocalRank([rankByBm25(query.text), selectCosineCandidates(query.vector, embeddings)])) {
         const previousScore = bestScores.get(id);
         if (previousScore === undefined || score > previousScore) {
           bestScores.set(id, score);
@@ -412,6 +410,14 @@ export class SqliteLearningRepo implements LearningRepo {
       )
       .all(...params, ...paginationParams)
       .map(mapLearningRecord);
+  }
+
+  countLearnings(filters: { repos?: string[] } = {}): number {
+    const repos = normalizeFilterValues(filters.repos);
+    const where = repos.length > 0 ? `WHERE repo IN (${repos.map(() => "?").join(", ")})` : "";
+    const row = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM learning ${where}`).get(...repos) as SqliteRow;
+
+    return Number(row.count);
   }
 
   upsertLearningEmbedding(input: LearningEmbeddingUpsert): boolean {

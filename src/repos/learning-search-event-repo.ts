@@ -1,3 +1,5 @@
+import type { RetrievalPipeline } from "../retrieval/retrieval-pipeline.js";
+
 export type LearningSearchEventKind = "search" | "get";
 
 /**
@@ -17,8 +19,14 @@ export type LearningSearchEventInput = {
   requestedIds?: string[];
   /** Learning ids that came back. */
   hitIds?: string[];
-  /** Relevance scores aligned with `hitIds` (search only; empty for `get`). */
+  /**
+   * Relevance scores aligned with `hitIds` (search only; empty for `get`).
+   * Only comparable within one `pipeline`: hybrid fuses ranks (higher is better),
+   * fts reports raw bm25 (more negative is better).
+   */
   hitScores?: number[];
+  /** Retriever that answered a `search`; null for a `get`. */
+  pipeline?: RetrievalPipeline | null;
 };
 
 export type LearningSearchEventRecord = {
@@ -32,6 +40,7 @@ export type LearningSearchEventRecord = {
   hitIds: string[];
   hitScores: number[];
   zeroHit: boolean;
+  pipeline: RetrievalPipeline | null;
 };
 
 export type LearningSearchEventFilters = {

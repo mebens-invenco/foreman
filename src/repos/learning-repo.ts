@@ -86,6 +86,8 @@ export interface LearningRepo {
   ): LearningSearchRecord[];
   getLearningsByIds(ids: string[], options?: LearningReadOptions): LearningRecord[];
   listLearnings(filters?: { search?: string; repo?: string; limit?: number; offset?: number }): LearningRecord[];
+  /** How many learnings the given repo scope holds, embedded or not. */
+  countLearnings(filters?: { repos?: string[] }): number;
   /**
    * Writes the vector only while the learning's embedded text still matches
    * `embeddedTitle`/`embeddedContent`. Returns false when it no longer does —
