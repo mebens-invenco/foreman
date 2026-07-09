@@ -1,5 +1,6 @@
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
+import type { RetrievalPipeline } from "../../retrieval/retrieval-pipeline.js";
 import type {
   LearningSearchEventFilters,
   LearningSearchEventInput,
@@ -9,7 +10,7 @@ import type {
 } from "../learning-search-event-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
-const EVENT_COLUMNS = "id, created_at, kind, caller, queries, repos, requested_ids, hit_ids, hit_scores, zero_hit";
+const EVENT_COLUMNS = "id, created_at, kind, caller, queries, repos, requested_ids, hit_ids, hit_scores, zero_hit, pipeline";
 
 const parseArray = <T>(value: unknown): T[] => JSON.parse(String(value ?? "[]")) as T[];
 
@@ -26,6 +27,7 @@ const mapEventRecord = (row: unknown): LearningSearchEventRecord => {
     hitIds: parseArray<string>(mapped.hit_ids),
     hitScores: parseArray<number>(mapped.hit_scores),
     zeroHit: Number(mapped.zero_hit) === 1,
+    pipeline: (mapped.pipeline as RetrievalPipeline | null) ?? null,
   };
 };
 
@@ -38,8 +40,8 @@ export class SqliteLearningSearchEventRepo implements LearningSearchEventRepo {
     this.sqlite
       .prepare(
         `INSERT INTO learning_search_event(
-          id, created_at, kind, caller, queries, repos, requested_ids, hit_ids, hit_scores, zero_hit
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, created_at, kind, caller, queries, repos, requested_ids, hit_ids, hit_scores, zero_hit, pipeline
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -52,6 +54,7 @@ export class SqliteLearningSearchEventRepo implements LearningSearchEventRepo {
         JSON.stringify(hitIds),
         JSON.stringify(input.hitScores ?? []),
         hitIds.length === 0 ? 1 : 0,
+        input.pipeline ?? null,
       );
     return id;
   }

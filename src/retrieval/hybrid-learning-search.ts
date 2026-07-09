@@ -1,5 +1,7 @@
 import type { Embedder } from "../embeddings/embedder.js";
+import { isForemanError } from "../lib/errors.js";
 import type { LearningRepo, LearningSearchRecord } from "../repos/learning-repo.js";
+import type { RetrievalPipeline } from "./retrieval-pipeline.js";
 
 export type HybridLearningSearchFilters = {
   queries: string[];
@@ -8,48 +10,80 @@ export type HybridLearningSearchFilters = {
   offset?: number;
 };
 
+export type HybridLearningSearchResult = {
+  pipeline: RetrievalPipeline;
+  learnings: LearningSearchRecord[];
+};
+
+/**
+ * Below this fraction of the in-scope corpus carrying a current vector, the
+ * cosine arm sees too little of the corpus to rank it fairly: an embedded but
+ * irrelevant learning collects fusion weight that an unembedded, relevant one
+ * can never earn, so hybrid can rank BELOW the FTS baseline. Presence of any
+ * vector is not enough — coverage is what makes the two arms comparable.
+ */
+export const MIN_EMBEDDING_COVERAGE = 0.9;
+
 /**
  * Hybrid search with an FTS-only safety net.
  *
  * Embeddings are an enhancement to retrieval, never a dependency of it: a model
- * that will not download, an embedder that fails to init, and a scope nothing
- * has been backfilled into yet all degrade to the bm25 pipeline with a warning.
+ * that will not download, an embedder that fails to init or infer, and a scope
+ * that is not yet backfilled all degrade to the bm25 pipeline with a warning.
  * A degraded search must not become a failed search — the same discipline the
  * retrieval telemetry follows.
  *
- * The returned records carry whichever pipeline's `score` produced them (fused
- * descending for hybrid, raw bm25 ascending for the fallback), so callers must
- * not compare scores across a fallback boundary.
+ * Everything else propagates. A defect is not a degrade: a corrupt vector blob,
+ * a fault on `learning_embedding`, or an `Embedder` that breaks its own contract
+ * would otherwise be swallowed once per search, forever, behind a warning line
+ * indistinguishable from the benign "nothing backfilled yet" case. Note that
+ * `searchLearnings` never reads `learning_embedding`, so such a fault would not
+ * take the fallback down with it — it would simply go unnoticed.
+ *
+ * `score` flips meaning across the fallback boundary (fused descending for
+ * hybrid, raw bm25 ascending for FTS), which is why the pipeline that answered
+ * is returned rather than left for the caller to guess.
  */
 export const searchLearningsWithHybridFallback = async (
   deps: { learnings: LearningRepo; embedder: Embedder; warn: (message: string) => void },
   filters: HybridLearningSearchFilters,
-): Promise<LearningSearchRecord[]> => {
+): Promise<HybridLearningSearchResult> => {
   const { learnings, embedder, warn } = deps;
   const options = { incrementReadCount: true };
-  const fallBackToFts = (reason: string): LearningSearchRecord[] => {
+  const scope = filters.repos && filters.repos.length > 0 ? { repos: filters.repos } : {};
+  const fallBackToFts = (reason: string): HybridLearningSearchResult => {
     warn(`hybrid learning search unavailable, falling back to FTS: ${reason}`);
-    return learnings.searchLearnings(filters, options);
+    return { pipeline: "fts", learnings: learnings.searchLearnings(filters, options) };
   };
 
-  // Checked before embedding: a scope with no vectors would reduce the fusion to
-  // bm25-only, which is the fallback wearing a hybrid label. It also spares the
-  // caller a model download that could not change the answer.
-  const embeddingCount = learnings.countLearningEmbeddings({
-    ...(filters.repos && filters.repos.length > 0 ? { repos: filters.repos } : {}),
-    model: embedder.modelId,
-  });
-  if (embeddingCount === 0) {
-    return fallBackToFts(`no ${embedder.modelId} learning embeddings in scope; run \`foreman learnings backfill-embeddings\``);
+  // Checked before embedding, so the fallback never pays for a model download
+  // that could not have changed the answer.
+  const learningCount = learnings.countLearnings(scope);
+  if (learningCount === 0) {
+    return { pipeline: "fts", learnings: [] };
   }
 
+  const embeddingCount = learnings.countLearningEmbeddings({ ...scope, model: embedder.modelId });
+  const coverage = embeddingCount / learningCount;
+  if (coverage < MIN_EMBEDDING_COVERAGE) {
+    return fallBackToFts(
+      `only ${embeddingCount}/${learningCount} in-scope learnings carry a ${embedder.modelId} vector ` +
+        `(need ${Math.round(MIN_EMBEDDING_COVERAGE * 100)}%); run \`foreman learnings backfill-embeddings\``,
+    );
+  }
+
+  let vectors: Float32Array[];
   try {
-    const vectors = await embedder.embed(filters.queries);
-    return learnings.searchLearningsHybrid(filters, { model: embedder.modelId, vectors }, options);
+    vectors = await embedder.embed(filters.queries);
   } catch (error) {
-    // Narrow by construction: the embedder (model download, init, inference) and
-    // the fusion's vector-width check are the only things in here that throw. A
-    // repo-level fault would take the fallback's `searchLearnings` down with it.
+    // An embedder that breaks its declared contract (a 500 ForemanError such as
+    // `embedding_dims_mismatch`) is a defect in the adapter, not an outage.
+    if (isForemanError(error) && error.statusCode >= 500) {
+      throw error;
+    }
+
     return fallBackToFts(error instanceof Error ? error.message : String(error));
   }
+
+  return { pipeline: "hybrid", learnings: learnings.searchLearningsHybrid(filters, { model: embedder.modelId, vectors }, options) };
 };

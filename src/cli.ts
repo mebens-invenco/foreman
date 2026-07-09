@@ -368,7 +368,7 @@ learnings
     }
 
     await withWorkspaceRepos(workspace, async (repos, paths) => {
-      const learnings = await searchLearningsWithHybridFallback(
+      const { pipeline, learnings } = await searchLearningsWithHybridFallback(
         {
           learnings: repos.learnings,
           embedder: createEmbedder(paths.projectRoot),
@@ -388,12 +388,16 @@ learnings
         repos: options.repo,
         hitIds: learnings.map((learning) => learning.id),
         hitScores: learnings.map((learning) => learning.score),
+        pipeline,
       });
 
+      // `pipeline` rides on stdout because `score` inverts across the fallback
+      // boundary, and consumers that read this JSON do not see the stderr warning.
       writeJson({
         workspace,
         repos: options.repo,
         queries: options.query,
+        pipeline,
         learnings,
       });
     });
