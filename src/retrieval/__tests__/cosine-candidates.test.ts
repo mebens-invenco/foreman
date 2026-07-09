@@ -26,21 +26,68 @@ describe("selectCosineCandidates", () => {
   });
 
   test("stays silent on a corpus too small to have an outlier", () => {
-    // The largest z attainable with n embeddings is (n - 1) / sqrt(n): 1.79 at
-    // n = 5, 2.04 at n = 6. So a perfect match cannot clear the floor until the
-    // corpus is big enough for "outlier" to mean anything.
+    // The largest z attainable with n embeddings is (n - 1) / sqrt(n) — the
+    // SAMPLE standard deviation's bound, which is why the variance divides by
+    // n - 1. So a perfect match cannot clear the floor until the corpus is big
+    // enough for "outlier" to mean anything.
     const perfectMatch = embedding("outlier", [0, 1, 0]);
-    expect((5 - 1) / Math.sqrt(5)).toBeLessThan(COSINE_Z_FLOOR);
-    expect((6 - 1) / Math.sqrt(6)).toBeGreaterThan(COSINE_Z_FLOOR);
+    const maxZ = (n: number) => (n - 1) / Math.sqrt(n);
+
+    // The margins matter as much as the direction: a population variance (divide
+    // by n) would bound z at sqrt(n - 1), putting n = 5 at exactly 2.0 — flush
+    // against a `>=` floor, where firing comes down to floating-point rounding.
+    expect(maxZ(5)).toBeCloseTo(1.789, 3);
+    expect(maxZ(6)).toBeCloseTo(2.041, 3);
+    expect(Math.sqrt(5 - 1)).toBe(COSINE_Z_FLOOR);
 
     expect(selectCosineCandidates(ALONG_Y, [perfectMatch, ...crowd(4)])).toEqual([]);
     expect(selectCosineCandidates(ALONG_Y, [perfectMatch, ...crowd(5)])).toEqual(["outlier"]);
   });
 
+  test("rejects a candidate that only a population standard deviation would admit", () => {
+    // Sample SD is the larger of the two, so sample z is the smaller: the arm is
+    // strictly more conservative than a population variance would make it. These
+    // six similarities (1.00, 0.66, 0.58, 0.57, 0.57, 0.45) put the leader at
+    // z = 1.909 by sample SD and z = 2.091 by population SD — one side of the
+    // floor each, with ~0.09 of margin, so this discriminates the two formulas
+    // rather than resting on the n = 5 knife-edge.
+    const xFor = (similarity: number) => Math.sqrt(1 / similarity ** 2 - 1);
+    const corpus = [1, 0.57, 0.45, 0.66, 0.58, 0.57].map((similarity, index) =>
+      embedding(index === 0 ? "outlier" : `crowd-${index}`, [similarity === 1 ? 0 : xFor(similarity), 1, 0]),
+    );
+
+    expect(selectCosineCandidates(ALONG_Y, corpus)).toEqual([]);
+  });
+
+  test("computes z against the sample standard deviation, not the population's", () => {
+    // One outlier at similarity 1 among four at 0: mean 0.2, sample SD 0.4472,
+    // so z = 1.789 and the arm stays silent. Under a population SD (0.4) the
+    // same corpus yields z = 2.0 exactly, and the arm fires.
+    const scored = [1, 0, 0, 0, 0];
+    const mean = scored.reduce((total, value) => total + value, 0) / scored.length;
+    const sumOfSquares = scored.reduce((total, value) => total + (value - mean) ** 2, 0);
+    const sampleZ = (1 - mean) / Math.sqrt(sumOfSquares / (scored.length - 1));
+    const populationZ = (1 - mean) / Math.sqrt(sumOfSquares / scored.length);
+
+    expect(sampleZ).toBeCloseTo(1.789, 3);
+    expect(sampleZ).toBeLessThan(COSINE_Z_FLOOR);
+
+    // In exact arithmetic the population z here is 2.0 — sitting on the `>=`
+    // floor. In doubles it lands a hair under, so a population variance would
+    // have made the arm's silence at n = 5 an accident of rounding, not a rule.
+    expect(Math.sqrt(scored.length - 1)).toBe(COSINE_Z_FLOOR);
+    expect(populationZ).toBeLessThan(COSINE_Z_FLOOR);
+    expect(COSINE_Z_FLOOR - populationZ).toBeLessThan(1e-15);
+
+    expect(selectCosineCandidates(ALONG_Y, [embedding("outlier", [0, 1, 0]), ...crowd(4)])).toEqual([]);
+  });
+
   test("stays silent on a single embedding rather than pinning it to rank 1", () => {
-    // Zero standard deviation: dividing by it would hand the only row an
-    // infinite z and let it tie the top bm25 hit on every search.
+    // One row has no spread to be an outlier against, and the sample variance
+    // would divide by zero. Two identical rows have zero spread, and dividing by
+    // it would hand both an infinite z and let them tie the top bm25 hit.
     expect(selectCosineCandidates(ALONG_Y, [embedding("only", [0, 1, 0])])).toEqual([]);
+    expect(selectCosineCandidates(ALONG_Y, [embedding("a", [0, 1, 0]), embedding("b", [0, 1, 0])])).toEqual([]);
     expect(selectCosineCandidates(ALONG_Y, [])).toEqual([]);
   });
 

@@ -1199,10 +1199,105 @@ describe("persistence repos", () => {
       expect(db.learnings.getLearningEmbeddings()).toHaveLength(3);
 
       // Counting reads the same scope, without decoding a single vector.
-      expect(db.learnings.countLearningEmbeddings({ model: "new-model" })).toBe(2);
-      expect(db.learnings.countLearningEmbeddings({ model: "new-model", repos: ["foreman"] })).toBe(1);
-      expect(db.learnings.countLearningEmbeddings({ model: "absent-model" })).toBe(0);
-      expect(db.learnings.countLearningEmbeddings()).toBe(3);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "new-model" })).toBe(2);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "new-model", repos: ["foreman"] })).toBe(1);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "absent-model" })).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("treats a vector older than its learning as absent, exactly as the backfill does", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      for (const id of ["learn-fresh", "learn-stale"]) {
+        db.learnings.addLearning({ id, title: id, repo: "shared", confidence: "emerging", content: "planning prompt", tags: [] });
+        const learning = db.learnings.getLearningsByIds([id])[0]!;
+        db.learnings.upsertLearningEmbedding({
+          learningId: id,
+          model: "m",
+          dims: 2,
+          vector: Float32Array.from([1, 0]),
+          embeddedTitle: learning.title,
+          embeddedContent: learning.content,
+        });
+      }
+
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(2);
+      expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual([]);
+
+      // Editing the text leaves the old vector row in place — the guarded upsert
+      // deliberately refuses to refresh it — so a presence count still says 2.
+      // The explicit offset keeps this deterministic: two isoNow() calls can land
+      // on the same millisecond, and an equal timestamp means "current".
+      db.database.sqlite.prepare("UPDATE learning SET content = ?, updated_at = ? WHERE id = ?").run("else", addSeconds(isoNow(), 60), "learn-stale");
+      expect(db.learnings.getLearningEmbeddings({ model: "m" })).toHaveLength(2);
+
+      // The two must agree on what "embedded" means, or the coverage gate holds
+      // open over a corpus `backfill-embeddings` still owes vectors for.
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(1);
+      expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual(["learn-stale"]);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" }) + db.learnings.listLearningIdsMissingEmbedding("m").length).toBe(
+        db.learnings.countLearnings(),
+      );
+
+      // And the stale vector is invisible to the cosine arm, not merely uncounted.
+      expect(db.learnings.getCurrentLearningEmbeddings({ model: "m" }).map((row) => row.learningId)).toEqual(["learn-fresh"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not stale a vector just because its learning was retrieved", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.learnings.addLearning({ id: "learn-read", title: "T", repo: "shared", confidence: "emerging", content: "planning prompt", tags: [] });
+      const learning = db.learnings.getLearningsByIds(["learn-read"])[0]!;
+      db.learnings.upsertLearningEmbedding({
+        learningId: "learn-read",
+        model: "m",
+        dims: 2,
+        vector: Float32Array.from([1, 0]),
+        embeddedTitle: learning.title,
+        embeddedContent: learning.content,
+      });
+
+      // Backdate the learning so a trigger firing would be unmistakable — the
+      // stamp it writes is `now`, an hour later. Comparing against a fresh
+      // isoNow() would be at the mercy of millisecond granularity.
+      const backdated = addSeconds(isoNow(), -3600);
+      db.database.sqlite.prepare("UPDATE learning SET updated_at = ? WHERE id = ?").run(backdated, "learn-read");
+      const updatedAt = () => db.learnings.getLearningsByIds(["learn-read"])[0]!.updatedAt;
+      expect(updatedAt()).toBe(backdated);
+
+      // `read_count` is retrieval telemetry, not content. Before 0029 the
+      // `learning_touch_updated_at` trigger fired on this UPDATE too, so a single
+      // search marked every hit's vector stale — re-embedding the read corpus on
+      // the next backfill, and driving the coverage gate to permanent fallback.
+      db.learnings.searchLearnings({ queries: ["planning prompt"], repos: ["shared"] }, { incrementReadCount: true });
+
+      expect(db.learnings.getLearningsByIds(["learn-read"])[0]!.readCount).toBe(1);
+      expect(updatedAt()).toBe(backdated);
+      expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual([]);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(1);
+
+      // The trigger still stamps a writer that changes content and forgets
+      // `updated_at` — that is the case it exists for.
+      db.database.sqlite.prepare("UPDATE learning SET content = ? WHERE id = ?").run("different", "learn-read");
+      expect(updatedAt() > backdated).toBe(true);
+
+      // And a content edit that lands after the vector was written stales it.
+      // Stamped explicitly: the trigger writes `now`, which can share a
+      // millisecond with the embedding's own `now`, and equal means "current".
+      db.database.sqlite.prepare("UPDATE learning SET updated_at = ? WHERE id = ?").run(addSeconds(isoNow(), 60), "learn-read");
+      expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual(["learn-read"]);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(0);
     } finally {
       db.close();
     }
@@ -1393,6 +1488,27 @@ describe("persistence repos", () => {
         { model: HYBRID_MODEL, vectors: [FLAT_VECTOR, LOCKFILE_VECTOR] },
       );
       expect(aligned.map((learning) => learning.id)).toEqual(["learn-lockfile"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("refuses a query list that trims to nothing rather than returning a listing", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      seedHybridCorpus(db);
+
+      // Delegating to `searchLearnings` here would hand back its recency listing —
+      // rows scored 0.0 that never met the fusion — which the caller would then
+      // label `pipeline: "hybrid"` on stdout and in telemetry.
+      for (const queries of [["   "], [], ["", "\t"]]) {
+        expect(() =>
+          db.learnings.searchLearningsHybrid({ queries, repos: ["shared"] }, { model: HYBRID_MODEL, vectors: queries.map(() => FLAT_VECTOR) }),
+        ).toThrow(/at least one non-blank query/);
+      }
     } finally {
       db.close();
     }
