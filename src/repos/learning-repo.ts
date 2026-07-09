@@ -71,6 +71,10 @@ export interface LearningRepo {
    * fused scores are then merged across queries by taking each learning's best,
    * as `searchLearnings` merges its bm25 scores.
    *
+   * Only vectors that are current for `queryEmbedding.model` are ranked, so a
+   * learning whose text moved on since it was embedded is reachable by bm25 but
+   * never by cosine.
+   *
    * `queryEmbedding.vectors[i]` must embed `filters.queries[i]` — same length,
    * same order. `queryEmbedding.model` selects the comparable vector space (see
    * `getLearningEmbeddings`), so it must be the model that produced `vectors`.
@@ -78,6 +82,10 @@ export interface LearningRepo {
    * `score` on the returned records is the fused score, where HIGHER is better —
    * the opposite of the raw bm25 `score` from `searchLearnings`. The two are not
    * comparable to one another.
+   *
+   * Throws when no query survives trimming: there is nothing to fuse, and the
+   * caller must decide what an empty query means rather than receive a listing
+   * wearing a hybrid label.
    */
   searchLearningsHybrid(
     filters: { queries?: string[]; repos?: string[]; limit?: number; offset?: number },
@@ -104,6 +112,14 @@ export interface LearningRepo {
    * meaning and must not be compared to one another.
    */
   getLearningEmbeddings(filters?: { repos?: string[]; model?: string }): LearningEmbeddingRecord[];
-  /** Same filters as `getLearningEmbeddings`, without decoding any vector. */
-  countLearningEmbeddings(filters?: { repos?: string[]; model?: string }): number;
+  /**
+   * The vectors `listLearningIdsMissingEmbedding` would NOT flag: present, from
+   * `model`, and no older than the learning they describe. Anything that reasons
+   * about whether a scope is usably embedded must read this rather than
+   * `getLearningEmbeddings`, or it will count vectors describing text that has
+   * since changed.
+   */
+  getCurrentLearningEmbeddings(filters: { repos?: string[]; model: string }): LearningEmbeddingRecord[];
+  /** Same rows as `getCurrentLearningEmbeddings`, without decoding any vector. */
+  countCurrentLearningEmbeddings(filters: { repos?: string[]; model: string }): number;
 }

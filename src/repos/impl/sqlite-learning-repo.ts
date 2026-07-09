@@ -67,9 +67,17 @@ const mapLearningEmbeddingRecord = (row: unknown): LearningEmbeddingRecord => {
 const normalizeFilterValues = (values: readonly string[] | undefined): string[] =>
   Array.from(new Set((values ?? []).map((value) => value.trim()).filter((value) => value.length > 0)));
 
-// Shared by the two `learning_embedding` readers so a scope means the same thing
+// Shared by every `learning_embedding` reader so a scope means the same thing
 // whether it is being counted or decoded.
-const learningEmbeddingFilter = (filters: { repos?: string[]; model?: string }): { where: string; params: unknown[] } => {
+//
+// `currentOnly` adds the freshness half of `listLearningIdsMissingEmbedding`'s
+// definition (`:missing = absent OR other model OR older than the learning`), so
+// callers that must agree with `backfill-embeddings` about what "embedded" means
+// cannot drift from it.
+const learningEmbeddingFilter = (
+  filters: { repos?: string[]; model?: string },
+  options: { currentOnly?: boolean } = {},
+): { where: string; params: unknown[] } => {
   const repos = normalizeFilterValues(filters.repos);
   const model = filters.model?.trim();
 
@@ -82,6 +90,9 @@ const learningEmbeddingFilter = (filters: { repos?: string[]; model?: string }):
   if (model) {
     clauses.push("learning_embedding.model = ?");
     params.push(model);
+  }
+  if (options.currentOnly) {
+    clauses.push("learning_embedding.updated_at >= learning.updated_at");
   }
 
   return { where: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "", params };
@@ -274,8 +285,12 @@ export class SqliteLearningRepo implements LearningRepo {
       queries.push({ text, vector: queryEmbedding.vectors[index]! });
     });
 
+    // Delegating to `searchLearnings` here would take its listing branch and hand
+    // back recency-ordered rows scored `0.0` — records that never met the fusion,
+    // labelled hybrid by the caller. The CLI already rejects a missing `--query`,
+    // so an all-blank query list is a caller bug, not a mode to degrade around.
     if (queries.length === 0) {
-      return this.searchLearnings(filters, options);
+      throw new ForemanError("hybrid_query_missing", "searchLearningsHybrid requires at least one non-blank query", 500);
     }
 
     const repos = normalizeFilterValues(filters.repos);
@@ -304,12 +319,13 @@ export class SqliteLearningRepo implements LearningRepo {
         .sort((left, right) => left.score - right.score || left.id.localeCompare(right.id))
         .map((candidate) => candidate.id);
 
-    // One read of the vector space, reused across queries. Learnings with no
-    // vector simply never enter the cosine list; their bm25 rank still counts.
+    // One read of the vector space, reused across queries. A learning with no
+    // vector, or one whose text has moved on since it was embedded, simply never
+    // enters the cosine list; its bm25 rank still counts.
     // `selectCosineCandidates` bounds that list rather than ranking the whole
     // corpus, so an empty result stays possible and bm25 hits are not displaced
     // by arbitrary near-neighbours.
-    const embeddings = this.getLearningEmbeddings({ repos, model: queryEmbedding.model });
+    const embeddings = this.getCurrentLearningEmbeddings({ repos, model: queryEmbedding.model });
 
     const bestScores = new Map<string, number>();
     for (const query of queries) {
@@ -482,8 +498,23 @@ export class SqliteLearningRepo implements LearningRepo {
       .map(mapLearningEmbeddingRecord);
   }
 
-  countLearningEmbeddings(filters: { repos?: string[]; model?: string } = {}): number {
-    const { where, params } = learningEmbeddingFilter(filters);
+  getCurrentLearningEmbeddings(filters: { repos?: string[]; model: string }): LearningEmbeddingRecord[] {
+    const { where, params } = learningEmbeddingFilter(filters, { currentOnly: true });
+
+    return this.sqlite
+      .prepare(
+        `SELECT learning_embedding.learning_id, learning_embedding.model, learning_embedding.dims, learning_embedding.vector
+           FROM learning_embedding
+           JOIN learning ON learning.id = learning_embedding.learning_id
+           ${where}
+          ORDER BY learning_embedding.learning_id ASC`,
+      )
+      .all(...params)
+      .map(mapLearningEmbeddingRecord);
+  }
+
+  countCurrentLearningEmbeddings(filters: { repos?: string[]; model: string }): number {
+    const { where, params } = learningEmbeddingFilter(filters, { currentOnly: true });
 
     const row = this.sqlite
       .prepare(
