@@ -265,6 +265,60 @@ describe("HTTP query validation", () => {
     }
   });
 
+  test("task detail returns the task-system error without leaking an unhandled rejection", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+
+    // Unmirrored task in a provider state Foreman cannot map (e.g. a Linear
+    // issue moved to Backlog): getTask and listComments both reject, and the
+    // handler must not leave either rejection unhandled — that kills the daemon.
+    // Plain async functions, not vi.fn(): the mock wrapper attaches handlers to
+    // returned promises (settledResults tracking), which would mask the leak.
+    const unmappedState = () => new ForemanError("unknown_provider_state", "Unmapped provider state: Backlog", 400);
+    const taskSystem = {
+      getTask: async () => {
+        throw unmappedState();
+      },
+      listComments: async () => {
+        throw unmappedState();
+      },
+    } as any;
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "linear"),
+      paths,
+      repoRefs: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      repos: db,
+      taskSystem,
+      reviewService: { resolvePullRequest: vi.fn(async () => null) } as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+      } as any,
+    });
+
+    const unhandledRejections: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => unhandledRejections.push(reason);
+    process.on("unhandledRejection", onUnhandledRejection);
+    try {
+      const response = await server.inject({ method: "GET", url: "/api/tasks/ENG-9" });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error.code).toBe("unknown_provider_state");
+
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandledRejections).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+      await server.close();
+      db.close();
+    }
+  });
+
   test("serves mirrored tasks and returns target projections for task APIs", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
     cleanupDirs.push(workspaceRoot);

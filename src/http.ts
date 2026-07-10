@@ -619,10 +619,11 @@ export const createHttpServer = (deps: HttpServerDeps) => {
     const params = request.params as { taskId: string };
     const query = request.query as { refreshReview?: string };
     const refreshReview = parseBooleanQuery("refreshReview", query.refreshReview);
-    const commentsPromise = deps.taskSystem.listComments(params.taskId);
     const mirroredTask = deps.repos.taskMirror.getTask(params.taskId);
-    const task = mirroredTask ?? (await deps.taskSystem.getTask(params.taskId));
-    const comments = await commentsPromise;
+    const [task, comments] = await Promise.all([
+      mirroredTask ?? deps.taskSystem.getTask(params.taskId),
+      deps.taskSystem.listComments(params.taskId),
+    ]);
     const tasksById = new Map(getAllMirroredTasks().map((candidateTask) => [candidateTask.id, candidateTask]));
     tasksById.set(task.id, task);
     return { task: await serializeTask(task, tasksById, refreshReview), comments };
