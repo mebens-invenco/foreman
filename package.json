@@ -39,7 +39,7 @@
   "devDependencies": {
     "@types/node": "24.13.2",
     "@types/better-sqlite3": "^7.6.13",
-    "tsx": "^4.22.4",
+    "tsx": "^4.23.0",
     "typescript": "^5.9.2",
     "vite": "^7.3.6",
     "vitest": "^3.2.6"
