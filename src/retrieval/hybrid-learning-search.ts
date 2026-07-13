@@ -1,7 +1,6 @@
 import type { Embedder } from "../embeddings/embedder.js";
 import { isForemanError } from "../lib/errors.js";
-import type { LearningRepo, LearningSearchRecord } from "../repos/learning-repo.js";
-import type { RetrievalPipeline } from "./retrieval-pipeline.js";
+import type { LearningReadOptions, LearningRepo, LearningRetrievalProvenance, LearningSearchRecord } from "../repos/learning-repo.js";
 
 export type HybridLearningSearchFilters = {
   queries: string[];
@@ -10,10 +9,17 @@ export type HybridLearningSearchFilters = {
   offset?: number;
 };
 
-export type HybridLearningSearchResult = {
-  pipeline: RetrievalPipeline;
-  learnings: LearningSearchRecord[];
-};
+/**
+ * Discriminated on the pipeline that answered, because what a result carries
+ * differs across the fallback boundary rather than merely being labelled by it:
+ * `score` inverts (fused descending vs raw bm25 ascending), and arm provenance
+ * exists only where there were two arms to attribute a hit to. A caller that
+ * needs provenance — a relevance floor — therefore cannot be served by the
+ * fallback at all, and the type says so instead of handing back an empty map.
+ */
+export type HybridLearningSearchResult =
+  | { pipeline: "hybrid"; learnings: LearningSearchRecord[]; provenance: ReadonlyMap<string, LearningRetrievalProvenance> }
+  | { pipeline: "fts"; learnings: LearningSearchRecord[] };
 
 /**
  * Below this fraction of the in-scope corpus carrying a current vector, the
@@ -47,9 +53,13 @@ export const MIN_EMBEDDING_COVERAGE = 0.9;
 export const searchLearningsWithHybridFallback = async (
   deps: { learnings: LearningRepo; embedder: Embedder; warn: (message: string) => void },
   filters: HybridLearningSearchFilters,
+  // Defaults to counting the read, because every caller that asks a question on
+  // an agent's behalf is a read. Push injection is the exception that proves it:
+  // nobody asked, so counting it would make the "did the agent consult a
+  // learning" metric true by construction.
+  options: LearningReadOptions = { incrementReadCount: true },
 ): Promise<HybridLearningSearchResult> => {
   const { learnings, embedder, warn } = deps;
-  const options = { incrementReadCount: true };
   const scope = filters.repos && filters.repos.length > 0 ? { repos: filters.repos } : {};
   const fallBackToFts = (reason: string): HybridLearningSearchResult => {
     warn(`hybrid learning search unavailable, falling back to FTS: ${reason}`);
@@ -116,5 +126,5 @@ export const searchLearningsWithHybridFallback = async (
       : fallBackToFts(shortfall(result.embeddingCount, result.learningCount));
   }
 
-  return { pipeline: "hybrid", learnings: result.learnings };
+  return { pipeline: "hybrid", learnings: result.learnings, provenance: result.provenance };
 };

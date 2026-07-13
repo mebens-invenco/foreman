@@ -44,10 +44,29 @@ export const COSINE_Z_FLOOR = 2.0;
  * putting n = 5 at exactly 2.0 — flush against the floor, where whether the arm
  * fires comes down to floating-point rounding rather than to the rule.
  */
+export type CosineCandidate = {
+  id: string;
+  /**
+   * The raw cosine similarity behind the z above.
+   *
+   * Reported rather than discarded because z answers "did this stand out from
+   * the corpus", which is the right question for RANKING and the wrong one for
+   * deciding whether to PUSH a learning at an agent who never asked. z is
+   * relative, so it is highest exactly where it should be lowest: against a
+   * homogeneous corpus an on-topic query is broadly similar to everything and
+   * nothing stands out, while an off-topic query gets a lucky outlier in a low,
+   * tight distribution. Measured against the live 143-learning corpus, "buy milk"
+   * scores z = 3.09 and a real foreman ticket scores z = 2.12. A caller that
+   * needs "close enough to be worth an agent's attention" must read the
+   * similarity itself.
+   */
+  similarity: number;
+};
+
 export const selectCosineCandidates = (
   queryVector: Float32Array,
   embeddings: readonly { learningId: string; vector: Float32Array }[],
-): string[] => {
+): CosineCandidate[] => {
   // A single embedding has no spread to be an outlier against, and the sample
   // variance below would divide by zero.
   if (embeddings.length < 2) {
@@ -73,5 +92,5 @@ export const selectCosineCandidates = (
     .filter((candidate) => (candidate.similarity - mean) / standardDeviation >= COSINE_Z_FLOOR)
     .sort((left, right) => right.similarity - left.similarity || left.id.localeCompare(right.id))
     .slice(0, COSINE_TOP_K)
-    .map((candidate) => candidate.id);
+    .map((candidate) => ({ id: candidate.id, similarity: candidate.similarity }));
 };
