@@ -64,24 +64,27 @@ export const searchLearningsWithHybridFallback = async (
     return { pipeline: "fts", learnings: learnings.searchLearnings(filters, options) };
   }
 
-  // Checked before embedding, so the fallback never pays for a model download
-  // that could not have changed the answer.
+  const shortfall = (embeddingCount: number, learningCount: number): string =>
+    `only ${embeddingCount}/${learningCount} in-scope learnings carry a ${embedder.modelId} vector ` +
+    `(need ${Math.round(MIN_EMBEDDING_COVERAGE * 100)}%); run \`foreman learnings backfill-embeddings\``;
+
   const learningCount = learnings.countLearnings(scope);
   if (learningCount === 0) {
     return { pipeline: "fts", learnings: [] };
   }
 
+  // An optimization, not the gate: it spares the caller a model download that
+  // could not have changed the answer. The decision that actually authorizes a
+  // hybrid ranking is made below, after the wait, against the corpus the ranking
+  // will really read.
+  //
   // `countCurrent…`, not a bare presence count: a vector whose learning has been
   // edited since is one `backfill-embeddings` still owes, and the cosine arm
   // cannot see it. Counting it would hold the gate open over a corpus hybrid has
   // largely gone blind to.
   const embeddingCount = learnings.countCurrentLearningEmbeddings({ ...scope, model: embedder.modelId });
-  const coverage = embeddingCount / learningCount;
-  if (coverage < MIN_EMBEDDING_COVERAGE) {
-    return fallBackToFts(
-      `only ${embeddingCount}/${learningCount} in-scope learnings carry a ${embedder.modelId} vector ` +
-        `(need ${Math.round(MIN_EMBEDDING_COVERAGE * 100)}%); run \`foreman learnings backfill-embeddings\``,
-    );
+  if (embeddingCount / learningCount < MIN_EMBEDDING_COVERAGE) {
+    return fallBackToFts(shortfall(embeddingCount, learningCount));
   }
 
   let vectors: Float32Array[];
@@ -97,5 +100,21 @@ export const searchLearningsWithHybridFallback = async (
     return fallBackToFts(error instanceof Error ? error.message : String(error));
   }
 
-  return { pipeline: "hybrid", learnings: learnings.searchLearningsHybrid(filters, { model: embedder.modelId, vectors }, options) };
+  // The corpus is free to move while the model initializes and infers — on a cold
+  // cache that await is a 133MB download, and the serve loop writes learnings
+  // throughout. So the gate is re-evaluated here, inside the same snapshot the
+  // ranking reads, and a decision can never outlive the corpus it was made on.
+  const result = learnings.searchLearningsHybridCovered(
+    filters,
+    { model: embedder.modelId, vectors },
+    { minCoverage: MIN_EMBEDDING_COVERAGE },
+    options,
+  );
+  if (!result.covered) {
+    return result.learningCount === 0
+      ? { pipeline: "fts", learnings: [] }
+      : fallBackToFts(shortfall(result.embeddingCount, result.learningCount));
+  }
+
+  return { pipeline: "hybrid", learnings: result.learnings };
 };
