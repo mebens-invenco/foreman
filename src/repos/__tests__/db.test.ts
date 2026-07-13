@@ -1284,6 +1284,39 @@ describe("persistence repos", () => {
     }
   });
 
+  test("skips a non-finite candidate instead of letting NaN poison the nearest-neighbour scan", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    const seed = (id: string, vector: number[]) => {
+      db.learnings.addLearning({ id, title: id, repo: "foreman", confidence: "emerging", content: "body", tags: [] });
+      db.learnings.upsertLearningEmbedding({
+        learningId: id,
+        model: "m1",
+        dims: vector.length,
+        vector: Float32Array.from(vector),
+        embeddedTitle: id,
+        embeddedContent: "body",
+      });
+    };
+
+    try {
+      // Right width, right model, right text snapshot -- so nothing else skips
+      // it and backfill cannot see it. It sorts first, and a NaN similarity
+      // makes every later `>` false, so it would install itself as the nearest
+      // neighbour forever and no valid candidate could ever displace it.
+      seed("aaa-nan", [Number.NaN, 0, 0]);
+      seed("valid", [0.9, 0.4359, 0]);
+
+      const nearest = db.learnings.nearestLearningEmbedding(Float32Array.from([1, 0, 0]), { model: "m1" });
+      expect(nearest?.learningId).toBe("valid");
+      expect(nearest?.similarity).toBeCloseTo(0.9, 4);
+    } finally {
+      db.close();
+    }
+  });
+
   test("never resolves a near duplicate against a vector whose learning has since changed", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);

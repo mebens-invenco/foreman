@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import { createEmbedder } from "../src/embeddings/create-embedder.js";
 import { learningEmbeddingText } from "../src/embeddings/learning-embedding-text.js";
+import { corpusEmbeddingDigest } from "../src/orchestration/__tests__/corpus-embedding-digest.js";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const corpusPath = path.join(projectRoot, "src", "eval", "retrieval", "fixtures", "corpus.json");
@@ -33,6 +34,11 @@ const main = async (): Promise<void> => {
   const fixture = {
     model: embedder.modelId,
     dims: embedder.dims,
+    // Ties the vectors to the exact canonical inputs they were computed from.
+    // Without it the calibration test validates the fixture only against itself,
+    // and a corpus or `learningEmbeddingText` change silently leaves it green
+    // against vectors that no longer describe the corpus.
+    inputDigest: corpusEmbeddingDigest(corpus),
     learnings: corpus.map((learning, index) => ({
       id: learning.id,
       repo: learning.repo,

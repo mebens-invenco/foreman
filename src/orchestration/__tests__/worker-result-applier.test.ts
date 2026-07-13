@@ -1704,9 +1704,10 @@ describe("WorkerResultApplier learning embeddings", () => {
 
       expect(vectorByLearningId.get(idByTitle.get("Alpha")!)).toEqual([2, 0, 0]);
       expect(vectorByLearningId.get(idByTitle.get("Beta")!)).toEqual([0, 3, 0]);
-      // Adds are embedded up front; the two content-changing updates re-embed in
-      // a second batched call.
-      expect(embedder.calls).toHaveLength(2);
+      // One up-front call for the adds, then one flush of the queued update
+      // before each add's near-duplicate lookup -- an add must never scan a
+      // scope an earlier update has left without a current vector.
+      expect(embedder.calls).toHaveLength(3);
     } finally {
       db.close();
     }
@@ -1763,6 +1764,36 @@ describe("WorkerResultApplier learning embeddings", () => {
       // its own warning, so collapsing them into one branch is a visible loss.
       expect(captured.warnings()).toContain("rejected by freshness guard");
       expect(captured.warnings()).not.toContain("failed to store learning embedding");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("flags an add against a learning an earlier update in the same batch rewrote", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-update-then-add-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      const neighbourId = seedNeighbour(db, embedder);
+
+      // The update rewrites the neighbour's text, which stales its vector; the
+      // re-embed is deferred. Unless the queue is flushed before the add's
+      // lookup, the neighbour has no current vector at that moment and the add
+      // silently lands unflagged against a duplicate that is really still there.
+      const rewritten = { title: "Neighbour", content: "Neighbour body, reworded" };
+      embedder.vectorsByText.set(learningEmbeddingText(rewritten), neighbourVector);
+
+      await applyLearningMutations(
+        db,
+        embedder,
+        [
+          { type: "update", id: neighbourId, content: rewritten.content },
+          addMutationAt(embedder, neighbourVector),
+        ],
+        tempDir,
+      );
+
+      expect(addedLearning(db).duplicateOf).toBe(neighbourId);
     } finally {
       db.close();
     }
