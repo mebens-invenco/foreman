@@ -3,7 +3,8 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { createRepos, type ForemanRepos } from "../repos/index.js";
+import { priorityToRank, type ActionType, type Task } from "../domain/index.js";
+import { createRepos, type AttemptRecord, type ForemanRepos } from "../repos/index.js";
 import { openSqliteDatabase, type SqliteForemanDatabase } from "../repos/impl/sqlite-database.js";
 import { createDefaultWorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
@@ -86,3 +87,42 @@ export const createMigratedDb = async (
 };
 
 export const createTestConfig = () => createDefaultWorkspaceConfig("test-workspace", "file");
+
+/**
+ * A real `execution_attempt` row, with the task target and job it hangs off.
+ *
+ * `learning_injection_event.attempt_id` is a foreign key, so a telemetry fixture
+ * cannot hand injection a synthetic attempt id: the insert would be rejected, and
+ * the never-fail catch around it would swallow the rejection into a warning.
+ */
+export const seedExecutionAttempt = (
+  repos: ForemanRepos,
+  input: { task: Task; repoKey: string; action: ActionType },
+): AttemptRecord => {
+  repos.workers.ensureWorkerSlots(1);
+  repos.taskMirror.saveTasks([input.task]);
+  const target = repos.taskMirror.getTaskTarget(input.task.id, input.repoKey);
+  if (!target) {
+    throw new Error(`seedExecutionAttempt: task ${input.task.id} carries no target for repo ${input.repoKey}`);
+  }
+
+  const job = repos.jobs.createJob({
+    taskId: input.task.id,
+    taskTargetId: target.id,
+    taskProvider: input.task.provider,
+    action: input.action,
+    priorityRank: priorityToRank(input.task.priority),
+    repoKey: input.repoKey,
+    baseBranch: "master",
+    dedupeKey: `${input.task.id}:${input.repoKey}:${input.action}`,
+    selectionReason: "test fixture",
+  });
+
+  return repos.attempts.createAttempt({
+    jobId: job.id,
+    workerId: repos.workers.listWorkers()[0]!.id,
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-5.4",
+    runnerVariant: "high",
+  });
+};

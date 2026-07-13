@@ -81,8 +81,9 @@ const runCli = async (args: string[]): Promise<unknown> => JSON.parse(await runC
  * so the measured counter and the honour-system one deliberately disagree. A stats
  * query that reads the wrong one of those two reports an empty rollup here.
  */
-const seedInjectionEvents = async (workspaceRoot: string): Promise<void> => {
+const seedInjectionEvents = async (workspaceRoot: string): Promise<Record<string, string>> => {
   const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), projectRoot);
+  const attemptIds: Record<string, string> = {};
   try {
     db.workers.ensureWorkerSlots(1);
     const workerId = db.workers.listWorkers()[0]!.id;
@@ -137,10 +138,22 @@ const seedInjectionEvents = async (workspaceRoot: string): Promise<void> => {
       if (applied) {
         db.learningInjectionEvents.markInjectedLearningApplied({ attemptId: attempt.id, learningId });
       }
+      attemptIds[learningId] = attempt.id;
     };
 
     attemptFor("learn-a", true);
     attemptFor("learn-b", false);
+  } finally {
+    db.close();
+  }
+
+  return attemptIds;
+};
+
+const backdateAttempt = async (workspaceRoot: string, attemptId: string, startedAt: string): Promise<void> => {
+  const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), projectRoot);
+  try {
+    db.database.sqlite.prepare("UPDATE execution_attempt SET started_at = ? WHERE id = ?").run(startedAt, attemptId);
   } finally {
     db.close();
   }
@@ -232,6 +245,39 @@ describe("learnings cli", () => {
     expect(output.appliedLearnings).toBe(1);
     expect(output.hitRate).toBe(0.5);
     expect(output.topAppliedLearnings).toEqual([{ learningId: "learn-a", title: "Planning prompt learnings note", injectedCount: 1, appliedCount: 1 }]);
+  });
+
+  test("injection-stats --since normalizes the boundary and actually filters on it", async () => {
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
+    const attemptIds = await seedInjectionEvents(workspaceRoot);
+    // Only `learn-b`'s attempt falls outside the window; `learn-a`'s — the applied
+    // one — stays inside it.
+    await backdateAttempt(workspaceRoot, attemptIds["learn-b"]!, "2020-01-01T00:00:00.000Z");
+
+    const output = (await runCli([
+      "learnings",
+      "injection-stats",
+      workspaceName,
+      "--since",
+      "2026-01-01",
+      "--json",
+    ])) as { since: string; eligibleAttempts: number; injectedLearnings: number; appliedLearnings: number; hitRate: number };
+
+    // A `since` echoed back un-normalized would still be string-compared against
+    // ISO instants, match nothing, and report zeros with exit code 0.
+    expect(output.since).toBe("2026-01-01T00:00:00.000Z");
+    expect(output.eligibleAttempts).toBe(1);
+    expect(output.injectedLearnings).toBe(1);
+    expect(output.appliedLearnings).toBe(1);
+    expect(output.hitRate).toBe(1);
+  });
+
+  test("injection-stats rejects a --since it cannot parse", async () => {
+    const { workspaceName } = await createCliWorkspace();
+
+    await expect(runCliRaw(["learnings", "injection-stats", workspaceName, "--since", "not-a-date", "--json"])).rejects.toThrow(
+      /ISO-8601/,
+    );
   });
 
   test("injection-stats renders a table when --json is absent", async () => {

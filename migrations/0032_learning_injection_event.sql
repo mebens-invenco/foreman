@@ -1,6 +1,6 @@
 CREATE TABLE learning_injection_event (
   id TEXT PRIMARY KEY,
-  attempt_id TEXT NOT NULL,
+  attempt_id TEXT NOT NULL REFERENCES execution_attempt(id) ON DELETE CASCADE,
   task_id TEXT NOT NULL,
   action TEXT NOT NULL CHECK (action IN ('execution', 'retry', 'review')),
   learning_id TEXT NOT NULL REFERENCES learning(id) ON DELETE CASCADE,

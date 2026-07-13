@@ -6,7 +6,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import type { Task } from "../../domain/index.js";
 import type { WorkerPromptTemplateName } from "../../prompts/template-renderer.js";
 import { FakeEmbedder } from "../../test-support/fake-embedder.js";
-import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
+import { createMigratedDb, createTempDir, seedExecutionAttempt, testProjectRoot } from "../../test-support/helpers.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import type { WorkspacePaths } from "../../workspace/workspace-paths.js";
 import { renderWorkerPrompt } from "../render-worker-prompt.js";
@@ -96,13 +96,15 @@ const withWorkspace = async (run: (input: { db: Db; paths: WorkspacePaths }) => 
   };
 
   try {
+    renderAttemptId = seedExecutionAttempt(db, { task, repoKey: "foreman", action: "execution" }).id;
     await run({ db, paths });
   } finally {
     db.close();
   }
 };
 
-const renderAttemptId = "01ATTEMPT0000000000000000";
+/** Real, not synthetic: injection's telemetry row carries a foreign key to it. */
+let renderAttemptId: string;
 
 const render = (input: {
   db: Db;

@@ -1,10 +1,19 @@
+import type { ActionType } from "../domain/orchestration.js";
+
 /**
  * The actions a learnings digest is pushed into, and so the only actions whose
  * attempts can carry an injection.
+ *
+ * The array is the source and the union is derived from it, not the reverse: an
+ * annotated array type-checks elements ⊆ union but never union ⊆ elements, so a
+ * fourth action added to a hand-written union would compile clean while the
+ * prompt seam silently skipped it and the eligibility predicate silently widened.
+ * `learning-injection-action-parity.test.ts` holds the migration's CHECK to the
+ * same set — the one restatement TypeScript cannot reach.
  */
-export type LearningInjectionAction = "execution" | "retry" | "review";
+export const learningInjectionActionValues = ["execution", "retry", "review"] as const satisfies readonly ActionType[];
 
-export const learningInjectionActionValues: readonly LearningInjectionAction[] = ["execution", "retry", "review"];
+export type LearningInjectionAction = (typeof learningInjectionActionValues)[number];
 
 export type InjectedLearningEvent = {
   learningId: string;

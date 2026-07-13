@@ -7,7 +7,7 @@ import type { Task } from "../../domain/index.js";
 import { ForemanError } from "../../lib/errors.js";
 import type { LearningInjectionAction, LearningInjectionEventRepo } from "../../repos/learning-injection-event-repo.js";
 import { FakeEmbedder } from "../../test-support/fake-embedder.js";
-import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
+import { createMigratedDb, createTempDir, seedExecutionAttempt, testProjectRoot } from "../../test-support/helpers.js";
 import {
   injectRelevantLearnings,
   INJECTION_SIMILARITY_FLOOR,
@@ -34,7 +34,7 @@ const task = (input: { title: string; description: string }): Task => ({
   priority: "none",
   labels: [],
   assignee: null,
-  targets: [],
+  targets: [{ repoKey: "foreman", branchName: "eng-1", position: 0 }],
   targetDependencies: [],
   dependencies: { taskIds: [], baseTaskId: null },
   baseBranch: null,
@@ -98,11 +98,19 @@ const seedPadding = (db: Db, count: number, vector = [1, 0, 0]): void => {
   }
 };
 
+/**
+ * The attempt every test in this file injects into. Seeded per db because
+ * `learning_injection_event.attempt_id` is a foreign key — a synthetic id would
+ * have its inserts rejected, and the never-fail catch would hide the rejection.
+ */
+let attemptId: string;
+
 const withDb = async (run: (db: Db) => Promise<void>): Promise<void> => {
   const tempDir = await createTempDir("foreman-inject-learnings-test-");
   cleanupDirs.push(tempDir);
   const db = await createMigratedDb(path.join(tempDir, "foreman.db"), testProjectRoot);
   try {
+    attemptId = seedExecutionAttempt(db, { task: queryTask, repoKey: "foreman", action: "execution" }).id;
     await run(db);
   } finally {
     db.close();
@@ -115,8 +123,6 @@ const embedderMatching = (targetVector = [0, 1, 0]): FakeEmbedder => {
   embedder.vectorsByText.set(taskQuery, Float32Array.from(targetVector));
   return embedder;
 };
-
-const attemptId = "01ATTEMPT0000000000000000";
 
 const injectWith = async (
   db: Db,
@@ -418,6 +424,20 @@ describe("injectRelevantLearnings", () => {
 
         const actions = db.database.sqlite.prepare("SELECT action FROM learning_injection_event").all();
         expect(actions).toEqual([{ action: "review" }]);
+      });
+    });
+
+    test("cascades its events away when the attempt they hang off is deleted", async () => {
+      await withDb(async (db) => {
+        seedLearning(db, { id: "learn-target", content: contentWithRule("learn-target"), vector: [0, 1, 0] });
+        seedPadding(db, 12);
+
+        await injectWith(db, embedderMatching());
+        expect(injectionRows(db)).toHaveLength(1);
+
+        db.database.sqlite.prepare("DELETE FROM execution_attempt WHERE id = ?").run(attemptId);
+
+        expect(injectionRows(db)).toEqual([]);
       });
     });
 
