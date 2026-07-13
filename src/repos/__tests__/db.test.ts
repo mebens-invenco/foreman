@@ -1262,36 +1262,50 @@ describe("persistence repos", () => {
       }
       expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual([]);
 
-      // The write boundary refuses this, so reaching it means the blob rotted at
-      // rest. Go around the repo to plant it, exactly as corruption would.
-      db.database.sqlite
-        .prepare("UPDATE learning_embedding SET vector = ? WHERE learning_id = ?")
-        .run(Buffer.from(Float32Array.from([0, 0, 0]).buffer), "learn-rotted");
+      // Every flavour of rot a blob can suffer at rest. The write boundaries refuse
+      // all of them, so a row like this was corrupted after it was written — and
+      // each has to land on the same repair path.
+      const rot = [
+        // No direction: scoring it 0 puts it at the head of a negative ranking.
+        Buffer.from(Float32Array.from([0, 0, 0]).buffer),
+        Buffer.from(Float32Array.from([NaN, 1, 0]).buffer),
+        // Not a multiple of 4. `new Float32Array` throws outright on this one, so a
+        // reader that decodes before it classifies takes the repair path down with
+        // it — `backfill-embeddings` would crash instead of re-embedding the row.
+        Buffer.alloc(10, 1),
+        // Decodable, but fewer floats than the row claims to hold.
+        Buffer.from(Float32Array.from([1, 0]).buffer),
+      ];
 
-      // Not merely excluded from the ranking — reported as missing, so the command
-      // the operator is actually told to run repairs it. Otherwise a single rotted
-      // row is a workspace-wide outage fixable only by hand-written SQL.
-      expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual(["learn-rotted"]);
-      expect(db.learnings.getCurrentLearningEmbeddings({ model: "m" }).map((row) => row.learningId)).toEqual(["learn-ok"]);
-      expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(1);
+      for (const blob of rot) {
+        // Go around the repo to plant it, exactly as corruption would.
+        db.database.sqlite.prepare("UPDATE learning_embedding SET vector = ? WHERE learning_id = ?").run(blob, "learn-rotted");
 
-      // The identity the whole freshness rule rests on still holds.
-      expect(
-        db.learnings.countCurrentLearningEmbeddings({ model: "m" }) + db.learnings.listLearningIdsMissingEmbedding("m").length,
-      ).toBe(db.learnings.countLearnings());
+        // Not merely excluded from the ranking — reported as missing, so the command
+        // the operator is actually told to run repairs it. Otherwise a single rotted
+        // row is a workspace-wide outage fixable only by hand-written SQL.
+        expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual(["learn-rotted"]);
+        expect(db.learnings.getCurrentLearningEmbeddings({ model: "m" }).map((row) => row.learningId)).toEqual(["learn-ok"]);
+        expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(1);
 
-      // And re-embedding through the normal path repairs it.
-      const rotted = db.learnings.getLearningsByIds(["learn-rotted"])[0]!;
-      db.learnings.upsertLearningEmbedding({
-        learningId: rotted.id,
-        model: "m",
-        dims: 3,
-        vector: Float32Array.from([0, 1, 0]),
-        embeddedTitle: rotted.title,
-        embeddedContent: rotted.content,
-      });
-      expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual([]);
-      expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(2);
+        // The identity the whole freshness rule rests on still holds.
+        expect(
+          db.learnings.countCurrentLearningEmbeddings({ model: "m" }) + db.learnings.listLearningIdsMissingEmbedding("m").length,
+        ).toBe(db.learnings.countLearnings());
+
+        // And re-embedding through the normal path repairs it.
+        const rotted = db.learnings.getLearningsByIds(["learn-rotted"])[0]!;
+        db.learnings.upsertLearningEmbedding({
+          learningId: rotted.id,
+          model: "m",
+          dims: 3,
+          vector: Float32Array.from([0, 1, 0]),
+          embeddedTitle: rotted.title,
+          embeddedContent: rotted.content,
+        });
+        expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual([]);
+        expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(2);
+      }
     } finally {
       db.close();
     }

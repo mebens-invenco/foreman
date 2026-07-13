@@ -90,7 +90,13 @@ describe("backfillLearningEmbeddings", () => {
     }
   });
 
-  test("repairs a vector corrupted after it was written, so search is never bricked", async () => {
+  test.each([
+    ["zero magnitude", Buffer.from(Float32Array.from([0, 0, 0]).buffer)],
+    // Not a multiple of 4, so `new Float32Array` throws outright. A reader that
+    // decodes before it classifies takes THIS command down with it — the repair
+    // path crashes rather than repairing.
+    ["truncated mid-float", Buffer.alloc(10, 1)],
+  ])("repairs a %s vector corrupted after it was written, so search is never bricked", async (_flavour, rotted) => {
     const db = await createDb();
     const embedder = new FakeEmbedder();
 
@@ -100,14 +106,12 @@ describe("backfillLearningEmbeddings", () => {
       }
       await backfillLearningEmbeddings({ learnings: db.learnings, embedder });
 
-      // The write boundary refuses an unrankable vector, so a rotted blob can only
+      // The write boundary refuses every one of these, so a rotted blob can only
       // arrive here — bit-rot, a partial write, someone's SQL. Its text snapshot
       // still matches, which is what used to make it invisible to the backfill and
       // fatal to every search: `learnings search` threw, and the warning telling
       // the operator to run this very command was a no-op.
-      db.database.sqlite
-        .prepare("UPDATE learning_embedding SET vector = ? WHERE learning_id = ?")
-        .run(Buffer.from(Float32Array.from([0, 0, 0]).buffer), "learn-a");
+      db.database.sqlite.prepare("UPDATE learning_embedding SET vector = ? WHERE learning_id = ?").run(rotted, "learn-a");
 
       expect(db.learnings.listLearningIdsMissingEmbedding(embedder.modelId)).toEqual(["learn-a"]);
 
