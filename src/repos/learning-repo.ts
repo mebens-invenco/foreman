@@ -43,6 +43,15 @@ export type LearningEmbeddingUpsert = LearningEmbeddingRecord & {
   embeddedContent: string;
 };
 
+/**
+ * Either the hybrid ranking, or the coverage that was too thin to authorize it.
+ * The two are exclusive by construction: the caller cannot receive a ranking that
+ * the gate did not clear, nor a shortfall it can ignore.
+ */
+export type CoveredHybridSearch =
+  | { covered: true; learnings: LearningSearchRecord[] }
+  | { covered: false; learningCount: number; embeddingCount: number };
+
 export interface LearningRepo {
   addLearning(input: {
     id?: string;
@@ -92,6 +101,23 @@ export interface LearningRepo {
     queryEmbedding: { model: string; vectors: readonly Float32Array[] },
     options?: LearningReadOptions,
   ): LearningSearchRecord[];
+  /**
+   * `searchLearningsHybrid`, gated on embedding coverage — with the gate and the
+   * ranking reading ONE database snapshot.
+   *
+   * Embedding a query is slow (on a cold cache, a model download), and the live
+   * server writes to the same database throughout. A coverage check made before
+   * that wait and enforced after it authorizes a ranking over a corpus that may
+   * have moved underneath it, which is the biased ranking the gate exists to
+   * prevent. So the check happens here, beside the read it guards, rather than in
+   * the caller.
+   */
+  searchLearningsHybridCovered(
+    filters: { queries?: string[]; repos?: string[]; limit?: number; offset?: number },
+    queryEmbedding: { model: string; vectors: readonly Float32Array[] },
+    gate: { minCoverage: number },
+    options?: LearningReadOptions,
+  ): CoveredHybridSearch;
   getLearningsByIds(ids: string[], options?: LearningReadOptions): LearningRecord[];
   listLearnings(filters?: { search?: string; repo?: string; limit?: number; offset?: number }): LearningRecord[];
   /** How many learnings the given repo scope holds, embedded or not. */
