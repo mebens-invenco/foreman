@@ -6,6 +6,7 @@ import { describe, expect, test } from "vitest";
 import { cosineSimilarity } from "../../retrieval/cosine-similarity.js";
 import { testProjectRoot } from "../../test-support/helpers.js";
 import { NEAR_DUPLICATE_SIMILARITY_THRESHOLD } from "../worker-result-applier.js";
+import { corpusEmbeddingDigest } from "./corpus-embedding-digest.js";
 
 /**
  * Calibrates NEAR_DUPLICATE_SIMILARITY_THRESHOLD against real bge-small-en-v1.5
@@ -16,9 +17,11 @@ import { NEAR_DUPLICATE_SIMILARITY_THRESHOLD } from "../worker-result-applier.js
  * hermetic -- the real model is a ~133MB download.
  */
 const fixturePath = path.join(testProjectRoot, "src", "orchestration", "__tests__", "fixtures", "corpus-embeddings.json");
+const corpusPath = path.join(testProjectRoot, "src", "eval", "retrieval", "fixtures", "corpus.json");
 
 type EmbeddedLearning = { id: string; repo: string; title: string; vector: string };
-type CorpusEmbeddings = { model: string; dims: number; learnings: EmbeddedLearning[] };
+type CorpusEmbeddings = { model: string; dims: number; inputDigest: string; learnings: EmbeddedLearning[] };
+type CorpusLearning = { id: string; title: string; content: string };
 
 // `Buffer.from(base64)` returns a view into a shared pool, so `.buffer` is the
 // whole pool. Slicing by byteOffset/byteLength copies just this vector -- the
@@ -29,6 +32,7 @@ const decodeVector = (base64: string): Float32Array => {
 };
 
 const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as CorpusEmbeddings;
+const corpus = JSON.parse(readFileSync(corpusPath, "utf8")) as CorpusLearning[];
 const vectorsById = new Map(fixture.learnings.map((learning) => [learning.id, decodeVector(learning.vector)]));
 
 const similarity = (leftId: string, rightId: string): number => {
@@ -72,6 +76,17 @@ describe("near-duplicate threshold calibration", () => {
     expect(fixture.dims).toBe(384);
     expect(vectorsById.size).toBe(fixture.learnings.length);
     expect(fixture.learnings.every((learning) => decodeVector(learning.vector).length === fixture.dims)).toBe(true);
+  });
+
+  test("the fixture's vectors were computed from the corpus as it stands now", () => {
+    // Everything below calibrates a threshold against these vectors. Compared
+    // only against itself the fixture cannot detect a corpus edit or a change to
+    // `learningEmbeddingText`, and the whole suite would stay green while
+    // measuring text the corpus no longer carries. Regenerate with
+    // `npx tsx scripts/generate-corpus-embeddings.ts` when this fails -- and
+    // re-derive the threshold, because the window it sits in will have moved.
+    expect(fixture.inputDigest).toBe(corpusEmbeddingDigest(corpus));
+    expect(fixture.learnings.map((learning) => learning.id)).toEqual(corpus.map((learning) => learning.id));
   });
 
   test.each(NEAR_IDENTICAL_PAIRS)("flags the near-identical pair: %s / %s (%s)", (leftId, rightId) => {
