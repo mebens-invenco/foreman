@@ -10,6 +10,8 @@ The task and PR have already been selected. Do not scout, reprioritize, or choos
 
 {{fragment:review-github}}
 
+{{fragment:comment-brevity}}
+
 {{fragment:learning-policy}}
 
 {{fragment:summary-policy}}

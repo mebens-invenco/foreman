@@ -8,6 +8,8 @@ You are reviewing one selected pull request in Foreman as an internal review age
 
 {{fragment:review-github}}
 
+{{fragment:comment-brevity}}
+
 {{fragment:summary-policy}}
 
 {{fragment:learning-policy}}

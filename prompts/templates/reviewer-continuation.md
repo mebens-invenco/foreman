@@ -4,6 +4,8 @@ You are continuing a reviewer session on the same selected PR. A prior reviewer 
 
 {{fragment:review-github}}
 
+{{fragment:comment-brevity}}
+
 {{fragment:summary-policy}}
 
 {{fragment:reviewer-audience}}
