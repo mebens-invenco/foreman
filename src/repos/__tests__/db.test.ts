@@ -1313,13 +1313,17 @@ describe("persistence repos", () => {
         .prepare("UPDATE learning_embedding SET vector = ? WHERE learning_id = ?")
         .run(Buffer.from(Float32Array.from([Number.NaN, 0, 0]).buffer), "aaa-nan");
 
-      // The row keeps its text snapshot, so nothing downstream would skip it and
-      // backfill cannot see it. This filter is the only thing standing between it and
-      // the scan: `cosineSimilarity` asserts rankability on both operands, so a
-      // candidate that reached the loop would THROW rather than score, and
-      // `findNearDuplicate` catches that -- one rotted row would silently degrade
-      // near-duplicate detection to un-flagged for the whole scope.
+      // The row keeps its text snapshot, so the freshness rule alone would call it
+      // current. The rankable filter does double duty. It keeps the row out of the
+      // scan: `cosineSimilarity` asserts rankability on both operands, so a candidate
+      // that reached the loop would THROW rather than score, and `findNearDuplicate`
+      // catches that -- one rotted row would silently degrade near-duplicate detection
+      // to un-flagged for the whole scope. And, being the complement of `missing`, it
+      // hands the row to backfill. Unlike the wrong-width sibling above -- which stays
+      // rankable, stays current, and is therefore permanent -- this row is repairable
+      // by the command the operator is actually told to run.
       expect(db.learnings.getCurrentLearningEmbeddings({ model: "m1" }).map((row) => row.learningId)).toEqual(["valid"]);
+      expect(db.learnings.listLearningIdsMissingEmbedding("m1")).toEqual(["aaa-nan"]);
 
       const nearest = db.learnings.nearestLearningEmbedding(Float32Array.from([1, 0, 0]), { model: "m1" });
       expect(nearest?.learningId).toBe("valid");
