@@ -4,6 +4,7 @@ import { isoNow } from "../../lib/time.js";
 import { selectCosineCandidates } from "../../retrieval/cosine-candidates.js";
 import { fuseByReciprocalRank } from "../../retrieval/reciprocal-rank-fusion.js";
 import type {
+  CoveredHybridSearch,
   LearningEmbeddingRecord,
   LearningEmbeddingUpsert,
   LearningReadOptions,
@@ -102,6 +103,47 @@ const learningEmbeddingFilter = (
   }
 
   return { where: clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "", params };
+};
+
+type HybridQuery = { text: string; vector: Float32Array };
+
+// Zip before normalizing. `normalizeFilterValues` trims and de-duplicates, so
+// normalizing the query texts alone would shift vectors onto the wrong queries
+// the moment a caller passes a blank or repeated query.
+const resolveHybridQueries = (
+  filters: { queries?: string[] },
+  queryEmbedding: { vectors: readonly Float32Array[] },
+): HybridQuery[] => {
+  const rawQueries = filters.queries ?? [];
+  if (queryEmbedding.vectors.length !== rawQueries.length) {
+    throw new ForemanError(
+      "hybrid_query_vector_mismatch",
+      `Received ${queryEmbedding.vectors.length} query vectors for ${rawQueries.length} queries`,
+      500,
+    );
+  }
+
+  const seen = new Set<string>();
+  const queries: HybridQuery[] = [];
+  rawQueries.forEach((rawQuery, index) => {
+    const text = rawQuery.trim();
+    if (text.length === 0 || seen.has(text)) {
+      return;
+    }
+
+    seen.add(text);
+    queries.push({ text, vector: queryEmbedding.vectors[index]! });
+  });
+
+  // Falling through to `searchLearnings` here would hand back its recency
+  // listing — rows scored `0.0` that never met the fusion — which the caller
+  // would then label hybrid. The CLI already rejects a missing `--query`, so an
+  // all-blank query list is a caller bug, not a mode to degrade around.
+  if (queries.length === 0) {
+    throw new ForemanError("hybrid_query_missing", "searchLearningsHybrid requires at least one non-blank query", 500);
+  }
+
+  return queries;
 };
 
 const toSafeFtsQuery = (query: string): string =>
@@ -267,38 +309,57 @@ export class SqliteLearningRepo implements LearningRepo {
     queryEmbedding: { model: string; vectors: readonly Float32Array[] },
     options: LearningReadOptions = {},
   ): LearningSearchRecord[] {
-    const rawQueries = filters.queries ?? [];
-    if (queryEmbedding.vectors.length !== rawQueries.length) {
-      throw new ForemanError(
-        "hybrid_query_vector_mismatch",
-        `Received ${queryEmbedding.vectors.length} query vectors for ${rawQueries.length} queries`,
-        500,
-      );
+    const queries = resolveHybridQueries(filters, queryEmbedding);
+    const learnings = this.rankLearningsHybrid(queries, filters, queryEmbedding.model);
+
+    if (options.incrementReadCount) {
+      this.incrementReadCount(learnings.map((learning) => learning.id));
     }
 
-    // Zip before normalizing. `normalizeFilterValues` trims and de-duplicates,
-    // so normalizing the query texts alone would shift vectors onto the wrong
-    // queries the moment a caller passes a blank or repeated query.
-    const seenQueries = new Set<string>();
-    const queries: { text: string; vector: Float32Array }[] = [];
-    rawQueries.forEach((rawQuery, index) => {
-      const text = rawQuery.trim();
-      if (text.length === 0 || seenQueries.has(text)) {
-        return;
+    return learnings;
+  }
+
+  searchLearningsHybridCovered(
+    filters: { queries?: string[]; repos?: string[]; limit?: number; offset?: number },
+    queryEmbedding: { model: string; vectors: readonly Float32Array[] },
+    gate: { minCoverage: number },
+    options: LearningReadOptions = {},
+  ): CoveredHybridSearch {
+    // Validated before the snapshot opens, so a caller bug surfaces as itself
+    // rather than as a coverage miss.
+    const queries = resolveHybridQueries(filters, queryEmbedding);
+    const repos = normalizeFilterValues(filters.repos);
+    const scope = repos.length > 0 ? { repos } : {};
+
+    // The decision and the ranking it authorizes read ONE snapshot. Left as two
+    // independent reads, the live server — a separate process on the same WAL
+    // file — can commit a corpus change in between, and the gate would then be
+    // enforced against a corpus that no longer exists.
+    const result = this.sqlite.transaction((): CoveredHybridSearch => {
+      const learningCount = this.countLearnings(scope);
+      const embeddingCount = this.countCurrentLearningEmbeddings({ ...scope, model: queryEmbedding.model });
+      if (learningCount === 0 || embeddingCount / learningCount < gate.minCoverage) {
+        return { covered: false, learningCount, embeddingCount };
       }
 
-      seenQueries.add(text);
-      queries.push({ text, vector: queryEmbedding.vectors[index]! });
-    });
+      return { covered: true, learnings: this.rankLearningsHybrid(queries, filters, queryEmbedding.model) };
+    })();
 
-    // Delegating to `searchLearnings` here would take its listing branch and hand
-    // back recency-ordered rows scored `0.0` — records that never met the fusion,
-    // labelled hybrid by the caller. The CLI already rejects a missing `--query`,
-    // so an all-blank query list is a caller bug, not a mode to degrade around.
-    if (queries.length === 0) {
-      throw new ForemanError("hybrid_query_missing", "searchLearningsHybrid requires at least one non-blank query", 500);
+    // Outside the snapshot: a read counter is telemetry about what came back, not
+    // part of the view the ranking was computed from. Writing inside a deferred
+    // read transaction would also risk SQLITE_BUSY_SNAPSHOT against a live writer.
+    if (result.covered && options.incrementReadCount) {
+      this.incrementReadCount(result.learnings.map((learning) => learning.id));
     }
 
+    return result;
+  }
+
+  private rankLearningsHybrid(
+    queries: readonly HybridQuery[],
+    filters: { repos?: string[]; limit?: number; offset?: number },
+    model: string,
+  ): LearningSearchRecord[] {
     const repos = normalizeFilterValues(filters.repos);
     const limit = filters.limit ?? 20;
     const offset = filters.offset ?? 0;
@@ -331,7 +392,7 @@ export class SqliteLearningRepo implements LearningRepo {
     // `selectCosineCandidates` bounds that list rather than ranking the whole
     // corpus, so an empty result stays possible and bm25 hits are not displaced
     // by arbitrary near-neighbours.
-    const embeddings = this.getCurrentLearningEmbeddings({ repos, model: queryEmbedding.model });
+    const embeddings = this.getCurrentLearningEmbeddings({ repos, model });
 
     const bestScores = new Map<string, number>();
     for (const query of queries) {
@@ -343,7 +404,7 @@ export class SqliteLearningRepo implements LearningRepo {
       }
     }
 
-    const learnings = Array.from(bestScores, ([id, score]) => ({ row: rowsById.get(id), score }))
+    return Array.from(bestScores, ([id, score]) => ({ row: rowsById.get(id), score }))
       .flatMap(({ row, score }) => (row ? [mapLearningSearchRecord({ ...row, score })] : []))
       .sort((left, right) => {
         // Fused score is a relevance score: descending, unlike raw bm25.
@@ -358,12 +419,6 @@ export class SqliteLearningRepo implements LearningRepo {
         return left.id.localeCompare(right.id);
       })
       .slice(offset, offset + limit);
-
-    if (options.incrementReadCount) {
-      this.incrementReadCount(learnings.map((learning) => learning.id));
-    }
-
-    return learnings;
   }
 
   getLearningsByIds(ids: string[], options: LearningReadOptions = {}): LearningRecord[] {

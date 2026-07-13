@@ -5,7 +5,8 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { ForemanError } from "../../lib/errors.js";
 import { addSeconds, isoNow } from "../../lib/time.js";
-import { FakeEmbedder } from "../../test-support/fake-embedder.js";
+import type { Embedder } from "../../embeddings/embedder.js";
+import { FakeEmbedder, fakeEmbeddingVector } from "../../test-support/fake-embedder.js";
 import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
 import { searchLearningsWithHybridFallback } from "../hybrid-learning-search.js";
 
@@ -159,6 +160,41 @@ describe("searchLearningsWithHybridFallback", () => {
 
       expect(result.pipeline).toBe("fts");
       expect(warnings[0]).toMatch(/only 0\/9 in-scope learnings carry a fake-embedder-v1 vector/);
+    });
+  });
+
+  test("re-checks coverage against the corpus as it stands after embedding", async () => {
+    await withDb(async (db) => {
+      seedCorpus(db);
+      const warnings: string[] = [];
+
+      // Embedding a query is slow — on a cold cache it is a model download — and
+      // the serve loop writes learnings throughout. This embedder stands in for
+      // that: the corpus is fully covered when the gate is first consulted, and
+      // two texts have moved by the time the ranking runs.
+      const racingEmbedder: Embedder = {
+        modelId: "fake-embedder-v1",
+        dims: 3,
+        async embed(texts) {
+          db.learnings.updateLearning({ id: "pad-0", content: "rewritten under the reader" });
+          db.learnings.updateLearning({ id: "pad-1", content: "rewritten under the reader too" });
+          return texts.map((text, index) => fakeEmbeddingVector(text, index));
+        },
+      };
+
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "fake-embedder-v1" })).toBe(9);
+
+      const result = await searchLearningsWithHybridFallback(
+        { learnings: db.learnings, embedder: racingEmbedder, warn: (message) => warnings.push(message) },
+        { queries: ["planning prompt"], repos: ["shared"] },
+      );
+
+      // 7 of 9 is below the gate. A decision made before the wait and enforced
+      // after it would have authorized exactly the biased ranking the gate exists
+      // to prevent — and reported it as hybrid.
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "fake-embedder-v1" })).toBe(7);
+      expect(result.pipeline).toBe("fts");
+      expect(warnings[0]).toMatch(/only 7\/9 in-scope learnings carry a fake-embedder-v1 vector/);
     });
   });
 

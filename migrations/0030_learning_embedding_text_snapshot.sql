@@ -16,11 +16,19 @@
 ALTER TABLE learning_embedding ADD COLUMN embedded_title TEXT;
 ALTER TABLE learning_embedding ADD COLUMN embedded_content TEXT;
 
--- Backfill under the rule in force until now: a vector at least as new as its
--- learning was taken to describe it. Rows that were already stale keep NULL
--- columns and stay stale, so no vector silently becomes current, and nothing
--- that was usable before this migration stops being usable after it.
+-- Backfill only where the old timestamps say the vector is UNAMBIGUOUSLY newer
+-- than its learning. Strictly newer, not `>=`: equal timestamps are precisely the
+-- millisecond-resolution ambiguity this migration exists to retire. A learning
+-- edited in the same millisecond as its embedding write is indistinguishable here
+-- from one that was never touched — and copying the learning's current text
+-- beside a vector computed from the previous text would make the snapshot check
+-- agree with itself forever, so no backfill would ever repair it. Leaving the
+-- columns NULL costs one re-embed and cannot be wrong.
+--
+-- Rows already stale under the old rule likewise keep NULL columns and stay
+-- stale. So no vector silently becomes current, and the only rows that lose their
+-- usable status are the ones whose status was never knowable.
 UPDATE learning_embedding
    SET embedded_title = (SELECT learning.title FROM learning WHERE learning.id = learning_embedding.learning_id),
        embedded_content = (SELECT learning.content FROM learning WHERE learning.id = learning_embedding.learning_id)
- WHERE learning_embedding.updated_at >= (SELECT learning.updated_at FROM learning WHERE learning.id = learning_embedding.learning_id);
+ WHERE learning_embedding.updated_at > (SELECT learning.updated_at FROM learning WHERE learning.id = learning_embedding.learning_id);
