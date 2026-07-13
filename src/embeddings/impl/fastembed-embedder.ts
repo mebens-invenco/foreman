@@ -3,6 +3,7 @@ import { EmbeddingModel, FlagEmbedding } from "fastembed";
 import { ForemanError } from "../../lib/errors.js";
 import { ensureDir } from "../../lib/fs.js";
 import type { Embedder } from "../embedder.js";
+import { assertRankableVector } from "../rankable-vector.js";
 
 const MODEL_ID = "bge-small-en-v1.5";
 const MODEL_DIMS = 384;
@@ -76,6 +77,15 @@ export class FastembedEmbedder implements Embedder {
         `Embedder ${this.modelId} produced a ${widthMismatch.length}-dim vector but declares ${this.dims} dims`,
         500,
       );
+    }
+
+    // Same class of contract as the two checks above, and the same reason to
+    // enforce it here: callers persist what this port returns, and a vector with
+    // no direction cannot be ranked. Stored, it is a poison pill — its text
+    // snapshot still matches, so the backfill calls it current and skips it while
+    // every search over that scope fails.
+    for (const vector of vectors) {
+      assertRankableVector(vector);
     }
 
     return vectors;

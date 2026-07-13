@@ -130,12 +130,19 @@ export interface LearningRepo {
    *
    * The matched text is snapshotted alongside the vector; it is what every
    * freshness check keys on.
+   *
+   * Throws rather than persist a vector nothing can rank, or one whose `dims`
+   * disagree with its own width. This is the single choke point every vector
+   * reaches the database through, so it is where such a row has to be stopped.
    */
   upsertLearningEmbedding(input: LearningEmbeddingUpsert): boolean;
   /**
-   * Learnings with no vector, a vector from another model, or a vector computed
-   * from text the learning no longer carries. Metadata-only edits (tags,
-   * confidence, `applied_count`) leave a vector valid and are NOT reported here.
+   * The learnings `backfill-embeddings` owes a vector: the exact complement of
+   * `getCurrentLearningEmbeddings`. No vector, a vector from another model, one
+   * computed from text the learning no longer carries, or one nothing can rank.
+   *
+   * Metadata-only edits (tags, confidence, `applied_count`) leave a vector valid
+   * and are NOT reported here.
    */
   listLearningIdsMissingEmbedding(model: string): string[];
   /**
@@ -146,13 +153,13 @@ export interface LearningRepo {
    */
   getLearningEmbeddings(filters?: { repos?: string[]; model?: string }): LearningEmbeddingRecord[];
   /**
-   * The vectors `listLearningIdsMissingEmbedding` would NOT flag: present, from
-   * `model`, and computed from the text the learning still carries. Anything that
-   * reasons about whether a scope is usably embedded must read this rather than
+   * The vectors that may actually be ranked: present, from `model`, computed from
+   * the text the learning still carries, and rankable. Anything reasoning about
+   * whether a scope is usably embedded must read this rather than
    * `getLearningEmbeddings`, or it will count vectors describing text that has
-   * since changed.
+   * since changed — or vectors the fusion would refuse to use.
    */
   getCurrentLearningEmbeddings(filters: { repos?: string[]; model: string }): LearningEmbeddingRecord[];
-  /** Same rows as `getCurrentLearningEmbeddings`, without decoding any vector. */
+  /** How many rows `getCurrentLearningEmbeddings` would return, and never a different set. */
   countCurrentLearningEmbeddings(filters: { repos?: string[]; model: string }): number;
 }
