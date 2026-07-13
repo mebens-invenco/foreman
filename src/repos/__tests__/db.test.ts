@@ -1815,6 +1815,38 @@ describe("persistence repos", () => {
     }
   });
 
+  test("reports each learning's BEST cosine similarity across queries, not the last query's", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      seedHybridDocs(db, [{ id: "learn-lockfile", content: "reviewers cannot verify resolution", vector: [0, 1, 0] }, ...padding(8)]);
+
+      // Both queries must PROPOSE `learn-lockfile`, at different similarities, or
+      // the reducer never sees it twice and the two rules cannot be told apart.
+      // This one sits 0.6 from it and 0 from the padding — an outlier at z = 2.67,
+      // so the arm names it, but a weaker match than LOCKFILE's exact 1.0.
+      const OBLIQUE_VECTOR = Float32Array.from([0, 0.6, 0.8]);
+
+      // Strong query FIRST, weak one LAST: the order that separates max from
+      // last-wins. The injection floor reads this number, so under last-wins a
+      // learning the task matched perfectly is dropped as too distant to push.
+      const covered = db.learnings.searchLearningsHybridCovered(
+        { queries: [PARAPHRASE_QUERY, "oblique vendored snapshot rubric"], repos: ["shared"] },
+        { model: HYBRID_MODEL, vectors: [LOCKFILE_VECTOR, OBLIQUE_VECTOR] },
+        { minCoverage: 0.9 },
+      );
+      if (!covered.covered) {
+        throw new Error("expected a covered hybrid ranking");
+      }
+
+      expect(covered.provenance.get("learn-lockfile")!.bestCosineSimilarity).toBeCloseTo(1, 5);
+    } finally {
+      db.close();
+    }
+  });
+
   test("paginates the fused ranking by row offset, not by page number", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
