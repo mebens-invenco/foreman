@@ -65,9 +65,85 @@ const getLearningReadCount = async (workspaceRoot: string, id: string): Promise<
   }
 };
 
-const runCli = async (args: string[]): Promise<unknown> => {
+const runCliRaw = async (args: string[]): Promise<string> => {
   const { stdout } = await execFileAsync("node", ["--import", "tsx", "src/cli.ts", ...args], { cwd: projectRoot });
-  return JSON.parse(stdout);
+  return stdout;
+};
+
+const runCli = async (args: string[]): Promise<unknown> => JSON.parse(await runCliRaw(args));
+
+/**
+ * One execution attempt that was handed `learn-a` and reported applying it, and a
+ * second that was handed `learn-b` and did not — so the fixture pins a hit rate
+ * that is neither 0 nor 1 and could not be produced by counting either half alone.
+ *
+ * It stamps the injection rows directly and never touches `learning.applied_count`,
+ * so the measured counter and the honour-system one deliberately disagree. A stats
+ * query that reads the wrong one of those two reports an empty rollup here.
+ */
+const seedInjectionEvents = async (workspaceRoot: string): Promise<void> => {
+  const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), projectRoot);
+  try {
+    db.workers.ensureWorkerSlots(1);
+    const workerId = db.workers.listWorkers()[0]!.id;
+    db.taskMirror.saveTasks(
+      ["learn-a", "learn-b"].map((learningId) => ({
+        id: `ENG-${learningId}`,
+        provider: "file" as const,
+        providerId: `ENG-${learningId}`,
+        title: `Task for ${learningId}`,
+        description: "",
+        state: "ready" as const,
+        providerState: "Todo",
+        priority: "none" as const,
+        labels: [],
+        assignee: null,
+        targets: [{ repoKey: "foreman", branchName: `eng-${learningId}`, position: 0 }],
+        targetDependencies: [],
+        dependencies: { taskIds: [], baseTaskId: null },
+        baseBranch: null,
+        pullRequests: [],
+        runnerOverride: null,
+        updatedAt: "2026-03-16T00:00:00Z",
+        url: null,
+      })),
+    );
+
+    const attemptFor = (learningId: string, applied: boolean): void => {
+      const job = db.jobs.createJob({
+        taskId: `ENG-${learningId}`,
+        taskTargetId: db.taskMirror.getTaskTarget(`ENG-${learningId}`, "foreman")!.id,
+        taskProvider: "file",
+        action: "execution",
+        priorityRank: 3,
+        repoKey: "foreman",
+        baseBranch: "master",
+        dedupeKey: `ENG-${learningId}:foreman:execution`,
+        selectionReason: "ready task",
+      });
+      const attempt = db.attempts.createAttempt({
+        jobId: job.id,
+        workerId,
+        runnerName: "opencode",
+        runnerModel: "openai/gpt-5.4",
+        runnerVariant: "high",
+      });
+      db.learningInjectionEvents.recordInjection({
+        attemptId: attempt.id,
+        taskId: `ENG-${learningId}`,
+        action: "execution",
+        learnings: [{ learningId, rank: 1, cosineSimilarity: 0.82 }],
+      });
+      if (applied) {
+        db.learningInjectionEvents.markInjectedLearningApplied({ attemptId: attempt.id, learningId });
+      }
+    };
+
+    attemptFor("learn-a", true);
+    attemptFor("learn-b", false);
+  } finally {
+    db.close();
+  }
 };
 
 describe("learnings cli", () => {
@@ -129,6 +205,45 @@ describe("learnings cli", () => {
     expect(output.missingIds).toEqual(["missing"]);
     expect(await getLearningReadCount(workspaceRoot, "learn-a")).toBe(1);
     expect(await getLearningReadCount(workspaceRoot, "learn-b")).toBe(1);
+  });
+
+  test("injection-stats reports the two exit metrics as structured JSON fields", async () => {
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
+    await seedInjectionEvents(workspaceRoot);
+
+    const output = (await runCli(["learnings", "injection-stats", workspaceName, "--json"])) as {
+      workspace: string;
+      since: string | null;
+      eligibleAttempts: number;
+      attemptsWithInjection: number;
+      attemptsWithInjectionRate: number;
+      injectedLearnings: number;
+      appliedLearnings: number;
+      hitRate: number;
+      topAppliedLearnings: Array<{ learningId: string; injectedCount: number; appliedCount: number }>;
+    };
+
+    expect(output.workspace).toBe(workspaceName);
+    expect(output.since).toBeNull();
+    expect(output.eligibleAttempts).toBe(2);
+    expect(output.attemptsWithInjection).toBe(2);
+    expect(output.attemptsWithInjectionRate).toBe(1);
+    expect(output.injectedLearnings).toBe(2);
+    expect(output.appliedLearnings).toBe(1);
+    expect(output.hitRate).toBe(0.5);
+    expect(output.topAppliedLearnings).toEqual([{ learningId: "learn-a", title: "Planning prompt learnings note", injectedCount: 1, appliedCount: 1 }]);
+  });
+
+  test("injection-stats renders a table when --json is absent", async () => {
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
+    await seedInjectionEvents(workspaceRoot);
+
+    const output = await runCliRaw(["learnings", "injection-stats", workspaceName]);
+
+    expect(output).toContain("Attempts with injection");
+    expect(output).toContain("Learnings applied");
+    expect(output).toContain("50.0%");
+    expect(output).toContain("learn-a");
   });
 
   test("package.json exposes the built CLI through pnpm run foreman", async () => {

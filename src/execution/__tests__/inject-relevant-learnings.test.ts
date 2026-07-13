@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import type { Task } from "../../domain/index.js";
 import { ForemanError } from "../../lib/errors.js";
+import type { LearningInjectionAction, LearningInjectionEventRepo } from "../../repos/learning-injection-event-repo.js";
 import { FakeEmbedder } from "../../test-support/fake-embedder.js";
 import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
 import {
@@ -115,18 +116,40 @@ const embedderMatching = (targetVector = [0, 1, 0]): FakeEmbedder => {
   return embedder;
 };
 
+const attemptId = "01ATTEMPT0000000000000000";
+
 const injectWith = async (
   db: Db,
   embedder: FakeEmbedder,
-  input: { task?: Task; repoKey?: string } = {},
+  input: { task?: Task; repoKey?: string; action?: LearningInjectionAction; events?: LearningInjectionEventRepo } = {},
 ): Promise<{ digest: string | null; warnings: string[] }> => {
   const warnings: string[] = [];
   const digest = await injectRelevantLearnings(
-    { learnings: db.learnings, embedder, warn: (message) => warnings.push(message) },
-    { task: input.task ?? queryTask, repoKey: input.repoKey ?? "foreman" },
+    {
+      learnings: db.learnings,
+      embedder,
+      warn: (message) => warnings.push(message),
+      telemetry: { events: input.events ?? db.learningInjectionEvents, attemptId },
+    },
+    { task: input.task ?? queryTask, repoKey: input.repoKey ?? "foreman", action: input.action ?? "execution" },
   );
   return { digest, warnings };
 };
+
+/** The injection rows this attempt wrote, in the rank order the digest carried. */
+const injectionRows = (db: Db): { learningId: string; rank: number; cosineSimilarity: number; appliedAt: string | null }[] =>
+  db.database.sqlite
+    .prepare("SELECT learning_id, rank, cosine_similarity, applied_at FROM learning_injection_event WHERE attempt_id = ? ORDER BY rank ASC")
+    .all(attemptId)
+    .map((row) => {
+      const mapped = row as Record<string, unknown>;
+      return {
+        learningId: String(mapped.learning_id),
+        rank: Number(mapped.rank),
+        cosineSimilarity: Number(mapped.cosine_similarity),
+        appliedAt: (mapped.applied_at as string | null) ?? null,
+      };
+    });
 
 const entryIds = (digest: string): string[] =>
   digest
@@ -334,6 +357,90 @@ describe("injectRelevantLearnings", () => {
 
         expect(entryIds(digest!).length).toBeLessThanOrEqual(RELEVANT_LEARNINGS_LIMIT);
         expect(estimateTokens(digest!)).toBeLessThanOrEqual(RELEVANT_LEARNINGS_TOKEN_BUDGET);
+      });
+    });
+  });
+
+  describe("telemetry", () => {
+    test("records one event per injected learning, ranked as the digest ranked them", async () => {
+      await withDb(async (db) => {
+        seedLearning(db, { id: "learn-target", content: contentWithRule("learn-target"), vector: [0, 1, 0] });
+        seedLearning(db, { id: "learn-near", content: contentWithRule("learn-near"), vector: [0, 0.99, 0.1] });
+        seedPadding(db, 12);
+
+        const { digest } = await injectWith(db, embedderMatching());
+        const rows = injectionRows(db);
+
+        expect(rows.map((row) => row.learningId)).toEqual(entryIds(digest!));
+        expect(rows.map((row) => row.rank)).toEqual(rows.map((_, index) => index + 1));
+        for (const row of rows) {
+          expect(row.cosineSimilarity).toBeGreaterThanOrEqual(INJECTION_SIMILARITY_FLOOR);
+          expect(row.appliedAt).toBeNull();
+        }
+      });
+    });
+
+    test("records only the entries the token budget left in the prompt", async () => {
+      await withDb(async (db) => {
+        const longRule = "x".repeat(1_200);
+        for (const id of ["cap-a", "cap-b", "cap-c"]) {
+          seedLearning(db, { id, content: `**Rule:** ${longRule} ${id}`, vector: [0, 1, 0] });
+        }
+        seedPadding(db, 40);
+
+        const { digest } = await injectWith(db, embedderMatching());
+
+        // The two the budget dropped were retrieved but never handed to the agent.
+        // Recording them would charge them against a hit-rate they could not earn.
+        expect(entryIds(digest!)).toEqual(["cap-a"]);
+        expect(injectionRows(db).map((row) => row.learningId)).toEqual(["cap-a"]);
+      });
+    });
+
+    test("records nothing when nothing is injected", async () => {
+      await withDb(async (db) => {
+        seedLearning(db, { id: "learn-target", content: contentWithRule("learn-target"), vector: [0, 1, 0] });
+        seedPadding(db, 12);
+
+        const { digest } = await injectWith(db, embedderMatching([1, 0, 0]));
+
+        expect(digest).toBeNull();
+        expect(injectionRows(db)).toEqual([]);
+      });
+    });
+
+    test("stamps the action the digest was pushed into", async () => {
+      await withDb(async (db) => {
+        seedLearning(db, { id: "learn-target", content: contentWithRule("learn-target"), vector: [0, 1, 0] });
+        seedPadding(db, 12);
+
+        await injectWith(db, embedderMatching(), { action: "review" });
+
+        const actions = db.database.sqlite.prepare("SELECT action FROM learning_injection_event").all();
+        expect(actions).toEqual([{ action: "review" }]);
+      });
+    });
+
+    test("still injects the digest when recording it fails", async () => {
+      await withDb(async (db) => {
+        seedLearning(db, { id: "learn-target", content: contentWithRule("learn-target"), vector: [0, 1, 0] });
+        seedPadding(db, 12);
+        const events: LearningInjectionEventRepo = {
+          recordInjection: () => {
+            throw new Error("disk is full");
+          },
+          markInjectedLearningApplied: () => 0,
+          getInjectionStats: () => {
+            throw new Error("unused");
+          },
+        };
+
+        const { digest, warnings } = await injectWith(db, embedderMatching(), { events });
+
+        // A prompt without its telemetry row is a prompt. A prompt without its
+        // digest is a worse attempt, and the render must never trade one for the other.
+        expect(entryIds(digest!)).toEqual(["learn-target"]);
+        expect(warnings).toEqual(["relevant-learnings digest injected but not recorded: disk is full"]);
       });
     });
   });

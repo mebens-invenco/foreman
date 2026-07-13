@@ -30,7 +30,7 @@ import { LoggerService } from "./logger.js";
 import { SchedulerService } from "./orchestration/index.js";
 import { renderWorkspacePlan } from "./planning/render-workspace-plan.js";
 import { createRepos } from "./repos/index.js";
-import type { LearningSearchEventInput } from "./repos/index.js";
+import type { LearningInjectionStats, LearningSearchEventInput } from "./repos/index.js";
 import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
 import { searchLearningsWithHybridFallback } from "./retrieval/hybrid-learning-search.js";
 import { createReviewService, resolveGitHubAuthEnv } from "./review/index.js";
@@ -202,6 +202,56 @@ const renderUsageTable = (input: {
   ];
 
   return lines.join("\n");
+};
+
+const formatRate = (value: number): string => `${(value * 100).toFixed(1)}%`;
+
+const renderInjectionStats = (input: { since: string | undefined; stats: LearningInjectionStats }): string => {
+  const { stats } = input;
+  const metrics = [
+    ["Attempts eligible", formatUsageNumber(stats.eligibleAttempts), ""],
+    ["Attempts with injection", formatUsageNumber(stats.attemptsWithInjection), formatRate(stats.attemptsWithInjectionRate)],
+    ["Learnings injected", formatUsageNumber(stats.injectedLearnings), ""],
+    ["Learnings applied", formatUsageNumber(stats.appliedLearnings), formatRate(stats.hitRate)],
+  ];
+  const metricWidths = [0, 1, 2].map((index) => Math.max(...metrics.map((row) => row[index]?.length ?? 0)));
+
+  const lines = [
+    `Learning injection ${input.since ? `since ${input.since}` : "(all time)"}, over execution/retry/review attempts:`,
+    ...metrics.map((row) => row.map((cell, index) => padCell(cell, metricWidths[index]!)).join("  ").trimEnd()),
+  ];
+
+  if (stats.topAppliedLearnings.length > 0) {
+    const header = ["Applied", "Injected", "Learning", "Title"];
+    const rows = stats.topAppliedLearnings.map((learning) => [
+      formatUsageNumber(learning.appliedCount),
+      formatUsageNumber(learning.injectedCount),
+      learning.learningId,
+      learning.title,
+    ]);
+    const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => row[index]?.length ?? 0)));
+
+    lines.push(
+      "",
+      "Top applied learnings:",
+      header.map((cell, index) => padCell(cell, widths[index]!)).join("  ").trimEnd(),
+      widths.map((width) => "-".repeat(width)).join("  "),
+      ...rows.map((row) => row.map((cell, index) => padCell(cell, widths[index]!)).join("  ").trimEnd()),
+    );
+  }
+
+  return lines.join("\n");
+};
+
+const parseIsoInstant = (value: string): string => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new InvalidArgumentError("Value must be an ISO-8601 date or timestamp.");
+  }
+
+  // Normalized, because the column it is compared against holds ISO instants and
+  // the comparison is a string one.
+  return parsed.toISOString();
 };
 
 const parseLogLevel = (value: string): LoggerLevelName => {
@@ -441,6 +491,27 @@ learnings
       });
 
       writeJson({ workspace, ...result });
+    });
+  });
+
+learnings
+  .command("injection-stats")
+  .description("Report how often injected learnings are pushed into attempts, and how often an attempt then applies one")
+  .argument("<workspace>")
+  .option("--since <iso>", "Count only attempts started at or after this ISO date/timestamp", parseIsoInstant)
+  .option("--json", "Emit JSON instead of the tab-aligned table")
+  .action(async (workspace: string, options: { since?: string; json?: boolean }) => {
+    await withWorkspaceRepos(workspace, async (repos) => {
+      const stats = repos.learningInjectionEvents.getInjectionStats({
+        ...(options.since !== undefined ? { since: options.since } : {}),
+      });
+
+      if (options.json) {
+        writeJson({ workspace, since: options.since ?? null, ...stats });
+        return;
+      }
+
+      process.stdout.write(`${renderInjectionStats({ since: options.since, stats })}\n`);
     });
   });
 

@@ -3,16 +3,15 @@ import path from "node:path";
 import { z } from "zod";
 
 import { resolveTaskPullRequest, resolveTaskTargetRef, type RepoRef, type ReviewContext, type Task, type TaskTarget, type TaskTargetRef } from "../domain/index.js";
-import type { Embedder } from "../embeddings/embedder.js";
 import { isForemanError } from "../lib/errors.js";
 import { stripLearningsIndex } from "../planning/learnings-index.js";
 import { jsonSection, renderPromptTemplate, textSection, type WorkerPromptTemplateName } from "../prompts/template-renderer.js";
 import type { ForemanRepos } from "../repos/index.js";
-import type { LearningRepo } from "../repos/learning-repo.js";
+import { learningInjectionActionValues, type LearningInjectionAction } from "../repos/learning-injection-event-repo.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import { readWorkspacePlan, resolveDeploymentInstructions } from "../workspace/deployment.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
-import { injectRelevantLearnings } from "./inject-relevant-learnings.js";
+import { injectRelevantLearnings, type LearningInjectionDeps } from "./inject-relevant-learnings.js";
 import { renderAgentResultSchemaHelp, workerResultActionValues, type WorkerResultAction } from "./worker-result.js";
 
 const parsePullRequestNumber = (url: string | null): number | null => {
@@ -267,11 +266,11 @@ const renderDeploymentInstructions = async (paths: WorkspacePaths, instructionBo
  * not to the task text the digest is retrieved against.
  *
  * `review` covers review-continuation — the continuation is the same action on a
- * later pass, and picks a different template, not a different job.
+ * later pass, and picks a different template, not a different job. The telemetry
+ * is recorded against the action, never the template, for that reason.
  */
-const learningInjectionActions = new Set<WorkerPromptTemplateName>(["execution", "retry", "review"]);
-
-type LearningInjectionDeps = { learnings: LearningRepo; embedder: Embedder; warn: (message: string) => void };
+const injectionAction = (action: WorkerPromptTemplateName): LearningInjectionAction | null =>
+  learningInjectionActionValues.find((eligible) => eligible === action) ?? null;
 
 const renderRelevantLearnings = async (input: {
   action: WorkerPromptTemplateName;
@@ -279,11 +278,12 @@ const renderRelevantLearnings = async (input: {
   repo: RepoRef;
   learningInjection?: LearningInjectionDeps;
 }): Promise<string | null> => {
-  if (!input.learningInjection || !learningInjectionActions.has(input.action)) {
+  const action = injectionAction(input.action);
+  if (!input.learningInjection || !action) {
     return null;
   }
 
-  return injectRelevantLearnings(input.learningInjection, { task: input.task, repoKey: input.repo.key });
+  return injectRelevantLearnings(input.learningInjection, { task: input.task, repoKey: input.repo.key, action });
 };
 
 const selectWorkerPromptTemplate = (input: {

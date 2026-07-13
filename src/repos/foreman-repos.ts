@@ -3,6 +3,7 @@ import type { DeploymentTrackingRepo } from "./deployment-tracking-repo.js";
 import type { ArtifactRepo } from "./artifact-repo.js";
 import type { AttemptRepo } from "./attempt-repo.js";
 import type { JobRepo } from "./job-repo.js";
+import type { LearningInjectionEventRepo } from "./learning-injection-event-repo.js";
 import type { LearningRepo } from "./learning-repo.js";
 import type { LearningSearchEventRepo } from "./learning-search-event-repo.js";
 import type { LeaseRepo } from "./lease-repo.js";
@@ -30,5 +31,6 @@ export type ForemanRepos = {
   runnerSessions: RunnerSessionRepo;
   learnings: LearningRepo;
   learningSearchEvents: LearningSearchEventRepo;
+  learningInjectionEvents: LearningInjectionEventRepo;
   close(): void;
 };

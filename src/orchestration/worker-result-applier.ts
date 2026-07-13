@@ -255,7 +255,7 @@ export class WorkerResultApplier {
       logger.info("updated consolidation labels", { addCount: labels.add.length, removeCount: labels.remove.length });
     }
 
-    await this.applyLearningMutations(workerResult.learningMutations, input.task.id, logger);
+    await this.applyLearningMutations(workerResult.learningMutations, { taskId: input.task.id, attemptId: input.attempt.id }, logger);
 
     if (
       input.job.action === "review" &&
@@ -311,7 +311,7 @@ export class WorkerResultApplier {
 
   private async applyLearningMutations(
     mutations: LearningMutation[],
-    sourceTaskId: string,
+    source: { taskId: string; attemptId: string },
     logger: LoggerService,
   ): Promise<void> {
     const pending: PendingLearningEmbedding[] = [];
@@ -336,7 +336,7 @@ export class WorkerResultApplier {
         const nearDuplicate = vector ? this.findNearDuplicate(vector, mutation.repo, logger) : undefined;
         const learningId = this.deps.foremanRepos.learnings.addLearning({
           ...mutation,
-          sourceTaskId,
+          sourceTaskId: source.taskId,
           ...(nearDuplicate ? { duplicateOf: nearDuplicate.learningId } : {}),
         });
         logger.info("added learning mutation", { learningTitle: mutation.title, repo: mutation.repo });
@@ -362,6 +362,10 @@ export class WorkerResultApplier {
         this.deps.foremanRepos.learnings.updateLearning(mutation);
         logger.info("updated learning mutation", { learningId: mutation.id });
 
+        if (mutation.markApplied) {
+          this.stampInjectionApplied(source.attemptId, mutation.id, logger);
+        }
+
         if (previous) {
           const next = {
             title: mutation.title ?? previous.title,
@@ -376,6 +380,24 @@ export class WorkerResultApplier {
     }
 
     await this.embedLearnings(pending, logger);
+  }
+
+  /**
+   * Stamping nothing is the expected outcome for a learning the agent found by
+   * itself: `applied_count` still counts it, but a learning that was never pushed
+   * cannot have been a hit for push injection, and the hit-rate must say so.
+   */
+  private stampInjectionApplied(attemptId: string, learningId: string, logger: LoggerService): void {
+    try {
+      const stamped = this.deps.foremanRepos.learningInjectionEvents.markInjectedLearningApplied({ attemptId, learningId });
+      if (stamped > 0) {
+        logger.info("stamped injected learning as applied", { learningId, injectionRowsStamped: stamped });
+        return;
+      }
+      logger.debug("applied learning was not injected into this attempt", { learningId });
+    } catch (error) {
+      logger.warn("failed to stamp injected learning as applied", { learningId, error: errorMessage(error) });
+    }
   }
 
   /**
@@ -665,7 +687,7 @@ export class WorkerResultApplier {
       logger.info("transitioned task to done after all relevant deployments succeeded");
     }
 
-    await this.applyLearningMutations(workerResult.learningMutations, input.task.id, logger);
+    await this.applyLearningMutations(workerResult.learningMutations, { taskId: input.task.id, attemptId: input.attempt.id }, logger);
 
     this.deps.scheduleScout();
     return pullRequestUrl;
