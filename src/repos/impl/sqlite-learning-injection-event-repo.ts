@@ -12,13 +12,27 @@ import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 const DEFAULT_TOP_LIMIT = 10;
 
-const injectionEligibleActions = learningInjectionActionValues.map(() => "?").join(", ");
+const eligibleActionPlaceholders = learningInjectionActionValues.map(() => "?").join(", ");
+
+/**
+ * Every count — denominator AND numerator — resolves eligibility from `job.action`
+ * here, rather than the numerator inferring it from "an event row exists". The two
+ * agree today only because the prompt seam refuses to inject into an ineligible
+ * action; narrow this set later and rows written under the old one would stay in a
+ * numerator they had dropped out of the denominator of, making a field documented
+ * as a ratio able to exceed 1.
+ */
+const ELIGIBLE_ATTEMPT = `JOIN execution_attempt AS attempt ON attempt.id = event.attempt_id
+           JOIN job ON job.id = attempt.job_id
+          WHERE job.action IN (${eligibleActionPlaceholders})`;
 
 /**
  * One clock for every metric: an attempt is in the window if it STARTED in it,
  * and its injections and their applied stamps come with it. Keying the events off
  * their own `created_at` instead would let a window slice an attempt in half —
  * counting a learning as injected while its apply, moments later, fell outside.
+ *
+ * Inclusive: an attempt started exactly at `since` is inside the window.
  */
 const attemptStartedSince = (since: string | undefined): { clause: string; params: string[] } =>
   since ? { clause: " AND attempt.started_at >= ?", params: [since] } : { clause: "", params: [] };
@@ -81,7 +95,7 @@ export class SqliteLearningInjectionEventRepo implements LearningInjectionEventR
             `SELECT COUNT(*) AS eligible
                FROM execution_attempt AS attempt
                JOIN job ON job.id = attempt.job_id
-              WHERE job.action IN (${injectionEligibleActions})${window.clause}`,
+              WHERE job.action IN (${eligibleActionPlaceholders})${window.clause}`,
           )
           .get(...learningInjectionActionValues, ...window.params) as SqliteRow
       ).eligible,
@@ -93,10 +107,9 @@ export class SqliteLearningInjectionEventRepo implements LearningInjectionEventR
                 COUNT(DISTINCT ${INJECTED_PAIR}) AS injected,
                 COUNT(DISTINCT CASE WHEN event.applied_at IS NOT NULL THEN ${INJECTED_PAIR} END) AS applied
            FROM learning_injection_event AS event
-           JOIN execution_attempt AS attempt ON attempt.id = event.attempt_id
-          WHERE 1 = 1${window.clause}`,
+           ${ELIGIBLE_ATTEMPT}${window.clause}`,
       )
-      .get(...window.params) as SqliteRow;
+      .get(...learningInjectionActionValues, ...window.params) as SqliteRow;
 
     const attemptsWithInjection = Number(totals.attempts_with_injection);
     const injectedLearnings = Number(totals.injected);
@@ -118,10 +131,12 @@ export class SqliteLearningInjectionEventRepo implements LearningInjectionEventR
    * is safe to make an inner one: deleting a learning cascades its events away,
    * so an event can never outlive the row it names.
    *
-   * `HAVING`/`ORDER BY` repeat the aggregates rather than naming the aliases,
-   * because `learning` carries an `applied_count` column of its own and an
-   * unqualified alias resolves to THAT — silently filtering this rollup on the
-   * honour-system counter it exists to check.
+   * Do NOT rename these aliases to `applied_count`. `learning` carries a real
+   * column of that name, and SQLite resolves an unqualified `HAVING`/`ORDER BY`
+   * reference to the column in preference to a same-named SELECT alias — which
+   * would silently filter this rollup on the honour-system counter it exists to
+   * check, with no error. The aliases below are distinct, so naming them here
+   * would be safe; repeating the aggregates keeps it safe under a rename too.
    */
   private listTopAppliedLearnings(
     window: { clause: string; params: string[] },
@@ -137,15 +152,14 @@ export class SqliteLearningInjectionEventRepo implements LearningInjectionEventR
                 ${attemptsInjected} AS attempts_injected,
                 ${attemptsApplied} AS attempts_applied
            FROM learning_injection_event AS event
-           JOIN execution_attempt AS attempt ON attempt.id = event.attempt_id
            JOIN learning ON learning.id = event.learning_id
-          WHERE 1 = 1${window.clause}
+           ${ELIGIBLE_ATTEMPT}${window.clause}
           GROUP BY event.learning_id, learning.title
          HAVING ${attemptsApplied} > 0
           ORDER BY ${attemptsApplied} DESC, ${attemptsInjected} ASC, event.learning_id ASC
           LIMIT ?`,
       )
-      .all(...window.params, limit)
+      .all(...learningInjectionActionValues, ...window.params, limit)
       .map((row: unknown) => {
         const mapped = row as SqliteRow;
         return {

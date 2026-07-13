@@ -10,7 +10,7 @@ import { LoggerService } from "../../logger.js";
 import type { ReviewService } from "../../review/index.js";
 import type { TaskSystem } from "../../tasking/index.js";
 import { FakeEmbedder } from "../../test-support/fake-embedder.js";
-import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
+import { createMigratedDb, createTempDir, createWorkspacePaths, seedExecutionAttempt, testProjectRoot } from "../../test-support/helpers.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import { WorkerResultApplier } from "../worker-result-applier.js";
 
@@ -332,6 +332,48 @@ describe("injection telemetry", () => {
     });
   });
 
+  describe("an attempt whose action can never carry a digest", () => {
+    test("stays out of the eligible denominator", async () => {
+      await withWorkspace(async (db, workspaceRoot) => {
+        await runAttempt(db, workspaceRoot, { appliedLearningId: injectedId });
+        // Live workspaces are dominated by these — 171 reviewer + 35 consolidation
+        // against 284 eligible. Counting them would deflate the rate toward zero.
+        seedExecutionAttempt(db, { task, repoKey: "foreman", action: "reviewer" });
+
+        expect(db.learningInjectionEvents.getInjectionStats()).toMatchObject({
+          eligibleAttempts: 1,
+          attemptsWithInjection: 1,
+          attemptsWithInjectionRate: 1,
+        });
+      });
+    });
+
+    test("stays out of the numerator too, even carrying an injection row", async () => {
+      await withWorkspace(async (db, workspaceRoot) => {
+        await runAttempt(db, workspaceRoot, { appliedLearningId: injectedId });
+        const ineligible = seedExecutionAttempt(db, { task, repoKey: "foreman", action: "reviewer" });
+
+        // The seam cannot produce this today — it refuses to inject into `reviewer`.
+        // It is what a later narrowing of the action set leaves behind, and the
+        // numerator must resolve eligibility from `job.action` rather than from the
+        // mere existence of a row, or the rate it reports can exceed 1.
+        db.learningInjectionEvents.recordInjection({
+          attemptId: ineligible.id,
+          taskId: task.id,
+          action: "execution",
+          learnings: [{ learningId: injectedId, rank: 1, cosineSimilarity: 0.9 }],
+        });
+
+        const stats = db.learningInjectionEvents.getInjectionStats();
+        expect(stats).toMatchObject({ eligibleAttempts: 1, attemptsWithInjection: 1, injectedLearnings: 1 });
+        expect(stats.attemptsWithInjectionRate).toBeLessThanOrEqual(1);
+        expect(stats.topAppliedLearnings).toEqual([
+          { learningId: injectedId, title: "Rank the fused arms", injectedCount: 1, appliedCount: 1 },
+        ]);
+      });
+    });
+  });
+
   describe("--since", () => {
     test("counts only attempts started inside the window", async () => {
       await withWorkspace(async (db, workspaceRoot) => {
@@ -349,6 +391,19 @@ describe("injection telemetry", () => {
           injectedLearnings: 1,
           appliedLearnings: 1,
           hitRate: 1,
+        });
+      });
+    });
+
+    test("includes an attempt started exactly at the boundary", async () => {
+      await withWorkspace(async (db, workspaceRoot) => {
+        const { attemptId } = await runAttempt(db, workspaceRoot, { appliedLearningId: injectedId });
+        const startedAt = "2026-07-13T00:00:00.000Z";
+        db.database.sqlite.prepare("UPDATE execution_attempt SET started_at = ? WHERE id = ?").run(startedAt, attemptId);
+
+        expect(db.learningInjectionEvents.getInjectionStats({ since: startedAt })).toMatchObject({
+          eligibleAttempts: 1,
+          injectedLearnings: 1,
         });
       });
     });
