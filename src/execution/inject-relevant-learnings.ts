@@ -23,16 +23,32 @@ export const RELEVANT_LEARNINGS_TOKEN_BUDGET = 600;
  * and a real foreman ticket scores z = 2.12 — a z floor would push learnings at
  * the shopping list and stay silent on the ticket.
  *
- * Similarity separates the two cleanly. Measured over 19 real tickets and 3
- * deliberately off-topic ones against the live corpus, the best hit per task:
+ * Similarity separates the two. Over the 19 real tickets and 3 deliberately
+ * off-topic tasks committed as the calibration fixture, the best hit per task:
  *
- *   real tickets     0.743 - 0.863
- *   off-topic tasks  0.519 - 0.656   (CSS padding, a k8s upgrade, buying milk)
+ *   real tasks       min 0.7163
+ *   off-topic tasks  max 0.6564   (CSS padding, a k8s upgrade, buying milk)
  *
- * 0.70 is the middle of that empty band, not an edge of it: every value in roughly
- * [0.67, 0.74] rejects all three off-topic tasks and admits all 19 real ones, so
- * the midpoint is the choice furthest from either error. Do not read a second
- * significant digit into it.
+ * Separation alone therefore admits (0.6564, 0.7163).
+ *
+ * 0.70 is NOT the midpoint of that band (0.6863 is), and is not equidistant from the
+ * two ways of being wrong: it holds 0.0436 of margin to the off-topic edge but only
+ * 0.0163 to the real-task edge, so it is ~2.7x closer to dropping a real ticket than
+ * to admitting junk. That asymmetry is the point, not an oversight — a wrong learning
+ * in an agent's context costs more than a missing one, so the floor leans toward
+ * silence.
+ *
+ * That judgement is pinned rather than merely stated: `injection-similarity-calibration`
+ * requires the floor to sit ABOVE the midpoint too, so the suite accepts only
+ * (0.6863, 0.7163) — sweeping the constant, 0.69/0.70/0.71 pass while 0.66 and 0.6863
+ * fail the lean, and 0.65/0.72/0.74 fail the separation. Moving the floor to the
+ * midpoint reverses a deliberate call and has to fail a test to do it. Do not read a
+ * second significant digit into any of these numbers.
+ *
+ * The live 143-learning corpus measures wider (real 0.743-0.863, off-topic 0.519-0.656)
+ * — a bigger corpus holds a closer match for every task — so production has more
+ * headroom than the numbers above. They are the ones quoted because they are the ones
+ * a test can falsify; the live figures are corroboration, not a guard.
  *
  * CALIBRATED FOR `bge-small-en-v1.5` AND FOR THE `injectionQueryText` QUERY SHAPE.
  * A cosine scale is a property of the model and shifts with query length, so both
