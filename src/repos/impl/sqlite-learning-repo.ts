@@ -679,8 +679,15 @@ export class SqliteLearningRepo implements LearningRepo {
         continue;
       }
 
-
       const similarity = cosineSimilarity(vector, candidate.vector);
+      // A NaN component yields a NaN similarity, and every `>` against NaN is
+      // false -- so a malformed first candidate would install itself as
+      // `nearest` and no later one could ever displace it, killing detection for
+      // the whole scope. Same corrupt-row reasoning as the width skip above.
+      if (!Number.isFinite(similarity)) {
+        continue;
+      }
+
       if (!nearest || similarity > nearest.similarity) {
         nearest = { learningId: candidate.learningId, similarity };
       }
