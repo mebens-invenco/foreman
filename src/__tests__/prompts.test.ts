@@ -599,6 +599,7 @@ describe("prompt rendering", () => {
     expect(reviewPrompt).toContain("Reconcile both branches' intent instead of defaulting to either side.");
     expect(reviewPrompt).toContain("treat the later maintainer decision as authoritative");
     expect(reviewPrompt).toContain("older feedback was superseded instead of changing code");
+    expect(reviewPrompt).toContain("## Comment Brevity");
     expect(reviewPrompt).not.toContain("Review Summary `review-1`");
     expect(reviewPrompt).not.toContain("[agent] Fixed in follow-up.");
     expect(reviewPrompt).not.toContain("Can you simplify this flow?");
@@ -613,6 +614,7 @@ describe("prompt rendering", () => {
     expect(reviewerPrompt).toContain("submit_pull_request_review");
     expect(reviewerPrompt).toContain("ignore comments whose review metadata is missing");
     expect(reviewerPrompt).toContain("include image links or uploaded assets");
+    expect(reviewerPrompt).toContain("## Comment Brevity");
     expect(reviewerPrompt).not.toContain("### Actionable Now");
 
     const continuationPrompt = await renderWorkerPrompt({
@@ -639,6 +641,7 @@ describe("prompt rendering", () => {
     expect(continuationPrompt).toContain("ignore comments whose review metadata is missing");
     expect(continuationPrompt).toContain("## Common Worker Rules");
     expect(continuationPrompt).toContain("## GitHub Provider Access");
+    expect(continuationPrompt).toContain("## Comment Brevity");
     expect(continuationPrompt).toContain("include image links or uploaded assets");
     expect(continuationPrompt).toContain("## Current Git State");
     expect(continuationPrompt).toContain("previousSessionHeadSha");
@@ -696,6 +699,7 @@ describe("prompt rendering", () => {
     expect(reviewerContinuationPrompt).toContain("## Common Worker Rules");
     expect(reviewerContinuationPrompt).toContain("## GitHub Provider Access");
     expect(reviewerContinuationPrompt).toContain("## Consumer Context");
+    expect(reviewerContinuationPrompt).toContain("## Comment Brevity");
     expect(reviewerContinuationPrompt).toContain("include image links or uploaded assets");
     expect(reviewerContinuationPrompt).not.toContain("## Continuation Worker Rules");
     expect(reviewerContinuationPrompt).not.toContain("## GitHub Continuation Access");

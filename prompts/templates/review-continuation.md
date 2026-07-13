@@ -4,6 +4,8 @@ You are continuing a review session on the same selected PR. A prior review acti
 
 {{fragment:review-github}}
 
+{{fragment:comment-brevity}}
+
 ## Context
 
 {{context:selected-task}}
