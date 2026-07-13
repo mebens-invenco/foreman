@@ -316,8 +316,9 @@ export class WorkerResultApplier {
   ): Promise<void> {
     const pending: PendingLearningEmbedding[] = [];
     // Adds are embedded before their rows exist, because the near-duplicate
-    // lookup needs the new vector to find a neighbour to point at. Updates keep
-    // using the deferred path below, so a mixed result costs two embed calls.
+    // lookup needs the new vector to find a neighbour to point at. Updates are
+    // re-embedded on the deferred path below, flushed before each add's lookup
+    // so no add ever queries a scope an earlier update has left a hole in.
     const addVectors = await this.embedAddedLearnings(mutations, logger);
     let addIndex = 0;
 
@@ -325,6 +326,12 @@ export class WorkerResultApplier {
       if (mutation.type === "add") {
         const vector = addVectors[addIndex];
         addIndex += 1;
+
+        // An update writes its row immediately but defers re-embedding, which
+        // leaves the learning with no current vector in between. Flush the queue
+        // first, or this lookup scans a scope with a hole in it and the add
+        // lands unflagged against a neighbour that is really still there.
+        await this.embedLearnings(pending.splice(0), logger);
 
         const nearDuplicate = vector ? this.findNearDuplicate(vector, mutation.repo, logger) : undefined;
         const learningId = this.deps.foremanRepos.learnings.addLearning({
