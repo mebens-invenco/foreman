@@ -129,4 +129,18 @@ describe("injection similarity floor calibration", () => {
     expect(strongestOffTopic).toBeLessThan(INJECTION_SIMILARITY_FLOOR);
     expect(INJECTION_SIMILARITY_FLOOR).toBeLessThan(weakestReal);
   });
+
+  test("the floor leans toward silence rather than sitting at the centre of the window", () => {
+    const weakestReal = Math.min(...realTasks.map(bestSimilarityInScope));
+    const strongestOffTopic = Math.max(...offTopicTasks.map(bestSimilarityInScope));
+    const midpoint = (strongestOffTopic + weakestReal) / 2;
+
+    // 0.70 is deliberately NOT the midpoint (0.6863): it keeps ~2.7x more margin
+    // against admitting junk than against dropping a real ticket, because a wrong
+    // learning in an agent's context costs more than a missing one. That is a
+    // judgement, so it is pinned like one — moving the floor below the midpoint
+    // reverses it, and has to fail a test rather than pass unnoticed.
+    expect(midpoint).toBeCloseTo(0.6863, 4);
+    expect(INJECTION_SIMILARITY_FLOOR).toBeGreaterThan(midpoint);
+  });
 });
