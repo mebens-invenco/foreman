@@ -1284,7 +1284,7 @@ describe("persistence repos", () => {
     }
   });
 
-  test("skips a non-finite candidate instead of letting NaN poison the nearest-neighbour scan", async () => {
+  test("keeps a non-finite candidate out of the nearest-neighbour scan, which would otherwise throw", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
@@ -1313,11 +1313,12 @@ describe("persistence repos", () => {
         .prepare("UPDATE learning_embedding SET vector = ? WHERE learning_id = ?")
         .run(Buffer.from(Float32Array.from([Number.NaN, 0, 0]).buffer), "aaa-nan");
 
-      // Filtered before the scan ever sees it -- which is the guard that matters,
-      // because the row keeps its text snapshot, so nothing downstream would skip
-      // it. It sorts first, and a NaN similarity makes every later `>` false, so it
-      // would install itself as the nearest neighbour forever and no valid candidate
-      // could ever displace it.
+      // The row keeps its text snapshot, so nothing downstream would skip it and
+      // backfill cannot see it. This filter is the only thing standing between it and
+      // the scan: `cosineSimilarity` asserts rankability on both operands, so a
+      // candidate that reached the loop would THROW rather than score, and
+      // `findNearDuplicate` catches that -- one rotted row would silently degrade
+      // near-duplicate detection to un-flagged for the whole scope.
       expect(db.learnings.getCurrentLearningEmbeddings({ model: "m1" }).map((row) => row.learningId)).toEqual(["valid"]);
 
       const nearest = db.learnings.nearestLearningEmbedding(Float32Array.from([1, 0, 0]), { model: "m1" });
