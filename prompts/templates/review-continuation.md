@@ -18,6 +18,8 @@ You are continuing a review session on the same selected PR. A prior review acti
 
 {{context:pull-request}}
 
+{{context:relevant-learnings}}
+
 {{context:prior-checkpoint}}
 
 ## Scope

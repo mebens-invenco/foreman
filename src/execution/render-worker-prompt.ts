@@ -3,13 +3,16 @@ import path from "node:path";
 import { z } from "zod";
 
 import { resolveTaskPullRequest, resolveTaskTargetRef, type RepoRef, type ReviewContext, type Task, type TaskTarget, type TaskTargetRef } from "../domain/index.js";
+import type { Embedder } from "../embeddings/embedder.js";
 import { isForemanError } from "../lib/errors.js";
 import { stripLearningsIndex } from "../planning/learnings-index.js";
 import { jsonSection, renderPromptTemplate, textSection, type WorkerPromptTemplateName } from "../prompts/template-renderer.js";
 import type { ForemanRepos } from "../repos/index.js";
+import type { LearningRepo } from "../repos/learning-repo.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import { readWorkspacePlan, resolveDeploymentInstructions } from "../workspace/deployment.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
+import { injectRelevantLearnings } from "./inject-relevant-learnings.js";
 import { renderAgentResultSchemaHelp, workerResultActionValues, type WorkerResultAction } from "./worker-result.js";
 
 const parsePullRequestNumber = (url: string | null): number | null => {
@@ -258,6 +261,31 @@ const renderDeploymentInstructions = async (paths: WorkspacePaths, instructionBo
   );
 };
 
+/**
+ * The actions a learnings digest is pushed into (DI3). Reviewer, deployment and
+ * consolidation are deliberately excluded: they answer to a diff or a pipeline,
+ * not to the task text the digest is retrieved against.
+ *
+ * `review` covers review-continuation — the continuation is the same action on a
+ * later pass, and picks a different template, not a different job.
+ */
+const learningInjectionActions = new Set<WorkerPromptTemplateName>(["execution", "retry", "review"]);
+
+type LearningInjectionDeps = { learnings: LearningRepo; embedder: Embedder; warn: (message: string) => void };
+
+const renderRelevantLearnings = async (input: {
+  action: WorkerPromptTemplateName;
+  task: Task;
+  repo: RepoRef;
+  learningInjection?: LearningInjectionDeps;
+}): Promise<string | null> => {
+  if (!input.learningInjection || !learningInjectionActions.has(input.action)) {
+    return null;
+  }
+
+  return injectRelevantLearnings(input.learningInjection, { task: input.task, repoKey: input.repo.key });
+};
+
 const selectWorkerPromptTemplate = (input: {
   action: WorkerPromptTemplateName;
   continuation?: boolean;
@@ -293,6 +321,10 @@ export const renderWorkerPrompt = async (input: {
   priorCheckpoint?: Record<string, unknown>;
   deploymentInstructionBody?: string;
   foremanRepos?: ForemanRepos;
+  // Opt-in: a caller that omits this renders exactly as it did before learnings
+  // were ever pushed. The eval harness relies on that — a prompt whose learnings
+  // section shifts with the live workspace corpus is not a fixture.
+  learningInjection?: LearningInjectionDeps;
   gitState?: {
     worktreeHeadSha: string | null;
     reviewHeadSha: string | null;
@@ -306,6 +338,7 @@ export const renderWorkerPrompt = async (input: {
   const resultSchemaAction = workerResultActionValues.includes(input.action as WorkerResultAction)
     ? (input.action as WorkerResultAction)
     : undefined;
+  const relevantLearnings = await renderRelevantLearnings(input);
 
   return renderPromptTemplate({
     paths: input.paths,
@@ -331,6 +364,9 @@ export const renderWorkerPrompt = async (input: {
       "workspace-plan": await renderWorkspacePlan(input.paths),
       "deployment-instructions": await renderDeploymentInstructions(input.paths, input.deploymentInstructionBody),
       "result-schema": renderAgentResultSchemaHelp(resultSchemaAction).trim(),
+      // Absent, not empty-but-present: the template token then takes its own
+      // separator with it, leaving the prompt as it was before the section existed.
+      ...(relevantLearnings ? { "relevant-learnings": relevantLearnings } : {}),
     },
     fragmentAliases: {
       "task-system-worker": input.config.taskSystem.type === "linear" ? "task-system-linear-worker" : "task-system-file-worker",
