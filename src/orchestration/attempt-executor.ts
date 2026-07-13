@@ -291,6 +291,7 @@ export class AttemptExecutor {
             learnings: this.deps.foremanRepos.learnings,
             embedder: this.deps.embedder,
             warn: (message) => attemptLogger.warn(message),
+            telemetry: { events: this.deps.foremanRepos.learningInjectionEvents, attemptId: attempt.id },
           },
           gitState: {
             worktreeHeadSha: beforeSha,

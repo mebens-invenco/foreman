@@ -1,8 +1,17 @@
 import type { Task } from "../domain/index.js";
 import type { Embedder } from "../embeddings/embedder.js";
 import { markdownSection } from "../prompts/template-renderer.js";
-import type { LearningRecord, LearningRepo, LearningRetrievalProvenance } from "../repos/learning-repo.js";
+import type { LearningInjectionAction, LearningInjectionEventRepo } from "../repos/learning-injection-event-repo.js";
+import type { LearningRecord, LearningRepo } from "../repos/learning-repo.js";
 import { searchLearningsWithHybridFallback } from "../retrieval/hybrid-learning-search.js";
+
+/** Injection is opt-in as a whole: a caller that wants no digest passes no deps. */
+export type LearningInjectionDeps = {
+  learnings: LearningRepo;
+  embedder: Embedder;
+  warn: (message: string) => void;
+  telemetry: { events: LearningInjectionEventRepo; attemptId: string };
+};
 
 /** Nobody asked for these learnings, so few enough that ignoring them stays cheap. */
 export const RELEVANT_LEARNINGS_LIMIT = 5;
@@ -46,12 +55,12 @@ const TOKENS_PER_CHARACTER = 0.25;
 const estimateTokens = (text: string): number => Math.ceil(text.length * TOKENS_PER_CHARACTER);
 
 /**
- * The relevance floor. A hit the cosine arm never proposed carries no similarity
- * at all, and "no evidence it is close" is not evidence that it is: it is floored
- * out rather than pushed on a bm25 rank alone.
+ * A learning paired with the similarity it cleared the floor on. The two travel
+ * together because the telemetry below has to report the score the decision was
+ * actually made on, and a similarity re-derived later — or defaulted when a
+ * lookup misses — would be a number about a different question.
  */
-const clearsRelevanceFloor = (provenance: LearningRetrievalProvenance | undefined): boolean =>
-  provenance?.bestCosineSimilarity != null && provenance.bestCosineSimilarity >= INJECTION_SIMILARITY_FLOOR;
+type ScoredLearning = { learning: LearningRecord; cosineSimilarity: number };
 
 const ruleLine = (content: string): string | null =>
   content
@@ -74,19 +83,45 @@ const renderEntry = (learning: LearningRecord): string => {
   return rule ? `${heading}\n  ${rule}` : heading;
 };
 
-const renderSection = (entries: readonly string[]): string =>
-  markdownSection("Relevant Learnings", `${injectionGuidance}\n\n${entries.join("\n")}`);
+const renderSection = (injected: readonly ScoredLearning[]): string =>
+  markdownSection("Relevant Learnings", `${injectionGuidance}\n\n${injected.map((hit) => renderEntry(hit.learning)).join("\n")}`);
 
-/** Drops the lowest-ranked entries until the section fits; null when even one entry will not. */
-const fitToTokenBudget = (entries: readonly string[]): string | null => {
-  for (let count = entries.length; count > 0; count -= 1) {
-    const section = renderSection(entries.slice(0, count));
-    if (estimateTokens(section) <= RELEVANT_LEARNINGS_TOKEN_BUDGET) {
-      return section;
+/**
+ * Drops the lowest-ranked entries until the section fits; empty when even one
+ * entry will not. What it returns is what the agent was handed — the entries it
+ * drops were retrieved but never injected, and must not be recorded as if they were.
+ */
+const fitToTokenBudget = (candidates: readonly ScoredLearning[]): readonly ScoredLearning[] => {
+  for (let count = candidates.length; count > 0; count -= 1) {
+    const injected = candidates.slice(0, count);
+    if (estimateTokens(renderSection(injected)) <= RELEVANT_LEARNINGS_TOKEN_BUDGET) {
+      return injected;
     }
   }
 
-  return null;
+  return [];
+};
+
+/** Runs after the digest exists and cannot unmake it: a lost row must not cost an attempt its learnings. */
+const recordInjection = (
+  deps: LearningInjectionDeps,
+  input: { task: Task; action: LearningInjectionAction },
+  injected: readonly ScoredLearning[],
+): void => {
+  try {
+    deps.telemetry.events.recordInjection({
+      attemptId: deps.telemetry.attemptId,
+      taskId: input.task.id,
+      action: input.action,
+      learnings: injected.map((hit, index) => ({
+        learningId: hit.learning.id,
+        rank: index + 1,
+        cosineSimilarity: hit.cosineSimilarity,
+      })),
+    });
+  } catch (error) {
+    deps.warn(`relevant-learnings digest injected but not recorded: ${error instanceof Error ? error.message : String(error)}`);
+  }
 };
 
 /**
@@ -109,8 +144,8 @@ const fitToTokenBudget = (entries: readonly string[]): string | null => {
  *   where a human is waiting, swallowed here where nobody asked.
  */
 export const injectRelevantLearnings = async (
-  deps: { learnings: LearningRepo; embedder: Embedder; warn: (message: string) => void },
-  input: { task: Task; repoKey: string },
+  deps: LearningInjectionDeps,
+  input: { task: Task; repoKey: string; action: LearningInjectionAction },
 ): Promise<string | null> => {
   try {
     const query = injectionQueryText(input.task);
@@ -133,17 +168,33 @@ export const injectRelevantLearnings = async (
       return null;
     }
 
-    const ranked = result.learnings.filter((learning) => clearsRelevanceFloor(result.provenance.get(learning.id)));
-    if (ranked.length === 0) {
+    // The relevance floor. A hit the cosine arm never proposed carries no
+    // similarity at all, and "no evidence it is close" is not evidence that it
+    // is: it is floored out rather than pushed on a bm25 rank alone.
+    const similarityById = new Map(
+      result.learnings.flatMap((learning) => {
+        const similarity = result.provenance.get(learning.id)?.bestCosineSimilarity;
+        return similarity != null && similarity >= INJECTION_SIMILARITY_FLOOR ? [[learning.id, similarity] as const] : [];
+      }),
+    );
+    if (similarityById.size === 0) {
       return null;
     }
 
-    const bodies = deps.learnings.getLearningsByIds(
-      ranked.map((learning) => learning.id),
-      { incrementReadCount: false },
-    );
+    const bodies = deps.learnings.getLearningsByIds([...similarityById.keys()], { incrementReadCount: false });
+    const candidates = bodies.flatMap((learning) => {
+      const cosineSimilarity = similarityById.get(learning.id);
+      return cosineSimilarity == null ? [] : [{ learning, cosineSimilarity }];
+    });
 
-    return fitToTokenBudget(bodies.map(renderEntry));
+    const injected = fitToTokenBudget(candidates);
+    if (injected.length === 0) {
+      return null;
+    }
+
+    const digest = renderSection(injected);
+    recordInjection(deps, { task: input.task, action: input.action }, injected);
+    return digest;
   } catch (error) {
     deps.warn(`no relevant-learnings digest injected: ${error instanceof Error ? error.message : String(error)}`);
     return null;

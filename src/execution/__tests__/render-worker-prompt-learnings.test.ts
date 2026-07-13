@@ -102,6 +102,8 @@ const withWorkspace = async (run: (input: { db: Db; paths: WorkspacePaths }) => 
   }
 };
 
+const renderAttemptId = "01ATTEMPT0000000000000000";
+
 const render = (input: {
   db: Db;
   paths: WorkspacePaths;
@@ -122,7 +124,16 @@ const render = (input: {
     worktreePath: path.join(input.paths.workspaceRoot, "foreman"),
     baseBranch: "master",
     ...(input.continuation ? { continuation: true } : {}),
-    ...(input.inject ? { learningInjection: { learnings: input.db.learnings, embedder, warn: () => {} } } : {}),
+    ...(input.inject
+      ? {
+          learningInjection: {
+            learnings: input.db.learnings,
+            embedder,
+            warn: () => {},
+            telemetry: { events: input.db.learningInjectionEvents, attemptId: renderAttemptId },
+          },
+        }
+      : {}),
   });
 };
 
