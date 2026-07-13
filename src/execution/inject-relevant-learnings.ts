@@ -31,14 +31,29 @@ export const RELEVANT_LEARNINGS_TOKEN_BUDGET = 600;
  *
  * 0.70 is the middle of that empty band, not an edge of it: every value in roughly
  * [0.67, 0.74] rejects all three off-topic tasks and admits all 19 real ones, so
- * the midpoint is the choice furthest from either error. It admits ~2.8 entries per
- * real ticket. Do not read a second significant digit into it.
+ * the midpoint is the choice furthest from either error. Do not read a second
+ * significant digit into it.
  *
- * CALIBRATED FOR `bge-small-en-v1.5` AND FOR A TITLE + DESCRIPTION QUERY. Cosine
- * scales are model-specific and shift with query length; changing either without
- * re-measuring this number silently changes what every attempt prompt is fed.
+ * CALIBRATED FOR `bge-small-en-v1.5` AND FOR THE `injectionQueryText` QUERY SHAPE.
+ * A cosine scale is a property of the model and shifts with query length, so both
+ * are tripwired in `injection-similarity-calibration.test.ts` rather than left to
+ * a comment: that test pins this constant from BOTH sides against committed
+ * real-model vectors (`maxOffTopic 0.6564 < 0.70 < 0.7163 minReal`), fails if the
+ * production embedder changes model, and fails if the query text is rebuilt. Tune
+ * this number there or not at all — on its own it is unfalsifiable.
  */
 export const INJECTION_SIMILARITY_FLOOR = 0.7;
+
+/**
+ * The exact text injection embeds for a task.
+ *
+ * Exported so the calibration fixture embeds what production embeds, the way
+ * `learningEmbeddingText` does for the other side of the comparison. The floor is
+ * calibrated for THIS query shape — a threshold measured against a different one
+ * (the title alone, a truncated body) is a threshold for a different question.
+ */
+export const injectionQueryText = (task: { title: string; description: string }): string =>
+  `${task.title}\n${task.description}`.trim();
 
 const TOKENS_PER_CHARACTER = 0.25;
 
@@ -125,7 +140,7 @@ export const injectRelevantLearnings = async (
   input: { task: Task; repoKey: string },
 ): Promise<string | null> => {
   try {
-    const query = `${input.task.title}\n${input.task.description}`.trim();
+    const query = injectionQueryText(input.task);
     if (query.length === 0) {
       return null;
     }
@@ -136,8 +151,12 @@ export const injectRelevantLearnings = async (
       { incrementReadCount: false },
     );
 
+    // Not scored and found wanting — never scored at all. The `fts` result carries
+    // no provenance, so the seam has no similarity to floor its matches on, and
+    // pushing them unmeasured is the one thing this module exists to prevent.
+    // Silent by design: `fallBackToFts` has already logged the actionable line for
+    // a genuine degrade, and an empty store is not a degrade at all.
     if (result.pipeline !== "hybrid") {
-      deps.warn("no relevant-learnings digest injected: hybrid retrieval unavailable, and FTS matches are too weak to push");
       return null;
     }
 

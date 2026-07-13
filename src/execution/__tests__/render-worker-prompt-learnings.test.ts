@@ -60,8 +60,9 @@ const seedRelevantCorpus = (db: Db): void => {
     embeddedContent: "**Rule:** Rank both arms before fusing.\n**When to apply:** Whenever retrieval fuses two rankings.",
   });
 
-  // 12 of noise around 1 match: the largest z a corpus of n admits is
-  // `(n - 1) / sqrt(n)`, so clearing INJECTION_COSINE_Z_FLOOR = 3 needs n >= 11.
+  // Noise around 1 match, so the arm will RANK it: the largest z a corpus of n
+  // admits is `(n - 1) / sqrt(n)`, and `COSINE_Z_FLOOR` = 2 needs n >= 6. What the
+  // seam then injects is decided by similarity, not by z.
   for (let index = 0; index < 12; index += 1) {
     const content = `filler ${index} unrelated`;
     db.learnings.addLearning({ id: `pad-${index}`, title: `pad-${index}`, repo: "shared", confidence: "emerging", content, tags: [] });

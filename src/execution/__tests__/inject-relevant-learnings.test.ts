@@ -74,12 +74,22 @@ const ruleFor = (id: string): string => `**Rule:** Do the ${id} thing.`;
 const contentWithRule = (id: string): string => `**Rule:** Do the ${id} thing.\n**When to apply:** Whenever.`;
 
 /**
+ * A unit vector sitting exactly `similarity` from the query, so a learning can be
+ * seeded at a chosen cosine distance from the task rather than at whatever one
+ * falls out of a hand-written triple.
+ */
+const vectorAtSimilarity = (similarity: number): number[] => [Math.sqrt(1 - similarity ** 2), similarity, 0];
+
+/**
+/**
  * Padding an unrelated query cannot reach by bm25 and the cosine arm scores 0.
  *
- * The corpus has to be mostly noise for an outlier to exist at all: with `n`
- * embeddings and one perfect match, the largest attainable z is `(n - 1) / sqrt(n)`,
- * so clearing `INJECTION_COSINE_Z_FLOOR` = 3 takes n >= 11 (2.85 at n = 10, 3.02 at
- * n = 11). Each seeding below is sized against that bound, not guessed.
+ * The corpus has to be mostly noise for a learning to be RANKED at all: the arm
+ * proposes only what clears `COSINE_Z_FLOOR` = 2, and with `n` embeddings the
+ * largest attainable z is `(n - 1) / sqrt(n)`, so a perfect match needs n >= 6
+ * (1.79 at n = 5, 2.04 at n = 6). Injection does not gate on z — it floors on
+ * similarity — so this bound only decides what reaches the seam, never what the
+ * seam then injects. Seedings below carry headroom over it rather than sitting on it.
  */
 const seedPadding = (db: Db, count: number, vector = [1, 0, 0]): void => {
   for (let index = 0; index < count; index += 1) {
@@ -182,10 +192,6 @@ describe("injectRelevantLearnings", () => {
   });
 
   describe("relevance floor", () => {
-    // A unit vector `similarity` of the way from orthogonal to parallel with the
-    // query, so a learning can be seeded at an exact cosine distance from the task.
-    const vectorAtSimilarity = (similarity: number): number[] => [Math.sqrt(1 - similarity ** 2), similarity, 0];
-
     test("keeps a learning above the similarity floor and drops one below it", async () => {
       await withDb(async (db) => {
         seedLearning(db, { id: "close", content: contentWithRule("close"), vector: vectorAtSimilarity(0.8) });
@@ -263,6 +269,42 @@ describe("injectRelevantLearnings", () => {
     });
   });
 
+  // Ids run OPPOSITE to rank throughout: `zzz-hi` is the more similar learning and
+  // `aaa-lo` the less. Seeded the other way round — or with equal vectors, where
+  // RRF breaks the tie on id — rank order and id order coincide, and every
+  // assertion below would hold just as well against a digest sorted alphabetically.
+  describe("ordering", () => {
+    const seedDivergent = (db: Db, rule = (id: string) => contentWithRule(id)): void => {
+      seedLearning(db, { id: "zzz-hi", content: rule("zzz-hi"), vector: vectorAtSimilarity(0.85) });
+      seedLearning(db, { id: "aaa-lo", content: rule("aaa-lo"), vector: vectorAtSimilarity(0.72) });
+      seedPadding(db, 30);
+    };
+
+    test("renders entries in fused-rank order, not id order", async () => {
+      await withDb(async (db) => {
+        seedDivergent(db);
+
+        const { digest } = await injectWith(db, embedderMatching());
+
+        expect(entryIds(digest!)).toEqual(["zzz-hi", "aaa-lo"]);
+      });
+    });
+
+    test("the token cap drops the lowest-ranked entry, not the last alphabetically", async () => {
+      await withDb(async (db) => {
+        // Sized so exactly one entry fits: the survivor names which end of the
+        // ranking `fitToTokenBudget` trims from.
+        const longRule = (id: string): string => `**Rule:** ${"x".repeat(1_400)} ${id}`;
+        seedDivergent(db, longRule);
+
+        const { digest } = await injectWith(db, embedderMatching());
+
+        expect(entryIds(digest!)).toEqual(["zzz-hi"]);
+        expect(estimateTokens(digest!)).toBeLessThanOrEqual(RELEVANT_LEARNINGS_TOKEN_BUDGET);
+      });
+    });
+  });
+
   describe("caps", () => {
     test("drops the lowest-ranked entries until the section fits the token budget", async () => {
       await withDb(async (db) => {
@@ -312,7 +354,7 @@ describe("injectRelevantLearnings", () => {
   });
 
   describe("a degraded retrieval never fails the render", () => {
-    test("injects nothing and warns once when coverage is too thin to rank", async () => {
+    test("injects nothing and warns exactly once, with the line that says what to do", async () => {
       await withDb(async (db) => {
         seedLearning(db, { id: "learn-target", content: contentWithRule("learn-target"), vector: [0, 1, 0] });
         seedPadding(db, 8);
@@ -321,8 +363,11 @@ describe("injectRelevantLearnings", () => {
 
         const { digest, warnings } = await injectWith(db, embedderMatching());
 
+        // One line, from the layer that knows why. The seam adding its own would
+        // double-warn a single degrade, and could only restate what it was told.
         expect(digest).toBeNull();
-        expect(warnings.filter((message) => message.includes("no relevant-learnings digest injected"))).toHaveLength(1);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("backfill-embeddings");
       });
     });
 
@@ -336,7 +381,8 @@ describe("injectRelevantLearnings", () => {
         const { digest, warnings } = await injectWith(db, embedder);
 
         expect(digest).toBeNull();
-        expect(warnings.filter((message) => message.includes("no relevant-learnings digest injected"))).toHaveLength(1);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("model download failed");
       });
     });
 
@@ -354,11 +400,14 @@ describe("injectRelevantLearnings", () => {
       });
     });
 
-    test("injects nothing on an empty corpus", async () => {
+    test("injects nothing on an empty corpus, and says nothing about it", async () => {
       await withDb(async (db) => {
-        const { digest } = await injectWith(db, embedderMatching());
+        const { digest, warnings } = await injectWith(db, embedderMatching());
 
+        // An empty store is not a degrade. Warning here would put a line in the
+        // log of every attempt in a workspace that has simply not learned anything.
         expect(digest).toBeNull();
+        expect(warnings).toEqual([]);
       });
     });
 
