@@ -1,6 +1,7 @@
 import { ForemanError } from "../../lib/errors.js";
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
+import { assertRankableVector, isRankableVector } from "../../embeddings/rankable-vector.js";
 import { selectCosineCandidates } from "../../retrieval/cosine-candidates.js";
 import { fuseByReciprocalRank } from "../../retrieval/reciprocal-rank-fusion.js";
 import type {
@@ -310,7 +311,11 @@ export class SqliteLearningRepo implements LearningRepo {
     options: LearningReadOptions = {},
   ): LearningSearchRecord[] {
     const queries = resolveHybridQueries(filters, queryEmbedding);
-    const learnings = this.rankLearningsHybrid(queries, filters, queryEmbedding.model);
+    const embeddings = this.getCurrentLearningEmbeddings({
+      repos: normalizeFilterValues(filters.repos),
+      model: queryEmbedding.model,
+    });
+    const learnings = this.rankLearningsHybrid(queries, filters, embeddings);
 
     if (options.incrementReadCount) {
       this.incrementReadCount(learnings.map((learning) => learning.id));
@@ -337,12 +342,15 @@ export class SqliteLearningRepo implements LearningRepo {
     // enforced against a corpus that no longer exists.
     const result = this.sqlite.transaction((): CoveredHybridSearch => {
       const learningCount = this.countLearnings(scope);
-      const embeddingCount = this.countCurrentLearningEmbeddings({ ...scope, model: queryEmbedding.model });
-      if (learningCount === 0 || embeddingCount / learningCount < gate.minCoverage) {
-        return { covered: false, learningCount, embeddingCount };
+      // One read, shared by the gate and the ranking it authorizes. They now see
+      // not merely the same snapshot but literally the same vectors, so the corpus
+      // the gate measured is the corpus the fusion ranks.
+      const embeddings = this.getCurrentLearningEmbeddings({ ...scope, model: queryEmbedding.model });
+      if (learningCount === 0 || embeddings.length / learningCount < gate.minCoverage) {
+        return { covered: false, learningCount, embeddingCount: embeddings.length };
       }
 
-      return { covered: true, learnings: this.rankLearningsHybrid(queries, filters, queryEmbedding.model) };
+      return { covered: true, learnings: this.rankLearningsHybrid(queries, filters, embeddings) };
     })();
 
     // Outside the snapshot: a read counter is telemetry about what came back, not
@@ -358,7 +366,7 @@ export class SqliteLearningRepo implements LearningRepo {
   private rankLearningsHybrid(
     queries: readonly HybridQuery[],
     filters: { repos?: string[]; limit?: number; offset?: number },
-    model: string,
+    embeddings: readonly LearningEmbeddingRecord[],
   ): LearningSearchRecord[] {
     const repos = normalizeFilterValues(filters.repos);
     const limit = filters.limit ?? 20;
@@ -386,14 +394,12 @@ export class SqliteLearningRepo implements LearningRepo {
         .sort((left, right) => left.score - right.score || left.id.localeCompare(right.id))
         .map((candidate) => candidate.id);
 
-    // One read of the vector space, reused across queries. A learning with no
-    // vector, or one whose text has moved on since it was embedded, simply never
-    // enters the cosine list; its bm25 rank still counts.
-    // `selectCosineCandidates` bounds that list rather than ranking the whole
-    // corpus, so an empty result stays possible and bm25 hits are not displaced
-    // by arbitrary near-neighbours.
-    const embeddings = this.getCurrentLearningEmbeddings({ repos, model });
-
+    // `embeddings` is the current vector space, read once by the caller and reused
+    // across queries. A learning with no vector, one whose text has moved on since
+    // it was embedded, or one whose vector nothing can rank simply never enters the
+    // cosine list; its bm25 rank still counts. `selectCosineCandidates` bounds that
+    // list rather than ranking the whole corpus, so an empty result stays possible
+    // and bm25 hits are not displaced by arbitrary near-neighbours.
     const bestScores = new Map<string, number>();
     for (const query of queries) {
       for (const [id, score] of fuseByReciprocalRank([rankByBm25(query.text), selectCosineCandidates(query.vector, embeddings)])) {
@@ -498,6 +504,26 @@ export class SqliteLearningRepo implements LearningRepo {
   }
 
   upsertLearningEmbedding(input: LearningEmbeddingUpsert): boolean {
+    // The single choke point every vector reaches the database through — backfill,
+    // worker applier, bench alike — so this is where an unrankable one has to be
+    // stopped. Persisted, it is a poison pill rather than a bad row: its text
+    // snapshot still matches its learning, so `listLearningIdsMissingEmbedding`
+    // calls it current and `backfill-embeddings` skips it, while every search over
+    // that scope throws. The refusal in `cosineSimilarity` is a backstop; this is
+    // the guard.
+    assertRankableVector(input.vector);
+
+    // `dims` is metadata ABOUT the blob, persisted beside it and used to decode
+    // it. A row allowed to claim a width it does not have is a row that lies about
+    // itself, which is the same reason the embedder port checks its own width.
+    if (input.dims !== input.vector.length) {
+      throw new ForemanError(
+        "embedding_dims_mismatch",
+        `Cannot store a ${input.vector.length}-dim vector as ${input.dims} dims`,
+        500,
+      );
+    }
+
     // Selecting the row rather than VALUES makes the guard and the write one
     // statement: a learning edited between an embed and its write yields no
     // source row, so the stale vector is dropped instead of being stamped
@@ -535,23 +561,20 @@ export class SqliteLearningRepo implements LearningRepo {
   }
 
   listLearningIdsMissingEmbedding(model: string): string[] {
-    // Text, not `updated_at`: re-embedding a learning because someone bumped its
-    // `applied_count` burns the model on text that never changed, and — since
-    // the coverage gate reads the same rule — would take hybrid retrieval down
-    // with it. `worker-result-applier` has always compared the text this way.
+    // Missing is the COMPLEMENT of current, by construction — absent, from another
+    // model, embedded from other text, or carrying a vector nothing can rank.
+    // Deriving it from the same read is what makes `backfill-embeddings` the true
+    // remedy: a vector corrupted after it was written is re-embedded rather than
+    // left for hand-written SQL. Two separate predicates would be two things to
+    // keep in agreement, which is exactly how the timestamp rule drifted away from
+    // the applier's in the first place.
+    const current = new Set(this.getCurrentLearningEmbeddings({ model }).map((embedding) => embedding.learningId));
+
     return this.sqlite
-      .prepare(
-        `SELECT learning.id AS id
-           FROM learning
-           LEFT JOIN learning_embedding ON learning_embedding.learning_id = learning.id
-          WHERE learning_embedding.learning_id IS NULL
-             OR learning_embedding.model != ?
-             OR learning_embedding.embedded_title IS NOT learning.title
-             OR learning_embedding.embedded_content IS NOT learning.content
-          ORDER BY learning.id ASC`,
-      )
-      .all(model)
-      .map((row) => String((row as SqliteRow).id));
+      .prepare("SELECT id FROM learning ORDER BY id ASC")
+      .all()
+      .map((row) => String((row as SqliteRow).id))
+      .filter((id) => !current.has(id));
   }
 
   getLearningEmbeddings(filters: { repos?: string[]; model?: string } = {}): LearningEmbeddingRecord[] {
@@ -572,30 +595,31 @@ export class SqliteLearningRepo implements LearningRepo {
   getCurrentLearningEmbeddings(filters: { repos?: string[]; model: string }): LearningEmbeddingRecord[] {
     const { where, params } = learningEmbeddingFilter(filters, { currentOnly: true });
 
-    return this.sqlite
-      .prepare(
-        `SELECT learning_embedding.learning_id, learning_embedding.model, learning_embedding.dims, learning_embedding.vector
-           FROM learning_embedding
-           JOIN learning ON learning.id = learning_embedding.learning_id
-           ${where}
-          ORDER BY learning_embedding.learning_id ASC`,
-      )
-      .all(...params)
-      .map(mapLearningEmbeddingRecord);
+    return (
+      this.sqlite
+        .prepare(
+          `SELECT learning_embedding.learning_id, learning_embedding.model, learning_embedding.dims, learning_embedding.vector
+             FROM learning_embedding
+             JOIN learning ON learning.id = learning_embedding.learning_id
+             ${where}
+            ORDER BY learning_embedding.learning_id ASC`,
+        )
+        .all(...params)
+        .map(mapLearningEmbeddingRecord)
+        // The write boundaries refuse an unrankable vector, and refuse a row that
+        // claims a width it does not have — so a row failing either check was
+        // corrupted after it was written. Treating it as one the backfill owes
+        // (see `listLearningIdsMissingEmbedding`) is what makes it repairable by
+        // the command the operator is actually told to run.
+        .filter((embedding) => embedding.vector.length === embedding.dims && isRankableVector(embedding.vector))
+    );
   }
 
   countCurrentLearningEmbeddings(filters: { repos?: string[]; model: string }): number {
-    const { where, params } = learningEmbeddingFilter(filters, { currentOnly: true });
-
-    const row = this.sqlite
-      .prepare(
-        `SELECT COUNT(*) AS count
-           FROM learning_embedding
-           JOIN learning ON learning.id = learning_embedding.learning_id
-           ${where}`,
-      )
-      .get(...params) as SqliteRow;
-
-    return Number(row.count);
+    // Derived from the same read rather than counted in SQL, so the count and the
+    // rows can never disagree about what "current" means. Decoding a few hundred
+    // vectors costs microseconds; a gate that counts a vector the ranking then
+    // refuses to use costs a wrong answer.
+    return this.getCurrentLearningEmbeddings(filters).length;
   }
 }
