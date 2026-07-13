@@ -30,6 +30,8 @@ Reattempt the task cleanly from fresh branch state while reusing only the prior 
 
 {{context:pull-request}}
 
+{{context:relevant-learnings}}
+
 ## Retry Rules
 
 - Treat previous patch content as discarded.

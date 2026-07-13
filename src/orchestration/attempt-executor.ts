@@ -9,6 +9,7 @@ import { ForemanError, isForemanError, isProviderRateLimitError } from "../lib/e
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
+import type { Embedder } from "../embeddings/embedder.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, RunnerSessionRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
@@ -95,6 +96,7 @@ type AttemptExecutorDeps = {
   config: WorkspaceConfig;
   paths: WorkspacePaths;
   foremanRepos: ForemanRepos;
+  embedder: Embedder;
   taskSystem: TaskSystem;
   reviewService: ReviewService;
   repos: RepoRef[];
@@ -285,6 +287,11 @@ export class AttemptExecutor {
           worktreePath,
           baseBranch: job.baseBranch ?? repo.defaultBranch,
           foremanRepos: this.deps.foremanRepos,
+          learningInjection: {
+            learnings: this.deps.foremanRepos.learnings,
+            embedder: this.deps.embedder,
+            warn: (message) => attemptLogger.warn(message),
+          },
           gitState: {
             worktreeHeadSha: beforeSha,
             reviewHeadSha,

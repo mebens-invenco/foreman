@@ -11,6 +11,7 @@ import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
 import type { ReviewService } from "../../review/index.js";
 import type { TaskSystem } from "../../tasking/index.js";
+import { FakeEmbedder } from "../../test-support/fake-embedder.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import { AttemptExecutor } from "../attempt-executor.js";
@@ -148,6 +149,7 @@ const createExecutorContext = async (options: { action?: ActionType; selectedTas
     config,
     paths,
     foremanRepos: db,
+    embedder: new FakeEmbedder(),
     taskSystem,
     reviewService,
     repos: [repo],
@@ -256,6 +258,7 @@ describe("AttemptExecutor", () => {
         config: createDefaultWorkspaceConfig("test-workspace", "file"),
         paths,
         foremanRepos: db,
+        embedder: new FakeEmbedder(),
         taskSystem,
         reviewService,
         repos: [repo],

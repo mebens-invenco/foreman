@@ -40,6 +40,8 @@ Priority order inside this action:
 
 {{context:pull-request}}
 
+{{context:relevant-learnings}}
+
 ## Review Rules
 
 - Discover the current actionable GitHub state before deciding whether code, replies, or thread resolution are needed.

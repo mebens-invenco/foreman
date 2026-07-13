@@ -36,6 +36,8 @@ Complete the selected task in the provided worktree.
 
 {{context:pull-request}}
 
+{{context:relevant-learnings}}
+
 ## Execution Rules
 
 - Treat the resolved repo, worktree, and base branch as authoritative.

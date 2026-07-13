@@ -98,6 +98,7 @@ export class SchedulerService extends EventEmitter {
       config: deps.config,
       paths: deps.paths,
       foremanRepos: deps.foremanRepos,
+      embedder: deps.embedder,
       taskSystem: deps.taskSystem,
       reviewService: deps.reviewService,
       repos: deps.repos,

@@ -38,7 +38,13 @@ const TEMPLATE_PATHS: Record<PromptTemplateName, string> = {
 
 const FRAGMENTS_DIR = path.join("prompts", "fragments");
 const fragmentTokenPattern = /\{\{fragment:([a-zA-Z0-9_-]+)\}\}/g;
-const contextTokenPattern = /\{\{context:([a-zA-Z0-9_-]+)\}\}/g;
+/**
+ * Captures the blank line that separates a context section from the next one, so
+ * an absent section can take its own separator with it. A section that renders to
+ * nothing must leave nothing: replacing the token alone would strand the blank
+ * line and change the output of every caller that does not supply the key.
+ */
+const contextTokenPattern = /\{\{context:([a-zA-Z0-9_-]+)\}\}(\n\n)?/g;
 const propertyTokenPattern = /\{\{([a-zA-Z0-9_-]+):([a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)*)\}\}/g;
 
 export const markdownSection = (title: string, body: string): string => `## ${title}\n\n${body}`;
@@ -95,7 +101,10 @@ const renderTemplate = (input: {
     });
 
   const withFragments = renderFragments(input.template);
-  const withContext = withFragments.replace(contextTokenPattern, (_match, rawName) => input.context[rawName] ?? "");
+  const withContext = withFragments.replace(contextTokenPattern, (_match, rawName: string, separator: string | undefined) => {
+    const section = input.context[rawName] ?? "";
+    return section ? `${section}${separator ?? ""}` : "";
+  });
   const withProperties = withContext.replace(propertyTokenPattern, (_match, rawScope, rawPath) =>
     resolveTemplateProperty(input.properties?.[rawScope], rawPath),
   );
