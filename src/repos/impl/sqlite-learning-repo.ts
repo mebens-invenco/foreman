@@ -66,6 +66,19 @@ const mapLearningEmbeddingRecord = (row: unknown): LearningEmbeddingRecord => {
   };
 };
 
+/**
+ * Whether a stored row can be decoded into the `dims` float32s it claims — asked
+ * of the RAW row, before `fromVectorBlob` touches it.
+ *
+ * A blob whose byte length is not a multiple of 4 makes `new Float32Array` throw,
+ * and the repair path reads through here: a truncated blob would take
+ * `backfill-embeddings` down with it rather than being re-embedded by it. Checking
+ * the byte count also subsumes "the row claims a width it does not have" — a blob
+ * is exactly `dims` floats wide or it is not this row's vector at all.
+ */
+const isDecodableVectorRow = (row: SqliteRow): boolean =>
+  (row.vector as Buffer).byteLength === Number(row.dims) * 4;
+
 const normalizeFilterValues = (values: readonly string[] | undefined): string[] =>
   Array.from(new Set((values ?? []).map((value) => value.trim()).filter((value) => value.length > 0)));
 
@@ -605,13 +618,15 @@ export class SqliteLearningRepo implements LearningRepo {
             ORDER BY learning_embedding.learning_id ASC`,
         )
         .all(...params)
+        // Both checks reject a row the write boundaries would never have written,
+        // so a row failing either was corrupted after the fact. Treating it as one
+        // the backfill owes (see `listLearningIdsMissingEmbedding`) is what makes
+        // it repairable by the command the operator is actually told to run.
+        // Undecodable first, and on the raw row: decoding it would throw, and take
+        // that repair path down with it.
+        .filter((row) => isDecodableVectorRow(row as SqliteRow))
         .map(mapLearningEmbeddingRecord)
-        // The write boundaries refuse an unrankable vector, and refuse a row that
-        // claims a width it does not have — so a row failing either check was
-        // corrupted after it was written. Treating it as one the backfill owes
-        // (see `listLearningIdsMissingEmbedding`) is what makes it repairable by
-        // the command the operator is actually told to run.
-        .filter((embedding) => embedding.vector.length === embedding.dims && isRankableVector(embedding.vector))
+        .filter((embedding) => isRankableVector(embedding.vector))
     );
   }
 
