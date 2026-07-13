@@ -1369,7 +1369,7 @@ describe("WorkerResultApplier learning embeddings", () => {
         learningId: "learn-a",
         model: embedder.modelId,
         dims: embedder.dims,
-        vector: Float32Array.from([0, 0, 0]),
+        vector: Float32Array.from([-9, -9, -9]),
         embeddedTitle: "Title",
         embeddedContent: "Old body",
       });
@@ -1377,7 +1377,7 @@ describe("WorkerResultApplier learning embeddings", () => {
       await applyLearningMutations(db, embedder, [{ type: "update", id: "learn-a", content: "New body" }], tempDir);
 
       expect(embedder.embeddedTexts).toEqual(["Title\nNew body"]);
-      expect(Array.from(db.learnings.getLearningEmbeddings()[0]!.vector)).not.toEqual([0, 0, 0]);
+      expect(Array.from(db.learnings.getLearningEmbeddings()[0]!.vector)).not.toEqual([-9, -9, -9]);
     } finally {
       db.close();
     }

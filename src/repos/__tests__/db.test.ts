@@ -1207,6 +1207,96 @@ describe("persistence repos", () => {
     }
   });
 
+  test("refuses to persist a vector nothing could rank, or one that lies about its width", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      db.learnings.addLearning({ id: "learn-a", title: "T", repo: "shared", confidence: "emerging", content: "body", tags: [] });
+      const upsert = (vector: Float32Array, dims = vector.length) =>
+        db.learnings.upsertLearningEmbedding({
+          learningId: "learn-a",
+          model: "m",
+          dims,
+          vector,
+          embeddedTitle: "T",
+          embeddedContent: "body",
+        });
+
+      // A vector with no direction, stored with a matching text snapshot, is a
+      // poison pill: the backfill calls it current and skips it, while every
+      // search over the scope throws. This is the choke point that stops it.
+      expect(() => upsert(Float32Array.from([0, 0, 0]))).toThrow(/no direction/);
+      expect(() => upsert(Float32Array.from([NaN, 1, 0]))).toThrow(/non-finite component/);
+      expect(() => upsert(Float32Array.from([Infinity, 1, 0]))).toThrow(/non-finite component/);
+
+      // `dims` is metadata about the blob, used to decode it. A row must not be
+      // allowed to claim a width it does not have.
+      expect(() => upsert(Float32Array.from([1, 0, 0]), 384)).toThrow(/Cannot store a 3-dim vector as 384 dims/);
+
+      // Nothing got through.
+      expect(db.learnings.getLearningEmbeddings()).toEqual([]);
+      expect(upsert(Float32Array.from([1, 0, 0]))).toBe(true);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports a vector corrupted after it was written as one the backfill owes", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      for (const id of ["learn-ok", "learn-rotted"]) {
+        db.learnings.addLearning({ id, title: id, repo: "shared", confidence: "emerging", content: "body", tags: [] });
+        db.learnings.upsertLearningEmbedding({
+          learningId: id,
+          model: "m",
+          dims: 3,
+          vector: Float32Array.from([1, 0, 0]),
+          embeddedTitle: id,
+          embeddedContent: "body",
+        });
+      }
+      expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual([]);
+
+      // The write boundary refuses this, so reaching it means the blob rotted at
+      // rest. Go around the repo to plant it, exactly as corruption would.
+      db.database.sqlite
+        .prepare("UPDATE learning_embedding SET vector = ? WHERE learning_id = ?")
+        .run(Buffer.from(Float32Array.from([0, 0, 0]).buffer), "learn-rotted");
+
+      // Not merely excluded from the ranking — reported as missing, so the command
+      // the operator is actually told to run repairs it. Otherwise a single rotted
+      // row is a workspace-wide outage fixable only by hand-written SQL.
+      expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual(["learn-rotted"]);
+      expect(db.learnings.getCurrentLearningEmbeddings({ model: "m" }).map((row) => row.learningId)).toEqual(["learn-ok"]);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(1);
+
+      // The identity the whole freshness rule rests on still holds.
+      expect(
+        db.learnings.countCurrentLearningEmbeddings({ model: "m" }) + db.learnings.listLearningIdsMissingEmbedding("m").length,
+      ).toBe(db.learnings.countLearnings());
+
+      // And re-embedding through the normal path repairs it.
+      const rotted = db.learnings.getLearningsByIds(["learn-rotted"])[0]!;
+      db.learnings.upsertLearningEmbedding({
+        learningId: rotted.id,
+        model: "m",
+        dims: 3,
+        vector: Float32Array.from([0, 1, 0]),
+        embeddedTitle: rotted.title,
+        embeddedContent: rotted.content,
+      });
+      expect(db.learnings.listLearningIdsMissingEmbedding("m")).toEqual([]);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: "m" })).toBe(2);
+    } finally {
+      db.close();
+    }
+  });
+
   test("treats a vector older than its learning as absent, exactly as the backfill does", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);

@@ -90,6 +90,46 @@ describe("backfillLearningEmbeddings", () => {
     }
   });
 
+  test("repairs a vector corrupted after it was written, so search is never bricked", async () => {
+    const db = await createDb();
+    const embedder = new FakeEmbedder();
+
+    try {
+      for (const id of ["learn-a", "learn-b"]) {
+        db.learnings.addLearning({ id, title: id, repo: "shared", confidence: "emerging", content: `body ${id}`, tags: [] });
+      }
+      await backfillLearningEmbeddings({ learnings: db.learnings, embedder });
+
+      // The write boundary refuses an unrankable vector, so a rotted blob can only
+      // arrive here — bit-rot, a partial write, someone's SQL. Its text snapshot
+      // still matches, which is what used to make it invisible to the backfill and
+      // fatal to every search: `learnings search` threw, and the warning telling
+      // the operator to run this very command was a no-op.
+      db.database.sqlite
+        .prepare("UPDATE learning_embedding SET vector = ? WHERE learning_id = ?")
+        .run(Buffer.from(Float32Array.from([0, 0, 0]).buffer), "learn-a");
+
+      expect(db.learnings.listLearningIdsMissingEmbedding(embedder.modelId)).toEqual(["learn-a"]);
+
+      const repair = await backfillLearningEmbeddings({ learnings: db.learnings, embedder });
+
+      expect(repair).toEqual({ model: embedder.modelId, total: 2, embedded: 1, skipped: 1 });
+      expect(embedder.embeddedTexts.at(-1)).toBe(learningEmbeddingText({ title: "learn-a", content: "body learn-a" }));
+      expect(db.learnings.listLearningIdsMissingEmbedding(embedder.modelId)).toEqual([]);
+      expect(db.learnings.countCurrentLearningEmbeddings({ model: embedder.modelId })).toBe(2);
+
+      // And it converges: the repaired row is not re-embedded forever after.
+      expect(await backfillLearningEmbeddings({ learnings: db.learnings, embedder })).toEqual({
+        model: embedder.modelId,
+        total: 2,
+        embedded: 0,
+        skipped: 2,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("re-embeds only the learnings whose vector is missing", async () => {
     const db = await createDb();
     const embedder = new FakeEmbedder();
@@ -98,11 +138,13 @@ describe("backfillLearningEmbeddings", () => {
       for (const id of ["learn-a", "learn-b"]) {
         db.learnings.addLearning({ id, title: id, repo: "foreman", confidence: "emerging", content: "body", tags: [] });
       }
+      // A sentinel standing for "this learning already has a vector" — distinct
+      // from anything FakeEmbedder produces, so a re-embed would be visible.
       db.learnings.upsertLearningEmbedding({
         learningId: "learn-a",
         model: embedder.modelId,
         dims: embedder.dims,
-        vector: Float32Array.from([0, 0, 0]),
+        vector: Float32Array.from([-9, -9, -9]),
         embeddedTitle: "learn-a",
         embeddedContent: "body",
       });
@@ -113,7 +155,7 @@ describe("backfillLearningEmbeddings", () => {
       expect(embedder.embeddedTexts).toEqual([learningEmbeddingText({ title: "learn-b", content: "body" })]);
       // The pre-existing vector is left untouched.
       const stored = db.learnings.getLearningEmbeddings({ repos: ["foreman"] });
-      expect(Array.from(stored.find((row) => row.learningId === "learn-a")!.vector)).toEqual([0, 0, 0]);
+      expect(Array.from(stored.find((row) => row.learningId === "learn-a")!.vector)).toEqual([-9, -9, -9]);
     } finally {
       db.close();
     }

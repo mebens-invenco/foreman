@@ -1,3 +1,4 @@
+import { assertRankableVector } from "../embeddings/rankable-vector.js";
 import { ForemanError } from "../lib/errors.js";
 
 /**
@@ -30,6 +31,13 @@ export const cosineSimilarity = (left: Float32Array, right: Float32Array): numbe
     );
   }
 
+  // A backstop, not the guard. The embedder port refuses to emit an unrankable
+  // vector and `upsertLearningEmbedding` refuses to persist one, so this should be
+  // unreachable — it stays because a NaN reaching the corpus statistics corrupts
+  // them silently, and silence is the one failure this arm must never have.
+  assertRankableVector(left);
+  assertRankableVector(right);
+
   let dotProduct = 0;
   let leftSumOfSquares = 0;
   let rightSumOfSquares = 0;
@@ -41,29 +49,5 @@ export const cosineSimilarity = (left: Float32Array, right: Float32Array): numbe
     rightSumOfSquares += rightValue * rightValue;
   }
 
-  // A non-finite component makes its own sum of squares non-finite, so the sums
-  // catch NaN and +/-Infinity alike. Float32 components cannot overflow these
-  // float64 accumulators, so a finite vector never trips this.
-  assertRankable(leftSumOfSquares, left);
-  assertRankable(rightSumOfSquares, right);
-
   return dotProduct / (Math.sqrt(leftSumOfSquares) * Math.sqrt(rightSumOfSquares));
-};
-
-const assertRankable = (sumOfSquares: number, vector: Float32Array): void => {
-  if (!Number.isFinite(sumOfSquares)) {
-    throw new ForemanError(
-      "embedding_vector_not_finite",
-      `Cannot rank a ${vector.length}-dim vector with a non-finite component`,
-      500,
-    );
-  }
-
-  if (sumOfSquares === 0) {
-    throw new ForemanError(
-      "embedding_vector_zero_magnitude",
-      `Cannot rank a ${vector.length}-dim vector of zero magnitude: it has no direction`,
-      500,
-    );
-  }
 };
