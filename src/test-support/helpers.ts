@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { priorityToRank, type ActionType, type Task } from "../domain/index.js";
+import { newId } from "../lib/ids.js";
 import { createRepos, type AttemptRecord, type ForemanRepos } from "../repos/index.js";
 import { openSqliteDatabase, type SqliteForemanDatabase } from "../repos/impl/sqlite-database.js";
 import { createDefaultWorkspaceConfig } from "../workspace/config.js";
@@ -94,6 +95,12 @@ export const createTestConfig = () => createDefaultWorkspaceConfig("test-workspa
  * `learning_injection_event.attempt_id` is a foreign key, so a telemetry fixture
  * cannot hand injection a synthetic attempt id: the insert would be rejected, and
  * the never-fail catch around it would swallow the rejection into a warning.
+ *
+ * The dedupe key is salted per call. `idx_job_unique_active_dedupe` is unique over
+ * jobs still in flight, and `createJob` always inserts one as `queued`, so an
+ * unsalted key would make a second attempt for the same task/repo/action throw —
+ * and two eligible attempts for one task is precisely the shape a denominator
+ * assertion needs.
  */
 export const seedExecutionAttempt = (
   repos: ForemanRepos,
@@ -114,7 +121,7 @@ export const seedExecutionAttempt = (
     priorityRank: priorityToRank(input.task.priority),
     repoKey: input.repoKey,
     baseBranch: "master",
-    dedupeKey: `${input.task.id}:${input.repoKey}:${input.action}`,
+    dedupeKey: `${input.task.id}:${input.repoKey}:${input.action}:${newId()}`,
     selectionReason: "test fixture",
   });
 

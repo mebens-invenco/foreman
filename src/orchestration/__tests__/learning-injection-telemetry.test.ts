@@ -332,6 +332,37 @@ describe("injection telemetry", () => {
     });
   });
 
+  describe("an eligible attempt the digest never reached", () => {
+    test("lands in the denominator and drags the rate below 1", async () => {
+      await withWorkspace(async (db, workspaceRoot) => {
+        await runAttempt(db, workspaceRoot, { appliedLearningId: injectedId });
+        // Eligible, but no digest was pushed into it — the common case in production,
+        // and the only shape that exercises the rate anywhere between its two ends.
+        seedExecutionAttempt(db, { task, repoKey: "foreman", action: "execution" });
+
+        expect(db.learningInjectionEvents.getInjectionStats()).toMatchObject({
+          eligibleAttempts: 2,
+          attemptsWithInjection: 1,
+          attemptsWithInjectionRate: 0.5,
+        });
+      });
+    });
+
+    test("counts each of a retried task's attempts, not the task once", async () => {
+      await withWorkspace(async (db, workspaceRoot) => {
+        await runAttempt(db, workspaceRoot, { appliedLearningId: injectedId });
+        const first = seedExecutionAttempt(db, { task, repoKey: "foreman", action: "execution" });
+        const second = seedExecutionAttempt(db, { task, repoKey: "foreman", action: "execution" });
+
+        expect(second.id).not.toBe(first.id);
+        expect(db.learningInjectionEvents.getInjectionStats()).toMatchObject({
+          eligibleAttempts: 3,
+          attemptsWithInjection: 1,
+        });
+      });
+    });
+  });
+
   describe("an attempt whose action can never carry a digest", () => {
     test("stays out of the eligible denominator", async () => {
       await withWorkspace(async (db, workspaceRoot) => {
