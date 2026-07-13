@@ -1302,12 +1302,23 @@ describe("persistence repos", () => {
     };
 
     try {
-      // Right width, right model, right text snapshot -- so nothing else skips
-      // it and backfill cannot see it. It sorts first, and a NaN similarity
-      // makes every later `>` false, so it would install itself as the nearest
-      // neighbour forever and no valid candidate could ever displace it.
-      seed("aaa-nan", [Number.NaN, 0, 0]);
+      seed("aaa-nan", [1, 0, 0]);
       seed("valid", [0.9, 0.4359, 0]);
+
+      // `upsertLearningEmbedding` refuses a non-finite vector, so rot at rest is the
+      // only way one reaches the scan. Go around the repo to plant it, exactly as
+      // corruption would -- at the width the row claims, so it decodes and the width
+      // skip does not catch it first.
+      db.database.sqlite
+        .prepare("UPDATE learning_embedding SET vector = ? WHERE learning_id = ?")
+        .run(Buffer.from(Float32Array.from([Number.NaN, 0, 0]).buffer), "aaa-nan");
+
+      // Filtered before the scan ever sees it -- which is the guard that matters,
+      // because the row keeps its text snapshot, so nothing downstream would skip
+      // it. It sorts first, and a NaN similarity makes every later `>` false, so it
+      // would install itself as the nearest neighbour forever and no valid candidate
+      // could ever displace it.
+      expect(db.learnings.getCurrentLearningEmbeddings({ model: "m1" }).map((row) => row.learningId)).toEqual(["valid"]);
 
       const nearest = db.learnings.nearestLearningEmbedding(Float32Array.from([1, 0, 0]), { model: "m1" });
       expect(nearest?.learningId).toBe("valid");

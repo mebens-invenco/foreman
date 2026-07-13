@@ -14,17 +14,30 @@ const applyMigration = (db: Database.Database, name: string): void => {
   db.exec(readFileSync(path.join(MIGRATIONS_DIR, name), "utf8"));
 };
 
+const migrationsMatching = (matches: (entry: string) => boolean): string[] =>
+  readdirSync(MIGRATIONS_DIR)
+    .filter((entry) => entry.endsWith(".sql") && matches(entry))
+    .sort();
+
 /** A database as it stood the moment before the snapshot columns existed. */
 const openPreSnapshotDatabase = (): Database.Database => {
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
-  for (const migration of readdirSync(MIGRATIONS_DIR)
-    .filter((entry) => entry.endsWith(".sql") && entry < SNAPSHOT_MIGRATION)
-    .sort()) {
+  for (const migration of migrationsMatching((entry) => entry < SNAPSHOT_MIGRATION)) {
     applyMigration(db, migration);
   }
 
   return db;
+};
+
+// Every migration 0030 does not know about, and only once it has run: the seed has
+// to meet the schema 0030 actually migrated, while the repo reads through the
+// schema this checkout ships. Derived from the directory rather than pinned, so a
+// migration added above 0030 lands here without having to know this test exists.
+const applyMigrationsAfterSnapshot = (db: Database.Database): void => {
+  for (const migration of migrationsMatching((entry) => entry > SNAPSHOT_MIGRATION)) {
+    applyMigration(db, migration);
+  }
 };
 
 const seedLegacyEmbedding = (
@@ -66,6 +79,7 @@ describe("0030_learning_embedding_text_snapshot", () => {
       seedLegacyEmbedding(db, { id: "same-ms", content: "rewritten", learningUpdatedAt: earlier, embeddingUpdatedAt: earlier });
 
       applyMigration(db, SNAPSHOT_MIGRATION);
+      applyMigrationsAfterSnapshot(db);
       const repo = new SqliteLearningRepo(db);
 
       // `same-ms` is re-embedded rather than blessed. Copying its current text
@@ -98,6 +112,7 @@ describe("0030_learning_embedding_text_snapshot", () => {
         embeddingUpdatedAt: "2026-01-01T00:00:00.000Z",
       });
       applyMigration(db, SNAPSHOT_MIGRATION);
+      applyMigrationsAfterSnapshot(db);
       const repo = new SqliteLearningRepo(db);
 
       expect(repo.listLearningIdsMissingEmbedding("m")).toEqual(["same-ms"]);
