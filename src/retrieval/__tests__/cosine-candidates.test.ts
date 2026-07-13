@@ -11,13 +11,17 @@ const crowd = (count: number, from = 0) =>
 const ALONG_Y = Float32Array.from([0, 1, 0]);
 const ALONG_X = Float32Array.from([1, 0, 0]);
 
+/** The arm reports each candidate's similarity alongside its id; most assertions here are about which. */
+const candidateIds = (...args: Parameters<typeof selectCosineCandidates>): string[] =>
+  selectCosineCandidates(...args).map((candidate) => candidate.id);
+
 describe("selectCosineCandidates", () => {
   test("proposes only the learnings that stand out from the corpus", () => {
     // One outlier among ten: z = 3.0, comfortably over the floor. Everything
     // else sits below the mean. A total ranking would return all ten.
     const candidates = selectCosineCandidates(ALONG_Y, [embedding("outlier", [0, 1, 0]), ...crowd(9)]);
 
-    expect(candidates).toEqual(["outlier"]);
+    expect(candidates.map((candidate) => candidate.id)).toEqual(["outlier"]);
   });
 
   test("proposes nothing when no learning stands out", () => {
@@ -41,7 +45,7 @@ describe("selectCosineCandidates", () => {
     expect(Math.sqrt(5 - 1)).toBe(COSINE_Z_FLOOR);
 
     expect(selectCosineCandidates(ALONG_Y, [perfectMatch, ...crowd(4)])).toEqual([]);
-    expect(selectCosineCandidates(ALONG_Y, [perfectMatch, ...crowd(5)])).toEqual(["outlier"]);
+    expect(candidateIds(ALONG_Y, [perfectMatch, ...crowd(5)])).toEqual(["outlier"]);
   });
 
   test("rejects a candidate that only a population standard deviation would admit", () => {
@@ -97,7 +101,7 @@ describe("selectCosineCandidates", () => {
     const outliers = Array.from({ length: 12 }, (_unused, index) =>
       embedding(`out-${String(index).padStart(2, "0")}`, [index * 0.001, 1, 0]),
     );
-    const candidates = selectCosineCandidates(ALONG_Y, [...outliers, ...crowd(200)]);
+    const candidates = candidateIds(ALONG_Y, [...outliers, ...crowd(200)]);
 
     expect(candidates).toHaveLength(COSINE_TOP_K);
     expect(candidates[0]).toBe("out-00");
@@ -105,7 +109,7 @@ describe("selectCosineCandidates", () => {
   });
 
   test("orders candidates by descending similarity, breaking ties on id", () => {
-    const candidates = selectCosineCandidates(ALONG_Y, [
+    const candidates = candidateIds(ALONG_Y, [
       embedding("b-tied", [0, 1, 0]),
       embedding("a-tied", [0, 1, 0]),
       embedding("c-lower", [0.4, 1, 0]),
@@ -113,5 +117,15 @@ describe("selectCosineCandidates", () => {
     ]);
 
     expect(candidates).toEqual(["a-tied", "b-tied", "c-lower"]);
+  });
+
+  test("reports each candidate's raw similarity, not the z it was gated on", () => {
+    // Push injection floors on similarity: z answers "did this stand out from the
+    // corpus", which is the right question for ranking and the wrong one for
+    // deciding whether a learning is close enough to push at an agent unasked.
+    const candidates = selectCosineCandidates(ALONG_Y, [embedding("outlier", [0, 1, 0]), ...crowd(9)]);
+
+    expect(candidates).toEqual([{ id: "outlier", similarity: expect.any(Number) }]);
+    expect(candidates[0]!.similarity).toBeCloseTo(1, 5);
   });
 });

@@ -12,6 +12,7 @@ import type {
   LearningReadOptions,
   LearningRecord,
   LearningRepo,
+  LearningRetrievalProvenance,
   LearningSearchRecord,
 } from "../learning-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
@@ -347,7 +348,7 @@ export class SqliteLearningRepo implements LearningRepo {
       repos: normalizeFilterValues(filters.repos),
       model: queryEmbedding.model,
     });
-    const learnings = this.rankLearningsHybrid(queries, filters, embeddings);
+    const { learnings } = this.rankLearningsHybrid(queries, filters, embeddings);
 
     if (options.incrementReadCount) {
       this.incrementReadCount(learnings.map((learning) => learning.id));
@@ -382,7 +383,7 @@ export class SqliteLearningRepo implements LearningRepo {
         return { covered: false, learningCount, embeddingCount: embeddings.length };
       }
 
-      return { covered: true, learnings: this.rankLearningsHybrid(queries, filters, embeddings) };
+      return { covered: true, ...this.rankLearningsHybrid(queries, filters, embeddings) };
     })();
 
     // Outside the snapshot: a read counter is telemetry about what came back, not
@@ -399,7 +400,7 @@ export class SqliteLearningRepo implements LearningRepo {
     queries: readonly HybridQuery[],
     filters: { repos?: string[]; limit?: number; offset?: number },
     embeddings: readonly LearningEmbeddingRecord[],
-  ): LearningSearchRecord[] {
+  ): { learnings: LearningSearchRecord[]; provenance: Map<string, LearningRetrievalProvenance> } {
     const repos = normalizeFilterValues(filters.repos);
     const limit = filters.limit ?? 20;
     const offset = filters.offset ?? 0;
@@ -432,9 +433,28 @@ export class SqliteLearningRepo implements LearningRepo {
     // cosine list; its bm25 rank still counts. `selectCosineCandidates` bounds that
     // list rather than ranking the whole corpus, so an empty result stays possible
     // and bm25 hits are not displaced by arbitrary near-neighbours.
+    //
+    // Provenance is recorded off the same two lists the fusion reads, never off its
+    // output: it observes the ranking, it does not participate in it.
+    // Each learning's best showing across queries, mirroring how the fused score
+    // itself keeps each learning's best.
     const bestScores = new Map<string, number>();
+    const bestSimilarities = new Map<string, number>();
+
     for (const query of queries) {
-      for (const [id, score] of fuseByReciprocalRank([rankByBm25(query.text), selectCosineCandidates(query.vector, embeddings)])) {
+      const bm25Ranking = rankByBm25(query.text);
+      const cosineCandidates = selectCosineCandidates(query.vector, embeddings);
+
+      for (const candidate of cosineCandidates) {
+        const previous = bestSimilarities.get(candidate.id);
+        if (previous === undefined || candidate.similarity > previous) {
+          bestSimilarities.set(candidate.id, candidate.similarity);
+        }
+      }
+
+      // The fusion still reads two ordered id lists, exactly as before: the
+      // similarity rides alongside the cosine ranking, it does not enter it.
+      for (const [id, score] of fuseByReciprocalRank([bm25Ranking, cosineCandidates.map((candidate) => candidate.id)])) {
         const previousScore = bestScores.get(id);
         if (previousScore === undefined || score > previousScore) {
           bestScores.set(id, score);
@@ -442,7 +462,7 @@ export class SqliteLearningRepo implements LearningRepo {
       }
     }
 
-    return Array.from(bestScores, ([id, score]) => ({ row: rowsById.get(id), score }))
+    const learnings = Array.from(bestScores, ([id, score]) => ({ row: rowsById.get(id), score }))
       .flatMap(({ row, score }) => (row ? [mapLearningSearchRecord({ ...row, score })] : []))
       .sort((left, right) => {
         // Fused score is a relevance score: descending, unlike raw bm25.
@@ -457,6 +477,15 @@ export class SqliteLearningRepo implements LearningRepo {
         return left.id.localeCompare(right.id);
       })
       .slice(offset, offset + limit);
+
+    // Narrowed to what actually came back, so the map means "provenance of these
+    // results" rather than of every candidate the fusion considered and dropped.
+    return {
+      learnings,
+      provenance: new Map(
+        learnings.map((learning) => [learning.id, { bestCosineSimilarity: bestSimilarities.get(learning.id) ?? null }] as const),
+      ),
+    };
   }
 
   getLearningsByIds(ids: string[], options: LearningReadOptions = {}): LearningRecord[] {

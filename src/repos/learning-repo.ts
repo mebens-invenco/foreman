@@ -48,12 +48,31 @@ export type LearningEmbeddingUpsert = LearningEmbeddingRecord & {
 };
 
 /**
+ * How strongly the cosine arm vouched for a hybrid hit.
+ *
+ * The fused score cannot answer that: it is built from ranks, so it reports how
+ * the two arms agreed, never how close the hit actually is. A caller deciding
+ * whether a learning is worth PUSHING at an agent who never asked for it — where
+ * a wrong one costs more than a missing one — needs a bar it can hold in absolute
+ * terms, so the fusion reports the similarity it already computed rather than
+ * making the caller re-derive a ranking it cannot see.
+ */
+export type LearningRetrievalProvenance = {
+  /**
+   * Best (highest) cosine similarity across queries, or null when the cosine arm
+   * never proposed it — a hit reached by bm25 alone carries no similarity, and
+   * "no evidence it is close" is not the same as "close".
+   */
+  bestCosineSimilarity: number | null;
+};
+
+/**
  * Either the hybrid ranking, or the coverage that was too thin to authorize it.
  * The two are exclusive by construction: the caller cannot receive a ranking that
  * the gate did not clear, nor a shortfall it can ignore.
  */
 export type CoveredHybridSearch =
-  | { covered: true; learnings: LearningSearchRecord[] }
+  | { covered: true; learnings: LearningSearchRecord[]; provenance: ReadonlyMap<string, LearningRetrievalProvenance> }
   | { covered: false; learningCount: number; embeddingCount: number };
 
 export interface LearningRepo {
