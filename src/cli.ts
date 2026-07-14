@@ -15,6 +15,7 @@ import {
   type UsageBucket,
   type UsageGroupBy,
 } from "./execution/cost/usage-rollup.js";
+import { readAttemptProvenanceEnv } from "./execution/attempt-provenance-env.js";
 import { isIsoDate, resolveUsageRange } from "./execution/cost/usage-range.js";
 import {
   formatWorkerResultValidationError,
@@ -30,7 +31,7 @@ import { LoggerService } from "./logger.js";
 import { SchedulerService } from "./orchestration/index.js";
 import { renderWorkspacePlan } from "./planning/render-workspace-plan.js";
 import { createRepos } from "./repos/index.js";
-import type { LearningInjectionStats, LearningSearchEventInput } from "./repos/index.js";
+import type { LearningInjectionStats, LearningSearchEventInput, LearningUsageStats } from "./repos/index.js";
 import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
 import { searchLearningsWithHybridFallback } from "./retrieval/hybrid-learning-search.js";
 import { createReviewService, resolveGitHubAuthEnv } from "./review/index.js";
@@ -132,9 +133,15 @@ const withWorkspaceReposReadOnly = async <T>(
 // Telemetry for learning retrieval must never fail the underlying query: record
 // the event best-effort and swallow (log to stderr, keeping stdout clean JSON)
 // any error so the search/get result still returns.
+//
+// The attempt is read from the env the executor exported, never from a flag: an
+// agent able to name its own attempt could name someone else's, and a
+// distinct-task count is only worth having if a task cannot inflate it. Ad-hoc
+// human use has no such env and stamps NULL.
 const recordLearningSearchEvent = (repos: ReturnType<typeof createRepos>, input: LearningSearchEventInput): void => {
+  const source = readAttemptProvenanceEnv(process.env);
   try {
-    repos.learningSearchEvents.recordEvent(input);
+    repos.learningSearchEvents.recordEvent({ ...input, ...(source ? { source } : {}) });
   } catch (error) {
     process.stderr.write(
       `warning: failed to record learning ${input.kind} telemetry: ${error instanceof Error ? error.message : String(error)}\n`,
@@ -239,6 +246,48 @@ const renderInjectionStats = (input: { since: string | undefined; stats: Learnin
       ...rows.map((row) => row.map((cell, index) => padCell(cell, widths[index]!)).join("  ").trimEnd()),
     );
   }
+
+  return lines.join("\n");
+};
+
+/**
+ * The raw counters sit next to the corrected ones on purpose. `Reads` / `Applies`
+ * are pipeline touches — a task whose execution, review and reviewer stages each
+ * search bumps them three times for one learning — and the gap between them and
+ * the `Tasks` columns is the inflation this table exists to expose. `Echo` is the
+ * learning's own source task using it, excluded from the task counts and shown so
+ * the exclusion is visible rather than silent.
+ */
+const renderUsageStats = (input: { since: string | undefined; stats: LearningUsageStats }): string => {
+  const { stats } = input;
+  const lines = [
+    `Task-distinct learning usage ${input.since ? `since ${input.since}` : "(all time)"}:`,
+    `Unattributed read events (ad-hoc CLI, no attempt — excluded): ${formatUsageNumber(stats.unattributedReadEvents)}`,
+  ];
+
+  if (stats.learnings.length === 0) {
+    lines.push("", "No learning has been read or applied inside a task attempt yet.");
+    return lines.join("\n");
+  }
+
+  const header = ["Tasks read", "Tasks applied", "Reads", "Applies", "Echo r/a", "Learning", "Title"];
+  const rows = stats.learnings.map((learning) => [
+    formatUsageNumber(learning.distinctTasksRead),
+    formatUsageNumber(learning.distinctTasksApplied),
+    formatUsageNumber(learning.readCount),
+    formatUsageNumber(learning.appliedCount),
+    `${formatUsageNumber(learning.selfEchoReads)}/${formatUsageNumber(learning.selfEchoApplies)}`,
+    learning.learningId,
+    learning.title,
+  ]);
+  const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => row[index]?.length ?? 0)));
+
+  lines.push(
+    "",
+    header.map((cell, index) => padCell(cell, widths[index]!)).join("  ").trimEnd(),
+    widths.map((width) => "-".repeat(width)).join("  "),
+    ...rows.map((row) => row.map((cell, index) => padCell(cell, widths[index]!)).join("  ").trimEnd()),
+  );
 
   return lines.join("\n");
 };
@@ -512,6 +561,29 @@ learnings
       }
 
       process.stdout.write(`${renderInjectionStats({ since: options.since, stats })}\n`);
+    });
+  });
+
+learnings
+  .command("usage-stats")
+  .description("Report per-learning usage by DISTINCT task, with the learning's own source task excluded")
+  .argument("<workspace>")
+  .option("--since <iso>", "Count only usage events recorded at or after this ISO date/timestamp", parseIsoInstant)
+  .option("--limit <count>", "Maximum learnings to list", parsePositiveInteger, 20)
+  .option("--json", "Emit JSON instead of the tab-aligned table")
+  .action(async (workspace: string, options: { since?: string; limit: number; json?: boolean }) => {
+    await withWorkspaceRepos(workspace, async (repos) => {
+      const stats = repos.learningUsage.getUsageStats({
+        ...(options.since !== undefined ? { since: options.since } : {}),
+        topLimit: options.limit,
+      });
+
+      if (options.json) {
+        writeJson({ workspace, since: options.since ?? null, ...stats });
+        return;
+      }
+
+      process.stdout.write(`${renderUsageStats({ since: options.since, stats })}\n`);
     });
   });
 

@@ -1,4 +1,5 @@
 import type { RetrievalPipeline } from "../retrieval/retrieval-pipeline.js";
+import type { LearningUsageSource } from "./learning-usage-repo.js";
 
 export type LearningSearchEventKind = "search" | "get";
 
@@ -27,6 +28,12 @@ export type LearningSearchEventInput = {
   hitScores?: number[];
   /** Retriever that answered a `search`; null for a `get`. */
   pipeline?: RetrievalPipeline | null;
+  /**
+   * The attempt this query ran inside, taken from the runner env. Absent for
+   * ad-hoc human CLI use, which stamps NULL and is excluded from every
+   * distinct-task count — a query no task caused cannot evidence a task's use.
+   */
+  source?: LearningUsageSource;
 };
 
 export type LearningSearchEventRecord = {
@@ -41,6 +48,8 @@ export type LearningSearchEventRecord = {
   hitScores: number[];
   zeroHit: boolean;
   pipeline: RetrievalPipeline | null;
+  attemptId: string | null;
+  taskId: string | null;
 };
 
 export type LearningSearchEventFilters = {

@@ -10,7 +10,8 @@ import type {
 } from "../learning-search-event-repo.js";
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
-const EVENT_COLUMNS = "id, created_at, kind, caller, queries, repos, requested_ids, hit_ids, hit_scores, zero_hit, pipeline";
+const EVENT_COLUMNS =
+  "id, created_at, kind, caller, queries, repos, requested_ids, hit_ids, hit_scores, zero_hit, pipeline, attempt_id, task_id";
 
 const parseArray = <T>(value: unknown): T[] => JSON.parse(String(value ?? "[]")) as T[];
 
@@ -28,6 +29,8 @@ const mapEventRecord = (row: unknown): LearningSearchEventRecord => {
     hitScores: parseArray<number>(mapped.hit_scores),
     zeroHit: Number(mapped.zero_hit) === 1,
     pipeline: (mapped.pipeline as RetrievalPipeline | null) ?? null,
+    attemptId: (mapped.attempt_id as string | null) ?? null,
+    taskId: (mapped.task_id as string | null) ?? null,
   };
 };
 
@@ -40,8 +43,9 @@ export class SqliteLearningSearchEventRepo implements LearningSearchEventRepo {
     this.sqlite
       .prepare(
         `INSERT INTO learning_search_event(
-          id, created_at, kind, caller, queries, repos, requested_ids, hit_ids, hit_scores, zero_hit, pipeline
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          id, created_at, kind, caller, queries, repos, requested_ids, hit_ids, hit_scores, zero_hit, pipeline,
+          attempt_id, task_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         id,
@@ -55,6 +59,8 @@ export class SqliteLearningSearchEventRepo implements LearningSearchEventRepo {
         JSON.stringify(input.hitScores ?? []),
         hitIds.length === 0 ? 1 : 0,
         input.pipeline ?? null,
+        input.source?.attemptId ?? null,
+        input.source?.taskId ?? null,
       );
     return id;
   }

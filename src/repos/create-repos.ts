@@ -7,6 +7,7 @@ import { SqliteJobRepo } from "./impl/sqlite-job-repo.js";
 import { SqliteLearningInjectionEventRepo } from "./impl/sqlite-learning-injection-event-repo.js";
 import { SqliteLearningRepo } from "./impl/sqlite-learning-repo.js";
 import { SqliteLearningSearchEventRepo } from "./impl/sqlite-learning-search-event-repo.js";
+import { SqliteLearningUsageRepo } from "./impl/sqlite-learning-usage-repo.js";
 import { SqliteLeaseRepo } from "./impl/sqlite-lease-repo.js";
 import { SqliteMigrationRunner } from "./impl/sqlite-migration-runner.js";
 import { SqliteReviewCheckpointRepo } from "./impl/sqlite-review-checkpoint-repo.js";
@@ -35,6 +36,7 @@ export const createRepos = (database: SqliteForemanDatabase): ForemanRepos => {
     learnings: new SqliteLearningRepo(sqlite),
     learningSearchEvents: new SqliteLearningSearchEventRepo(sqlite),
     learningInjectionEvents: new SqliteLearningInjectionEventRepo(sqlite),
+    learningUsage: new SqliteLearningUsageRepo(sqlite),
     close(): void {
       database.close();
     },

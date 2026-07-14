@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskState, type TaskTarget, type TokenUsage, type WorkerResult } from "../domain/index.js";
 import { sumTokenUsage } from "../execution/impl/token-usage.js";
-import { createAgentRunner, parseWorkerResult, resolveRunnerConfigForAction, validateWorkerResult, type AgentRunner, type CapturedAgentRunResult, type WorkerResultAction } from "../execution/index.js";
+import { attemptProvenanceEnv, createAgentRunner, parseWorkerResult, resolveRunnerConfigForAction, validateWorkerResult, type AgentRunner, type CapturedAgentRunResult, type WorkerResultAction } from "../execution/index.js";
 import { parseWorkerPromptPullRequestReference, renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
 import { ForemanError, isForemanError, isProviderRateLimitError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
@@ -324,7 +324,7 @@ export class AttemptExecutor {
           attemptId: attempt.id,
           action: job.action,
           cwd: worktreePath,
-          env: this.deps.env,
+          env: { ...this.deps.env, ...attemptProvenanceEnv({ attemptId: attempt.id, taskId: task.id }) },
           prompt,
           timeoutMs: runnerConfig.timeoutMs,
           ...(activeRunnerSession?.nativeSessionId ? { nativeSessionId: activeRunnerSession.nativeSessionId } : {}),
@@ -627,7 +627,7 @@ export class AttemptExecutor {
       attemptId: input.attempt.id,
       action: input.job.action,
       cwd: input.worktreePath,
-      env: this.deps.env,
+      env: { ...this.deps.env, ...attemptProvenanceEnv({ attemptId: input.attempt.id, taskId: input.task.id }) },
       prompt: await renderWorkerResultRecoveryPrompt({
         action: input.job.action as WorkerResultAction,
         paths: this.deps.paths,

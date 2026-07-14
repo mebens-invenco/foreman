@@ -53,8 +53,19 @@ const createCliWorkspace = async (): Promise<{ workspaceName: string; workspaceR
   return { workspaceName, workspaceRoot };
 };
 
-const runCli = async (args: string[]): Promise<unknown> => {
-  const { stdout } = await execFileAsync("node", ["--import", "tsx", "src/cli.ts", ...args], { cwd: projectRoot });
+/**
+ * The provenance vars are stripped from the inherited env before each run, then
+ * put back only when the test asks for them. Without the strip, a suite running
+ * inside a Foreman worker session would inherit that session's real
+ * FOREMAN_ATTEMPT_ID and the ad-hoc case below would silently stop testing
+ * anything — it would be a worker-session run wearing an ad-hoc test's name.
+ */
+const runCli = async (args: string[], provenance?: Record<string, string>): Promise<unknown> => {
+  const { FOREMAN_ATTEMPT_ID: _attempt, FOREMAN_TASK_ID: _task, ...ambient } = process.env;
+  const { stdout } = await execFileAsync("node", ["--import", "tsx", "src/cli.ts", ...args], {
+    cwd: projectRoot,
+    env: { ...ambient, ...provenance },
+  });
   return JSON.parse(stdout);
 };
 
@@ -228,5 +239,56 @@ describe("learning search telemetry", () => {
     } finally {
       db.close();
     }
+  });
+});
+
+describe("learning search attempt provenance", () => {
+  const workerSession = { FOREMAN_ATTEMPT_ID: "attempt-1", FOREMAN_TASK_ID: "ENG-A" };
+
+  test("a search inside a worker session is stamped with the attempt and task from the env", async () => {
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
+
+    await runCli(["learnings", "search", workspaceName, "--query", "planning prompt"], workerSession);
+
+    expect(await readEvents(workspaceRoot)).toEqual([
+      expect.objectContaining({ kind: "search", attemptId: "attempt-1", taskId: "ENG-A" }),
+    ]);
+  });
+
+  test("a get inside a worker session is stamped the same way", async () => {
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
+
+    await runCli(["learnings", "get", workspaceName, "--id", "learn-a"], workerSession);
+
+    expect(await readEvents(workspaceRoot)).toEqual([
+      expect.objectContaining({ kind: "get", attemptId: "attempt-1", taskId: "ENG-A" }),
+    ]);
+  });
+
+  test("a human running the CLI by hand stamps NULL, and is excluded from the distinct-task counts", async () => {
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
+
+    await runCli(["learnings", "search", workspaceName, "--query", "planning prompt"]);
+
+    expect(await readEvents(workspaceRoot)).toEqual([expect.objectContaining({ attemptId: null, taskId: null })]);
+
+    const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), projectRoot);
+    try {
+      expect(db.learningUsage.getUsageStats()).toMatchObject({ learnings: [], unattributedReadEvents: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  // Half a stamp is not a weaker signal, it is an uncountable one: the reader takes
+  // the pair or nothing, so a partial env reads as ad-hoc use.
+  test("an env carrying only the attempt stamps neither", async () => {
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
+
+    await runCli(["learnings", "search", workspaceName, "--query", "planning prompt"], {
+      FOREMAN_ATTEMPT_ID: "attempt-1",
+    });
+
+    expect(await readEvents(workspaceRoot)).toEqual([expect.objectContaining({ attemptId: null, taskId: null })]);
   });
 });
