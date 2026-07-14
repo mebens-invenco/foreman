@@ -71,6 +71,51 @@ outlier: with `n` embeddings the largest attainable z is `(n - 1) / sqrt(n)`,
 which stays under 2.0 until `n` reaches 6 — so a handful of freshly-embedded rows
 cannot outrank the unembedded majority they are drowning in.
 
+### …and why push injection floors on similarity anyway (M4, measured 2026-07-13)
+
+The section above is about **ranking a query someone asked**. Push injection
+(`src/execution/inject-relevant-learnings.ts`) asks a different question — *is this
+close enough to shove at an agent who never asked?* — and the answer inverts twice.
+Recorded here because these are point-in-time measurements; the code keeps only the
+invariants they justify.
+
+**1. bm25 falls silent on a long query, so "hybrid" here is nearly cosine alone.**
+The `0.676` recall@5 above was earned on a planner's several *short* queries.
+Injection issues **one long** query (a whole title + description), and
+`toSafeFtsQuery` ANDs every term of it, so a learning must contain all of them to
+match at all. Over the 54 bench cases bm25 matched in **1**, and 51 of 53
+result-window entries came from the cosine arm alone. A recall number earned on
+short queries does not transfer to a long-query path, and a floor built on bm25
+rank there is dead code.
+
+**2. z *inverts* on this path, so it cannot be the relevance floor.**
+z is relative to one query's own distribution, and against a homogeneous corpus an
+on-topic query is broadly similar to *everything* — so nothing stands out — while an
+off-topic query gets a lucky outlier in a low, tight distribution. Against the live
+corpus (143 learnings at the time), `"buy milk"` scored **z = 3.09** and a real
+foreman ticket **z = 2.12**. A z floor would push learnings at the shopping list and
+stay silent on the ticket. The plan's original lean — inject what the cosine arm
+proposed (z ≥ 2.0) or what bm25 ranked top-3 — admitted **100%** of the window, and
+would have injected into **23 of the 28** zero-expected distractor cases.
+
+**3. Raw similarity does separate, on this query shape.**
+Best hit per task, 19 real tickets vs 3 deliberately off-topic ones (CSS padding, a
+k8s upgrade, buying milk):
+
+```
+                    committed corpus      live corpus (143 learnings)
+real tasks          min 0.7163            0.743 - 0.863
+off-topic tasks     max 0.6564            0.519 - 0.656
+```
+
+Hence `INJECTION_SIMILARITY_FLOOR = 0.70`. The live corpus measures wider — a bigger
+corpus holds a closer match for every task — so production has more headroom than
+the committed band; the committed numbers are the ones quoted in code because they
+are the only ones a test can falsify. That test is
+`src/execution/__tests__/injection-similarity-calibration.test.ts`, which pins the
+band from both sides and is the only place the constant may be re-derived. This is
+the precision use the distractor cases were reserved for (see Metrics, below).
+
 ## Fixtures — provenance
 
 - `fixtures/corpus.json` — the 113 live automation-pilot learnings
