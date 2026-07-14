@@ -3,11 +3,15 @@ import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { RepoRef, Task } from "../../domain/index.js";
 import { createWorkspacePaths, createTempDir } from "../../test-support/helpers.js";
 import { ensureTaskWorktree } from "../git-worktrees.js";
+
+// Every test here drives real `git` subprocess chains, which routinely outrun the 5s global
+// default under disk/CPU load. Budgeted here rather than globally: slow git is expected only here.
+vi.setConfig({ testTimeout: 30_000 });
 
 const execFileAsync = promisify(execFile);
 const cleanupDirs: string[] = [];

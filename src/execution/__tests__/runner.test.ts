@@ -8,6 +8,12 @@ import { runAgentProcess } from "../impl/run-agent-process.js";
 import { createTempDir } from "../../test-support/helpers.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 
+// The kill timer is armed at spawn, so `timeoutMs` doubles as the child's startup budget: keep it
+// far above any plausible boot, or SIGTERM races the fake runner's `checkpoint` write under load.
+const runnerTimeoutMs = 5_000;
+// How long a timed-out invocation may take to settle *after* the kill timer fires.
+const settleBudgetMs = 3_000;
+
 const cleanupDirs: string[] = [];
 const originalOpencodeBin = process.env.FOREMAN_OPENCODE_BIN;
 const originalClaudeBin = process.env.FOREMAN_CLAUDE_BIN;
@@ -65,15 +71,15 @@ describe("provider runners", () => {
         cwd: tempDir,
         env: {},
         prompt: "test prompt",
-        timeoutMs: 200,
+        timeoutMs: runnerTimeoutMs,
       },
     });
 
     expect(result.exitCode).toBeNull();
     expect(result.timedOut).toBe(true);
-    expect(result.timeoutMs).toBe(200);
+    expect(result.timeoutMs).toBe(runnerTimeoutMs);
     expect(result.stdout).toBe("checkpoint\n");
-  }, 10_000);
+  }, 20_000);
 
   test("settles timed-out runner invocations when an escaped descendant keeps stdio open", async () => {
     const tempDir = await createTempDir("foreman-runner-test-");
@@ -108,14 +114,14 @@ describe("provider runners", () => {
           cwd: tempDir,
           env: {},
           prompt: "test prompt",
-          timeoutMs: 200,
+          timeoutMs: runnerTimeoutMs,
         },
       });
 
-      expect(Date.now() - startedAt).toBeLessThan(3_000);
+      expect(Date.now() - startedAt).toBeLessThan(runnerTimeoutMs + settleBudgetMs);
       expect(result.exitCode).toBeNull();
       expect(result.timedOut).toBe(true);
-      expect(result.timeoutMs).toBe(200);
+      expect(result.timeoutMs).toBe(runnerTimeoutMs);
       expect(result.stdout).toBe("checkpoint\n");
     } finally {
       const descendantPid = Number(await fs.readFile(descendantPidPath, "utf8").catch(() => "0"));
@@ -129,7 +135,7 @@ describe("provider runners", () => {
         }
       }
     }
-  }, 10_000);
+  }, 20_000);
 
   test("sets PWD to the requested cwd for spawned runners", async () => {
     const tempDir = await createTempDir("foreman-runner-test-");

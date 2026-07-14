@@ -12,7 +12,10 @@ import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 
 export const testProjectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-export const createTempDir = async (prefix: string): Promise<string> => fs.mkdtemp(path.join(os.tmpdir(), prefix));
+// Resolved, because `os.tmpdir()` is a symlink on macOS (`/var` → `/private/var`) while a spawned
+// child reports the realpath as its `process.cwd()`. Callers must compare like with like.
+export const createTempDir = async (prefix: string): Promise<string> =>
+  fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), prefix)));
 
 export interface FakeRunnerBin {
   /**

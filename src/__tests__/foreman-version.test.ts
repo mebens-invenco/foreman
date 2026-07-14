@@ -1,11 +1,15 @@
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { ForemanVersionMonitor } from "../foreman-version.js";
 import { exec } from "../lib/process.js";
 import { createTempDir, createWorkspacePaths } from "../test-support/helpers.js";
+
+// Every fixture here drives real `git` subprocess chains, which routinely outrun the 5s global
+// default under disk/CPU load. Budgeted here rather than globally: slow git is expected only here.
+vi.setConfig({ testTimeout: 30_000 });
 
 const cleanupDirs: string[] = [];
 
