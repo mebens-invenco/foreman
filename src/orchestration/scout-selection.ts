@@ -65,6 +65,25 @@ const latestRetryWasManuallyStopped = (input: { foremanRepos: ForemanRepos; targ
     .some((event) => event.eventType === "attempt_stop_requested");
 };
 
+const latestReviewerFailedForHead = (input: {
+  foremanRepos: ForemanRepos;
+  target: TaskTarget;
+  reviewContext: ReviewContext;
+}): boolean => {
+  const latestJob = input.foremanRepos.jobs.latestJobForTaskTarget(input.target.id);
+  if (!latestJob || latestJob.action !== "reviewer" || latestJob.status !== "failed") {
+    return false;
+  }
+
+  const failedReviewContext = latestJob.selectionContext.reviewContext;
+  return (
+    typeof failedReviewContext === "object" &&
+    failedReviewContext !== null &&
+    "headSha" in failedReviewContext &&
+    failedReviewContext.headSha === input.reviewContext.headSha
+  );
+};
+
 const logBlockedOrdinaryWorkSkip = (logger: LoggerService | undefined, task: Task, target: TaskTarget, progress: TargetProgress): void => {
   const evaluation = evaluateBlockedOrdinaryWork(task, progress.latestJob, progress.latestAttempt);
   const context = {
@@ -976,6 +995,13 @@ export const runScoutSelection = async (input: {
           }
 
           if (checkpointMatches) {
+            continue;
+          }
+
+          if (
+            input.triggerType === "worker_finished" &&
+            latestReviewerFailedForHead({ foremanRepos: input.foremanRepos, target, reviewContext })
+          ) {
             continue;
           }
 
