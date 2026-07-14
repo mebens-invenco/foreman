@@ -23,18 +23,14 @@ export const COSINE_TOP_K = 10;
  */
 export const COSINE_Z_FLOOR = 2.0;
 
+/**
+ * A candidate and the similarity it was selected on. Two selectors below produce
+ * this, gated on different questions — which gate admitted a candidate is the
+ * producing selector's business, and each states its own.
+ */
 export type CosineCandidate = {
   id: string;
-  /**
-   * The raw cosine similarity this candidate was selected on, reported rather than
-   * discarded.
-   *
-   * The z it was gated on answers "did this stand out from the corpus" — the right
-   * question for RANKING, and the wrong one for deciding whether a learning is close
-   * enough to PUSH at an agent who never asked. z is within-query relative and
-   * inverts on a homogeneous corpus (`src/eval/retrieval/README.md`), so a caller
-   * holding that second bar must read the similarity itself.
-   */
+  /** The raw cosine similarity this candidate was selected on, reported rather than discarded. */
   similarity: number;
 };
 

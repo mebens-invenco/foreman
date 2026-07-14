@@ -83,8 +83,18 @@ const embeddingsInScope = (query: CalibrationQuery): typeof learnings => {
 const bestSimilarityInScope = (query: CalibrationQuery): number =>
   Math.max(...embeddingsInScope(query).map((learning) => cosineSimilarity(queryVectorFor(query), learning.vector)));
 
-/** Exactly what the seam injects: the real selector, at the real floor, under the real cap. */
-const injectedFor = (query: CalibrationQuery) =>
+/**
+ * What the seam SELECTS: the real selector, at the real floor, under the real cap.
+ *
+ * Not what it injects. `fitToTokenBudget` runs downstream of this and drops entries from
+ * the tail until the section fits, so these are the candidates offered to the budget, not
+ * the ones that survive it — the vector fixture carries no `content`, so the budget cannot
+ * be computed from it here, and its tail-drop is pinned in `inject-relevant-learnings.test.ts`.
+ *
+ * The implication runs one way only: the budget can remove entries, never add one, so
+ * "selects nothing" does mean "injects nothing" while "selects k" does not mean "injects k".
+ */
+const selectedFor = (query: CalibrationQuery) =>
   selectSimilarCandidates(queryVectorFor(query), embeddingsInScope(query), {
     minSimilarity: INJECTION_SIMILARITY_FLOOR,
     limit: RELEVANT_LEARNINGS_LIMIT,
@@ -179,32 +189,34 @@ describe("injection similarity floor calibration", () => {
  *
  * These run the real selectors over the same committed vectors the floor is calibrated
  * on, so the reachability claim is falsifiable against real geometry rather than argued.
+ * What they establish is what the seam SELECTS — see `selectedFor` for why the budget
+ * downstream of it cannot be computed from this fixture, and which way the implication runs.
  */
 describe("injection reachability", () => {
-  test.each(realTasks.map((query) => [query.id, query] as const))("a real task reaches its cap's worth of learnings: %s", (_id, query) => {
-    const injected = injectedFor(query);
+  test.each(realTasks.map((query) => [query.id, query] as const))("a real task selects its cap's worth of learnings: %s", (_id, query) => {
+    const selected = selectedFor(query);
 
     // A cap, not a quota: the scope yields as many as it holds, up to k.
-    expect(injected).toHaveLength(Math.min(RELEVANT_LEARNINGS_LIMIT, admissibleFor(query)));
-    expect(injected.every((candidate) => candidate.similarity >= INJECTION_SIMILARITY_FLOOR)).toBe(true);
+    expect(selected).toHaveLength(Math.min(RELEVANT_LEARNINGS_LIMIT, admissibleFor(query)));
+    expect(selected.every((candidate) => candidate.similarity >= INJECTION_SIMILARITY_FLOOR)).toBe(true);
 
-    const similarities = injected.map((candidate) => candidate.similarity);
+    const similarities = selected.map((candidate) => candidate.similarity);
     expect(similarities).toEqual([...similarities].sort((left, right) => right - left));
   });
 
-  test("the k = 5 window is reachable rather than aspirational", () => {
-    const filled = realTasks.filter((query) => injectedFor(query).length === RELEVANT_LEARNINGS_LIMIT);
+  test("the k = 5 selection window is reachable rather than aspirational", () => {
+    const filled = realTasks.filter((query) => selectedFor(query).length === RELEVANT_LEARNINGS_LIMIT);
 
-    // 18 of the 19 real tickets hold at least k admissible learnings and now get k.
+    // 18 of the 19 real tickets hold at least k admissible learnings and now select k.
     // The 19th is ENG-5687, whose `shipping-service` scope holds only 3 above the
-    // floor — and it gets 3. Sourced through the z gate these same 19 tasks averaged
+    // floor — and it selects 3. Sourced through the z gate these same 19 tasks averaged
     // ~1.4 admitted candidates, and 4 of them got none at all.
     expect(filled).toHaveLength(18);
     expect(realTasks.filter((query) => admissibleFor(query) < RELEVANT_LEARNINGS_LIMIT).map((query) => query.id)).toEqual(["ENG-5687"]);
-    expect(injectedFor(realTasks.find((query) => query.id === "ENG-5687")!)).toHaveLength(3);
+    expect(selectedFor(realTasks.find((query) => query.id === "ENG-5687")!)).toHaveLength(3);
   });
 
-  test("the z gate hid what the floor admits: ENG-5685's own query goes 0 -> 5", () => {
+  test("the z gate hid what the floor admits: ENG-5685's own query goes 0 -> 5 selected", () => {
     const query = realTasks.find((candidate) => candidate.id === "ENG-5685")!;
     const inScope = embeddingsInScope(query);
 
@@ -218,9 +230,9 @@ describe("injection reachability", () => {
     expect(admissibleFor(query)).toBe(50);
     expect(bestSimilarityInScope(query)).toBeCloseTo(0.7739, 4);
 
-    const injected = injectedFor(query);
-    expect(injected).toHaveLength(RELEVANT_LEARNINGS_LIMIT);
-    expect(injected[0]!.similarity).toBeCloseTo(0.7739, 4);
+    const selected = selectedFor(query);
+    expect(selected).toHaveLength(RELEVANT_LEARNINGS_LIMIT);
+    expect(selected[0]!.similarity).toBeCloseTo(0.7739, 4);
   });
 
   test.each(offTopicTasks.map((query) => [query.id, query] as const))("an off-topic task still injects nothing: %s", (_id, query) => {
@@ -230,7 +242,10 @@ describe("injection reachability", () => {
     // nothing: it PROPOSES candidates for every off-topic task here — the lucky outlier
     // in a low, tight distribution — and the floor refuses every one. The bar that
     // protects an agent's context is, and always was, the absolute one.
+    //
+    // "Injects" is exact here, not shorthand for "selects": the budget can only remove
+    // entries, so an empty selection is an empty digest.
     expect(selectCosineCandidates(queryVectorFor(query), inScope).length).toBeGreaterThan(0);
-    expect(injectedFor(query)).toEqual([]);
+    expect(selectedFor(query)).toEqual([]);
   });
 });

@@ -13,9 +13,8 @@ export type HybridLearningSearchFilters = {
  * Discriminated on the pipeline that answered, because what a result carries
  * differs across the fallback boundary rather than merely being labelled by it:
  * `score` inverts (fused descending vs raw bm25 ascending), and arm provenance
- * exists only where there were two arms to attribute a hit to. A caller that
- * needs provenance — a relevance floor — therefore cannot be served by the
- * fallback at all, and the type says so instead of handing back an empty map.
+ * exists only where there were two arms to attribute a hit to — so the fallback
+ * cannot carry it, and the type says so instead of handing back an empty map.
  */
 export type HybridLearningSearchResult =
   | { pipeline: "hybrid"; learnings: LearningSearchRecord[]; provenance: ReadonlyMap<string, LearningRetrievalProvenance> }

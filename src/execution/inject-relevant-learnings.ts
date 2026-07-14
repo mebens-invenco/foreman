@@ -136,9 +136,12 @@ const recordInjection = (
  *   are sourced on similarity, never on the corpus-relative z the search arm bounds
  *   its dense window with, which inverts on a homogeneous corpus and is lowest
  *   exactly for the on-topic queries this exists to serve (`src/eval/retrieval/README.md`).
- * - `RELEVANT_LEARNINGS_LIMIT` is a cap, not a quota. A corpus of same-domain
- *   learnings only ever holds a handful worth pushing unasked, so injecting one — or
- *   none — is the system working.
+ * - `RELEVANT_LEARNINGS_LIMIT` is a cap, not a quota: a scope holding fewer admissible
+ *   learnings than k yields fewer, and a thin or genuinely distant one yields none.
+ *   But none is no longer the routine outcome it was while the z gate starved this
+ *   seam — an on-topic task against a populated same-domain corpus now clears the
+ *   floor several times over, so an empty digest there points at coverage, embedding
+ *   freshness or the candidate source rather than at a corpus with nothing to say.
  * - Never increments `read_count`. Being handed something is not reading it, and the
  *   "did the agent consult a learning" metric this exists to move would otherwise
  *   read 100% by construction, measuring only that injection ran.

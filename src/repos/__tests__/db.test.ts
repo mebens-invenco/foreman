@@ -1990,9 +1990,9 @@ describe("persistence repos", () => {
         throw new Error("expected a covered similarity selection");
       }
 
-      // Closest first — ids run OPPOSITE to rank, so a list ordered by the id-keyed
-      // body fetch rather than by the ranking would come back reversed. `far` sits
-      // below the bar, and the caller's limit cuts the rest.
+      // Closest first — ids run OPPOSITE to rank, so a selection that let the body
+      // fetch's ordering leak through instead of rebuilding in candidate order would
+      // come back reversed. `far` sits below the bar, and the caller's limit cuts the rest.
       expect(covered.learnings.map((hit) => hit.learning.id)).toEqual(["near-4", "near-3", "near-2"]);
       expect(covered.learnings[0]!.similarity).toBeCloseTo(0.8, 5);
       // The whole learning, carrying the similarity it was admitted on: the seam
