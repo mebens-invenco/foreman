@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { COSINE_TOP_K, COSINE_Z_FLOOR, selectCosineCandidates } from "../cosine-candidates.js";
+import { COSINE_TOP_K, COSINE_Z_FLOOR, selectCosineCandidates, selectSimilarCandidates } from "../cosine-candidates.js";
 
 const embedding = (learningId: string, vector: number[]) => ({ learningId, vector: Float32Array.from(vector) });
 
@@ -127,5 +127,106 @@ describe("selectCosineCandidates", () => {
 
     expect(candidates).toEqual([{ id: "outlier", similarity: expect.any(Number) }]);
     expect(candidates[0]!.similarity).toBeCloseTo(1, 5);
+  });
+});
+
+/** A unit vector sitting exactly `similarity` from a query along y, so a corpus can be seeded at chosen distances. */
+const at = (learningId: string, similarity: number) => embedding(learningId, [Math.sqrt(1 - similarity ** 2), similarity, 0]);
+
+const similarIds = (...args: Parameters<typeof selectSimilarCandidates>): string[] =>
+  selectSimilarCandidates(...args).map((candidate) => candidate.id);
+
+describe("selectSimilarCandidates", () => {
+  const gate = { minSimilarity: 0.7, limit: 5 };
+
+  test("admits the learnings above the floor and drops the rest", () => {
+    expect(similarIds(ALONG_Y, [at("above", 0.75), at("just-above", 0.71), at("below", 0.69), at("far", 0.1)], gate)).toEqual([
+      "above",
+      "just-above",
+    ]);
+  });
+
+  test("the floor is inclusive", () => {
+    // On a value floats represent exactly, so this pins `>=` rather than the
+    // rounding of a hand-built vector — the knife-edge `COSINE_Z_FLOOR`'s own
+    // sample-variance choice exists to stay off.
+    const exact = [embedding("exact", [1, 0, 0])];
+
+    expect(similarIds(ALONG_X, exact, { minSimilarity: 1, limit: 5 })).toEqual(["exact"]);
+    expect(selectSimilarCandidates(ALONG_X, exact, { minSimilarity: 1.000_001, limit: 5 })).toEqual([]);
+  });
+
+  test("reaches the learnings a z gate hides on a homogeneous corpus", () => {
+    // The bug this selector exists to fix, in miniature. Twenty learnings all
+    // broadly close to the query and to each other: every one clears an absolute
+    // floor of 0.7, and NONE stands 2 SDs off a mean sitting right among them. A
+    // real ticket's query against the live corpus is this shape — measured on the
+    // committed calibration vectors, ENG-5685's own query held 50 learnings above
+    // the floor and `selectCosineCandidates` proposed none of them.
+    const homogeneous = Array.from({ length: 20 }, (_unused, index) =>
+      at(`near-${String(index).padStart(2, "0")}`, 0.72 + index * 0.002),
+    );
+
+    expect(selectCosineCandidates(ALONG_Y, homogeneous)).toEqual([]);
+    expect(similarIds(ALONG_Y, homogeneous, gate)).toEqual(["near-19", "near-18", "near-17", "near-16", "near-15"]);
+  });
+
+  test("refuses the lucky outlier a z gate would propose", () => {
+    // The same disagreement, running the other way: one learning stands far off a
+    // low, tight distribution — z = 3.9, the shape an OFF-topic query produces —
+    // but at 0.61 it is not close to anything. The z gate proposes it; the floor
+    // does not, and the floor is the one deciding what reaches an agent.
+    const tight = [at("lucky", 0.61), ...Array.from({ length: 15 }, (_unused, index) => at(`cold-${index}`, 0.3))];
+
+    expect(candidateIds(ALONG_Y, tight)).toEqual(["lucky"]);
+    expect(selectSimilarCandidates(ALONG_Y, tight, gate)).toEqual([]);
+  });
+
+  test("ranks a corpus with no spread at all, where z divides by zero", () => {
+    // Identical similarities: no outlier exists and z cannot be computed, so the
+    // z gate falls silent. But "is this close" is still answerable — and here the
+    // answer is yes for all three. Ties break on id, as they do for the z gate.
+    const flat = [embedding("c", [0, 1, 0]), embedding("a", [0, 1, 0]), embedding("b", [0, 1, 0])];
+
+    expect(selectCosineCandidates(ALONG_Y, flat)).toEqual([]);
+    expect(similarIds(ALONG_Y, flat, gate)).toEqual(["a", "b", "c"]);
+  });
+
+  test("judges a single learning, which z cannot", () => {
+    // One row has no spread to be an outlier against, so the z gate must stay
+    // silent. Closeness needs no corpus: one learning either clears the bar or not.
+    expect(selectCosineCandidates(ALONG_Y, [at("only", 0.9)])).toEqual([]);
+    expect(similarIds(ALONG_Y, [at("only", 0.9)], gate)).toEqual(["only"]);
+    expect(selectSimilarCandidates(ALONG_Y, [at("only", 0.5)], gate)).toEqual([]);
+    expect(selectSimilarCandidates(ALONG_Y, [], gate)).toEqual([]);
+  });
+
+  test("caps at the caller's limit, not COSINE_TOP_K, keeping the most similar", () => {
+    const admissible = Array.from({ length: 12 }, (_unused, index) => at(`near-${String(index).padStart(2, "0")}`, 0.99 - index * 0.01));
+
+    const capped = similarIds(ALONG_Y, admissible, { minSimilarity: 0.7, limit: 5 });
+    expect(capped).toEqual(["near-00", "near-01", "near-02", "near-03", "near-04"]);
+
+    // The bound that keeps the dense arm from crowding out bm25 in a fusion window
+    // has no authority over a caller that has no window to pad.
+    expect(similarIds(ALONG_Y, admissible, { minSimilarity: 0.7, limit: COSINE_TOP_K + 2 })).toHaveLength(12);
+  });
+
+  test("is a cap and not a quota: an admissible pair yields a pair", () => {
+    const candidates = similarIds(ALONG_Y, [at("one", 0.8), at("two", 0.75), at("cold", 0.2)], gate);
+
+    expect(candidates).toEqual(["one", "two"]);
+  });
+
+  test("orders by descending similarity, breaking ties on id", () => {
+    const candidates = selectSimilarCandidates(
+      ALONG_Y,
+      [at("b-tied", 0.8), at("a-tied", 0.8), at("z-highest", 0.95), at("c-lowest", 0.71)],
+      gate,
+    );
+
+    expect(candidates.map((candidate) => candidate.id)).toEqual(["z-highest", "a-tied", "b-tied", "c-lowest"]);
+    expect(candidates.map((candidate) => candidate.similarity)).toEqual([...candidates.map((c) => c.similarity)].sort((l, r) => r - l));
+    expect(candidates[0]!.similarity).toBeCloseTo(0.95, 5);
   });
 });

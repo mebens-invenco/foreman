@@ -1,6 +1,6 @@
 import type { Embedder } from "../embeddings/embedder.js";
-import { isForemanError } from "../lib/errors.js";
 import type { LearningReadOptions, LearningRepo, LearningRetrievalProvenance, LearningSearchRecord } from "../repos/learning-repo.js";
+import { embedQueriesOrDegrade, embeddingShortfall, MIN_EMBEDDING_COVERAGE } from "./embedding-coverage-gate.js";
 
 export type HybridLearningSearchFilters = {
   queries: string[];
@@ -20,15 +20,6 @@ export type HybridLearningSearchFilters = {
 export type HybridLearningSearchResult =
   | { pipeline: "hybrid"; learnings: LearningSearchRecord[]; provenance: ReadonlyMap<string, LearningRetrievalProvenance> }
   | { pipeline: "fts"; learnings: LearningSearchRecord[] };
-
-/**
- * Below this fraction of the in-scope corpus carrying a current vector, the
- * cosine arm sees too little of the corpus to rank it fairly: an embedded but
- * irrelevant learning collects fusion weight that an unembedded, relevant one
- * can never earn, so hybrid can rank BELOW the FTS baseline. Presence of any
- * vector is not enough — coverage is what makes the two arms comparable.
- */
-export const MIN_EMBEDDING_COVERAGE = 0.9;
 
 /**
  * Hybrid search with an FTS-only safety net.
@@ -75,8 +66,7 @@ export const searchLearningsWithHybridFallback = async (
   }
 
   const shortfall = (embeddingCount: number, learningCount: number): string =>
-    `only ${embeddingCount}/${learningCount} in-scope learnings carry a ${embedder.modelId} vector ` +
-    `(need ${Math.round(MIN_EMBEDDING_COVERAGE * 100)}%); run \`foreman learnings backfill-embeddings\``;
+    embeddingShortfall(embedder, { embeddingCount, learningCount });
 
   const learningCount = learnings.countLearnings(scope);
   if (learningCount === 0) {
@@ -97,18 +87,12 @@ export const searchLearningsWithHybridFallback = async (
     return fallBackToFts(shortfall(embeddingCount, learningCount));
   }
 
-  let vectors: Float32Array[];
-  try {
-    vectors = await embedder.embed(filters.queries);
-  } catch (error) {
-    // An embedder that breaks its declared contract (a 500 ForemanError such as
-    // `embedding_dims_mismatch`) is a defect in the adapter, not an outage.
-    if (isForemanError(error) && error.statusCode >= 500) {
-      throw error;
-    }
-
-    return fallBackToFts(error instanceof Error ? error.message : String(error));
+  const embedded = await embedQueriesOrDegrade(embedder, filters.queries);
+  if ("degraded" in embedded) {
+    return fallBackToFts(embedded.degraded);
   }
+
+  const { vectors } = embedded;
 
   // The corpus is free to move while the model initializes and infers — on a cold
   // cache that await is a 133MB download, and the serve loop writes learnings

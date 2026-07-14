@@ -116,6 +116,31 @@ are the only ones a test can falsify. That test is
 band from both sides and is the only place the constant may be re-derived. This is
 the precision use the distractor cases were reserved for (see Metrics, below).
 
+### …and why the floor needed its own candidate source (M4, measured 2026-07-14)
+
+The floor above only ever decides among the candidates it is *shown*, and it was
+shown the fused search's — which the cosine arm had already gated on `z >= 2.0`.
+So the bar calibrated for "ranking" ran *upstream* of the bar calibrated for
+"pushing", and by (2) above the two invert on exactly the queries injection exists
+to serve. Measured on the committed calibration vectors, ENG-5685's own ticket
+query held **50** learnings above the 0.70 floor in its 83-learning scope — the
+closest at 0.7739 — and `selectCosineCandidates` proposed **none** of them. The
+seam injected nothing, and no floor however calibrated could admit a learning that
+never arrived. Across the 19 real tickets the z gate averaged ~1.4 admitted
+candidates and starved 4 of them completely.
+
+Hence `selectSimilarCandidates` (`src/retrieval/cosine-candidates.ts`): the same
+geometry, gated on the similarity itself and ranked by it, with no z and no
+zero-variance early return — both are artifacts of a statistic that needs spread to
+exist, and "is this close" is answerable of a single learning. 18 of the 19 real
+tickets now fill the k = 5 cap; the 19th holds only 3 above the floor and gets 3. The
+3 off-topic tasks still inject **nothing** — the z gate proposed a candidate for
+every one of them, and the floor refused every one. The bar that protects an agent's
+context is, and always was, the absolute one.
+
+**The bench is untouched by this.** Search keeps the z-gated arm — `selectCosineCandidates`
+is unchanged, and the numbers above must keep reproducing exactly.
+
 ## Fixtures — provenance
 
 - `fixtures/corpus.json` — the 113 live automation-pilot learnings

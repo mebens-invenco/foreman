@@ -3,7 +3,7 @@ import type { Embedder } from "../embeddings/embedder.js";
 import { markdownSection } from "../prompts/template-renderer.js";
 import type { LearningInjectionAction, LearningInjectionEventRepo } from "../repos/learning-injection-event-repo.js";
 import type { LearningRecord, LearningRepo } from "../repos/learning-repo.js";
-import { searchLearningsWithHybridFallback } from "../retrieval/hybrid-learning-search.js";
+import { selectSimilarLearnings } from "../retrieval/similar-learning-search.js";
 
 /** Injection is opt-in as a whole: a caller that wants no digest passes no deps. */
 export type LearningInjectionDeps = {
@@ -129,9 +129,13 @@ const recordInjection = (
  * "inject nothing". Four invariants, each pinned in
  * `__tests__/inject-relevant-learnings.test.ts`:
  *
- * - Hybrid only. A fallback to FTS — thin coverage, an embedder that will not load,
- *   an empty corpus — injects nothing: those matches carry no similarity to floor
- *   them on, and pushing them unmeasured is what this module exists to prevent.
+ * - Cosine only, floored on the similarity itself. bm25 has no arm here — a text
+ *   match carries no evidence of closeness — and thin coverage, an embedder that
+ *   will not load or an empty corpus injects nothing rather than something worse.
+ *   Nothing upstream of the floor may decide what is close enough to push: candidates
+ *   are sourced on similarity, never on the corpus-relative z the search arm bounds
+ *   its dense window with, which inverts on a homogeneous corpus and is lowest
+ *   exactly for the on-topic queries this exists to serve (`src/eval/retrieval/README.md`).
  * - `RELEVANT_LEARNINGS_LIMIT` is a cap, not a quota. A corpus of same-domain
  *   learnings only ever holds a handful worth pushing unasked, so injecting one — or
  *   none — is the system working.
@@ -139,55 +143,23 @@ const recordInjection = (
  *   "did the agent consult a learning" metric this exists to move would otherwise
  *   read 100% by construction, measuring only that injection ran.
  * - Never fails a render. A prompt without its digest is slightly worse; a prompt
- *   that failed to render is a failed attempt. That includes the defects
- *   `searchLearningsWithHybridFallback` deliberately re-throws — loud on the CLI path
- *   where a human is waiting, swallowed here where nobody asked.
+ *   that failed to render is a failed attempt. That includes the defects the
+ *   retrieval layer deliberately re-throws — loud on the CLI path where a human is
+ *   waiting, swallowed here where nobody asked.
  */
 export const injectRelevantLearnings = async (
   deps: LearningInjectionDeps,
   input: { task: Task; repoKey: string; action: LearningInjectionAction },
 ): Promise<string | null> => {
   try {
-    const query = injectionQueryText(input.task);
-    if (query.length === 0) {
-      return null;
-    }
-
-    const result = await searchLearningsWithHybridFallback(
-      deps,
-      { queries: [query], repos: [input.repoKey, "shared"], limit: RELEVANT_LEARNINGS_LIMIT },
-      { incrementReadCount: false },
-    );
-
-    // Not scored and found wanting — never scored at all. The `fts` result carries
-    // no provenance, so the seam has no similarity to floor its matches on, and
-    // pushing them unmeasured is the one thing this module exists to prevent.
-    // Silent by design: `fallBackToFts` has already logged the actionable line for
-    // a genuine degrade, and an empty store is not a degrade at all.
-    if (result.pipeline !== "hybrid") {
-      return null;
-    }
-
-    // The relevance floor. A hit the cosine arm never proposed carries no
-    // similarity at all, and "no evidence it is close" is not evidence that it
-    // is: it is floored out rather than pushed on a bm25 rank alone.
-    const similarityById = new Map(
-      result.learnings.flatMap((learning) => {
-        const similarity = result.provenance.get(learning.id)?.bestCosineSimilarity;
-        return similarity != null && similarity >= INJECTION_SIMILARITY_FLOOR ? [[learning.id, similarity] as const] : [];
-      }),
-    );
-    if (similarityById.size === 0) {
-      return null;
-    }
-
-    const bodies = deps.learnings.getLearningsByIds([...similarityById.keys()], { incrementReadCount: false });
-    const candidates = bodies.flatMap((learning) => {
-      const cosineSimilarity = similarityById.get(learning.id);
-      return cosineSimilarity == null ? [] : [{ learning, cosineSimilarity }];
+    const relevant = await selectSimilarLearnings(deps, {
+      query: injectionQueryText(input.task),
+      repos: [input.repoKey, "shared"],
+      limit: RELEVANT_LEARNINGS_LIMIT,
+      minSimilarity: INJECTION_SIMILARITY_FLOOR,
     });
 
-    const injected = fitToTokenBudget(candidates);
+    const injected = fitToTokenBudget(relevant.map((hit) => ({ learning: hit.learning, cosineSimilarity: hit.similarity })));
     if (injected.length === 0) {
       return null;
     }

@@ -90,3 +90,40 @@ export const selectCosineCandidates = (
     .slice(0, COSINE_TOP_K)
     .map((candidate) => ({ id: candidate.id, similarity: candidate.similarity }));
 };
+
+/**
+ * The learnings sitting at or above `gate.minSimilarity` from the query, closest
+ * first — the same geometry `selectCosineCandidates` reads, gated on the other
+ * question you can ask of it.
+ *
+ * z asks "did this stand out from the corpus", which is the right question for
+ * RANKING and the wrong one for deciding whether a learning is close enough to PUSH
+ * at a caller who never asked. The two disagree hardest exactly where it matters:
+ * against a homogeneous corpus an on-topic query is broadly similar to everything,
+ * so nothing stands out and the z gate proposes nothing, while an off-topic query
+ * finds a lucky outlier in a low, tight distribution and the z gate proposes it.
+ * Gating injection on z therefore hid learnings it would have happily admitted —
+ * measured on the committed calibration vectors, a real foreman ticket held 50
+ * learnings above the injection floor and the z gate proposed none of them.
+ *
+ * So there is no zero-variance early return and no `n < 2` guard here. Both are
+ * artifacts of z, which needs spread to exist and divides by it: a corpus whose
+ * similarities are all identical has no outlier, but it may still be uniformly
+ * close, and "is this close" is answerable of a single learning. Only the floor
+ * decides.
+ *
+ * `gate.limit` is the caller's, not `COSINE_TOP_K`: this list does not pad a fusion
+ * window, so the bound that keeps the dense arm from crowding out bm25 is not the
+ * bound that belongs here. It stays a cap, never a quota — a query with two
+ * admissible learnings gets two.
+ */
+export const selectSimilarCandidates = (
+  queryVector: Float32Array,
+  embeddings: readonly { learningId: string; vector: Float32Array }[],
+  gate: { minSimilarity: number; limit: number },
+): CosineCandidate[] =>
+  embeddings
+    .map((embedding) => ({ id: embedding.learningId, similarity: cosineSimilarity(queryVector, embedding.vector) }))
+    .filter((candidate) => candidate.similarity >= gate.minSimilarity)
+    .sort((left, right) => right.similarity - left.similarity || left.id.localeCompare(right.id))
+    .slice(0, gate.limit);
