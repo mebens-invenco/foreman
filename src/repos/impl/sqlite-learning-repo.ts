@@ -421,8 +421,9 @@ export class SqliteLearningRepo implements LearningRepo {
         limit: filters.limit,
       });
 
-      // Read back through the candidate order rather than the fetch's: rows come
-      // back by id, and this list is ranked by similarity.
+      // Rebuilt in candidate order, which is similarity order. Keying the fetch by id
+      // and walking `candidates` means the fetch's own ordering is not relied on at
+      // all, and each learning is paired with the similarity it was admitted on.
       const bodies = new Map(this.getLearningsByIds(candidates.map((candidate) => candidate.id)).map((row) => [row.id, row]));
       return {
         covered: true,

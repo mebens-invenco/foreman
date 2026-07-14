@@ -588,9 +588,12 @@ describe("injectRelevantLearnings", () => {
         seedPadding(db, 8);
         const embedder = embedderMatching();
 
-        const { digest } = await injectWith(db, embedder, { task: task({ title: "  ", description: "" }) });
+        const { digest, warnings } = await injectWith(db, embedder, { task: task({ title: "  ", description: "" }) });
 
         expect(digest).toBeNull();
+        // A task with no text is not a degrade either: nothing to say about it in the
+        // log of every attempt, and nothing to embed.
+        expect(warnings).toEqual([]);
         expect(embedder.calls).toEqual([]);
       });
     });

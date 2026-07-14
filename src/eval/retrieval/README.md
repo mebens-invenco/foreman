@@ -133,7 +133,12 @@ Hence `selectSimilarCandidates` (`src/retrieval/cosine-candidates.ts`): the same
 geometry, gated on the similarity itself and ranked by it, with no z and no
 zero-variance early return — both are artifacts of a statistic that needs spread to
 exist, and "is this close" is answerable of a single learning. 18 of the 19 real
-tickets now fill the k = 5 cap; the 19th holds only 3 above the floor and gets 3. The
+tickets now *select* a full k = 5; the 19th holds only 3 above the floor and selects 3.
+(Selection, not injection: `fitToTokenBudget` runs downstream and can drop entries from
+the tail, and the vector fixture carries no bodies to measure that on — the budget's
+tail-drop is pinned in `inject-relevant-learnings.test.ts` instead. The implication runs
+one way, since the budget only ever removes: selecting nothing does mean injecting
+nothing, which is what the off-topic tasks below establish.) The
 3 off-topic tasks still inject **nothing** — the z gate proposed a candidate for
 every one of them, and the floor refused every one. The bar that protects an agent's
 context is, and always was, the absolute one.
