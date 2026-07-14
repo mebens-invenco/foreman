@@ -12,51 +12,21 @@ export const RELEVANT_LEARNINGS_TOKEN_BUDGET = 600;
 
 /**
  * How close a learning must sit to the task text before it is worth pushing at an
- * agent who never asked for it. Raw cosine similarity, NOT the corpus-relative z
- * the cosine arm ranks on.
+ * agent who never asked for it: raw cosine similarity against `injectionQueryText`,
+ * NOT the corpus-relative z the cosine arm ranks on. z is a within-query bound and
+ * inverts on a homogeneous corpus, so it cannot express this bar at all — the
+ * measurements behind that are in `src/eval/retrieval/README.md`.
  *
- * z cannot express this bar, and gets it backwards. It asks "did this stand out
- * from the corpus", which against a homogeneous corpus is highest exactly where it
- * should be lowest: an on-topic query is broadly similar to everything, so nothing
- * stands out, while an off-topic query finds a lucky outlier in a low, tight
- * distribution. Against the live 143-learning corpus, "buy milk" scores z = 3.09
- * and a real foreman ticket scores z = 2.12 — a z floor would push learnings at
- * the shopping list and stay silent on the ticket.
+ * The committed calibration separates real tasks (min 0.7163) from off-topic ones
+ * (max 0.6564). 0.70 is deliberately NOT the midpoint of that band (0.6863 is): it
+ * leans toward silence, because a wrong learning in an agent's context costs more
+ * than a missing one. Both the separation and the lean are pinned, so the suite
+ * accepts only (0.6863, 0.7163).
  *
- * Similarity separates the two. Over the 19 real tickets and 3 deliberately
- * off-topic tasks committed as the calibration fixture, the best hit per task:
- *
- *   real tasks       min 0.7163
- *   off-topic tasks  max 0.6564   (CSS padding, a k8s upgrade, buying milk)
- *
- * Separation alone therefore admits (0.6564, 0.7163).
- *
- * 0.70 is NOT the midpoint of that band (0.6863 is), and is not equidistant from the
- * two ways of being wrong: it holds 0.0436 of margin to the off-topic edge but only
- * 0.0163 to the real-task edge, so it is ~2.7x closer to dropping a real ticket than
- * to admitting junk. That asymmetry is the point, not an oversight — a wrong learning
- * in an agent's context costs more than a missing one, so the floor leans toward
- * silence.
- *
- * That judgement is pinned rather than merely stated: `injection-similarity-calibration`
- * requires the floor to sit ABOVE the midpoint too, so the suite accepts only
- * (0.6863, 0.7163) — sweeping the constant, 0.69/0.70/0.71 pass while 0.66 and 0.6863
- * fail the lean, and 0.65/0.72/0.74 fail the separation. Moving the floor to the
- * midpoint reverses a deliberate call and has to fail a test to do it. Do not read a
- * second significant digit into any of these numbers.
- *
- * The live 143-learning corpus measures wider (real 0.743-0.863, off-topic 0.519-0.656)
- * — a bigger corpus holds a closer match for every task — so production has more
- * headroom than the numbers above. They are the ones quoted because they are the ones
- * a test can falsify; the live figures are corroboration, not a guard.
- *
- * CALIBRATED FOR `bge-small-en-v1.5` AND FOR THE `injectionQueryText` QUERY SHAPE.
- * A cosine scale is a property of the model and shifts with query length, so both
- * are tripwired in `injection-similarity-calibration.test.ts` rather than left to
- * a comment: that test pins this constant from BOTH sides against committed
- * real-model vectors (`maxOffTopic 0.6564 < 0.70 < 0.7163 minReal`), fails if the
- * production embedder changes model, and fails if the query text is rebuilt. Tune
- * this number there or not at all — on its own it is unfalsifiable.
+ * Calibrated for `bge-small-en-v1.5` and for the `injectionQueryText` query shape —
+ * a cosine scale belongs to the model and shifts with query length. Both couplings
+ * are tripwired in `injection-similarity-calibration.test.ts`, which is the only
+ * place this number can be re-derived: on its own it is unfalsifiable.
  */
 export const INJECTION_SIMILARITY_FLOOR = 0.7;
 
@@ -121,35 +91,22 @@ const fitToTokenBudget = (entries: readonly string[]): string | null => {
 
 /**
  * The Relevant Learnings digest pushed into an attempt prompt, or null for
- * "inject nothing".
+ * "inject nothing". Four invariants, each pinned in
+ * `__tests__/inject-relevant-learnings.test.ts`:
  *
- * Hybrid only. Push injection was sequenced after hybrid search precisely because
- * pushing FTS matches at an agent that did not ask for them injects noise, so a
- * fallback to bm25 — thin embedding coverage, an embedder that will not load,
- * an empty corpus — means no digest rather than a worse one.
- *
- * Worth knowing, because the name oversells it: on THIS path "hybrid" is very
- * nearly cosine alone. The bench's 0.676 recall@5 was measured on a planner's
- * several short queries; injection has one long one (a whole title + description),
- * and FTS ANDs every term of it, so bm25 matched in 1 of 54 bench cases. The
- * fusion is real, the coverage gate is real, and the bm25 arm is — here — almost
- * always silent, which leaves the floor below doing nearly all of the work.
- *
- * So `k = 5` is a cap, not a quota. Against the live corpus the fused window holds
- * 1-5 hits for a real ticket, and a homogeneous corpus of same-domain learnings has
- * only ever a handful genuinely worth pushing unasked. Injecting one is the system
- * working, not failing.
- *
- * Reading is not the same as being handed something: this path must not increment
- * `read_count`, or the "did the agent consult a learning" metric this feature
- * exists to move becomes 100% by construction, measuring only that injection ran.
- *
- * Nothing here may fail a render. A prompt without its digest is a slightly worse
- * prompt; a prompt that failed to render is a failed attempt. That includes the
- * defects `searchLearningsWithHybridFallback` deliberately re-throws — loud on the
- * CLI path where a human is waiting on the answer, swallowed on this one where
- * nobody asked. The defect still surfaces there; it just does not take an
- * unrelated attempt down with it here.
+ * - Hybrid only. A fallback to FTS — thin coverage, an embedder that will not load,
+ *   an empty corpus — injects nothing: those matches carry no similarity to floor
+ *   them on, and pushing them unmeasured is what this module exists to prevent.
+ * - `RELEVANT_LEARNINGS_LIMIT` is a cap, not a quota. A corpus of same-domain
+ *   learnings only ever holds a handful worth pushing unasked, so injecting one — or
+ *   none — is the system working.
+ * - Never increments `read_count`. Being handed something is not reading it, and the
+ *   "did the agent consult a learning" metric this exists to move would otherwise
+ *   read 100% by construction, measuring only that injection ran.
+ * - Never fails a render. A prompt without its digest is slightly worse; a prompt
+ *   that failed to render is a failed attempt. That includes the defects
+ *   `searchLearningsWithHybridFallback` deliberately re-throws — loud on the CLI path
+ *   where a human is waiting, swallowed here where nobody asked.
  */
 export const injectRelevantLearnings = async (
   deps: { learnings: LearningRepo; embedder: Embedder; warn: (message: string) => void },
