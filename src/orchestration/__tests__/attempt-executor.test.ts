@@ -280,6 +280,13 @@ describe("AttemptExecutor", () => {
       expect(runnerMocks.invoke.mock.calls[1]![0].prompt).toContain("could not parse a valid `<agent-result>` block");
 
       const attempt = db.attempts.latestAttemptForJob(job.id)!;
+      // Both invokes — the primary and the recovery — carry the attempt seam's
+      // provenance, so a `learnings search` run from either stamps the task that
+      // caused it. Exported once here rather than per-runner, and never as a flag
+      // the agent could set to some other attempt's id.
+      for (const call of runnerMocks.invoke.mock.calls) {
+        expect(call[0].env).toMatchObject({ FOREMAN_ATTEMPT_ID: attempt.id, FOREMAN_TASK_ID: task.id });
+      }
       expect(attempt.status).toBe("completed");
       expect(attempt.summary).toBe("Recovered structured result.");
       const artifacts = db.artifacts.listArtifacts("execution_attempt", attempt.id);

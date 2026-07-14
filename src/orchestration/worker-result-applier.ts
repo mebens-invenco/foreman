@@ -1,4 +1,5 @@
 import type {
+  ActionType,
   LearningMutation,
   RepoRef,
   ReviewContext,
@@ -255,7 +256,11 @@ export class WorkerResultApplier {
       logger.info("updated consolidation labels", { addCount: labels.add.length, removeCount: labels.remove.length });
     }
 
-    await this.applyLearningMutations(workerResult.learningMutations, { taskId: input.task.id, attemptId: input.attempt.id }, logger);
+    await this.applyLearningMutations(
+      workerResult.learningMutations,
+      { taskId: input.task.id, attemptId: input.attempt.id, action: input.job.action },
+      logger,
+    );
 
     if (
       input.job.action === "review" &&
@@ -311,7 +316,7 @@ export class WorkerResultApplier {
 
   private async applyLearningMutations(
     mutations: LearningMutation[],
-    source: { taskId: string; attemptId: string },
+    source: { taskId: string; attemptId: string; action: ActionType },
     logger: LoggerService,
   ): Promise<void> {
     const pending: PendingLearningEmbedding[] = [];
@@ -363,6 +368,7 @@ export class WorkerResultApplier {
         logger.info("updated learning mutation", { learningId: mutation.id });
 
         if (mutation.markApplied) {
+          this.recordLearningApplied(source, mutation.id, logger);
           this.stampInjectionApplied(source.attemptId, mutation.id, logger);
         }
 
@@ -380,6 +386,28 @@ export class WorkerResultApplier {
     }
 
     await this.embedLearnings(pending, logger);
+  }
+
+  /**
+   * Every apply, injected or self-found — the opposite of the injection stamp
+   * below, which by design only marks what the digest actually pushed. Promotion
+   * asks whether OTHER tasks found a learning useful, and a learning the agent
+   * dug up by itself is evidence of exactly that.
+   *
+   * Its own try/catch, and not nested in the injection stamp: `updateLearning`
+   * has already committed by the time either runs, so a telemetry insert that
+   * fails must warn and let the apply stand.
+   */
+  private recordLearningApplied(
+    source: { taskId: string; attemptId: string; action: ActionType },
+    learningId: string,
+    logger: LoggerService,
+  ): void {
+    try {
+      this.deps.foremanRepos.learningUsage.recordApplied({ ...source, learningId });
+    } catch (error) {
+      logger.warn("failed to record learning applied event", { learningId, error: errorMessage(error) });
+    }
   }
 
   /**
@@ -687,7 +715,11 @@ export class WorkerResultApplier {
       logger.info("transitioned task to done after all relevant deployments succeeded");
     }
 
-    await this.applyLearningMutations(workerResult.learningMutations, { taskId: input.task.id, attemptId: input.attempt.id }, logger);
+    await this.applyLearningMutations(
+      workerResult.learningMutations,
+      { taskId: input.task.id, attemptId: input.attempt.id, action: input.job.action },
+      logger,
+    );
 
     this.deps.scheduleScout();
     return pullRequestUrl;

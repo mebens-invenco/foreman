@@ -1,4 +1,5 @@
 export * from "./agent-runner.js";
+export * from "./attempt-provenance-env.js";
 export * from "./create-agent-runner.js";
 export * from "./worker-result.js";
 export * from "./impl/claude-runner.js";
