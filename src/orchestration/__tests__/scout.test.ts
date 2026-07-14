@@ -298,6 +298,52 @@ const seedReviewerCheckpoint = (
   });
 };
 
+const seedFailedReviewerAttempt = (
+  db: Awaited<ReturnType<typeof createMigratedDb>>,
+  reviewTask: Task,
+  context: ReviewContext,
+): { jobId: string; targetId: string } => {
+  db.workers.ensureWorkerSlots(1);
+  const worker = db.workers.listWorkers()[0];
+  expect(worker).toBeDefined();
+  db.taskMirror.saveTasks([reviewTask]);
+  const target = db.taskMirror.getTaskTarget(reviewTask.id, reviewTask.targets[0]?.repoKey ?? "repo-a");
+  expect(target).not.toBeNull();
+
+  const reviewerJob = db.jobs.createJob({
+    taskId: reviewTask.id,
+    taskTargetId: target!.id,
+    taskProvider: reviewTask.provider,
+    action: "reviewer",
+    priorityRank: priorityToRank(reviewTask.priority),
+    repoKey: target!.repoKey,
+    baseBranch: context.baseBranch,
+    dedupeKey: `${reviewTask.id}:${target!.repoKey}:reviewer`,
+    selectionReason: "test failed reviewer",
+    selectionContext: { reviewContext: context },
+  });
+  const attempt = db.attempts.createAttemptWithLeases({
+    jobId: reviewerJob.id,
+    workerId: worker!.id,
+    runnerName: "claude",
+    runnerModel: "claude-opus-4-6",
+    runnerVariant: "high",
+    expiresAt: "2026-03-14T12:05:00Z",
+    leases: [],
+  });
+  expect(attempt).not.toBeNull();
+  db.attempts.finalizeAttempt(attempt!.id, "failed", {
+    finishedAt: "2026-03-14T12:04:00Z",
+    summary: "Reviewer runner failed",
+    errorMessage: "Reviewer runner failed",
+  });
+  db.jobs.updateJobStatus(reviewerJob.id, "failed", {
+    finishedAt: "2026-03-14T12:04:00Z",
+    errorMessage: "Reviewer runner failed",
+  });
+  return { jobId: reviewerJob.id, targetId: target!.id };
+};
+
 const seedReviewCheckpoint = (
   db: Awaited<ReturnType<typeof createMigratedDb>>,
   reviewTask: Task,
@@ -1980,6 +2026,188 @@ describe("runScoutSelection", () => {
       expect(result.jobs).toHaveLength(1);
       expect(result.jobs[0]?.action).toBe("reviewer");
       expect(result.jobs[0]?.task.id).toBe("TASK-0005R");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not immediately reselect a failed reviewer for the same head on worker-finished scout", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const reviewTask = task({
+      id: "TASK-FAILED-REVIEWER",
+      title: "Failed reviewer task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/150", source: "provider" } satisfies TaskPullRequest],
+    });
+    const context = reviewContext({
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/150",
+      pullRequestNumber: 150,
+      state: "open",
+      headSha: "failed-reviewer-head",
+      headBranch: "task-failed-reviewer",
+      baseBranch: "main",
+    });
+    seedFailedReviewerAttempt(db, reviewTask, context);
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({ [reviewTask.id]: context }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "worker_finished",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test.each(["poll", "startup", "lease_change", "task_mutation", "manual"] as const)(
+    "allows failed reviewers on later %s scouts",
+    async (triggerType) => {
+      const tempDir = await createTempDir("foreman-scout-test-");
+      cleanupDirs.push(tempDir);
+      const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      const reviewTask = task({
+        id: `TASK-FAILED-REVIEWER-${triggerType.toUpperCase()}`,
+        title: `Failed reviewer ${triggerType} task`,
+        state: "in_review",
+        providerState: "in_review",
+        priority: "normal",
+        updatedAt: "2026-03-14T12:00:00Z",
+        pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/151", source: "provider" } satisfies TaskPullRequest],
+      });
+      const context = reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/151",
+        pullRequestNumber: 151,
+        state: "open",
+        headSha: "failed-reviewer-later-head",
+        headBranch: "task-failed-reviewer-later",
+        baseBranch: "main",
+      });
+      seedFailedReviewerAttempt(db, reviewTask, context);
+
+      try {
+        const result = await runScoutSelection({
+          config,
+          foremanRepos: db,
+          taskSystem: new FakeTaskSystem([reviewTask]),
+          reviewService: new FakeReviewService({ [reviewTask.id]: context }),
+          repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+          triggerType,
+        });
+
+        expect(result.jobs).toHaveLength(1);
+        expect(result.jobs[0]?.action).toBe("reviewer");
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  test("reselects a failed reviewer on worker-finished scout after the pull request head changes", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const reviewTask = task({
+      id: "TASK-STALE-FAILED-REVIEWER",
+      title: "Stale failed reviewer task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/152", source: "provider" } satisfies TaskPullRequest],
+    });
+    const failedContext = reviewContext({
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/152",
+      pullRequestNumber: 152,
+      state: "open",
+      headSha: "old-reviewer-head",
+      headBranch: "task-stale-failed-reviewer",
+      baseBranch: "main",
+    });
+    seedFailedReviewerAttempt(db, reviewTask, failedContext);
+    const currentContext = { ...failedContext, headSha: "new-reviewer-head" };
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({ [reviewTask.id]: currentContext }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "worker_finished",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("reviewer");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not suppress reviewer work when another target job is newer than the failed reviewer", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const reviewTask = task({
+      id: "TASK-OLD-FAILED-REVIEWER",
+      title: "Old failed reviewer task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/153", source: "provider" } satisfies TaskPullRequest],
+    });
+    const context = reviewContext({
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/153",
+      pullRequestNumber: 153,
+      state: "open",
+      headSha: "old-failed-reviewer-head",
+      headBranch: "task-old-failed-reviewer",
+      baseBranch: "main",
+    });
+    const failed = seedFailedReviewerAttempt(db, reviewTask, context);
+    db.database.sqlite
+      .prepare("UPDATE job SET created_at = ?, updated_at = ?, finished_at = ? WHERE id = ?")
+      .run("2026-03-14T12:00:00Z", "2026-03-14T12:04:00Z", "2026-03-14T12:04:00Z", failed.jobId);
+    const newerReviewJob = db.jobs.createJob({
+      taskId: reviewTask.id,
+      taskTargetId: failed.targetId,
+      taskProvider: reviewTask.provider,
+      action: "review",
+      priorityRank: priorityToRank(reviewTask.priority),
+      repoKey: "repo-a",
+      baseBranch: "main",
+      dedupeKey: `${reviewTask.id}:repo-a:review`,
+      selectionReason: "test newer review progress",
+    });
+    db.jobs.updateJobStatus(newerReviewJob.id, "completed", { finishedAt: "2026-03-14T12:07:00Z" });
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({ [reviewTask.id]: context }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "worker_finished",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("reviewer");
     } finally {
       db.close();
     }
