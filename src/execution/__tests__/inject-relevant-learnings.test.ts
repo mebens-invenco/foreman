@@ -82,15 +82,10 @@ const contentWithRule = (id: string): string => `**Rule:** Do the ${id} thing.\n
 const vectorAtSimilarity = (similarity: number): number[] => [Math.sqrt(1 - similarity ** 2), similarity, 0];
 
 /**
-/**
- * Padding an unrelated query cannot reach by bm25 and the cosine arm scores 0.
- *
- * The corpus has to be mostly noise for a learning to be RANKED at all: the arm
- * proposes only what clears `COSINE_Z_FLOOR` = 2, and with `n` embeddings the
- * largest attainable z is `(n - 1) / sqrt(n)`, so a perfect match needs n >= 6
- * (1.79 at n = 5, 2.04 at n = 6). Injection does not gate on z — it floors on
- * similarity — so this bound only decides what reaches the seam, never what the
- * seam then injects. Seedings below carry headroom over it rather than sitting on it.
+ * Filler orthogonal to the task query: cosine scores it 0, so it can never clear
+ * the floor however much of it there is. It gives the coverage gate a real corpus
+ * to measure, and it is the population the learnings under test must be picked out
+ * of — never a population that can push one over a bar.
  */
 const seedPadding = (db: Db, count: number, vector = [1, 0, 0]): void => {
   for (let index = 0; index < count; index += 1) {
@@ -221,30 +216,38 @@ describe("injectRelevantLearnings", () => {
   });
 
   describe("relevance floor", () => {
+    /** What the seam actually asks the corpus, at the bar it actually asks for. */
+    const selectAtFloor = async (db: Db, embedder: FakeEmbedder, minSimilarity = INJECTION_SIMILARITY_FLOOR) => {
+      const [queryVector] = await embedder.embed([taskQuery]);
+      const covered = db.learnings.selectSimilarLearningsCovered(
+        { repos: ["foreman", "shared"], limit: RELEVANT_LEARNINGS_LIMIT },
+        { model: embedder.modelId, vector: queryVector! },
+        { minCoverage: 0.9, minSimilarity },
+      );
+      if (!covered.covered) {
+        throw new Error("expected a covered similarity selection");
+      }
+
+      return covered.learnings;
+    };
+
     test("keeps a learning above the similarity floor and drops one below it", async () => {
       await withDb(async (db) => {
         seedLearning(db, { id: "close", content: contentWithRule("close"), vector: vectorAtSimilarity(0.8) });
         seedLearning(db, { id: "distant", content: contentWithRule("distant"), vector: vectorAtSimilarity(0.5) });
-        // Enough noise that even `distant` clears the arm's own z bar (z = 2.8):
-        // both must be RANKED, or the floor is not what is separating them.
         seedPadding(db, 30);
 
         const embedder = embedderMatching();
-        const [queryVector] = await embedder.embed([taskQuery]);
-        const covered = db.learnings.searchLearningsHybridCovered(
-          { queries: [taskQuery], repos: ["foreman", "shared"], limit: RELEVANT_LEARNINGS_LIMIT },
-          { model: embedder.modelId, vectors: [queryVector!] },
-          { minCoverage: 0.9 },
-        );
-        if (!covered.covered) {
-          throw new Error("expected a covered hybrid ranking");
-        }
 
-        // Both stand out from the corpus enough for the arm to RANK them — the
-        // floor is the only thing separating them, and it separates on similarity.
-        expect(covered.learnings.map((row) => row.id).sort()).toEqual(["close", "distant"]);
-        expect(covered.provenance.get("close")!.bestCosineSimilarity).toBeCloseTo(0.8, 5);
-        expect(covered.provenance.get("distant")!.bestCosineSimilarity).toBeCloseTo(0.5, 5);
+        const admitted = await selectAtFloor(db, embedder);
+        expect(admitted.map((hit) => hit.learning.id)).toEqual(["close"]);
+        expect(admitted[0]!.similarity).toBeCloseTo(0.8, 5);
+
+        // Drop the bar under both and `distant` comes back: it is in scope,
+        // embedded, and rankable. The floor is the only thing keeping it out.
+        const withLowerBar = await selectAtFloor(db, embedder, 0.4);
+        expect(withLowerBar.map((hit) => hit.learning.id)).toEqual(["close", "distant"]);
+        expect(withLowerBar[1]!.similarity).toBeCloseTo(0.5, 5);
         expect(INJECTION_SIMILARITY_FLOOR).toBeGreaterThan(0.5);
         expect(INJECTION_SIMILARITY_FLOOR).toBeLessThanOrEqual(0.8);
 
@@ -253,32 +256,33 @@ describe("injectRelevantLearnings", () => {
       });
     });
 
-    test("drops a hit the cosine arm never proposed, however well bm25 ranked it", async () => {
+    test("does not push a learning on a text match alone", async () => {
       await withDb(async (db) => {
-        // Every vector identical: with no spread the cosine arm cannot name an
-        // outlier and falls silent, so these reach the window on bm25 alone. A hit
-        // with no similarity is not a hit known to be close, and is not pushed.
-        for (let index = 0; index < 6; index += 1) {
-          seedLearning(db, {
-            id: `bm25-${index}`,
-            content: `${contentWithRule(`bm25-${index}`)} vector retrieval tuning rank the learnings ${"filler ".repeat(index * 4)}`,
-            vector: [1, 0, 0],
-          });
-        }
+        // A perfect bm25 hit — the content carries every term of the query — sitting
+        // nowhere near it geometrically. Text overlap is not evidence of closeness,
+        // and injection has no bm25 arm to be persuaded by it.
+        seedLearning(db, {
+          id: "text-match",
+          content: `${contentWithRule("text-match")} vector retrieval tuning rank the learnings`,
+          vector: vectorAtSimilarity(0.2),
+        });
+        seedPadding(db, 12);
 
         const embedder = embedderMatching();
         const [queryVector] = await embedder.embed([taskQuery]);
-        const covered = db.learnings.searchLearningsHybridCovered(
+        const fused = db.learnings.searchLearningsHybridCovered(
           { queries: [taskQuery], repos: ["foreman", "shared"], limit: RELEVANT_LEARNINGS_LIMIT },
           { model: embedder.modelId, vectors: [queryVector!] },
           { minCoverage: 0.9 },
         );
-        if (!covered.covered) {
+        if (!fused.covered) {
           throw new Error("expected a covered hybrid ranking");
         }
 
-        expect(covered.learnings.length).toBe(RELEVANT_LEARNINGS_LIMIT);
-        expect([...covered.provenance.values()].every((arms) => arms.bestCosineSimilarity === null)).toBe(true);
+        // bm25 wins it the top slot of the fused search, which hands it straight back.
+        // Its geometry says otherwise, and geometry is the only evidence injection takes.
+        expect(fused.learnings[0]!.id).toBe("text-match");
+        expect(fused.provenance.get("text-match")!.bestCosineSimilarity!).toBeLessThan(INJECTION_SIMILARITY_FLOOR);
 
         const { digest, warnings } = await injectWith(db, embedder);
         expect(digest).toBeNull();
@@ -293,6 +297,44 @@ describe("injectRelevantLearnings", () => {
         const { digest, warnings } = await injectWith(db, embedderMatching());
 
         expect(digest).toBeNull();
+        expect(warnings).toEqual([]);
+      });
+    });
+  });
+
+  describe("reachability: the floor decides what is close, not the corpus-relative z", () => {
+    test("injects up to k from a homogeneous corpus the search arm proposes nothing from", async () => {
+      await withDb(async (db) => {
+        // Ten learnings all broadly close to the task and to each other — the shape a
+        // real ticket's query makes against a same-domain corpus. Every one clears the
+        // injection floor, and none stands 2 SDs off a mean sitting right among them.
+        const ids = Array.from({ length: 10 }, (_unused, index) => `near-${String(index).padStart(2, "0")}`);
+        ids.forEach((id, index) => {
+          seedLearning(db, { id, content: contentWithRule(id), vector: vectorAtSimilarity(0.72 + index * 0.005) });
+        });
+
+        const embedder = embedderMatching();
+        const [queryVector] = await embedder.embed([taskQuery]);
+
+        // The bug, pinned. Sourced through the fused search — as injection was — the
+        // seam is handed NOTHING: bm25 cannot reach these, and the cosine arm's z gate
+        // proposes no candidate from a corpus with no outlier in it. No floor, however
+        // well calibrated, can admit a learning that never arrives.
+        const fused = db.learnings.searchLearningsHybridCovered(
+          { queries: [taskQuery], repos: ["foreman", "shared"], limit: RELEVANT_LEARNINGS_LIMIT },
+          { model: embedder.modelId, vectors: [queryVector!] },
+          { minCoverage: 0.9 },
+        );
+        if (!fused.covered) {
+          throw new Error("expected a covered hybrid ranking");
+        }
+
+        expect(fused.learnings).toEqual([]);
+
+        // Sourced on absolute similarity, the same corpus fills the cap, closest first.
+        const { digest, warnings } = await injectWith(db, embedder);
+
+        expect(entryIds(digest!)).toEqual(["near-09", "near-08", "near-07", "near-06", "near-05"]);
         expect(warnings).toEqual([]);
       });
     });
@@ -345,8 +387,8 @@ describe("injectRelevantLearnings", () => {
 
         const { digest } = await injectWith(db, embedderMatching());
 
-        // Cosine ranks the three identically, so the fusion breaks the tie on id:
-        // the survivor is the head of the ranking, not an arbitrary one.
+        // The three sit at an identical similarity, so the selection breaks the tie
+        // on id: the survivor is the head of the ranking, not an arbitrary one.
         expect(entryIds(digest!)).toEqual(["cap-a"]);
         expect(estimateTokens(digest!)).toBeLessThanOrEqual(RELEVANT_LEARNINGS_TOKEN_BUDGET);
       });
@@ -405,10 +447,12 @@ describe("injectRelevantLearnings", () => {
 
     test("records nothing when nothing is injected", async () => {
       await withDb(async (db) => {
-        seedLearning(db, { id: "learn-target", content: contentWithRule("learn-target"), vector: [0, 1, 0] });
+        // Nothing in scope clears the floor — the target sits under it, the padding is
+        // orthogonal — so there is no digest, and nothing to record against the attempt.
+        seedLearning(db, { id: "learn-target", content: contentWithRule("learn-target"), vector: vectorAtSimilarity(0.4) });
         seedPadding(db, 12);
 
-        const { digest } = await injectWith(db, embedderMatching([1, 0, 0]));
+        const { digest } = await injectWith(db, embedderMatching());
 
         expect(digest).toBeNull();
         expect(injectionRows(db)).toEqual([]);

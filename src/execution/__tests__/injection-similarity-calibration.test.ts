@@ -5,9 +5,10 @@ import { describe, expect, test } from "vitest";
 
 import { createEmbedder } from "../../embeddings/create-embedder.js";
 import { corpusEmbeddingDigest } from "../../orchestration/__tests__/corpus-embedding-digest.js";
+import { selectCosineCandidates, selectSimilarCandidates } from "../../retrieval/cosine-candidates.js";
 import { cosineSimilarity } from "../../retrieval/cosine-similarity.js";
 import { testProjectRoot } from "../../test-support/helpers.js";
-import { INJECTION_SIMILARITY_FLOOR } from "../inject-relevant-learnings.js";
+import { INJECTION_SIMILARITY_FLOOR, RELEVANT_LEARNINGS_LIMIT } from "../inject-relevant-learnings.js";
 import { injectionCalibrationDigest, type CalibrationQuery } from "./injection-calibration-digest.js";
 
 /**
@@ -51,24 +52,47 @@ const queryVectors = JSON.parse(readFileSync(queryVectorsPath, "utf8")) as Query
 const corpus = JSON.parse(readFileSync(corpusPath, "utf8")) as CorpusLearning[];
 const corpusVectors = JSON.parse(readFileSync(corpusVectorsPath, "utf8")) as CorpusVectors;
 
-const learnings = corpusVectors.learnings.map((learning) => ({ repo: learning.repo, vector: decodeVector(learning.vector) }));
+const learnings = corpusVectors.learnings.map((learning) => ({
+  learningId: learning.id,
+  repo: learning.repo,
+  vector: decodeVector(learning.vector),
+}));
 const queryVectorById = new Map(queryVectors.queries.map((query) => [query.id, decodeVector(query.vector)]));
 
-/** Exactly what the seam floors on: the closest learning the task's scope holds. */
-const bestSimilarityInScope = (query: CalibrationQuery): number => {
+const queryVectorFor = (query: CalibrationQuery): Float32Array => {
   const vector = queryVectorById.get(query.id);
   if (!vector) {
     throw new Error(`query fixture is missing a vector for ${query.id}`);
   }
 
+  return vector;
+};
+
+/** The corpus the seam reads for this task: production scopes it to `[repo, "shared"]`. */
+const embeddingsInScope = (query: CalibrationQuery): typeof learnings => {
   const scope = new Set([query.repo, "shared"]);
   const inScope = learnings.filter((learning) => scope.has(learning.repo));
   if (inScope.length === 0) {
     throw new Error(`corpus holds no learning in scope for ${query.id} (${query.repo} + shared)`);
   }
 
-  return Math.max(...inScope.map((learning) => cosineSimilarity(vector, learning.vector)));
+  return inScope;
 };
+
+/** The closest learning the task's scope holds — the statistic the floor is calibrated against. */
+const bestSimilarityInScope = (query: CalibrationQuery): number =>
+  Math.max(...embeddingsInScope(query).map((learning) => cosineSimilarity(queryVectorFor(query), learning.vector)));
+
+/** Exactly what the seam injects: the real selector, at the real floor, under the real cap. */
+const injectedFor = (query: CalibrationQuery) =>
+  selectSimilarCandidates(queryVectorFor(query), embeddingsInScope(query), {
+    minSimilarity: INJECTION_SIMILARITY_FLOOR,
+    limit: RELEVANT_LEARNINGS_LIMIT,
+  });
+
+/** Every learning the floor would admit if nothing capped the list. */
+const admissibleFor = (query: CalibrationQuery): number =>
+  embeddingsInScope(query).filter((learning) => cosineSimilarity(queryVectorFor(query), learning.vector) >= INJECTION_SIMILARITY_FLOOR).length;
 
 const byKind = (kind: CalibrationQuery["kind"]): CalibrationQuery[] => queries.filter((query) => query.kind === kind);
 const realTasks = byKind("real");
@@ -142,5 +166,71 @@ describe("injection similarity floor calibration", () => {
     // reverses it, and has to fail a test rather than pass unnoticed.
     expect(midpoint).toBeCloseTo(0.6863, 4);
     expect(INJECTION_SIMILARITY_FLOOR).toBeGreaterThan(midpoint);
+  });
+});
+
+/**
+ * The floor decides what is close enough to push — but only over the candidates it is
+ * shown. Sourced through the fused search, those candidates were first forced past
+ * `COSINE_Z_FLOOR`, a bar that answers a different question ("did this stand out from
+ * the corpus") for a different consumer (how far the dense arm may pad a search's
+ * result window). On a homogeneous corpus the two questions do not merely differ, they
+ * invert: z is LOWEST exactly for the on-topic queries injection exists to serve.
+ *
+ * These run the real selectors over the same committed vectors the floor is calibrated
+ * on, so the reachability claim is falsifiable against real geometry rather than argued.
+ */
+describe("injection reachability", () => {
+  test.each(realTasks.map((query) => [query.id, query] as const))("a real task reaches its cap's worth of learnings: %s", (_id, query) => {
+    const injected = injectedFor(query);
+
+    // A cap, not a quota: the scope yields as many as it holds, up to k.
+    expect(injected).toHaveLength(Math.min(RELEVANT_LEARNINGS_LIMIT, admissibleFor(query)));
+    expect(injected.every((candidate) => candidate.similarity >= INJECTION_SIMILARITY_FLOOR)).toBe(true);
+
+    const similarities = injected.map((candidate) => candidate.similarity);
+    expect(similarities).toEqual([...similarities].sort((left, right) => right - left));
+  });
+
+  test("the k = 5 window is reachable rather than aspirational", () => {
+    const filled = realTasks.filter((query) => injectedFor(query).length === RELEVANT_LEARNINGS_LIMIT);
+
+    // 18 of the 19 real tickets hold at least k admissible learnings and now get k.
+    // The 19th is ENG-5687, whose `shipping-service` scope holds only 3 above the
+    // floor — and it gets 3. Sourced through the z gate these same 19 tasks averaged
+    // ~1.4 admitted candidates, and 4 of them got none at all.
+    expect(filled).toHaveLength(18);
+    expect(realTasks.filter((query) => admissibleFor(query) < RELEVANT_LEARNINGS_LIMIT).map((query) => query.id)).toEqual(["ENG-5687"]);
+    expect(injectedFor(realTasks.find((query) => query.id === "ENG-5687")!)).toHaveLength(3);
+  });
+
+  test("the z gate hid what the floor admits: ENG-5685's own query goes 0 -> 5", () => {
+    const query = realTasks.find((candidate) => candidate.id === "ENG-5685")!;
+    const inScope = embeddingsInScope(query);
+
+    // The ticket that built this fixture, served by the code that built it: the arm
+    // the fused search ranks on proposes NOTHING from its own 83-learning scope, so no
+    // floor — however well calibrated — had anything to admit.
+    expect(selectCosineCandidates(queryVectorFor(query), inScope)).toEqual([]);
+
+    // Meanwhile 50 of those 83 learnings sit above the floor, the closest at 0.7739.
+    // They were never rejected as too distant; they never reached the bar to be judged.
+    expect(admissibleFor(query)).toBe(50);
+    expect(bestSimilarityInScope(query)).toBeCloseTo(0.7739, 4);
+
+    const injected = injectedFor(query);
+    expect(injected).toHaveLength(RELEVANT_LEARNINGS_LIMIT);
+    expect(injected[0]!.similarity).toBeCloseTo(0.7739, 4);
+  });
+
+  test.each(offTopicTasks.map((query) => [query.id, query] as const))("an off-topic task still injects nothing: %s", (_id, query) => {
+    const inScope = embeddingsInScope(query);
+
+    // The z gate is not what was keeping these out, and dropping it costs the seam
+    // nothing: it PROPOSES candidates for every off-topic task here — the lucky outlier
+    // in a low, tight distribution — and the floor refuses every one. The bar that
+    // protects an agent's context is, and always was, the absolute one.
+    expect(selectCosineCandidates(queryVectorFor(query), inScope).length).toBeGreaterThan(0);
+    expect(injectedFor(query)).toEqual([]);
   });
 });

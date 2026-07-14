@@ -75,6 +75,27 @@ export type CoveredHybridSearch =
   | { covered: true; learnings: LearningSearchRecord[]; provenance: ReadonlyMap<string, LearningRetrievalProvenance> }
   | { covered: false; learningCount: number; embeddingCount: number };
 
+/**
+ * A learning close enough to the query to be worth pushing, and how close.
+ *
+ * The similarity travels WITH the learning rather than in a side map, because on
+ * this path it is not provenance about a ranking — it is the reason the learning is
+ * here at all, and every consumer (the floor that admitted it, the telemetry that
+ * records what reached a prompt) needs the two together.
+ */
+export type SimilarLearning = { learning: LearningRecord; similarity: number };
+
+/**
+ * Either the learnings close enough to push, or the coverage that was too thin to
+ * judge closeness at all — exclusive by construction, as `CoveredHybridSearch` is.
+ *
+ * `covered: true` with an empty list is a real answer, and a different one from a
+ * shortfall: the corpus was readable and holds nothing close enough.
+ */
+export type CoveredSimilarLearnings =
+  | { covered: true; learnings: SimilarLearning[] }
+  | { covered: false; learningCount: number; embeddingCount: number };
+
 export interface LearningRepo {
   addLearning(input: {
     id?: string;
@@ -143,6 +164,33 @@ export interface LearningRepo {
     gate: { minCoverage: number },
     options?: LearningReadOptions,
   ): CoveredHybridSearch;
+  /**
+   * The in-scope learnings sitting at or above `gate.minSimilarity` from the query,
+   * closest first — gated on the same embedding coverage as
+   * `searchLearningsHybridCovered`, and reading the same single snapshot for the
+   * same reason.
+   *
+   * Cosine alone, floored on the similarity itself rather than on the corpus-relative
+   * z the fusion ranks by. It answers "which learnings are close enough to push at an
+   * agent who never asked", not "which learnings best answer this query", and the two
+   * take different evidence: bm25 has no say here, because a text match carries no
+   * evidence of closeness and this path has nothing to floor it on. z has no say
+   * either — it is a bound on how far the dense arm may pad a fusion window, and this
+   * path has no window to pad.
+   *
+   * `filters.limit` caps the list; it is not a quota, and a scope holding two
+   * admissible learnings yields two. Required, because how many learnings may be
+   * pushed at an agent unasked is the caller's question and has no sane default.
+   *
+   * Takes no `LearningReadOptions` and never counts a read: being handed a learning is
+   * not consulting one, and a path that pushes learnings unasked would make the "did
+   * the agent consult a learning" metric true by construction.
+   */
+  selectSimilarLearningsCovered(
+    filters: { repos?: string[]; limit: number },
+    queryEmbedding: { model: string; vector: Float32Array },
+    gate: { minCoverage: number; minSimilarity: number },
+  ): CoveredSimilarLearnings;
   getLearningsByIds(ids: string[], options?: LearningReadOptions): LearningRecord[];
   listLearnings(filters?: { search?: string; repo?: string; limit?: number; offset?: number }): LearningRecord[];
   /** How many learnings the given repo scope holds, embedded or not. */

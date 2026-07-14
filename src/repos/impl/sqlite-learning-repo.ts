@@ -3,10 +3,11 @@ import { ForemanError } from "../../lib/errors.js";
 import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
 import { assertRankableVector, isRankableVector } from "../../embeddings/rankable-vector.js";
-import { selectCosineCandidates } from "../../retrieval/cosine-candidates.js";
+import { selectCosineCandidates, selectSimilarCandidates } from "../../retrieval/cosine-candidates.js";
 import { fuseByReciprocalRank } from "../../retrieval/reciprocal-rank-fusion.js";
 import type {
   CoveredHybridSearch,
+  CoveredSimilarLearnings,
   LearningEmbeddingRecord,
   LearningEmbeddingUpsert,
   LearningReadOptions,
@@ -394,6 +395,43 @@ export class SqliteLearningRepo implements LearningRepo {
     }
 
     return result;
+  }
+
+  selectSimilarLearningsCovered(
+    filters: { repos?: string[]; limit: number },
+    queryEmbedding: { model: string; vector: Float32Array },
+    gate: { minCoverage: number; minSimilarity: number },
+  ): CoveredSimilarLearnings {
+    const repos = normalizeFilterValues(filters.repos);
+    const scope = repos.length > 0 ? { repos } : {};
+
+    // Gate, selection and bodies read ONE snapshot, for the reason
+    // `searchLearningsHybridCovered` does: the serve loop is a separate process on
+    // the same WAL file, so left as independent reads the gate could authorize a
+    // corpus that no longer exists by the time it is ranked.
+    return this.sqlite.transaction((): CoveredSimilarLearnings => {
+      const learningCount = this.countLearnings(scope);
+      const embeddings = this.getCurrentLearningEmbeddings({ ...scope, model: queryEmbedding.model });
+      if (learningCount === 0 || embeddings.length / learningCount < gate.minCoverage) {
+        return { covered: false, learningCount, embeddingCount: embeddings.length };
+      }
+
+      const candidates = selectSimilarCandidates(queryEmbedding.vector, embeddings, {
+        minSimilarity: gate.minSimilarity,
+        limit: filters.limit,
+      });
+
+      // Read back through the candidate order rather than the fetch's: rows come
+      // back by id, and this list is ranked by similarity.
+      const bodies = new Map(this.getLearningsByIds(candidates.map((candidate) => candidate.id)).map((row) => [row.id, row]));
+      return {
+        covered: true,
+        learnings: candidates.flatMap((candidate) => {
+          const learning = bodies.get(candidate.id);
+          return learning ? [{ learning, similarity: candidate.similarity }] : [];
+        }),
+      };
+    })();
   }
 
   private rankLearningsHybrid(

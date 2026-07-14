@@ -1953,6 +1953,108 @@ describe("persistence repos", () => {
       db.close();
     }
   });
+  test("selects learnings on absolute similarity, reaching what the z-gated fusion cannot", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      // A homogeneous corpus — every learning broadly close to the query and to every
+      // other — which is the shape a real ticket's query meets. Nothing stands out, so
+      // the fusion's z-gated arm proposes nothing and the paraphrase bm25-matches
+      // nothing: the fused search is EMPTY. Closeness is still perfectly decidable,
+      // and five of the six are close.
+      const near = (similarity: number): number[] => [Math.sqrt(1 - similarity ** 2), similarity, 0];
+      seedHybridDocs(db, [
+        { id: "near-0", content: "one", vector: near(0.72) },
+        { id: "near-1", content: "two", vector: near(0.74) },
+        { id: "near-2", content: "three", vector: near(0.76) },
+        { id: "near-3", content: "four", vector: near(0.78) },
+        { id: "near-4", content: "five", vector: near(0.8) },
+        { id: "far", content: "six", vector: near(0.4) },
+      ]);
+
+      expect(
+        db.learnings.searchLearningsHybrid(
+          { queries: [PARAPHRASE_QUERY], repos: ["shared"] },
+          { model: HYBRID_MODEL, vectors: [LOCKFILE_VECTOR] },
+        ),
+      ).toEqual([]);
+
+      const covered = db.learnings.selectSimilarLearningsCovered(
+        { repos: ["shared"], limit: 3 },
+        { model: HYBRID_MODEL, vector: LOCKFILE_VECTOR },
+        { minCoverage: 0.9, minSimilarity: 0.7 },
+      );
+      if (!covered.covered) {
+        throw new Error("expected a covered similarity selection");
+      }
+
+      // Closest first — ids run OPPOSITE to rank, so a list ordered by the id-keyed
+      // body fetch rather than by the ranking would come back reversed. `far` sits
+      // below the bar, and the caller's limit cuts the rest.
+      expect(covered.learnings.map((hit) => hit.learning.id)).toEqual(["near-4", "near-3", "near-2"]);
+      expect(covered.learnings[0]!.similarity).toBeCloseTo(0.8, 5);
+      // The whole learning, carrying the similarity it was admitted on: the seam
+      // renders a body and records what reached the prompt without a second read.
+      expect(covered.learnings[0]!.learning.content).toBe("five");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("refuses to judge closeness on a corpus the vector space has gone half blind to", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      seedHybridDocs(db, [{ id: "learn-lockfile", content: "reviewers cannot verify resolution", vector: [0, 1, 0] }]);
+      db.learnings.addLearning({ id: "unembedded", title: "unembedded", repo: "shared", confidence: "emerging", content: "no vector", tags: [] });
+
+      const result = db.learnings.selectSimilarLearningsCovered(
+        { repos: ["shared"], limit: 5 },
+        { model: HYBRID_MODEL, vector: LOCKFILE_VECTOR },
+        { minCoverage: 0.9, minSimilarity: 0.7 },
+      );
+
+      // An exact match sits in the corpus and is still not handed back: half the scope
+      // carries no vector, and the shortfall is returned instead of a ranking the
+      // caller could mistake for a complete one.
+      expect(result).toEqual({ covered: false, learningCount: 2, embeddingCount: 1 });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("never counts a read: being handed a learning is not consulting one", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      seedHybridDocs(db, [{ id: "learn-lockfile", content: "reviewers cannot verify resolution", vector: [0, 1, 0] }, ...padding(8)]);
+
+      const covered = db.learnings.selectSimilarLearningsCovered(
+        { repos: ["shared"], limit: 5 },
+        { model: HYBRID_MODEL, vector: LOCKFILE_VECTOR },
+        { minCoverage: 0.9, minSimilarity: 0.7 },
+      );
+      if (!covered.covered) {
+        throw new Error("expected a covered similarity selection");
+      }
+
+      // The method takes no read options at all, so this is a property of the path
+      // rather than a discipline its callers have to keep: counting a pushed learning
+      // as consulted would make the metric the feature exists to move true by
+      // construction.
+      expect(covered.learnings.map((hit) => hit.learning.id)).toEqual(["learn-lockfile"]);
+      expect(db.learnings.getLearningsByIds(["learn-lockfile"])[0]!.readCount).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
   test("scopes learning embeddings by repo and cascades deletes from the learning row", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
