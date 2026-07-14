@@ -5,8 +5,9 @@ import { promisify } from "node:util";
 
 import { afterEach, describe, expect, test } from "vitest";
 
+import type { Task } from "../domain/index.js";
 import { stringifyWorkspaceConfig, createDefaultWorkspaceConfig } from "../workspace/config.js";
-import { createMigratedDb, createWorkspacePaths, testProjectRoot } from "../test-support/helpers.js";
+import { createMigratedDb, createWorkspacePaths, seedExecutionAttempt, testProjectRoot } from "../test-support/helpers.js";
 
 const execFileAsync = promisify(execFile);
 const cleanupDirs: string[] = [];
@@ -71,6 +72,70 @@ const runCliRaw = async (args: string[]): Promise<string> => {
 };
 
 const runCli = async (args: string[]): Promise<unknown> => JSON.parse(await runCliRaw(args));
+
+const usageTask = (id: string): Task => ({
+  id,
+  provider: "file",
+  providerId: id,
+  title: `Task ${id}`,
+  description: "",
+  state: "ready",
+  providerState: "Todo",
+  priority: "none",
+  labels: [],
+  assignee: null,
+  targets: [{ repoKey: "foreman", branchName: id.toLowerCase(), position: 0 }],
+  targetDependencies: [],
+  dependencies: { taskIds: [], baseTaskId: null },
+  baseBranch: null,
+  pullRequests: [],
+  runnerOverride: null,
+  updatedAt: "2026-03-16T00:00:00Z",
+  url: null,
+});
+
+/**
+ * ENG-SELF extracted `learn-a` and then two of its own stages read and applied it
+ * — the self-echo, and under the raw counters alone it is indistinguishable from
+ * a learning two tasks found useful. ENG-OTHER's single use is the only real
+ * cross-task signal in the fixture, so every corrected count must come back as 1
+ * while the raw counters stay at 3+.
+ */
+const seedUsageEvents = async (workspaceRoot: string): Promise<void> => {
+  const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), projectRoot);
+  try {
+    db.database.sqlite.prepare("UPDATE learning SET source_task_id = ? WHERE id = ?").run("ENG-SELF", "learn-a");
+
+    const read = (attemptId: string, taskId: string, learningIds: string[]): void => {
+      db.learnings.getLearningsByIds(learningIds, { incrementReadCount: true });
+      db.learningSearchEvents.recordEvent({
+        kind: "search",
+        queries: ["planning prompt"],
+        hitIds: learningIds,
+        source: { attemptId, taskId },
+      });
+    };
+    const apply = (attemptId: string, taskId: string, learningId: string): void => {
+      db.learnings.updateLearning({ id: learningId, markApplied: true });
+      db.learningUsage.recordApplied({ attemptId, taskId, action: "execution", learningId });
+    };
+
+    for (const action of ["execution", "review"] as const) {
+      const attempt = seedExecutionAttempt(db, { task: usageTask("ENG-SELF"), repoKey: "foreman", action });
+      read(attempt.id, "ENG-SELF", ["learn-a", "learn-b"]);
+      apply(attempt.id, "ENG-SELF", "learn-a");
+    }
+
+    const other = seedExecutionAttempt(db, { task: usageTask("ENG-OTHER"), repoKey: "foreman", action: "execution" });
+    read(other.id, "ENG-OTHER", ["learn-a"]);
+    apply(other.id, "ENG-OTHER", "learn-a");
+
+    db.learnings.getLearningsByIds(["learn-a"], { incrementReadCount: true });
+    db.learningSearchEvents.recordEvent({ kind: "search", queries: ["planning prompt"], hitIds: ["learn-a"] });
+  } finally {
+    db.close();
+  }
+};
 
 /**
  * One execution attempt that was handed `learn-a` and reported applying it, and a
@@ -298,5 +363,81 @@ describe("learnings cli", () => {
     };
 
     expect(packageJson.scripts?.foreman).toBe("node dist/cli.js");
+  });
+
+  test("usage-stats reports the task-distinct counts as structured JSON fields", async () => {
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
+    await seedUsageEvents(workspaceRoot);
+
+    const output = (await runCli(["learnings", "usage-stats", workspaceName, "--json"])) as {
+      workspace: string;
+      since: string | null;
+      unattributedReadEvents: number;
+      learnings: Array<{
+        learningId: string;
+        sourceTaskId: string | null;
+        readCount: number;
+        appliedCount: number;
+        distinctTasksRead: number;
+        distinctTasksApplied: number;
+        selfEchoReads: number;
+        selfEchoApplies: number;
+      }>;
+    };
+
+    expect(output.workspace).toBe(workspaceName);
+    expect(output.since).toBeNull();
+    // The ad-hoc search: no attempt, so no task, so out of every distinct count.
+    expect(output.unattributedReadEvents).toBe(1);
+    expect(output.learnings).toEqual([
+      // ENG-SELF extracted learn-a, then two of its own stages read AND applied it.
+      // Every one of those touches is echo; only ENG-OTHER's use is real signal.
+      {
+        learningId: "learn-a",
+        title: "Planning prompt learnings note",
+        repo: "foreman",
+        sourceTaskId: "ENG-SELF",
+        readCount: 4,
+        appliedCount: 3,
+        distinctTasksRead: 1,
+        distinctTasksApplied: 1,
+        selfEchoReads: 2,
+        selfEchoApplies: 2,
+      },
+      // Read by both of ENG-SELF's stages — pipeline depth, one task.
+      {
+        learningId: "learn-b",
+        title: "Planning prompt learnings note",
+        repo: "shared",
+        sourceTaskId: null,
+        readCount: 2,
+        appliedCount: 0,
+        distinctTasksRead: 1,
+        distinctTasksApplied: 0,
+        selfEchoReads: 0,
+        selfEchoApplies: 0,
+      },
+    ]);
+  });
+
+  test("usage-stats renders a table when --json is absent", async () => {
+    const { workspaceName, workspaceRoot } = await createCliWorkspace();
+    await seedUsageEvents(workspaceRoot);
+
+    const output = await runCliRaw(["learnings", "usage-stats", workspaceName]);
+
+    expect(output).toContain("Task-distinct learning usage");
+    expect(output).toContain("Unattributed read events");
+    expect(output).toContain("Tasks applied");
+    expect(output).toContain("Echo r/a");
+    expect(output).toContain("learn-a");
+  });
+
+  test("usage-stats rejects a --since it cannot parse", async () => {
+    const { workspaceName } = await createCliWorkspace();
+
+    await expect(runCliRaw(["learnings", "usage-stats", workspaceName, "--since", "not-a-date", "--json"])).rejects.toThrow(
+      /ISO-8601/,
+    );
   });
 });
