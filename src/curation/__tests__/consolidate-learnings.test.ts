@@ -94,6 +94,8 @@ describe("consolidateLearnings", () => {
 
       expect(report.applied).toBe(false);
       expect(report.threshold).toBe(0.91);
+      expect(report.scanned).toBe(3);
+      expect(report.corpus).toBe(3);
       expect(report.clusters).toHaveLength(1);
       expect(report.clusters[0]!.survivorId).toBe("dup-new");
       expect(report.clusters[0]!.survivorReason).toBe("recency_tiebreak");
@@ -138,6 +140,63 @@ describe("consolidateLearnings", () => {
 
       // Never deleted: the usage-event history still joins to the archived loser.
       expect(db.learningUsage.distinctTasksAppliedByIds(["drop"]).get("drop")).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("--apply archives every loser of a multi-member transitive-chain cluster", async () => {
+    const db = await createDb();
+    try {
+      // Three learnings on a 0.92 arc: a~b and b~c clear the bar, a~c does not, so
+      // union-find still binds all three into one cluster with two losers. Pins that
+      // the apply forwards EVERY loser, not just the first — the multi-loser path a
+      // 2-member cluster can never exercise.
+      const angle = Math.acos(0.92);
+      const onArc = (multiple: number): number[] => [Math.cos(multiple * angle), Math.sin(multiple * angle), 0];
+      seed(db, { id: "arc-a", vector: onArc(0), updatedAt: "2026-05-01T00:00:00.000Z" });
+      seed(db, { id: "arc-b", vector: onArc(1), updatedAt: "2026-05-01T00:00:00.000Z" });
+      seed(db, { id: "arc-c", vector: onArc(2), updatedAt: "2026-05-01T00:00:00.000Z" });
+
+      const report = consolidate(db, true);
+      expect(report.clusters).toHaveLength(1);
+      expect(report.clusters[0]!.survivorId).toBe("arc-a");
+      expect(report.clusters[0]!.loserIds).toEqual(["arc-b", "arc-c"]);
+
+      // Both losers — not just the first — come back archived and flagged.
+      for (const id of ["arc-b", "arc-c"]) {
+        const [loser] = db.learnings.getLearningsByIds([id]);
+        expect(loser?.archivedAt).toEqual(expect.any(String));
+        expect(loser?.duplicateOf).toBe("arc-a");
+      }
+      const [survivor] = db.learnings.getLearningsByIds(["arc-a"]);
+      expect(survivor?.archivedAt).toBeNull();
+      expect(survivor?.duplicateOf).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("reports scan coverage so a zero-scan is distinct from a clean corpus", async () => {
+    const db = await createDb();
+    try {
+      // Embedded under a DIFFERENT model, so the scan for MODEL finds no current
+      // vectors and compares nothing over a non-empty corpus — the case that would
+      // otherwise render as an all-clear.
+      db.learnings.addLearning({ id: "unscanned", title: "unscanned", repo: "shared", confidence: "emerging", content: "b", tags: [] });
+      db.learnings.upsertLearningEmbedding({
+        learningId: "unscanned",
+        model: "some-other-model",
+        dims: 3,
+        vector: Float32Array.from([1, 0, 0]),
+        embeddedTitle: "unscanned",
+        embeddedContent: "b",
+      });
+
+      const report = consolidate(db, false);
+      expect(report.scanned).toBe(0);
+      expect(report.corpus).toBe(1);
+      expect(report.clusters).toEqual([]);
     } finally {
       db.close();
     }

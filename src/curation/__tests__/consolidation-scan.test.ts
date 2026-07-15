@@ -78,6 +78,39 @@ describe("scanForConsolidation", () => {
     expect(clusters[0]!.loserIds).toEqual(["older"]);
   });
 
+  test("more distinct-task applies win even against a newer updated_at", () => {
+    // Puts the two survivor dimensions in direct conflict: the winner is OLDER but
+    // more-applied. If the comparator ever checked recency first, the fresher entry
+    // would win — so this pins applies as the primary key, not just as a tiebreak.
+    const clusters = scanForConsolidation(
+      [
+        input("proven-older", BASE, { distinctTasksApplied: 2, updatedAt: "2026-07-01T00:00:00.000Z" }),
+        input("fresh-unused", unitVectorAt(0.9151), { distinctTasksApplied: 1, updatedAt: "2026-07-31T00:00:00.000Z" }),
+      ],
+      NEAR_DUPLICATE_SIMILARITY_THRESHOLD,
+    );
+
+    expect(clusters[0]!.survivorId).toBe("proven-older");
+    expect(clusters[0]!.survivorReason).toBe("distinct_tasks_applied");
+    expect(clusters[0]!.loserIds).toEqual(["fresh-unused"]);
+  });
+
+  test("recency breaks a tie on equal NONZERO applies, not only at zero", () => {
+    // The recency tiebreak must fire whenever applies are equal, not just in the
+    // common 0/0 case — otherwise a comparator that special-cased 0/0 would pass.
+    const clusters = scanForConsolidation(
+      [
+        input("older", BASE, { distinctTasksApplied: 2, updatedAt: "2026-07-01T00:00:00.000Z" }),
+        input("newer", unitVectorAt(0.9151), { distinctTasksApplied: 2, updatedAt: "2026-07-31T00:00:00.000Z" }),
+      ],
+      NEAR_DUPLICATE_SIMILARITY_THRESHOLD,
+    );
+
+    expect(clusters[0]!.survivorId).toBe("newer");
+    expect(clusters[0]!.survivorReason).toBe("recency_tiebreak");
+    expect(clusters[0]!.loserIds).toEqual(["older"]);
+  });
+
   test("the id is the final tiebreak so the survivor is total even on identical usage and recency", () => {
     const clusters = scanForConsolidation(
       [input("zzz", unitVectorAt(0.9151)), input("aaa", BASE)],

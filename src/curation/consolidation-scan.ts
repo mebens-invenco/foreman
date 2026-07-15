@@ -81,9 +81,11 @@ const toMember = (learning: ConsolidationInput): ConsolidationMember => ({
  * is `NEAR_DUPLICATE_SIMILARITY_THRESHOLD`, passed in rather than imported so this
  * module carries no dependency on the calibration that owns the constant.
  *
- * A pair whose vectors disagree in width, or whose cosine is non-finite, is a
- * corrupt row and is skipped rather than allowed to throw — one bad vector must
- * not abort the whole scan, the same robustness `nearestLearningEmbedding` keeps.
+ * A pair whose vectors disagree in width is skipped rather than cosined — one
+ * corrupt-width row must not abort the whole scan, the same width guard
+ * `nearestLearningEmbedding` keeps. (Rankability is already guaranteed by the
+ * caller's `getCurrentLearningEmbeddings` filter, and `cosineSimilarity` throws on
+ * anything unrankable, so there is no non-finite result left to guard against.)
  */
 export const scanForConsolidation = (
   learnings: readonly ConsolidationInput[],
@@ -122,12 +124,6 @@ export const scanForConsolidation = (
       }
 
       const similarity = cosineSimilarity(leftVector, rightVector);
-      // A NaN component yields a NaN similarity, and every comparison against it
-      // is false — recording it as an edge would be recording a poison pill.
-      if (!Number.isFinite(similarity)) {
-        continue;
-      }
-
       similarityByPair.set(pairKey(left, right), similarity);
       if (similarity >= threshold) {
         union(left, right);

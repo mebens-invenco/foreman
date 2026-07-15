@@ -6,6 +6,10 @@ import { scanForConsolidation, type ConsolidationCluster } from "./consolidation
 export type ConsolidationReport = {
   threshold: number;
   applied: boolean;
+  /** Learnings actually compared (current-embedding for the model, non-archived, non-flagged). */
+  scanned: number;
+  /** Total non-archived learnings in the workspace — the denominator `scanned` is a coverage of. */
+  corpus: number;
   clusters: ConsolidationCluster[];
 };
 
@@ -64,5 +68,14 @@ export const consolidateLearnings = (deps: ConsolidateDeps, options: { apply: bo
     );
   }
 
-  return { threshold: NEAR_DUPLICATE_SIMILARITY_THRESHOLD, applied: options.apply, clusters };
+  // `scanned` / `corpus` disclose coverage the way `selectSimilarLearningsCovered`
+  // does: a scan that compared nothing (scanned 0 of a non-empty corpus — e.g. the
+  // embedder model does not match the stored vectors) must not read as a clean run.
+  return {
+    threshold: NEAR_DUPLICATE_SIMILARITY_THRESHOLD,
+    applied: options.apply,
+    scanned: candidates.length,
+    corpus: deps.learnings.countLearnings(),
+    clusters,
+  };
 };

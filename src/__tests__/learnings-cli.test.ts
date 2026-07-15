@@ -538,6 +538,8 @@ describe("learnings cli", () => {
       workspace: string;
       threshold: number;
       applied: boolean;
+      scanned: number;
+      corpus: number;
       clusters: Array<{
         survivorId: string;
         survivorReason: string;
@@ -550,6 +552,8 @@ describe("learnings cli", () => {
     expect(output.workspace).toBe(workspaceName);
     expect(output.threshold).toBe(0.91);
     expect(output.applied).toBe(false);
+    expect(output.scanned).toBe(3);
+    expect(output.corpus).toBe(3);
     expect(output.clusters).toHaveLength(1);
 
     const cluster = output.clusters[0]!;
@@ -594,6 +598,7 @@ describe("learnings cli", () => {
     const output = await runCliRaw(["learnings", "consolidate", workspaceName]);
 
     expect(output).toContain("dry run");
+    expect(output).toContain("scanned 3 of 3 learnings");
     expect(output).toContain("survivor dup-new");
     expect(output).toContain("dup-old");
     expect(output).toContain("repo=shared");
