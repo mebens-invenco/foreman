@@ -1418,6 +1418,25 @@ describe("WorkerResultApplier learning embeddings", () => {
     }
   });
 
+  test("un-archives an archived learning when a worker update revives it", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-unarchive-");
+    const embedder = new FakeEmbedder();
+
+    try {
+      db.learnings.addLearning({ id: "learn-a", title: "Title", repo: "foreman", confidence: "emerging", content: "Body", tags: [] });
+      db.learnings.archiveLearning("learn-a");
+      // Archived: out of the recency listing the update below will revive it into.
+      expect(db.learnings.listLearnings()).toHaveLength(0);
+
+      await applyLearningMutations(db, embedder, [{ type: "update", id: "learn-a", content: "Revived body" }], tempDir);
+
+      expect(db.learnings.getLearningsByIds(["learn-a"])[0]!.archivedAt).toBeNull();
+      expect(db.learnings.listLearnings().map((learning) => learning.id)).toEqual(["learn-a"]);
+    } finally {
+      db.close();
+    }
+  });
+
   test("discards its vector when another writer edits the learning mid-embed", async () => {
     const { tempDir, db } = await setUp("foreman-learning-embed-race-");
     const embedder = new FakeEmbedder();

@@ -210,6 +210,57 @@ describe("HTTP query validation", () => {
     }
   });
 
+  test("archives and unarchives a learning, keeping it visible in the listing throughout", async () => {
+    const workspaceRoot = await createTempDir("foreman-http-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+    const db = await createMigratedDb(paths.dbPath, projectRoot);
+    db.learnings.addLearning({ id: "learn-a", title: "Archivable", repo: "shared", confidence: "emerging", content: "body", tags: [] });
+
+    const server = createHttpServer({
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths,
+      repoRefs: [],
+      repos: db,
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      scheduler: {
+        getStatus: () => ({ status: "running", nextScoutPollAt: null }),
+        start: vi.fn(),
+        pause: vi.fn(),
+        stop: vi.fn(async () => undefined),
+        triggerManualScout: vi.fn(),
+        syncConfigUpdate: vi.fn(),
+      } as any,
+    });
+
+    try {
+      const archived = await server.inject({ method: "POST", url: "/api/learnings/learn-a/archived", payload: { archived: true } });
+      expect(archived.statusCode).toBe(200);
+      expect(archived.json().learning.archivedAt).toEqual(expect.any(String));
+
+      // The browse listing keeps returning the archived row (badged in the UI).
+      const listed = await server.inject({ method: "GET", url: "/api/learnings" });
+      const listedLearning = listed.json().learnings.find((learning: { id: string }) => learning.id === "learn-a");
+      expect(listedLearning.archivedAt).toEqual(expect.any(String));
+
+      const unarchived = await server.inject({ method: "POST", url: "/api/learnings/learn-a/archived", payload: { archived: false } });
+      expect(unarchived.statusCode).toBe(200);
+      expect(unarchived.json().learning.archivedAt).toBeNull();
+
+      const badBody = await server.inject({ method: "POST", url: "/api/learnings/learn-a/archived", payload: {} });
+      expect(badBody.statusCode).toBe(400);
+      expect(badBody.json().error.code).toBe("invalid_request");
+
+      const unknown = await server.inject({ method: "POST", url: "/api/learnings/nope/archived", payload: { archived: true } });
+      expect(unknown.statusCode).toBe(404);
+      expect(unknown.json().error.code).toBe("learning_not_found");
+    } finally {
+      await server.close();
+      db.close();
+    }
+  });
+
   test("scope=assigned merges live assigned issues with mirrored candidates", async () => {
     const workspaceRoot = await createTempDir("foreman-http-test-");
     cleanupDirs.push(workspaceRoot);

@@ -30,6 +30,14 @@ export function LearningDuplicateBadge() {
   )
 }
 
+export function LearningArchivedBadge() {
+  return (
+    <span className="inline-flex rounded-none border border-border/70 bg-muted/40 px-2 py-1 text-xxs font-medium tracking-[0.18em] text-muted-foreground uppercase">
+      archived
+    </span>
+  )
+}
+
 function buildLearningSearchText(learning: LearningRecord) {
   return [
     learning.id,
@@ -82,6 +90,7 @@ export const learningColumns: ColumnDef<LearningRecord>[] = [
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-mono text-xs text-muted-foreground">{row.original.id}</p>
           {row.original.duplicateOf ? <LearningDuplicateBadge /> : null}
+          {row.original.archivedAt ? <LearningArchivedBadge /> : null}
         </div>
       </div>
     ),
@@ -182,3 +191,31 @@ export const learningConfidenceFilterValues = [
   "all",
   ...confidenceValues,
 ] as const
+
+export const learningStatusFilterValues = ["all", "active", "archived"] as const
+
+export type LearningStatusFilter = (typeof learningStatusFilterValues)[number]
+
+export const learningStatusOptions: DataTableFilterOption[] =
+  learningStatusFilterValues
+    .filter((value) => value !== "all")
+    .map((value) => ({
+      label: value,
+      value,
+    }))
+
+// The status toggle filters the data array (there is no status column to hang a
+// columnFilter on), so an archived learning stays reachable by direct id while
+// the table narrows to the chosen lifecycle state.
+export function matchesLearningStatus(
+  learning: LearningRecord,
+  status: LearningStatusFilter
+): boolean {
+  if (status === "active") {
+    return learning.archivedAt === null
+  }
+  if (status === "archived") {
+    return learning.archivedAt !== null
+  }
+  return true
+}

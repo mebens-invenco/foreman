@@ -1079,8 +1079,34 @@ export const createHttpServer = (deps: HttpServerDeps) => {
       filters.offset = offset;
     }
     return {
-      learnings: deps.repos.learnings.listLearnings(filters),
+      // Archived rows are visible in the UI (badged) and filtered client-side, so
+      // the browse endpoint returns them; every prompt-facing caller leaves the
+      // default (false) and never sees them.
+      learnings: deps.repos.learnings.listLearnings({ ...filters, includeArchived: true }),
     };
+  });
+
+  server.post("/api/learnings/:id/archived", async (request) => {
+    const params = request.params as { id: string };
+    const body = request.body;
+    if (!isRecord(body) || typeof body.archived !== "boolean") {
+      throw new ForemanError("invalid_request", "Body must include an 'archived' boolean.", 400);
+    }
+
+    if (body.archived) {
+      deps.repos.learnings.archiveLearning(params.id);
+    } else {
+      deps.repos.learnings.unarchiveLearning(params.id);
+    }
+
+    // Resolve unfiltered so the caller gets the row back whether it is now
+    // archived or active — the UI reconciles its optimistic flip against this.
+    const [learning] = deps.repos.learnings.getLearningsByIds([params.id]);
+    if (!learning) {
+      throw new ForemanError("learning_not_found", `Learning not found: ${params.id}`, 404);
+    }
+
+    return { learning };
   });
   server.get("/api/scout/runs", async () => ({ runs: deps.repos.scoutRuns.listScoutRuns() }));
 

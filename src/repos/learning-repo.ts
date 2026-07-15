@@ -11,6 +11,12 @@ export type LearningRecord = {
   duplicateOf: string | null;
   /** Task whose attempt produced this learning. Null for rows written before provenance existed. */
   sourceTaskId: string | null;
+  /**
+   * When the learning was soft-archived, or null while it is active. An archived
+   * learning is excluded from every retrieval and injection surface but stays in
+   * the store — resolvable by id, visible in the UI, and reversible.
+   */
+  archivedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -116,6 +122,14 @@ export interface LearningRepo {
     tags?: string[];
     markApplied?: boolean;
   }): void;
+  /**
+   * Soft-archive a learning: stamp `archived_at` so it drops out of every
+   * retrieval and injection surface while staying in the store. Throws
+   * `learning_not_found` when no such learning exists.
+   */
+  archiveLearning(id: string): void;
+  /** Clear `archived_at`, restoring the learning to retrieval. Throws `learning_not_found`. */
+  unarchiveLearning(id: string): void;
   searchLearnings(
     filters?: { queries?: string[]; repos?: string[]; limit?: number; offset?: number },
     options?: LearningReadOptions,
@@ -191,8 +205,26 @@ export interface LearningRepo {
     queryEmbedding: { model: string; vector: Float32Array },
     gate: { minCoverage: number; minSimilarity: number },
   ): CoveredSimilarLearnings;
+  /**
+   * Resolve learnings by id, archived or not: an id in hand — a `learnings get`
+   * after injection, a `duplicate_of` link — must keep resolving even once the
+   * learning has been archived. Deliberately unfiltered.
+   */
   getLearningsByIds(ids: string[], options?: LearningReadOptions): LearningRecord[];
-  listLearnings(filters?: { search?: string; repo?: string; limit?: number; offset?: number }): LearningRecord[];
+  /**
+   * `includeArchived` governs the browse path only: default false hides archived
+   * rows (prompt-facing callers), true lists them (the UI/HTTP surface, where
+   * archived rows are visible by design). The `search` path routes through
+   * `searchLearnings` — a retrieval surface — and always hides archived
+   * regardless, so a text query never surfaces an archived learning.
+   */
+  listLearnings(filters?: {
+    search?: string;
+    repo?: string;
+    limit?: number;
+    offset?: number;
+    includeArchived?: boolean;
+  }): LearningRecord[];
   /** How many learnings the given repo scope holds, embedded or not. */
   countLearnings(filters?: { repos?: string[] }): number;
   /**

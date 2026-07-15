@@ -13,13 +13,16 @@ import { aggregateMetrics, scoreCase, type BenchMetrics, type CaseScore } from "
 // its FTS index, the embedding table, and the text snapshot every freshness
 // check keys on. Later migrations don't touch retrieval ranking; pinning keeps
 // the committed baseline reproducible even if one would. 0031 carries the
-// duplicate_of/source_task_id columns the learning row mapper now selects.
+// duplicate_of/source_task_id columns the learning row mapper now selects; 0034
+// carries archived_at, which the mapper also selects (the exclusion predicate is
+// inert here — no fixture row is archived, so the committed numbers are unchanged).
 const BENCH_MIGRATIONS = [
   "0004_memory_tables.sql",
   "0005_learning_fts.sql",
   "0027_learning_embedding.sql",
   "0030_learning_embedding_text_snapshot.sql",
   "0031_learning_duplicate_flag_provenance.sql",
+  "0034_learning_archived_at.sql",
 ] as const;
 
 // Fixtures and migrations are read from the on-disk checkout, resolved against

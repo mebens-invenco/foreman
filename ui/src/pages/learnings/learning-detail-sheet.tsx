@@ -6,15 +6,22 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet"
+import { Button } from "@/components/ui/button"
 import { MarkdownView } from "@/components/markdown-view"
 import { formatTimestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { LearningRecord } from "@/lib/api"
-import { confidenceTone, LearningDuplicateBadge } from "@/pages/learnings/columns"
+import {
+  confidenceTone,
+  LearningArchivedBadge,
+  LearningDuplicateBadge,
+} from "@/pages/learnings/columns"
 
 type LearningDetailSheetProps = {
   learning: LearningRecord | null
   onSelectLearning: (learningId: string) => void
+  onSetArchived: (learningId: string, archived: boolean) => void
+  isUpdatingArchive: boolean
 }
 
 function DetailRow({ label, value }: { label: string; value: ReactNode }) {
@@ -68,6 +75,8 @@ function DuplicateOfLink({
 export function LearningDetailSheet({
   learning,
   onSelectLearning,
+  onSetArchived,
+  isUpdatingArchive,
 }: LearningDetailSheetProps) {
   return (
     <SheetContent
@@ -85,7 +94,18 @@ export function LearningDetailSheet({
           {learning ? (
             <div className="flex flex-wrap items-center justify-end gap-2">
               {learning.duplicateOf ? <LearningDuplicateBadge /> : null}
+              {learning.archivedAt ? <LearningArchivedBadge /> : null}
               <LearningConfidenceBadge confidence={learning.confidence} />
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isUpdatingArchive}
+                onClick={() =>
+                  onSetArchived(learning.id, learning.archivedAt === null)
+                }
+              >
+                {learning.archivedAt ? "Unarchive" : "Archive"}
+              </Button>
             </div>
           ) : null}
         </div>
@@ -102,6 +122,12 @@ export function LearningDetailSheet({
               <DetailRow label="Created" value={formatTimestamp(learning.createdAt)} />
               <DetailRow label="Updated" value={formatTimestamp(learning.updatedAt)} />
               <DetailRow label="Source task" value={learning.sourceTaskId ?? "-"} />
+              {learning.archivedAt ? (
+                <DetailRow
+                  label="Archived"
+                  value={formatTimestamp(learning.archivedAt)}
+                />
+              ) : null}
               {learning.duplicateOf ? (
                 <DetailRow
                   label="Duplicate of"

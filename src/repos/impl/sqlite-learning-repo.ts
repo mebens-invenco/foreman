@@ -19,7 +19,7 @@ import type {
 import type { SqliteDatabase, SqliteRow } from "./sqlite-database.js";
 
 const LEARNING_COLUMNS =
-  "id, title, repo, tags, confidence, content, applied_count, read_count, duplicate_of, source_task_id, created_at, updated_at";
+  "id, title, repo, tags, confidence, content, applied_count, read_count, duplicate_of, source_task_id, archived_at, created_at, updated_at";
 
 const toNullableString = (value: unknown): string | null => (value === null || value === undefined ? null : String(value));
 
@@ -36,6 +36,7 @@ const mapLearningRecord = (row: unknown): LearningRecord => {
     readCount: Number(mapped.read_count),
     duplicateOf: toNullableString(mapped.duplicate_of),
     sourceTaskId: toNullableString(mapped.source_task_id),
+    archivedAt: toNullableString(mapped.archived_at),
     createdAt: String(mapped.created_at),
     updatedAt: String(mapped.updated_at),
   };
@@ -109,7 +110,12 @@ const learningEmbeddingFilter = (
   const repos = normalizeFilterValues(filters.repos);
   const model = filters.model?.trim();
 
-  const clauses: string[] = [];
+  // Archived learnings leave every retrieval surface, so their vectors surface in
+  // none of these reads either. This keeps the coverage gate honest: an archived
+  // row is out of the numerator here exactly as it is out of `countLearnings`'
+  // denominator, and out of the `current` set `listLearningIdsMissingEmbedding`
+  // subtracts — so it can never be counted as missing and owed a backfill.
+  const clauses: string[] = ["learning.archived_at IS NULL"];
   const params: unknown[] = [];
   if (repos.length > 0) {
     clauses.push(`learning.repo IN (${repos.map(() => "?").join(", ")})`);
@@ -237,10 +243,13 @@ export class SqliteLearningRepo implements LearningRepo {
       throw new ForemanError("learning_not_found", `Learning not found: ${input.id}`);
     }
 
+    // Clearing `archived_at` un-archives: an update is fresh evidence the learning
+    // is worth carrying, so it revives an archived row rather than editing a
+    // shelved one. The applier's freshness guard re-embeds if the content changed.
     this.sqlite
       .prepare(
         `UPDATE learning
-            SET title = ?, repo = ?, tags = ?, confidence = ?, content = ?, applied_count = ?, updated_at = ?
+            SET title = ?, repo = ?, tags = ?, confidence = ?, content = ?, applied_count = ?, archived_at = NULL, updated_at = ?
           WHERE id = ?`,
       )
       .run(
@@ -255,6 +264,28 @@ export class SqliteLearningRepo implements LearningRepo {
       );
   }
 
+  archiveLearning(id: string): void {
+    this.setArchivedAt(id, isoNow());
+  }
+
+  unarchiveLearning(id: string): void {
+    this.setArchivedAt(id, null);
+  }
+
+  // Existence-checked like `updateLearning`, so an unknown id is a caller error
+  // rather than a silent no-op. The `learning_touch_updated_at` trigger bumps
+  // `updated_at` here (this write leaves it untouched) — expected and harmless:
+  // embedding freshness keys on the title/content snapshot, not `updated_at`, and
+  // archived rows are excluded from every recency-ordered retrieval surface.
+  private setArchivedAt(id: string, archivedAt: string | null): void {
+    const existing = this.sqlite.prepare("SELECT id FROM learning WHERE id = ?").get(id) as SqliteRow | undefined;
+    if (!existing) {
+      throw new ForemanError("learning_not_found", `Learning not found: ${id}`, 404);
+    }
+
+    this.sqlite.prepare("UPDATE learning SET archived_at = ? WHERE id = ?").run(archivedAt, id);
+  }
+
   searchLearnings(
     filters: { queries?: string[]; repos?: string[]; limit?: number; offset?: number } = {},
     options: LearningReadOptions = {},
@@ -265,11 +296,12 @@ export class SqliteLearningRepo implements LearningRepo {
     const offset = filters.offset ?? 0;
 
     if (queries.length === 0) {
-      const repoWhere = repos.length > 0 ? `WHERE repo IN (${repos.map(() => "?").join(", ")})` : "";
+      const repoClause = repos.length > 0 ? ` AND repo IN (${repos.map(() => "?").join(", ")})` : "";
       const learnings = this.sqlite
         .prepare(
           `SELECT id, title, repo, tags, confidence, created_at, updated_at, 0.0 AS score
-             FROM learning ${repoWhere}
+             FROM learning
+            WHERE archived_at IS NULL${repoClause}
             ORDER BY updated_at DESC, id ASC
             LIMIT ? OFFSET ?`,
         )
@@ -303,12 +335,15 @@ export class SqliteLearningRepo implements LearningRepo {
       return [];
     }
 
+    // Archived rows are still indexed in `learning_fts` (archiving does not
+    // reindex), so they can match; drop them here at the join, before the JS sort
+    // and slice so the page window counts only rows that survive the filter.
     const repoWhere = repos.length > 0 ? ` AND repo IN (${repos.map(() => "?").join(", ")})` : "";
     const rows = this.sqlite
       .prepare(
         `SELECT rowid, id, title, repo, tags, confidence, created_at, updated_at
            FROM learning
-          WHERE rowid IN (${rowIds.map(() => "?").join(", ")})${repoWhere}`,
+          WHERE rowid IN (${rowIds.map(() => "?").join(", ")}) AND archived_at IS NULL${repoWhere}`,
       )
       .all(...rowIds, ...repos) as SqliteRow[];
 
@@ -446,10 +481,17 @@ export class SqliteLearningRepo implements LearningRepo {
 
     // The whole in-scope corpus, not just the bm25 matches: cosine ranks every
     // candidate, which is the entire point of the fusion. Bounded by the corpus
-    // (hundreds of rows), so a full scan costs microseconds.
-    const repoWhere = repos.length > 0 ? `WHERE repo IN (${repos.map(() => "?").join(", ")})` : "";
+    // (hundreds of rows), so a full scan costs microseconds. Archived rows are
+    // excluded here, so they enter neither the bm25 rowid→id map nor the row
+    // bodies — and the cosine arm never sees them, since `embeddings` came from
+    // `getCurrentLearningEmbeddings`, which excludes them too.
+    const repoClause = repos.length > 0 ? ` AND repo IN (${repos.map(() => "?").join(", ")})` : "";
     const inScopeRows = this.sqlite
-      .prepare(`SELECT rowid, id, title, repo, tags, confidence, created_at, updated_at FROM learning ${repoWhere}`)
+      .prepare(
+        `SELECT rowid, id, title, repo, tags, confidence, created_at, updated_at
+           FROM learning
+          WHERE archived_at IS NULL${repoClause}`,
+      )
       .all(...repos) as SqliteRow[];
     const idsByRowId = new Map(inScopeRows.map((row) => [Number(row.rowid), String(row.id)]));
     const rowsById = new Map(inScopeRows.map((row) => [String(row.id), row]));
@@ -551,8 +593,13 @@ export class SqliteLearningRepo implements LearningRepo {
     return learnings;
   }
 
-  listLearnings(filters: { search?: string; repo?: string; limit?: number; offset?: number } = {}): LearningRecord[] {
+  listLearnings(
+    filters: { search?: string; repo?: string; limit?: number; offset?: number; includeArchived?: boolean } = {},
+  ): LearningRecord[] {
     if (filters.search) {
+      // Search is a retrieval surface: `searchLearnings` already hides archived
+      // rows, so `includeArchived` has no say on this path — a text query never
+      // surfaces an archived learning.
       const matches = this.searchLearnings({
         queries: [filters.search],
         ...(filters.repo ? { repos: [filters.repo] } : {}),
@@ -564,6 +611,12 @@ export class SqliteLearningRepo implements LearningRepo {
 
     const clauses: string[] = [];
     const params: unknown[] = [];
+
+    // The browse path: the UI/HTTP surface passes `includeArchived` to show
+    // archived rows (badged); every prompt-facing caller leaves it false.
+    if (!filters.includeArchived) {
+      clauses.push("archived_at IS NULL");
+    }
 
     if (filters.repo) {
       clauses.push("repo = ?");
@@ -597,8 +650,13 @@ export class SqliteLearningRepo implements LearningRepo {
 
   countLearnings(filters: { repos?: string[] } = {}): number {
     const repos = normalizeFilterValues(filters.repos);
-    const where = repos.length > 0 ? `WHERE repo IN (${repos.map(() => "?").join(", ")})` : "";
-    const row = this.sqlite.prepare(`SELECT COUNT(*) AS count FROM learning ${where}`).get(...repos) as SqliteRow;
+    // Archived rows are out of the coverage gate's denominator exactly as their
+    // vectors are out of `getCurrentLearningEmbeddings`' numerator — count them in
+    // one but not the other and the gate would read a coverage it cannot honour.
+    const repoClause = repos.length > 0 ? ` AND repo IN (${repos.map(() => "?").join(", ")})` : "";
+    const row = this.sqlite
+      .prepare(`SELECT COUNT(*) AS count FROM learning WHERE archived_at IS NULL${repoClause}`)
+      .get(...repos) as SqliteRow;
 
     return Number(row.count);
   }
@@ -670,8 +728,11 @@ export class SqliteLearningRepo implements LearningRepo {
     // the applier's in the first place.
     const current = new Set(this.getCurrentLearningEmbeddings({ model }).map((embedding) => embedding.learningId));
 
+    // Archived learnings need no vector: excluded from the id list here exactly as
+    // they are from `getCurrentLearningEmbeddings`, so one can never be reported as
+    // missing and let `backfill-embeddings` claim or block work on a shelved row.
     return this.sqlite
-      .prepare("SELECT id FROM learning ORDER BY id ASC")
+      .prepare("SELECT id FROM learning WHERE archived_at IS NULL ORDER BY id ASC")
       .all()
       .map((row) => String((row as SqliteRow).id))
       .filter((id) => !current.has(id));
