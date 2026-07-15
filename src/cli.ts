@@ -303,9 +303,16 @@ const survivorReasonLabel = (cluster: ConsolidationCluster): string => {
 
 const renderConsolidationReport = (input: { report: ConsolidationReport }): string => {
   const { report } = input;
-  const header = `Learning consolidation (threshold ${report.threshold}), ${report.applied ? "applied" : "dry run"}:`;
+  const coverage = `scanned ${formatUsageNumber(report.scanned)} of ${formatUsageNumber(report.corpus)} learnings`;
+  const header = `Learning consolidation (threshold ${report.threshold}), ${report.applied ? "applied" : "dry run"} — ${coverage}:`;
   if (report.clusters.length === 0) {
-    return `${header}\nNo near-duplicate clusters found.`;
+    // Scanned nothing over a non-empty corpus is a coverage gap, not an all-clear:
+    // the stored vectors do not match the workspace embedder model.
+    const note =
+      report.scanned === 0 && report.corpus > 0
+        ? "\nNo current embeddings for the workspace model — run `foreman learnings backfill-embeddings` first."
+        : "";
+    return `${header}\nNo near-duplicate clusters found.${note}`;
   }
 
   const loserCount = report.clusters.reduce((total, cluster) => total + cluster.loserIds.length, 0);
