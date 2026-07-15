@@ -1399,6 +1399,24 @@ describe("WorkerResultApplier learning embeddings", () => {
     }
   });
 
+  // The floor is scoped to `proven` only. `established` is worker-declarable, so a
+  // worker update lowering a mis-declared `established` back to `emerging` must go
+  // through — otherwise it is permanent and, since decay only touches `emerging`,
+  // decay-immune with no correction path.
+  test("lets a worker update walk a mis-declared established learning back to emerging", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-clamp-lower-");
+    const embedder = new FakeEmbedder();
+    db.learnings.addLearning({ id: "learn-e", title: "Established", repo: "foreman", confidence: "established", content: "Body", tags: [] });
+
+    try {
+      await applyLearningMutations(db, embedder, [{ type: "update", id: "learn-e", confidence: "emerging" }], tempDir);
+
+      expect(db.learnings.getLearningsByIds(["learn-e"])[0]!.confidence).toBe("emerging");
+    } finally {
+      db.close();
+    }
+  });
+
   test("embeds the title and content of an added learning", async () => {
     const { tempDir, db } = await setUp("foreman-learning-embed-add-");
     const embedder = new FakeEmbedder();

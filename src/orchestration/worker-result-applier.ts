@@ -9,7 +9,7 @@ import type {
   TaskTarget,
   WorkerResult,
 } from "../domain/index.js";
-import { CONFIDENCE_RANK, type Confidence } from "../curation/confidence-lifecycle.js";
+import { type Confidence } from "../curation/confidence-lifecycle.js";
 import type { Embedder } from "../embeddings/embedder.js";
 import { learningEmbeddingText } from "../embeddings/learning-embedding-text.js";
 import { ForemanError } from "../lib/errors.js";
@@ -55,10 +55,11 @@ const sharedLearningRepo = "shared";
  *
  * - Ceiling: only the curation pass mints `proven`, so a declared `proven` is
  *   stored as `established`.
- * - Floor: a worker `update` never lowers a tier the pass granted. `proven` is the
- *   pass's alone to mint and retire, and `established` is earned, not a worker's to
- *   walk back — so a re-declared or lowered confidence on an already-higher
- *   learning holds at the stored tier rather than demoting it.
+ * - Floor: a worker `update` never lowers `proven`, the one tier the curation pass
+ *   alone mints and retires. The floor is scoped to `proven` only — a lower tier a
+ *   worker can itself declare (`established`) stays a worker's to walk back, so a
+ *   mis-declared tier keeps a correction path instead of becoming permanent and,
+ *   since decay only touches `emerging`, decay-immune.
  *
  * Adds have no stored tier (`stored` is undefined) and so are ceiling-only. Both
  * bounds live here, not in the worker-result schema, so the schema stays permissive
@@ -72,7 +73,7 @@ const resolveDeclaredConfidence = (
   logger: LoggerService,
 ): Confidence => {
   const capped = declared === "proven" ? "established" : declared;
-  const resolved = stored !== undefined && CONFIDENCE_RANK[stored] > CONFIDENCE_RANK[capped] ? stored : capped;
+  const resolved = stored === "proven" ? "proven" : capped;
 
   if (resolved !== declared) {
     logger.info("clamped worker-declared confidence to the earned range", { ...context, declared, resolved });
