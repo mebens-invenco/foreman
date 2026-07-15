@@ -585,6 +585,57 @@ export const resolveBaseBranch = async (input: {
   return { baseBranch, blockers };
 };
 
+// A task that loses its include label or assignee drops out of listCandidates,
+// freezing its mirror row at its last state (e.g. in_review) forever. Re-fetch
+// each non-terminal row that stopped appearing, sync it to live state, and prune
+// it when the provider no longer knows it. The cap bounds provider calls on a
+// pathological backlog; the set is normally empty since a synced terminal row
+// leaves the non-terminal set and a pruned row is gone.
+export const staleMirrorRefetchCap = 20;
+const nonTerminalMirrorStates = ["ready", "in_progress", "in_review", "deployable"] as const;
+
+const reconcileStaleMirrorTasks = async (input: {
+  foremanRepos: ForemanRepos;
+  taskSystem: TaskSystem;
+  listedTaskIds: ReadonlySet<string>;
+  logger?: LoggerService;
+}): Promise<void> => {
+  const staleTasks = nonTerminalMirrorStates
+    .flatMap((state) => input.foremanRepos.taskMirror.getTasks({ state }))
+    .filter((task) => !input.listedTaskIds.has(task.id));
+  if (staleTasks.length === 0) {
+    return;
+  }
+
+  const refetchTasks = staleTasks.slice(0, staleMirrorRefetchCap);
+  if (staleTasks.length > refetchTasks.length) {
+    input.logger?.warn("stale mirror reconcile truncated to re-fetch cap", {
+      staleCount: staleTasks.length,
+      cap: staleMirrorRefetchCap,
+    });
+  }
+
+  for (const staleTask of refetchTasks) {
+    try {
+      const liveTask = await input.taskSystem.getTask(staleTask.id);
+      input.foremanRepos.taskMirror.saveTasks([liveTask]);
+    } catch (error) {
+      if (isForemanError(error) && error.code === "task_not_found") {
+        input.foremanRepos.taskMirror.deleteTasks([staleTask.id]);
+        continue;
+      }
+      if (isUnknownProviderStateError(error)) {
+        input.logger?.info("skipping stale mirror task in unmapped provider state", { taskId: staleTask.id });
+        continue;
+      }
+      input.logger?.warn("failed to reconcile stale mirror task", {
+        taskId: staleTask.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+};
+
 export const runScoutSelection = async (input: {
   config: WorkspaceConfig;
   paths?: WorkspacePaths;
@@ -598,6 +649,12 @@ export const runScoutSelection = async (input: {
   const logger = input.logger?.child({ component: "scout.selection", trigger: input.triggerType });
   const listedTasks = await input.taskSystem.listCandidates();
   input.foremanRepos.taskMirror.saveTasks(listedTasks);
+  await reconcileStaleMirrorTasks({
+    foremanRepos: input.foremanRepos,
+    taskSystem: input.taskSystem,
+    listedTaskIds: new Set(listedTasks.map((task) => task.id)),
+    ...(logger ? { logger } : {}),
+  });
   const mirroredTasks = listedTasks.map((task) => input.foremanRepos.taskMirror.getTask(task.id) ?? task);
   // Hard-skip any issue carrying a configured exclude label at candidate intake.
   // This is the single chokepoint that removes excluded issues from every

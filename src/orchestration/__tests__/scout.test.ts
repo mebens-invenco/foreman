@@ -14,7 +14,7 @@ import {
   type TaskComment,
   type TaskPullRequest,
 } from "../../domain/index.js";
-import { runScoutSelection } from "../index.js";
+import { runScoutSelection, staleMirrorRefetchCap } from "../index.js";
 import type { ReviewService } from "../../review/index.js";
 import { FileTaskSystem } from "../../tasking/index.js";
 import type { TaskSystem } from "../../tasking/index.js";
@@ -34,6 +34,8 @@ afterEach(async () => {
 class FakeTaskSystem implements TaskSystem {
   comments = new Map<string, TaskComment[]>();
   transitions: Array<{ taskId: string; toState: Task["state"] }> = [];
+  getTaskCalls: string[] = [];
+  getTaskOverrides = new Map<string, Task | ForemanError>();
 
   constructor(private readonly tasks: Task[]) {}
 
@@ -50,6 +52,14 @@ class FakeTaskSystem implements TaskSystem {
   }
 
   async getTask(taskId: string): Promise<Task> {
+    this.getTaskCalls.push(taskId);
+    const override = this.getTaskOverrides.get(taskId);
+    if (override) {
+      if (override instanceof ForemanError) {
+        throw override;
+      }
+      return override;
+    }
     const task = this.tasks.find((item) => item.id === taskId);
     if (!task) {
       throw new Error(`missing task ${taskId}`);
@@ -3746,6 +3756,204 @@ describe("runScoutSelection", () => {
       expect(result.jobs[0]?.action).toBe("execution");
       expect(result.jobs[0]?.task.id).toBe("TASK-EXC-EMPTY");
       expect(result.excludedByLabelCount).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("syncs a stale in-review mirror row to its live terminal state", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const staleTask = task({
+      id: "TASK-STALE-DONE",
+      title: "Dropped out of candidacy",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/9", source: "provider" } satisfies TaskPullRequest],
+    });
+    db.taskMirror.saveTasks([staleTask]);
+
+    const taskSystem = new FakeTaskSystem([]);
+    taskSystem.getTaskOverrides.set(
+      staleTask.id,
+      task({ ...staleTask, state: "done", providerState: "done", labels: [] }),
+    );
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.getTaskCalls).toEqual([staleTask.id]);
+      expect(db.taskMirror.getTask(staleTask.id)).toMatchObject({ state: "done", providerState: "done", labels: [] });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("prunes a stale mirror row when its live re-fetch reports task_not_found", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const staleTask = task({
+      id: "TASK-STALE-GONE",
+      title: "Deleted upstream",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/10", source: "provider" } satisfies TaskPullRequest],
+    });
+    db.taskMirror.saveTasks([staleTask]);
+    const target = db.taskMirror.getTaskTarget(staleTask.id, "repo-a");
+    expect(target).not.toBeNull();
+
+    const taskSystem = new FakeTaskSystem([]);
+    taskSystem.getTaskOverrides.set(staleTask.id, new ForemanError("task_not_found", "Linear task not found", 404));
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(db.taskMirror.getTask(staleTask.id)).toBeNull();
+      expect(db.taskMirror.getTaskTarget(staleTask.id, "repo-a")).toBeNull();
+      const prRows = db.database.sqlite
+        .prepare("SELECT COUNT(*) AS count FROM task_pull_request WHERE task_target_id = ?")
+        .get(target!.id) as { count: number };
+      expect(prRows.count).toBe(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("leaves a stale mirror row untouched when its live re-fetch is in an unmapped provider state", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const staleTask = task({
+      id: "TASK-STALE-BACKLOG",
+      title: "Moved to an unmapped state",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    db.taskMirror.saveTasks([staleTask]);
+
+    const taskSystem = new FakeTaskSystem([]);
+    taskSystem.getTaskOverrides.set(staleTask.id, new ForemanError("unknown_provider_state", "Unmapped provider state: Backlog"));
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.getTaskCalls).toEqual([staleTask.id]);
+      expect(db.taskMirror.getTask(staleTask.id)).toMatchObject({ state: "in_review", providerState: "in_review" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("caps stale mirror re-fetches per run", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const staleTasks = Array.from({ length: staleMirrorRefetchCap + 1 }, (_, index) =>
+      task({
+        id: `TASK-STALE-CAP-${String(index).padStart(2, "0")}`,
+        title: `Stale ${index}`,
+        state: "in_review",
+        providerState: "in_review",
+        priority: "normal",
+        updatedAt: "2026-03-14T12:00:00Z",
+      }),
+    );
+    db.taskMirror.saveTasks(staleTasks);
+
+    const taskSystem = new FakeTaskSystem([]);
+    for (const staleTask of staleTasks) {
+      taskSystem.getTaskOverrides.set(staleTask.id, task({ ...staleTask }));
+    }
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.getTaskCalls).toHaveLength(staleMirrorRefetchCap);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not re-fetch a terminal mirror row that is absent from candidates", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+
+    const terminalTask = task({
+      id: "TASK-STALE-TERMINAL",
+      title: "Already terminal",
+      state: "done",
+      providerState: "done",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    db.taskMirror.saveTasks([terminalTask]);
+
+    const taskSystem = new FakeTaskSystem([]);
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+      expect(taskSystem.getTaskCalls).toEqual([]);
+      expect(db.taskMirror.getTask(terminalTask.id)).toMatchObject({ state: "done", providerState: "done" });
     } finally {
       db.close();
     }

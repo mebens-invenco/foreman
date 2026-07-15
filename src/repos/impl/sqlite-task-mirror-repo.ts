@@ -530,6 +530,23 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
     })();
   }
 
+  deleteTasks(ids: string[]): void {
+    const normalizedIds = normalizeIds(ids);
+    if (normalizedIds.length === 0) {
+      return;
+    }
+
+    const placeholders = normalizedIds.map(() => "?").join(", ");
+    const targetsForTasks = `SELECT id FROM task_target WHERE task_id IN (${placeholders})`;
+    this.sqlite.transaction(() => {
+      this.sqlite.prepare(`DELETE FROM task_pull_request WHERE task_target_id IN (${targetsForTasks})`).run(...normalizedIds);
+      this.sqlite.prepare(`DELETE FROM review_checkpoint WHERE task_target_id IN (${targetsForTasks})`).run(...normalizedIds);
+      this.sqlite.prepare(`DELETE FROM reviewer_checkpoint WHERE task_target_id IN (${targetsForTasks})`).run(...normalizedIds);
+      this.sqlite.prepare(`DELETE FROM task_target WHERE task_id IN (${placeholders})`).run(...normalizedIds);
+      this.sqlite.prepare(`DELETE FROM task WHERE id IN (${placeholders})`).run(...normalizedIds);
+    })();
+  }
+
   setTaskLabels(taskId: string, labels: string[]): void {
     this.sqlite
       .prepare("UPDATE task SET labels_json = ?, synced_at = ? WHERE id = ?")

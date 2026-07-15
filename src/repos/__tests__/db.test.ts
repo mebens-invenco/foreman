@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { actionableReviewThreadFingerprint, priorityToRank } from "../../domain/index.js";
 import { addSeconds, isoNow } from "../../lib/time.js";
-import { createMigratedDb, createTempDir, testProjectRoot } from "../../test-support/helpers.js";
+import { createMigratedDb, createTempDir, seedExecutionAttempt, testProjectRoot } from "../../test-support/helpers.js";
 import { createRepos } from "../index.js";
 import { openSqliteDatabase } from "../impl/sqlite-database.js";
 
@@ -1061,6 +1061,81 @@ describe("persistence repos", () => {
         .prepare("SELECT COUNT(*) AS count FROM reviewer_checkpoint WHERE task_id = ? AND pr_url = ?")
         .get(taskId, prUrl) as { count: number };
       expect(rowCount.count).toBe(1);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("deleteTasks prunes the task with its target, pull request, and checkpoints", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+
+    try {
+      const taskId = "TASK-PRUNE";
+      const prUrl = "https://github.com/acme/repo/pull/500";
+      const attempt = seedExecutionAttempt(db, {
+        task: {
+          id: taskId,
+          provider: "file",
+          providerId: taskId,
+          title: taskId,
+          description: "",
+          state: "in_review",
+          providerState: "in_review",
+          priority: "normal",
+          labels: ["Agent"],
+          assignee: null,
+          targets: [{ repoKey: "repo-a", branchName: "task-prune", position: 0 }],
+          targetDependencies: [],
+          dependencies: { taskIds: [], baseTaskId: null },
+          baseBranch: null,
+          pullRequests: [],
+          runnerOverride: null,
+          updatedAt: "2026-03-14T12:00:00Z",
+          url: null,
+        },
+        repoKey: "repo-a",
+        action: "review",
+      });
+      const target = db.taskMirror.getTaskTarget(taskId, "repo-a");
+      expect(target).not.toBeNull();
+
+      db.taskMirror.upsertTaskPullRequest({ taskId, pullRequest: { repoKey: "repo-a", url: prUrl, source: "provider" } });
+      const reviewContext = {
+        provider: "github" as const,
+        pullRequestUrl: prUrl,
+        pullRequestNumber: 500,
+        state: "open" as const,
+        isDraft: false,
+        headSha: "sha-prune",
+        headBranch: "task-prune",
+        baseBranch: "main",
+        headIntroducedAt: "2026-03-16T00:00:00Z",
+        mergeState: "clean" as const,
+        reviewSummaries: [],
+        conversationComments: [],
+        reviewThreads: [],
+        failingChecks: [],
+        pendingChecks: [],
+      };
+      db.reviewCheckpoints.upsertReviewCheckpoint({ taskId, taskTargetId: target!.id, prUrl, sourceAttemptId: attempt.id, reviewContext });
+      db.reviewerCheckpoints.upsertReviewerCheckpoint({ taskId, taskTargetId: target!.id, prUrl, sourceAttemptId: attempt.id, reviewContext });
+
+      expect(db.reviewCheckpoints.getReviewCheckpoint(target!.id)).not.toBeNull();
+      expect(db.reviewerCheckpoints.getReviewerCheckpoint(target!.id)).not.toBeNull();
+
+      db.taskMirror.deleteTasks([taskId]);
+
+      expect(db.taskMirror.getTask(taskId)).toBeNull();
+      expect(db.taskMirror.getTaskTarget(taskId, "repo-a")).toBeNull();
+      expect(db.reviewCheckpoints.getReviewCheckpoint(target!.id)).toBeNull();
+      expect(db.reviewerCheckpoints.getReviewerCheckpoint(target!.id)).toBeNull();
+
+      const countWhere = (table: string, column: string, value: string): number =>
+        (db.database.sqlite.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE ${column} = ?`).get(value) as { count: number }).count;
+      expect(countWhere("task_target", "task_id", taskId)).toBe(0);
+      expect(countWhere("task_pull_request", "task_target_id", target!.id)).toBe(0);
     } finally {
       db.close();
     }
