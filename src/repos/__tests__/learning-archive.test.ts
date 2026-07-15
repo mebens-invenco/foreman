@@ -232,4 +232,58 @@ describe("learning archive substrate", () => {
       db.close();
     }
   });
+
+  test("flagAndArchiveDuplicates points each loser at its survivor, drops them from retrieval, keeps them resolvable", async () => {
+    const db = await createDb();
+    try {
+      seed(db, { id: "survivor", content: "ubuntu lockfile discipline", vector: [1, 0, 0] });
+      seed(db, { id: "loser-a", content: "ubuntu lockfile discipline again", vector: [1, 0, 0] });
+      seed(db, { id: "loser-b", content: "ubuntu lockfile discipline once more", vector: [1, 0, 0] });
+
+      db.learnings.flagAndArchiveDuplicates([
+        { id: "loser-a", duplicateOf: "survivor" },
+        { id: "loser-b", duplicateOf: "survivor" },
+      ]);
+
+      // Each loser is archived and flagged, and gone from retrieval.
+      for (const id of ["loser-a", "loser-b"]) {
+        const [loser] = db.learnings.getLearningsByIds([id]);
+        expect(loser?.archivedAt).toEqual(expect.any(String));
+        expect(loser?.duplicateOf).toBe("survivor");
+      }
+      expect(ftsIds(db, "ubuntu")).toEqual(["survivor"]);
+
+      // The survivor is untouched — it duplicates nothing and stays active.
+      const [survivor] = db.learnings.getLearningsByIds(["survivor"]);
+      expect(survivor?.archivedAt).toBeNull();
+      expect(survivor?.duplicateOf).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("flagAndArchiveDuplicates rolls the whole batch back rather than stranding an already-archived loser", async () => {
+    const db = await createDb();
+    try {
+      seed(db, { id: "survivor", content: "ubuntu lockfile discipline", vector: [1, 0, 0] });
+      seed(db, { id: "loser", content: "ubuntu lockfile discipline again", vector: [1, 0, 0] });
+
+      // A batch whose second entry is unknown must abort atomically: the valid
+      // first loser is NOT left archived, so a partial apply cannot strand a
+      // transitive-chain member the re-scan would never re-cluster.
+      expect(() =>
+        db.learnings.flagAndArchiveDuplicates([
+          { id: "loser", duplicateOf: "survivor" },
+          { id: "nope", duplicateOf: "survivor" },
+        ]),
+      ).toThrow(/Learning not found/);
+
+      const [loser] = db.learnings.getLearningsByIds(["loser"]);
+      expect(loser?.archivedAt).toBeNull();
+      expect(loser?.duplicateOf).toBeNull();
+      expect(ftsIds(db, "ubuntu").sort()).toEqual(["loser", "survivor"]);
+    } finally {
+      db.close();
+    }
+  });
 });
