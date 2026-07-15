@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { LearningLifecycleRollup } from "../../repos/learning-usage-repo.js";
-import { proposeConfidenceTransitions, USAGE_EPOCH } from "../confidence-lifecycle.js";
+import { DECAY_WINDOW_DAYS, proposeConfidenceTransitions, USAGE_EPOCH } from "../confidence-lifecycle.js";
 
 const NOW = new Date("2026-11-01T00:00:00.000Z");
 /** Far enough before NOW that the 90-day epoch grace is always cleared. */
@@ -102,6 +102,17 @@ describe("confidence lifecycle decay", () => {
       expect(propose([rollup({ learningId: "recent", createdAt: daysAgo(200), lastUsedAt: daysAgo(10) })])).toEqual([]);
       expect(propose([rollup({ learningId: "stale", createdAt: daysAgo(200), lastUsedAt: daysAgo(91) })])).toMatchObject([
         { kind: "decay", learningId: "stale", idleDays: 91 },
+      ]);
+    });
+
+    // Age, idleness, and epoch grace are all `<=` — inclusive. At exactly now−90d
+    // each check is an equality, so this pins the inclusive bound: flipping any of
+    // the three `<=` to `<` drops this decay and fails the test.
+    test("inclusive at the window edge: created, idle, and epoch all exactly a window old still decays", () => {
+      const edge = daysAgo(DECAY_WINDOW_DAYS);
+      const epochAtEdge = new Date(NOW.getTime() - DECAY_WINDOW_DAYS * MS_PER_DAY);
+      expect(propose([rollup({ learningId: "edge", createdAt: edge, lastUsedAt: edge })], epochAtEdge)).toMatchObject([
+        { kind: "decay", learningId: "edge" },
       ]);
     });
   });

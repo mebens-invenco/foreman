@@ -152,6 +152,25 @@ describe("learning lifecycle rollups", () => {
         expect(rollupFor(db, "used")!.lastUsedAt).not.toBeNull();
       });
     });
+
+    // Both sides non-null and distinct: laterIso must take the LATER of the read and
+    // the apply. A wrong-direction combine would read an actively-used learning as
+    // idle and silently archive it — a hole the single-side cases above cannot see.
+    test("with a read and an apply at different times, lastUsedAt is the later of the two", async () => {
+      await withDb((db) => {
+        db.learnings.addLearning({ id: "both", title: "Both", repo: "shared", confidence: "emerging", content: "c", tags: [] });
+        applyIn(db, { task: TASK_A, learningId: "both" });
+        searchIn(db, { task: TASK_B, learningId: "both" });
+
+        // Pin distinct timestamps with the apply strictly later than the read.
+        const readAt = new Date(Date.now() - 20 * DAY).toISOString();
+        const applyAt = new Date(Date.now() - 5 * DAY).toISOString();
+        db.database.sqlite.prepare("UPDATE learning_search_event SET created_at = ? WHERE hit_ids LIKE ?").run(readAt, "%both%");
+        db.database.sqlite.prepare("UPDATE learning_applied_event SET created_at = ? WHERE learning_id = ?").run(applyAt, "both");
+
+        expect(rollupFor(db, "both")!.lastUsedAt).toBe(applyAt);
+      });
+    });
   });
 
   describe("what the pass sees", () => {
