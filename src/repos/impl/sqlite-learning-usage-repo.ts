@@ -2,6 +2,7 @@ import { newId } from "../../lib/ids.js";
 import { isoNow } from "../../lib/time.js";
 import type {
   LearningAppliedEventInput,
+  LearningLifecycleRollup,
   LearningUsageRepo,
   LearningUsageRollup,
   LearningUsageStats,
@@ -59,6 +60,30 @@ const usageOver = (touch: string, cte: string, predicate: string, expression: st
       FROM ${cte} AS ${touch}
      WHERE ${touch}.learning_id = learning.id
        AND ${predicate})`;
+
+/**
+ * Recency for decay, over the base event tables rather than the distinct-task
+ * CTEs: a self-echo read and an ad-hoc CLI read are both genuine surfacings, so
+ * they refresh recency even though neither counts toward promotion. Injection is
+ * a separate table and never joined here — being pushed and ignored is the decay
+ * signal, and must not look like use. Split in two so each stays a plain
+ * correlated scalar subquery; the app takes the later of the two.
+ */
+const LAST_READ_AT = `(SELECT MAX(event.created_at)
+                         FROM learning_search_event AS event
+                         JOIN json_each(event.hit_ids) AS hit
+                        WHERE hit.value = learning.id)`;
+
+const LAST_APPLIED_AT = `(SELECT MAX(event.created_at)
+                           FROM learning_applied_event AS event
+                          WHERE event.learning_id = learning.id)`;
+
+/** The later of two ISO-8601 UTC instants, either of which may be absent. */
+const laterIso = (a: string | null, b: string | null): string | null => {
+  if (a === null) return b;
+  if (b === null) return a;
+  return a >= b ? a : b;
+};
 
 export class SqliteLearningUsageRepo implements LearningUsageRepo {
   constructor(private readonly sqlite: SqliteDatabase) {}
@@ -144,6 +169,43 @@ export class SqliteLearningUsageRepo implements LearningUsageRepo {
       .all(...normalized) as SqliteRow[];
 
     return new Map(rows.map((row) => [String(row.learning_id), Number(row.distinct_tasks_applied)]));
+  }
+
+  getLifecycleRollups(): LearningLifecycleRollup[] {
+    return this.sqlite
+      .prepare(
+        `WITH reads AS (${READ_TOUCHES}),
+              applies AS (${APPLY_TOUCHES})
+         SELECT learning.id,
+                learning.title,
+                learning.repo,
+                learning.confidence,
+                learning.created_at,
+                ${usageOver("a", "applies", notSelfEcho("a"), "COUNT(DISTINCT a.task_id)")} AS distinct_tasks_applied,
+                ${usageOver("r", "reads", notSelfEcho("r"), "COUNT(DISTINCT r.task_id)")} AS distinct_tasks_read,
+                ${LAST_READ_AT} AS last_read_at,
+                ${LAST_APPLIED_AT} AS last_applied_at
+           FROM learning
+          WHERE learning.archived_at IS NULL
+          ORDER BY learning.created_at ASC, learning.id ASC`,
+      )
+      .all()
+      .map((row: unknown): LearningLifecycleRollup => {
+        const mapped = row as SqliteRow;
+        return {
+          learningId: String(mapped.id),
+          title: String(mapped.title),
+          repo: String(mapped.repo),
+          confidence: mapped.confidence as LearningLifecycleRollup["confidence"],
+          distinctTasksApplied: Number(mapped.distinct_tasks_applied),
+          distinctTasksRead: Number(mapped.distinct_tasks_read),
+          createdAt: String(mapped.created_at),
+          lastUsedAt: laterIso(
+            (mapped.last_read_at as string | null) ?? null,
+            (mapped.last_applied_at as string | null) ?? null,
+          ),
+        };
+      });
   }
 
   /**

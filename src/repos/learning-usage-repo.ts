@@ -49,6 +49,31 @@ export type LearningUsageRollup = {
   selfEchoApplies: number;
 };
 
+/**
+ * Per-learning signal the confidence lifecycle pass decides on — over the WHOLE
+ * active corpus, not just the touched slice `getUsageStats` returns, because a
+ * never-touched learning is the strongest decay candidate and must be visible.
+ *
+ * Carries the distinct-task counts (the promotion signal, self-echo excluded) and
+ * DELIBERATELY not the raw `read_count` / `applied_count`: a lifecycle decision
+ * that cannot see the inflated counters cannot be tricked by them.
+ *
+ * `lastUsedAt` is the most recent genuine surfacing — a search that returned the
+ * learning, or an apply of it — with injection excluded: being pushed at an agent
+ * and ignored is precisely the decay signal, so it must not refresh recency. Null
+ * when the learning has never been read or applied.
+ */
+export type LearningLifecycleRollup = {
+  learningId: string;
+  title: string;
+  repo: string;
+  confidence: "emerging" | "established" | "proven";
+  distinctTasksApplied: number;
+  distinctTasksRead: number;
+  createdAt: string;
+  lastUsedAt: string | null;
+};
+
 export type LearningUsageStats = {
   learnings: LearningUsageRollup[];
   /**
@@ -82,4 +107,11 @@ export interface LearningUsageRepo {
    * applies are still present in the map at 0; unknown ids are absent.
    */
   distinctTasksAppliedByIds(ids: readonly string[]): Map<string, number>;
+  /**
+   * Every active (non-archived) learning with the signal the confidence lifecycle
+   * pass reads. Unbounded by design — a top-N would hide exactly the quiet
+   * learnings decay exists to retire — and archived rows are already out of every
+   * retrieval surface, so the pass never reconsiders them.
+   */
+  getLifecycleRollups(): LearningLifecycleRollup[];
 }
