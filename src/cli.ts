@@ -5,6 +5,8 @@ import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { z } from "zod";
 
+import { consolidateLearnings, type ConsolidationReport } from "./curation/consolidate-learnings.js";
+import type { ConsolidationCluster } from "./curation/consolidation-scan.js";
 import { backfillLearningEmbeddings } from "./embeddings/backfill-learning-embeddings.js";
 import { createEmbedder } from "./embeddings/create-embedder.js";
 import { listRunnerRates } from "./execution/cost/rates.js";
@@ -288,6 +290,41 @@ const renderUsageStats = (input: { since: string | undefined; stats: LearningUsa
     widths.map((width) => "-".repeat(width)).join("  "),
     ...rows.map((row) => row.map((cell, index) => padCell(cell, widths[index]!)).join("  ").trimEnd()),
   );
+
+  return lines.join("\n");
+};
+
+const survivorReasonLabel = (cluster: ConsolidationCluster): string => {
+  const applies = formatUsageNumber(cluster.members[0]!.distinctTasksApplied);
+  return cluster.survivorReason === "distinct_tasks_applied"
+    ? `most distinct-task applies: ${applies}`
+    : `most recent update; applies tied at ${applies}`;
+};
+
+const renderConsolidationReport = (input: { report: ConsolidationReport }): string => {
+  const { report } = input;
+  const header = `Learning consolidation (threshold ${report.threshold}), ${report.applied ? "applied" : "dry run"}:`;
+  if (report.clusters.length === 0) {
+    return `${header}\nNo near-duplicate clusters found.`;
+  }
+
+  const loserCount = report.clusters.reduce((total, cluster) => total + cluster.loserIds.length, 0);
+  const lines = [
+    `${header} ${report.clusters.length} cluster(s), ${loserCount} loser(s)${report.applied ? " archived" : " to archive"}.`,
+  ];
+
+  report.clusters.forEach((cluster, index) => {
+    lines.push("", `Cluster ${index + 1} — survivor ${cluster.survivorId} (${survivorReasonLabel(cluster)})`);
+    for (const member of cluster.members) {
+      const role = member.id === cluster.survivorId ? "survivor" : "loser";
+      lines.push(
+        `  ${padCell(role, 8)} ${member.id}  repo=${member.repo}  applies=${formatUsageNumber(member.distinctTasksApplied)}  updated=${member.updatedAt}  ${member.title}`,
+      );
+    }
+    for (const pair of cluster.pairwiseSimilarities) {
+      lines.push(`    ${pair.left} ~ ${pair.right}  ${pair.similarity.toFixed(4)}`);
+    }
+  });
 
   return lines.join("\n");
 };
@@ -610,6 +647,34 @@ learnings
       }
 
       process.stdout.write(`${renderUsageStats({ since: options.since, stats })}\n`);
+    });
+  });
+
+learnings
+  .command("consolidate")
+  .description("Scan current learnings for near-duplicate clusters; --apply archives the losers with duplicate_of set")
+  .argument("<workspace>")
+  .option("--apply", "Archive each cluster's losers and set duplicate_of on them (dry-run by default)")
+  .option("--json", "Emit JSON instead of the human-readable report")
+  .action(async (workspace: string, options: { apply?: boolean; json?: boolean }) => {
+    await withWorkspaceRepos(workspace, async (repos, paths) => {
+      // The embedder is constructed only to name the vector space to scan; it is
+      // never asked to embed, so this stays hermetic (no model download).
+      const report = consolidateLearnings(
+        {
+          learnings: repos.learnings,
+          learningUsage: repos.learningUsage,
+          model: createEmbedder(paths.projectRoot).modelId,
+        },
+        { apply: options.apply ?? false },
+      );
+
+      if (options.json) {
+        writeJson({ workspace, ...report });
+        return;
+      }
+
+      process.stdout.write(`${renderConsolidationReport({ report })}\n`);
     });
   });
 

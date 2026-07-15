@@ -66,6 +66,62 @@ const getLearningReadCount = async (workspaceRoot: string, id: string): Promise<
   }
 };
 
+const getLearningFlags = async (
+  workspaceRoot: string,
+  id: string,
+): Promise<{ archivedAt: string | null; duplicateOf: string | null } | undefined> => {
+  const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), projectRoot);
+  try {
+    const [learning] = db.learnings.getLearningsByIds([id]);
+    return learning ? { archivedAt: learning.archivedAt, duplicateOf: learning.duplicateOf } : undefined;
+  } finally {
+    db.close();
+  }
+};
+
+// The CLI reads the workspace's live embedder id, so the fixture vectors must be
+// stored under that model. They are hand-built 3-dim vectors, never the real
+// 384-dim model output, so the scan runs without any model download.
+const CONSOLIDATION_MODEL = "bge-small-en-v1.5";
+const unitVectorAt = (cosine: number): number[] => [cosine, Math.sqrt(1 - cosine * cosine), 0];
+
+const createConsolidationWorkspace = async (): Promise<{ workspaceName: string; workspaceRoot: string }> => {
+  await fs.mkdir(workspacesRoot, { recursive: true });
+  const workspaceRoot = await fs.mkdtemp(path.join(workspacesRoot, "foreman-cli-consolidate-"));
+  cleanupDirs.push(workspaceRoot);
+  const workspaceName = path.basename(workspaceRoot);
+  const paths = createWorkspacePaths(projectRoot, workspaceRoot);
+
+  await fs.writeFile(paths.configPath, stringifyWorkspaceConfig(createDefaultWorkspaceConfig(workspaceName, "file")), "utf8");
+  await fs.writeFile(paths.envPath, "", "utf8");
+
+  const db = await createMigratedDb(paths.dbPath, projectRoot);
+  try {
+    const seed = (id: string, vector: number[], updatedAt: string): void => {
+      const content = `body ${id}`;
+      db.learnings.addLearning({ id, title: `Title ${id}`, repo: "shared", confidence: "emerging", content, tags: [] });
+      db.learnings.upsertLearningEmbedding({
+        learningId: id,
+        model: CONSOLIDATION_MODEL,
+        dims: 3,
+        vector: Float32Array.from(vector),
+        embeddedTitle: `Title ${id}`,
+        embeddedContent: content,
+      });
+      db.database.sqlite.prepare("UPDATE learning SET updated_at = ? WHERE id = ?").run(updatedAt, id);
+    };
+    // dup-old / dup-new are near-identical (cosine 0.9151); distinct is orthogonal.
+    // No usage, so recency picks dup-new as survivor.
+    seed("dup-old", [1, 0, 0], "2026-07-09T00:00:00.000Z");
+    seed("dup-new", unitVectorAt(0.9151), "2026-07-13T00:00:00.000Z");
+    seed("distinct", [0, 0, 1], "2026-07-10T00:00:00.000Z");
+  } finally {
+    db.close();
+  }
+
+  return { workspaceName, workspaceRoot };
+};
+
 const runCliRaw = async (args: string[]): Promise<string> => {
   const { stdout } = await execFileAsync("node", ["--import", "tsx", "src/cli.ts", ...args], { cwd: projectRoot });
   return stdout;
@@ -473,5 +529,73 @@ describe("learnings cli", () => {
     await expect(runCliRaw(["learnings", "usage-stats", workspaceName, "--since", "not-a-date", "--json"])).rejects.toThrow(
       /ISO-8601/,
     );
+  });
+
+  test("consolidate --json proposes the near-duplicate cluster and writes nothing by default", async () => {
+    const { workspaceName, workspaceRoot } = await createConsolidationWorkspace();
+
+    const output = (await runCli(["learnings", "consolidate", workspaceName, "--json"])) as {
+      workspace: string;
+      threshold: number;
+      applied: boolean;
+      clusters: Array<{
+        survivorId: string;
+        survivorReason: string;
+        loserIds: string[];
+        members: Array<{ id: string; title: string; repo: string; distinctTasksApplied: number; updatedAt: string }>;
+        pairwiseSimilarities: Array<{ left: string; right: string; similarity: number }>;
+      }>;
+    };
+
+    expect(output.workspace).toBe(workspaceName);
+    expect(output.threshold).toBe(0.91);
+    expect(output.applied).toBe(false);
+    expect(output.clusters).toHaveLength(1);
+
+    const cluster = output.clusters[0]!;
+    expect(cluster.survivorId).toBe("dup-new");
+    expect(cluster.survivorReason).toBe("recency_tiebreak");
+    expect(cluster.loserIds).toEqual(["dup-old"]);
+    expect(cluster.members.map((member) => member.id)).toEqual(["dup-new", "dup-old"]);
+    expect(cluster.members[0]).toMatchObject({ id: "dup-new", repo: "shared", distinctTasksApplied: 0 });
+    expect(cluster.pairwiseSimilarities).toHaveLength(1);
+    expect(cluster.pairwiseSimilarities[0]).toMatchObject({ left: "dup-new", right: "dup-old" });
+    expect(cluster.pairwiseSimilarities[0]!.similarity).toBeGreaterThanOrEqual(0.91);
+
+    // Dry run by default: no learning was archived or flagged.
+    expect(await getLearningFlags(workspaceRoot, "dup-old")).toEqual({ archivedAt: null, duplicateOf: null });
+    expect(await getLearningFlags(workspaceRoot, "dup-new")).toEqual({ archivedAt: null, duplicateOf: null });
+  });
+
+  test("consolidate --apply archives the loser with duplicate_of set, and a re-run is idempotent", async () => {
+    const { workspaceName, workspaceRoot } = await createConsolidationWorkspace();
+
+    const applied = (await runCli(["learnings", "consolidate", workspaceName, "--apply", "--json"])) as {
+      applied: boolean;
+      clusters: Array<{ survivorId: string; loserIds: string[] }>;
+    };
+    expect(applied.applied).toBe(true);
+    expect(applied.clusters[0]).toMatchObject({ survivorId: "dup-new", loserIds: ["dup-old"] });
+
+    expect(await getLearningFlags(workspaceRoot, "dup-old")).toEqual({
+      archivedAt: expect.any(String),
+      duplicateOf: "dup-new",
+    });
+    expect(await getLearningFlags(workspaceRoot, "dup-new")).toEqual({ archivedAt: null, duplicateOf: null });
+
+    // The archived loser has left the corpus, so a second scan proposes nothing.
+    const rerun = (await runCli(["learnings", "consolidate", workspaceName, "--json"])) as { clusters: unknown[] };
+    expect(rerun.clusters).toEqual([]);
+  });
+
+  test("consolidate renders a human report when --json is absent", async () => {
+    const { workspaceName } = await createConsolidationWorkspace();
+
+    const output = await runCliRaw(["learnings", "consolidate", workspaceName]);
+
+    expect(output).toContain("dry run");
+    expect(output).toContain("survivor dup-new");
+    expect(output).toContain("dup-old");
+    expect(output).toContain("repo=shared");
   });
 });

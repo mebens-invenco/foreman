@@ -130,6 +130,22 @@ export interface LearningRepo {
   archiveLearning(id: string): void;
   /** Clear `archived_at`, restoring the learning to retrieval. Throws `learning_not_found`. */
   unarchiveLearning(id: string): void;
+  /**
+   * Point each loser at the survivor it duplicates and soft-archive it — the
+   * consolidation scan's apply step, applied to the whole batch atomically. Each
+   * loser gains its `duplicate_of` and an `archived_at` stamp, so it leaves every
+   * retrieval surface while staying resolvable by id (its `duplicate_of` link
+   * included, so the UI still renders it). Never a delete: the usage-event history
+   * M5 promotion consumes FKs the loser id and must stay joinable.
+   *
+   * All-or-nothing: the whole batch runs in one transaction. A partial apply would
+   * strand a transitive-chain loser — archive B out of a chain A~B~C where A and C
+   * are only linked through B, and the re-scan no longer sees an A~C edge, so C is
+   * left active, unflagged, and undetectable. Rolling back on any failure keeps the
+   * re-scan re-forming the identical clusters instead. Throws `learning_not_found`
+   * for an unknown id (rolling the batch back).
+   */
+  flagAndArchiveDuplicates(pairs: readonly { id: string; duplicateOf: string }[]): void;
   searchLearnings(
     filters?: { queries?: string[]; repos?: string[]; limit?: number; offset?: number },
     options?: LearningReadOptions,

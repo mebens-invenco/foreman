@@ -272,6 +272,33 @@ export class SqliteLearningRepo implements LearningRepo {
     this.setArchivedAt(id, null);
   }
 
+  // One transaction over the whole batch: either every loser gains its
+  // `duplicate_of` link and leaves retrieval, or none does. A partial apply would
+  // strand a transitive-chain loser (see the interface doc), so an unknown id
+  // throws and rolls the batch back rather than committing the losers before it.
+  // Each row is existence-checked like `setArchivedAt`. `updated_at` is left alone
+  // and the `learning_touch_updated_at` trigger bumps it — harmless, as an archived
+  // row is out of every recency-ordered surface. The `duplicate_of` FK is the
+  // backstop that a survivor id actually exists.
+  flagAndArchiveDuplicates(pairs: readonly { id: string; duplicateOf: string }[]): void {
+    if (pairs.length === 0) {
+      return;
+    }
+
+    const exists = this.sqlite.prepare("SELECT id FROM learning WHERE id = ?");
+    const flagAndArchive = this.sqlite.prepare("UPDATE learning SET duplicate_of = ?, archived_at = ? WHERE id = ?");
+    const archivedAt = isoNow();
+
+    this.sqlite.transaction(() => {
+      for (const pair of pairs) {
+        if (!exists.get(pair.id)) {
+          throw new ForemanError("learning_not_found", `Learning not found: ${pair.id}`, 404);
+        }
+        flagAndArchive.run(pair.duplicateOf, archivedAt, pair.id);
+      }
+    })();
+  }
+
   // Existence-checked like `updateLearning`, so an unknown id is a caller error
   // rather than a silent no-op. The `learning_touch_updated_at` trigger bumps
   // `updated_at` here (this write leaves it untouched) — expected and harmless:

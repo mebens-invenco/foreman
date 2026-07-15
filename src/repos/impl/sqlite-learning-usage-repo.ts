@@ -121,6 +121,31 @@ export class SqliteLearningUsageRepo implements LearningUsageRepo {
     return { learnings: rows, unattributedReadEvents: this.countUnattributedReadEvents(window) };
   }
 
+  distinctTasksAppliedByIds(ids: readonly string[]): Map<string, number> {
+    const normalized = Array.from(new Set(ids.map((id) => id.trim()).filter((id) => id.length > 0)));
+    if (normalized.length === 0) {
+      return new Map();
+    }
+
+    // A correlated subquery per learning rather than the CTE rollup: no window,
+    // no read side, and no ordering — just the one number the survivor rule reads.
+    // `notSelfEcho` carries the three-valued-logic guard, so a null-source
+    // learning keeps all of its applies instead of silently dropping them.
+    const rows = this.sqlite
+      .prepare(
+        `SELECT learning.id AS learning_id,
+                (SELECT COUNT(DISTINCT event.task_id)
+                   FROM learning_applied_event AS event
+                  WHERE event.learning_id = learning.id
+                    AND ${notSelfEcho("event")}) AS distinct_tasks_applied
+           FROM learning
+          WHERE learning.id IN (${normalized.map(() => "?").join(", ")})`,
+      )
+      .all(...normalized) as SqliteRow[];
+
+    return new Map(rows.map((row) => [String(row.learning_id), Number(row.distinct_tasks_applied)]));
+  }
+
   /**
    * Read events that hit at least one learning but carry no attempt, so no task can
    * be attributed to them. `zero_hit = 0` keeps the figure to events that would

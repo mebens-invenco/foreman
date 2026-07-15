@@ -275,4 +275,37 @@ describe("learning usage stats", () => {
       });
     });
   });
+
+  // The consolidation scan's survivor rule reads this, so it must carry the same
+  // self-echo exclusion the rollup does -- including the null-source trap.
+  describe("distinctTasksAppliedByIds", () => {
+    test("counts distinct applying tasks and excludes the learning's own source task", async () => {
+      await withDb((db) => {
+        applyIn(db, { task: TASK_A, learningId: SELF_SOURCED });
+        applyIn(db, { task: TASK_B, learningId: SELF_SOURCED });
+
+        // TASK_A extracted it, so only TASK_B's apply is a distinct-task signal.
+        expect(db.learningUsage.distinctTasksAppliedByIds([SELF_SOURCED]).get(SELF_SOURCED)).toBe(1);
+      });
+    });
+
+    test("keeps every apply of a null-source learning, not zero (the three-valued-logic trap)", async () => {
+      await withDb((db) => {
+        applyIn(db, { task: TASK_A, learningId: ORPHAN });
+        applyIn(db, { task: TASK_B, learningId: ORPHAN });
+
+        // A bare `task_id <> source_task_id` would evaluate to NULL for a null
+        // source and drop both — the guard keeps them.
+        expect(db.learningUsage.distinctTasksAppliedByIds([ORPHAN]).get(ORPHAN)).toBe(2);
+      });
+    });
+
+    test("maps an applied-nothing learning to 0 and omits an unknown id", async () => {
+      await withDb((db) => {
+        const counts = db.learningUsage.distinctTasksAppliedByIds([ORPHAN, "no-such-id"]);
+        expect(counts.get(ORPHAN)).toBe(0);
+        expect(counts.has("no-such-id")).toBe(false);
+      });
+    });
+  });
 });

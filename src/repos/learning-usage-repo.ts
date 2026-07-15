@@ -74,4 +74,12 @@ export interface LearningUsageRepo {
    */
   recordApplied(input: LearningAppliedEventInput): void;
   getUsageStats(filters?: LearningUsageStatsFilters): LearningUsageStats;
+  /**
+   * `distinctTasksApplied` per learning id — how many DISTINCT tasks applied each,
+   * with the learning's own source task excluded (a learning cannot vouch for
+   * itself), the same self-echo rule `getUsageStats` uses. The consolidation scan's
+   * survivor rule reads this, never the raw `applied_count`. Ids with no qualifying
+   * applies are still present in the map at 0; unknown ids are absent.
+   */
+  distinctTasksAppliedByIds(ids: readonly string[]): Map<string, number>;
 }
