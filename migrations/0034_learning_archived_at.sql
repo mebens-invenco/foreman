@@ -1,0 +1,12 @@
+-- Soft-archive for learnings: a stamped `archived_at` drops the row out of every
+-- retrieval and injection surface (FTS, hybrid, similar-injection, the plan.md
+-- index, the write-time dedup NN check, and the embedding-coverage gate's BOTH
+-- counts) while it stays in the store — visible and badged in the UI, resolvable
+-- by id, and reversible. Not a delete: `learning_applied_event` /
+-- `learning_injection_event` FK `learning(id) ON DELETE CASCADE`, so a delete
+-- would destroy exactly the usage history M5 promotion consumes.
+--
+-- No partial index: archiving is rare, so `archived_at IS NULL` matches nearly the
+-- whole corpus (hundreds of rows) — near-zero selectivity, and the in-scope scans
+-- already cost microseconds.
+ALTER TABLE learning ADD COLUMN archived_at TEXT;

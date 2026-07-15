@@ -529,6 +529,32 @@ learnings
   });
 
 learnings
+  .command("archive")
+  .description("Soft-archive a learning so it leaves every retrieval surface but stays in the store")
+  .argument("<workspace>")
+  .argument("<id>")
+  .action(async (workspace: string, id: string) => {
+    await withWorkspaceRepos(workspace, async (repos) => {
+      repos.learnings.archiveLearning(id);
+      const [learning] = repos.learnings.getLearningsByIds([id]);
+      writeJson({ workspace, id, archived: true, learning });
+    });
+  });
+
+learnings
+  .command("unarchive")
+  .description("Restore a soft-archived learning to every retrieval surface")
+  .argument("<workspace>")
+  .argument("<id>")
+  .action(async (workspace: string, id: string) => {
+    await withWorkspaceRepos(workspace, async (repos) => {
+      repos.learnings.unarchiveLearning(id);
+      const [learning] = repos.learnings.getLearningsByIds([id]);
+      writeJson({ workspace, id, archived: false, learning });
+    });
+  });
+
+learnings
   .command("backfill-embeddings")
   .description("Embed learnings whose vector is missing or stale for the current embedding model")
   .argument("<workspace>")

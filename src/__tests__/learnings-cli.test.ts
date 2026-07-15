@@ -285,6 +285,40 @@ describe("learnings cli", () => {
     expect(await getLearningReadCount(workspaceRoot, "learn-b")).toBe(1);
   });
 
+  test("archive drops a learning from search but keeps it resolvable, and unarchive restores it", async () => {
+    const { workspaceName } = await createCliWorkspace();
+
+    const archived = (await runCli(["learnings", "archive", workspaceName, "learn-a"])) as {
+      archived: boolean;
+      learning: { id: string; archivedAt: string | null };
+    };
+    expect(archived.archived).toBe(true);
+    expect(archived.learning.archivedAt).toEqual(expect.any(String));
+
+    const afterArchive = (await runCli(["learnings", "search", workspaceName, "--query", "planning prompt"])) as {
+      learnings: Array<{ id: string }>;
+    };
+    expect(afterArchive.learnings.map((learning) => learning.id)).toEqual(["learn-b"]);
+
+    // An id in hand still resolves the archived learning.
+    const fetched = (await runCli(["learnings", "get", workspaceName, "--id", "learn-a"])) as {
+      learnings: Array<{ id: string; archivedAt: string | null }>;
+    };
+    expect(fetched.learnings[0]?.archivedAt).toEqual(expect.any(String));
+
+    const unarchived = (await runCli(["learnings", "unarchive", workspaceName, "learn-a"])) as {
+      archived: boolean;
+      learning: { archivedAt: string | null };
+    };
+    expect(unarchived.archived).toBe(false);
+    expect(unarchived.learning.archivedAt).toBeNull();
+
+    const afterUnarchive = (await runCli(["learnings", "search", workspaceName, "--query", "planning prompt"])) as {
+      learnings: Array<{ id: string }>;
+    };
+    expect(afterUnarchive.learnings.map((learning) => learning.id).sort()).toEqual(["learn-a", "learn-b"]);
+  });
+
   test("injection-stats reports the two exit metrics as structured JSON fields", async () => {
     const { workspaceName, workspaceRoot } = await createCliWorkspace();
     await seedInjectionEvents(workspaceRoot);

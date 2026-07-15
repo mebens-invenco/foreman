@@ -2,7 +2,10 @@ import type { ColumnFiltersState } from "@tanstack/react-table"
 import { parseAsString, parseAsStringLiteral, useQueryStates } from "nuqs"
 
 import { useDataTableState } from "@/components/data-table"
-import { learningConfidenceFilterValues } from "@/pages/learnings/columns"
+import {
+  learningConfidenceFilterValues,
+  learningStatusFilterValues,
+} from "@/pages/learnings/columns"
 
 export function useLearningsTableState() {
   const baseState = useDataTableState({
@@ -17,6 +20,7 @@ export function useLearningsTableState() {
         "all"
       ),
       repo: parseAsString.withDefault("all"),
+      status: parseAsStringLiteral(learningStatusFilterValues).withDefault("all"),
     },
     {
       history: "replace",
@@ -62,11 +66,25 @@ export function useLearningsTableState() {
     })
   }
 
+  const setStatus = (value: string) => {
+    const nextStatus = learningStatusFilterValues.includes(
+      value as (typeof learningStatusFilterValues)[number]
+    )
+      ? (value as (typeof learningStatusFilterValues)[number])
+      : "all"
+
+    baseState.setPageIndex(0)
+    void setFilters({
+      status: nextStatus === "all" ? null : nextStatus,
+    })
+  }
+
   const resetFilters = () => {
     baseState.resetBaseState()
     void setFilters({
       confidence: null,
       repo: null,
+      status: null,
     })
   }
 
@@ -77,10 +95,13 @@ export function useLearningsTableState() {
     hasActiveFilters:
       baseState.hasBaseState ||
       filters.confidence !== "all" ||
-      filters.repo !== "all",
+      filters.repo !== "all" ||
+      filters.status !== "all",
     repo: filters.repo,
     resetFilters,
     setConfidence,
     setRepo,
+    setStatus,
+    status: filters.status,
   }
 }

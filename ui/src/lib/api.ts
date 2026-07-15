@@ -359,6 +359,7 @@ export type LearningRecord = {
   readCount: number
   duplicateOf: string | null
   sourceTaskId: string | null
+  archivedAt: string | null
   createdAt: string
   updatedAt: string
 }
@@ -549,6 +550,22 @@ export function listLearnings(params: {
   return requestJson<{ learnings: LearningRecord[] }>(
     `/api/learnings${buildSearch(params)}`
   ).then((payload) => payload.learnings)
+}
+
+// Soft-archive or restore a learning. Archiving drops it out of every retrieval
+// surface server-side; it stays visible (badged) in this table. Returns the
+// reconciled record.
+export function setLearningArchived(id: string, archived: boolean) {
+  return requestJson<{ learning: LearningRecord }>(
+    `/api/learnings/${encodeURIComponent(id)}/archived`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ archived }),
+    }
+  ).then((payload) => payload.learning)
 }
 
 export type UsageGroupBy = "day" | "runner" | "model"

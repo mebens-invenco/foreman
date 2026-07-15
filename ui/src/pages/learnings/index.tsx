@@ -9,12 +9,17 @@ import {
   useDataTable,
 } from "@/components/data-table"
 import { Sheet } from "@/components/ui/sheet"
-import { useLearningsQuery } from "@/hooks/use-learnings-query"
+import {
+  useLearningsQuery,
+  useSetLearningArchivedMutation,
+} from "@/hooks/use-learnings-query"
 import {
   getLearningRepoOptions,
   learningColumns,
   learningConfidenceOptions,
   learningsGlobalFilter,
+  learningStatusOptions,
+  matchesLearningStatus,
 } from "@/pages/learnings/columns"
 import { LearningDetailSheet } from "@/pages/learnings/learning-detail-sheet"
 import { useLearningsTableState } from "@/pages/learnings/use-learnings-table-state"
@@ -24,10 +29,16 @@ export function LearningsPage() {
   const selectedLearningId = searchParams.get("learningId")
   const { data: learnings = [], isLoading, isError, error } = useLearningsQuery()
   const tableState = useLearningsTableState()
+  const archiveMutation = useSetLearningArchivedMutation()
+  // The lifecycle toggle narrows the data itself (no status column to filter on);
+  // repo options still derive from the full list so every repo stays selectable.
+  const visibleLearnings = learnings.filter((learning) =>
+    matchesLearningStatus(learning, tableState.status)
+  )
   const table = useDataTable({
     columns: learningColumns,
     columnFilters: tableState.columnFilters,
-    data: learnings,
+    data: visibleLearnings,
     getRowId: (row) => row.id,
     globalFilter: tableState.globalFilter,
     globalFilterFn: learningsGlobalFilter,
@@ -80,6 +91,13 @@ export function LearningsPage() {
               options={repoOptions}
               value={tableState.repo}
             />
+            <DataTableFilterSelect
+              allLabel="All statuses"
+              label="Status"
+              onValueChange={tableState.setStatus}
+              options={learningStatusOptions}
+              value={tableState.status}
+            />
           </DataTableToolbar>
 
           <DataTable
@@ -110,6 +128,10 @@ export function LearningsPage() {
         <LearningDetailSheet
           learning={selectedLearning}
           onSelectLearning={setSelectedLearningId}
+          onSetArchived={(id, archived) =>
+            archiveMutation.mutate({ id, archived })
+          }
+          isUpdatingArchive={archiveMutation.isPending}
         />
       </Sheet>
     </>
