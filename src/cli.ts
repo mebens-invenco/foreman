@@ -5,6 +5,11 @@ import path from "node:path";
 import { Command, InvalidArgumentError } from "commander";
 import { z } from "zod";
 
+import {
+  proposeConfidenceTransitions,
+  USAGE_EPOCH,
+  type LifecycleProposal,
+} from "./curation/confidence-lifecycle.js";
 import { consolidateLearnings, type ConsolidationReport } from "./curation/consolidate-learnings.js";
 import type { ConsolidationCluster } from "./curation/consolidation-scan.js";
 import { backfillLearningEmbeddings } from "./embeddings/backfill-learning-embeddings.js";
@@ -334,6 +339,61 @@ const renderConsolidationReport = (input: { report: ConsolidationReport }): stri
   });
 
   return lines.join("\n");
+};
+
+/**
+ * The proposal table for `learnings curate`. Every row carries the evidence it
+ * fired on — the distinct-task count for a promotion, the age/idle days for a
+ * decay — so a reader can see WHY each transition is proposed, not just that it
+ * is. The header line says whether these changes were applied or are a dry run.
+ */
+const renderCurationProposals = (input: { applied: boolean; proposals: LifecycleProposal[] }): string => {
+  const { applied, proposals } = input;
+  if (proposals.length === 0) {
+    return applied
+      ? "Confidence curation: applied no changes; no learning met a promotion or decay threshold."
+      : "Confidence curation (dry run): no learning met a promotion or decay threshold. Pass --apply to execute.";
+  }
+
+  const header = ["Action", "From", "To", "Distinct applied", "Learning", "Reason", "Title"];
+  const rows = proposals.map((proposal) =>
+    proposal.kind === "promote"
+      ? [
+          "promote",
+          proposal.from,
+          proposal.to,
+          formatUsageNumber(proposal.distinctTasksApplied),
+          proposal.learningId,
+          proposal.reason,
+          proposal.title,
+        ]
+      : ["archive", proposal.from, "archived", "-", proposal.learningId, proposal.reason, proposal.title],
+  );
+  const widths = header.map((cell, index) => Math.max(cell.length, ...rows.map((row) => row[index]?.length ?? 0)));
+
+  return [
+    applied
+      ? "Confidence curation — applied:"
+      : "Confidence curation — dry run (pass --apply to execute):",
+    header.map((cell, index) => padCell(cell, widths[index]!)).join("  ").trimEnd(),
+    widths.map((width) => "-".repeat(width)).join("  "),
+    ...rows.map((row) => row.map((cell, index) => padCell(cell, widths[index]!)).join("  ").trimEnd()),
+  ].join("\n");
+};
+
+/**
+ * A confidence-only update leaves the embedding valid — it is keyed on the
+ * title/content snapshot, not `updated_at` — so promotion never strands a vector.
+ * Decay archives through the same soft-archive substrate a worker `archive` uses.
+ */
+const applyLifecycleProposals = (repos: ReturnType<typeof createRepos>, proposals: LifecycleProposal[]): void => {
+  for (const proposal of proposals) {
+    if (proposal.kind === "promote") {
+      repos.learnings.updateLearning({ id: proposal.learningId, confidence: proposal.to });
+    } else {
+      repos.learnings.archiveLearning(proposal.learningId);
+    }
+  }
 };
 
 const parseIsoInstant = (value: string): string => {
@@ -682,6 +742,34 @@ learnings
       }
 
       process.stdout.write(`${renderConsolidationReport({ report })}\n`);
+    });
+  });
+
+learnings
+  .command("curate")
+  .description("Promote learnings on distinct-task usage and archive decayed emerging ones (dry run unless --apply)")
+  .argument("<workspace>")
+  .option("--apply", "Execute the proposed transitions; without it the command only prints them")
+  .option("--json", "Emit JSON instead of the tab-aligned table")
+  .action(async (workspace: string, options: { apply?: boolean; json?: boolean }) => {
+    await withWorkspaceRepos(workspace, async (repos) => {
+      const proposals = proposeConfidenceTransitions(
+        repos.learningUsage.getLifecycleRollups(),
+        new Date(),
+        new Date(USAGE_EPOCH),
+      );
+
+      const applied = options.apply === true;
+      if (applied) {
+        applyLifecycleProposals(repos, proposals);
+      }
+
+      if (options.json) {
+        writeJson({ workspace, applied, proposals });
+        return;
+      }
+
+      process.stdout.write(`${renderCurationProposals({ applied, proposals })}\n`);
     });
   });
 

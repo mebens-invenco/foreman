@@ -1238,6 +1238,7 @@ describe("WorkerResultApplier learning embeddings", () => {
     learningMutations: WorkerResult["learningMutations"],
     tempDir: string,
     stdout: NodeJS.WritableStream = new PassThrough(),
+    minLevel: "debug" | "info" | "warn" | "error" = "warn",
   ): Promise<void> => {
     const executionTask: Task = { ...task(), state: "ready", providerState: "ready" };
     const repo: RepoRef = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
@@ -1279,7 +1280,7 @@ describe("WorkerResultApplier learning embeddings", () => {
       reviewService: new FakeReviewService(pullRequest),
       repos: [repo],
       embedder,
-      logger: LoggerService.create({ stdout, minLevel: "warn" }),
+      logger: LoggerService.create({ stdout, minLevel }),
       scheduleScout: () => undefined,
     });
 
@@ -1310,6 +1311,93 @@ describe("WorkerResultApplier learning embeddings", () => {
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
     return { tempDir, db };
   };
+
+  // DL1 lean b: only the curation pass mints `proven`. A worker that declares it is
+  // corrected to `established` and the clamp logged, so an old runner's output
+  // still parses — the schema stays permissive, the applier holds the ceiling.
+  test("clamps a worker-declared proven add to established and logs it", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-clamp-add-");
+    const embedder = new FakeEmbedder();
+    const { stdout, warnings: logLines } = captureWarnings();
+
+    try {
+      await applyLearningMutations(
+        db,
+        embedder,
+        [{ type: "add", title: "Overclaim", repo: "foreman", confidence: "proven", content: "Body.", tags: [] }],
+        tempDir,
+        stdout,
+        "info",
+      );
+
+      expect(db.learnings.listLearnings()[0]!.confidence).toBe("established");
+      const logs = logLines();
+      expect(logs).toContain("clamped worker-declared confidence to the earned range");
+      expect(logs).toContain('declared="proven"');
+      expect(logs).toContain('resolved="established"');
+    } finally {
+      db.close();
+    }
+  });
+
+  test("stores a worker-declared established add unchanged, no clamp logged", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-clamp-noop-");
+    const embedder = new FakeEmbedder();
+    const { stdout, warnings: logLines } = captureWarnings();
+
+    try {
+      await applyLearningMutations(
+        db,
+        embedder,
+        [{ type: "add", title: "Honest", repo: "foreman", confidence: "established", content: "Body.", tags: [] }],
+        tempDir,
+        stdout,
+        "info",
+      );
+
+      expect(db.learnings.listLearnings()[0]!.confidence).toBe("established");
+      expect(logLines()).not.toContain("clamped worker-declared confidence");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("clamps a worker-declared proven update to established and logs it", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-clamp-update-");
+    const embedder = new FakeEmbedder();
+    const { stdout, warnings: logLines } = captureWarnings();
+    db.learnings.addLearning({ id: "learn-a", title: "Title", repo: "foreman", confidence: "emerging", content: "Body", tags: [] });
+
+    try {
+      await applyLearningMutations(db, embedder, [{ type: "update", id: "learn-a", confidence: "proven" }], tempDir, stdout, "info");
+
+      expect(db.learnings.getLearningsByIds(["learn-a"])[0]!.confidence).toBe("established");
+      const logs = logLines();
+      expect(logs).toContain("clamped worker-declared confidence to the earned range");
+      expect(logs).toContain('declared="proven"');
+      expect(logs).toContain('resolved="established"');
+      expect(logs).toContain('learningId="learn-a"');
+    } finally {
+      db.close();
+    }
+  });
+
+  // The ceiling must not act as a floor-breaker: a worker re-declaring `proven` on a
+  // learning the curation pass already minted to `proven` must not demote it. The
+  // pass alone grants and retires `proven`; a worker update never lowers it.
+  test("holds a curation-minted proven learning when a worker update re-declares proven", async () => {
+    const { tempDir, db } = await setUp("foreman-learning-clamp-floor-");
+    const embedder = new FakeEmbedder();
+    db.learnings.addLearning({ id: "learn-p", title: "Proven", repo: "foreman", confidence: "proven", content: "Body", tags: [] });
+
+    try {
+      await applyLearningMutations(db, embedder, [{ type: "update", id: "learn-p", confidence: "proven", markApplied: true }], tempDir);
+
+      expect(db.learnings.getLearningsByIds(["learn-p"])[0]!.confidence).toBe("proven");
+    } finally {
+      db.close();
+    }
+  });
 
   test("embeds the title and content of an added learning", async () => {
     const { tempDir, db } = await setUp("foreman-learning-embed-add-");
