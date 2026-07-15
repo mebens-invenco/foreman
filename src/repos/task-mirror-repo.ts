@@ -25,6 +25,10 @@ export type TaskTargetDependencyRecord = {
 
 export interface TaskMirrorRepo {
   saveTasks(tasks: Task[]): void;
+  // Prune a task and its child rows (targets, pull requests, review/reviewer
+  // checkpoints). Deletes children explicitly rather than leaning on FK cascade
+  // so the prune holds regardless of the connection's foreign_keys pragma.
+  deleteTasks(ids: string[]): void;
   // Update only a task's labels. Unlike saveTasks this touches no targets or
   // dependencies, so it's safe for a lightweight write (e.g. the agent-enabled
   // toggle) without triggering a full target-dependency rebuild. No-op if the
