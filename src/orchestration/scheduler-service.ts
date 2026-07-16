@@ -3,8 +3,15 @@ import { EventEmitter } from "node:events";
 import { discoverCronJobs, type CronJobDefinition } from "../cron/index.js";
 import type { ActionType, RepoRef, ReviewContext, Task, TaskTarget, WorkerResult } from "../domain/index.js";
 import type { Embedder } from "../embeddings/embedder.js";
-import { ForemanError, isForemanError, isProviderRateLimitError, type ProviderRateLimitError } from "../lib/errors.js";
-import { addSeconds, isoNow } from "../lib/time.js";
+import {
+  ForemanError,
+  isForemanError,
+  isProviderRateLimitError,
+  isProviderUnavailableError,
+  type ProviderRateLimitError,
+  type ProviderUnavailableError,
+} from "../lib/errors.js";
+import { isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, RecoveredAttemptRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
@@ -21,6 +28,9 @@ type ScoutTrigger = "startup" | "poll" | "worker_finished" | "task_mutation" | "
 
 const SCOUT_RUN_TIMEOUT_MS = 5 * 60 * 1000;
 const PROVIDER_COOLDOWN_MAX_MS = 60 * 60 * 1000;
+const PROVIDER_UNAVAILABLE_COOLDOWN_BASE_MS = 60 * 1000;
+
+type ProviderCooldown = { until: Date; reason: "rate_limit" | "unavailable" };
 
 const isQueuedJobDispatchable = (job: JobRecord, now: number): boolean => {
   if (!job.nextEligibleAt) {
@@ -76,7 +86,8 @@ export class SchedulerService extends EventEmitter {
   private readonly attemptExecutor: AttemptExecutor;
   private readonly cronAttemptExecutor: CronAttemptExecutor;
   private cronScheduleInFlight = false;
-  private readonly providerCooldowns = new Map<string, Date>();
+  private readonly providerCooldowns = new Map<string, ProviderCooldown>();
+  private readonly providerUnavailableStreaks = new Map<string, number>();
 
   constructor(private readonly deps: SchedulerDeps) {
     super();
@@ -314,16 +325,20 @@ export class SchedulerService extends EventEmitter {
 
   private armTimers(): void {
     this.clearTimers();
-    this.nextPollAt = addSeconds(new Date(), this.deps.config.scheduler.scoutPollIntervalSeconds);
+    const normalPollDelayMs = this.deps.config.scheduler.scoutPollIntervalSeconds * 1000;
+    const githubCooldown = this.providerCooldowns.get("github");
+    const pollDelayMs = Math.max(normalPollDelayMs, githubCooldown ? githubCooldown.until.getTime() - Date.now() : 0);
+    this.nextPollAt = new Date(Date.now() + pollDelayMs).toISOString();
     this.logger.debug("armed scheduler timers", {
       nextScoutPollAt: this.nextPollAt,
       scoutPollIntervalSeconds: this.deps.config.scheduler.scoutPollIntervalSeconds,
+      ...(githubCooldown ? { providerCooldownReason: githubCooldown.reason } : {}),
       schedulerLoopIntervalMs: this.deps.config.scheduler.schedulerLoopIntervalMs,
       staleLeaseReapIntervalSeconds: this.deps.config.scheduler.staleLeaseReapIntervalSeconds,
     });
     this.pollTimer = setTimeout(() => {
       this.scheduleScout("poll");
-    }, this.deps.config.scheduler.scoutPollIntervalSeconds * 1000);
+    }, pollDelayMs);
 
     this.loopTimer = setInterval(() => {
       void this.dispatchQueuedJobs();
@@ -423,12 +438,16 @@ export class SchedulerService extends EventEmitter {
     }
 
     const githubCooldown = this.providerCooldowns.get("github");
-    if (githubCooldown && githubCooldown.getTime() > Date.now()) {
-      this.logger.warn("skipped scout run during provider rate-limit cooldown", {
+    if (githubCooldown && githubCooldown.until.getTime() > Date.now()) {
+      this.logger.warn("skipped scout run during provider cooldown", {
         trigger,
         provider: "github",
-        resetAt: githubCooldown.toISOString(),
+        reason: githubCooldown.reason,
+        retryAt: githubCooldown.until.toISOString(),
       });
+      if (this.status === "running") {
+        this.armTimers();
+      }
       return;
     }
     if (githubCooldown) {
@@ -514,6 +533,10 @@ export class SchedulerService extends EventEmitter {
         },
       });
 
+      if (this.providerUnavailableStreaks.delete("github")) {
+        this.logger.info("GitHub provider availability recovered; reset scout backoff");
+      }
+
       if (selection.jobs.length > 0) {
         this.emit("scout_completed", { enqueued: selection.jobs.length });
       }
@@ -546,6 +569,34 @@ export class SchedulerService extends EventEmitter {
               provider: error.provider,
               resetAt,
               retryAfterSeconds: error.retryAfterSeconds,
+            },
+          });
+        }
+        return;
+      }
+
+      if (isProviderUnavailableError(error)) {
+        const cooldown = this.recordProviderUnavailableCooldown(error);
+        this.logger.warn("scout run paused because provider is unavailable", {
+          trigger,
+          provider: error.provider,
+          retryAt: cooldown.retryAt,
+          retryAfterSeconds: cooldown.retryAfterSeconds,
+          failureStreak: cooldown.failureStreak,
+          error: message,
+        });
+        const scoutRuns = this.deps.foremanRepos.scoutRuns.listScoutRuns(5);
+        const latestRunning = scoutRuns.find((run) => run.status === "running");
+        if (latestRunning) {
+          this.deps.foremanRepos.scoutRuns.completeScoutRun({
+            id: latestRunning.id,
+            summary: {
+              enqueued: 0,
+              providerUnavailable: true,
+              provider: error.provider,
+              retryAt: cooldown.retryAt,
+              retryAfterSeconds: cooldown.retryAfterSeconds,
+              failureStreak: cooldown.failureStreak,
             },
           });
         }
@@ -586,8 +637,25 @@ export class SchedulerService extends EventEmitter {
         Date.now() + PROVIDER_COOLDOWN_MAX_MS,
       ),
     );
-    this.providerCooldowns.set(error.provider, boundedResetAt);
+    this.providerCooldowns.set(error.provider, { until: boundedResetAt, reason: "rate_limit" });
     return boundedResetAt.toISOString();
+  }
+
+  private recordProviderUnavailableCooldown(error: ProviderUnavailableError): {
+    retryAt: string;
+    retryAfterSeconds: number;
+    failureStreak: number;
+  } {
+    const failureStreak = (this.providerUnavailableStreaks.get(error.provider) ?? 0) + 1;
+    this.providerUnavailableStreaks.set(error.provider, failureStreak);
+    const cooldownMs = Math.min(PROVIDER_UNAVAILABLE_COOLDOWN_BASE_MS * 2 ** (failureStreak - 1), PROVIDER_COOLDOWN_MAX_MS);
+    const until = new Date(Date.now() + cooldownMs);
+    this.providerCooldowns.set(error.provider, { until, reason: "unavailable" });
+    return {
+      retryAt: until.toISOString(),
+      retryAfterSeconds: cooldownMs / 1000,
+      failureStreak,
+    };
   }
 
   private async dispatchQueuedJobs(): Promise<void> {

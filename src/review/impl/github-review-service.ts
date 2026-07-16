@@ -1,4 +1,4 @@
-import { ForemanError, ProviderRateLimitError } from "../../lib/errors.js";
+import { ForemanError, ProviderRateLimitError, ProviderUnavailableError } from "../../lib/errors.js";
 import { createTimeoutSignal, isAbortLikeError, PROVIDER_REQUEST_TIMEOUT_MS } from "../../lib/fetch-timeout.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
@@ -397,12 +397,14 @@ export class GitHubReviewService implements ReviewService {
 
   private async rest<T>(path: string, init: RequestInit = {}): Promise<T> {
     const startedAt = Date.now();
-    const method = init.method ?? "GET";
+    const method = (init.method ?? "GET").toUpperCase();
+    const isRead = method === "GET";
+    const maxAttempts = isRead ? GITHUB_REQUEST_MAX_ATTEMPTS : 1;
     const requestContext: GitHubRequestContext = { kind: "REST", method, path };
     this.throwIfRateLimited(requestContext);
 
-    for (let attempt = 1; attempt <= GITHUB_REQUEST_MAX_ATTEMPTS; attempt += 1) {
-      this.logger.debug("sending GitHub REST request", { method, path, attempt, maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS });
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      this.logger.debug("sending GitHub REST request", { method, path, attempt, maxAttempts });
       let response: Response;
       try {
         response = await fetch(`https://api.github.com${path}`, {
@@ -417,13 +419,13 @@ export class GitHubReviewService implements ReviewService {
         });
       } catch (error) {
         if (isAbortLikeError(error)) {
-          if (attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
+          if (attempt < maxAttempts) {
             const delayMs = retryDelayMs(attempt);
             this.logger.warn("GitHub REST request timed out; retrying", {
               method,
               path,
               attempt,
-              maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+              maxAttempts,
               delayMs,
               durationMs: Date.now() - startedAt,
               timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
@@ -436,10 +438,17 @@ export class GitHubReviewService implements ReviewService {
             method,
             path,
             attempt,
-            maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+            maxAttempts,
             durationMs: Date.now() - startedAt,
             timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
           });
+          if (isRead) {
+            throw new ProviderUnavailableError({
+              provider: "github",
+              message: `GitHub REST ${method} request timed out after ${maxAttempts} attempts`,
+              statusCode: 504,
+            });
+          }
           throw new ForemanError("github_request_timeout", `GitHub request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
         }
         throw error;
@@ -460,14 +469,14 @@ export class GitHubReviewService implements ReviewService {
           });
         }
 
-        if (isRetryableGitHubResponse(response.status, body) && attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
+        if (isRead && isRetryableGitHubResponse(response.status, body) && attempt < maxAttempts) {
           const delayMs = retryDelayMs(attempt);
           this.logger.warn("GitHub REST request failed with transient status; retrying", {
             method,
             path,
             status: response.status,
             attempt,
-            maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+            maxAttempts,
             delayMs,
             durationMs: Date.now() - startedAt,
           });
@@ -475,12 +484,28 @@ export class GitHubReviewService implements ReviewService {
           continue;
         }
 
+        if (isRead && GITHUB_TRANSIENT_STATUS_CODES.has(response.status)) {
+          this.logger.error("GitHub REST request unavailable after retries", {
+            method,
+            path,
+            status: response.status,
+            attempt,
+            maxAttempts,
+            durationMs: Date.now() - startedAt,
+          });
+          throw new ProviderUnavailableError({
+            provider: "github",
+            message: `GitHub REST ${method} request unavailable after ${maxAttempts} attempts (${response.status})`,
+            statusCode: response.status,
+          });
+        }
+
         this.logger.error("GitHub REST request failed", {
           method,
           path,
           status: response.status,
           attempt,
-          maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+          maxAttempts,
           durationMs: Date.now() - startedAt,
         });
         throw new ForemanError("github_request_failed", `GitHub request failed: ${response.status} ${body}`, 502);
@@ -500,17 +525,20 @@ export class GitHubReviewService implements ReviewService {
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
     const startedAt = Date.now();
+    const operationKind = query.match(/\b(query|mutation)\b/)?.[1] ?? "query";
     const operationName = query.match(/\b(?:query|mutation)\s+(\w+)/)?.[1] ?? "anonymous";
+    const isRead = operationKind === "query";
+    const maxAttempts = isRead ? GITHUB_REQUEST_MAX_ATTEMPTS : 1;
     const variableKeys = Object.keys(variables).sort().join(",");
     const requestContext: GitHubRequestContext = { kind: "GraphQL", operationName };
     this.throwIfRateLimited(requestContext);
 
-    for (let attempt = 1; attempt <= GITHUB_REQUEST_MAX_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       this.logger.debug("sending GitHub GraphQL request", {
         operationName,
         variableKeys,
         attempt,
-        maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+        maxAttempts,
       });
       let response: Response;
       try {
@@ -527,12 +555,12 @@ export class GitHubReviewService implements ReviewService {
         });
       } catch (error) {
         if (isAbortLikeError(error)) {
-          if (attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
+          if (attempt < maxAttempts) {
             const delayMs = retryDelayMs(attempt);
             this.logger.warn("GitHub GraphQL request timed out; retrying", {
               operationName,
               attempt,
-              maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+              maxAttempts,
               delayMs,
               durationMs: Date.now() - startedAt,
               timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
@@ -544,10 +572,17 @@ export class GitHubReviewService implements ReviewService {
           this.logger.error("GitHub GraphQL request timed out", {
             operationName,
             attempt,
-            maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+            maxAttempts,
             durationMs: Date.now() - startedAt,
             timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
           });
+          if (isRead) {
+            throw new ProviderUnavailableError({
+              provider: "github",
+              message: `GitHub GraphQL query ${operationName} timed out after ${maxAttempts} attempts`,
+              statusCode: 504,
+            });
+          }
           throw new ForemanError("github_request_timeout", `GitHub GraphQL request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
         }
         throw error;
@@ -568,13 +603,13 @@ export class GitHubReviewService implements ReviewService {
           });
         }
 
-        if (isRetryableGitHubResponse(response.status, body) && attempt < GITHUB_REQUEST_MAX_ATTEMPTS) {
+        if (isRead && isRetryableGitHubResponse(response.status, body) && attempt < maxAttempts) {
           const delayMs = retryDelayMs(attempt);
           this.logger.warn("GitHub GraphQL request failed with transient status; retrying", {
             operationName,
             status: response.status,
             attempt,
-            maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+            maxAttempts,
             delayMs,
             durationMs: Date.now() - startedAt,
           });
@@ -582,11 +617,26 @@ export class GitHubReviewService implements ReviewService {
           continue;
         }
 
+        if (isRead && GITHUB_TRANSIENT_STATUS_CODES.has(response.status)) {
+          this.logger.error("GitHub GraphQL query unavailable after retries", {
+            operationName,
+            status: response.status,
+            attempt,
+            maxAttempts,
+            durationMs: Date.now() - startedAt,
+          });
+          throw new ProviderUnavailableError({
+            provider: "github",
+            message: `GitHub GraphQL query ${operationName} unavailable after ${maxAttempts} attempts (${response.status})`,
+            statusCode: response.status,
+          });
+        }
+
         this.logger.error("GitHub GraphQL request failed", {
           operationName,
           status: response.status,
           attempt,
-          maxAttempts: GITHUB_REQUEST_MAX_ATTEMPTS,
+          maxAttempts,
           durationMs: Date.now() - startedAt,
         });
         throw new ForemanError("github_request_failed", `GitHub GraphQL request failed: ${response.status} ${body}`, 502);

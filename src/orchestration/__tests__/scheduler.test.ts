@@ -5,7 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../../domain/index.js";
-import { ForemanError, ProviderRateLimitError } from "../../lib/errors.js";
+import { ForemanError, ProviderRateLimitError, ProviderUnavailableError } from "../../lib/errors.js";
 import { SchedulerService } from "../index.js";
 import * as worktrees from "../../workspace/git-worktrees.js";
 import { FakeEmbedder } from "../../test-support/fake-embedder.js";
@@ -537,6 +537,143 @@ describe("SchedulerService scout timeout", () => {
       expect(listCandidates).toHaveBeenCalledTimes(1);
     } finally {
       (scheduler as any).clearTimers();
+    }
+  });
+
+  test("increases GitHub outage cooldowns, suppresses triggers, and resets after recovery", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-16T22:21:53Z"));
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 1;
+    config.scheduler.scoutPollIntervalSeconds = 60;
+    config.scheduler.schedulerLoopIntervalMs = 999_000;
+    config.scheduler.staleLeaseReapIntervalSeconds = 999_000;
+    const completeScoutRun = vi.fn();
+    const listCandidates = vi.fn(async () => [sampleTask()]);
+    const getContext = vi
+      .fn()
+      .mockRejectedValueOnce(new ProviderUnavailableError({ provider: "github", message: "GitHub unavailable" }))
+      .mockRejectedValueOnce(new ProviderUnavailableError({ provider: "github", message: "GitHub unavailable" }))
+      .mockResolvedValueOnce(null)
+      .mockRejectedValueOnce(new ProviderUnavailableError({ provider: "github", message: "GitHub unavailable" }));
+    const foremanRepos = createMockRepos({
+      jobs: { createJob: vi.fn(() => ({ id: "job-1" })) },
+      scoutRuns: {
+        createScoutRun: vi.fn(() => "scout-1"),
+        completeScoutRun,
+        listScoutRuns: vi.fn(() => [
+          {
+            id: "scout-1",
+            triggerType: "poll",
+            status: "running",
+            startedAt: "2026-07-16T22:21:53Z",
+            finishedAt: null,
+            selectedAction: null,
+            selectedTaskId: null,
+            candidateCount: 1,
+            activeCount: 1,
+            terminalCount: 0,
+          },
+        ]),
+      },
+    });
+    const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
+      config,
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos,
+      taskSystem: { listCandidates, listComments: vi.fn(async () => []) } as any,
+      reviewService: { resolvePullRequest: vi.fn(async () => null), getContext } as any,
+      repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    try {
+      (scheduler as any).status = "running";
+      await (scheduler as any).runScout("poll");
+      await (scheduler as any).runScout("worker_finished");
+
+      expect(listCandidates).toHaveBeenCalledTimes(1);
+      expect(scheduler.getStatus().nextScoutPollAt).toBe("2026-07-16T22:22:53.000Z");
+
+      vi.setSystemTime(new Date("2026-07-16T22:22:53Z"));
+      await (scheduler as any).runScout("poll");
+      expect(scheduler.getStatus().nextScoutPollAt).toBe("2026-07-16T22:24:53.000Z");
+
+      vi.setSystemTime(new Date("2026-07-16T22:24:53Z"));
+      await (scheduler as any).runScout("poll");
+      expect((scheduler as any).providerUnavailableStreaks.has("github")).toBe(false);
+
+      await (scheduler as any).runScout("poll");
+      expect(completeScoutRun).toHaveBeenLastCalledWith({
+        id: "scout-1",
+        summary: {
+          enqueued: 0,
+          providerUnavailable: true,
+          provider: "github",
+          retryAt: "2026-07-16T22:25:53.000Z",
+          retryAfterSeconds: 60,
+          failureStreak: 1,
+        },
+      });
+      expect(listCandidates).toHaveBeenCalledTimes(4);
+    } finally {
+      (scheduler as any).clearTimers();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  test("bounds GitHub outage cooldowns at one hour", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-16T22:21:53Z"));
+    const scheduler = new SchedulerService({
+      embedder: new FakeEmbedder(),
+      config: createDefaultWorkspaceConfig("foo", "file"),
+      paths: {
+        projectRoot: "/tmp/project",
+        workspaceRoot: "/tmp/workspace",
+        configPath: "/tmp/workspace/foreman.workspace.yml",
+        envPath: "/tmp/workspace/.env",
+        dbPath: "/tmp/workspace/foreman.db",
+        logsDir: "/tmp/workspace/logs",
+        attemptsLogDir: "/tmp/workspace/logs/attempts",
+        artifactsDir: "/tmp/workspace/artifacts",
+        worktreesDir: "/tmp/workspace/worktrees",
+        tasksDir: "/tmp/workspace/tasks",
+        planPath: "/tmp/workspace/plan.md",
+      },
+      foremanRepos: createMockRepos(),
+      taskSystem: {} as any,
+      reviewService: {} as any,
+      repos: [],
+      env: {},
+      logger: fakeLogger as any,
+    });
+
+    try {
+      let cooldown: { retryAfterSeconds: number } | undefined;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        cooldown = (scheduler as any).recordProviderUnavailableCooldown(
+          new ProviderUnavailableError({ provider: "github", message: "GitHub unavailable" }),
+        );
+      }
+      expect(cooldown?.retryAfterSeconds).toBe(3600);
+    } finally {
+      vi.useRealTimers();
     }
   });
 });
