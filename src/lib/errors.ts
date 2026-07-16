@@ -32,3 +32,15 @@ export class ProviderRateLimitError extends ForemanError {
 
 export const isProviderRateLimitError = (value: unknown): value is ProviderRateLimitError =>
   value instanceof ProviderRateLimitError;
+
+export class ProviderUnavailableError extends ForemanError {
+  readonly provider: string;
+
+  constructor(input: { provider: string; message: string; statusCode?: number }) {
+    super("provider_unavailable", input.message, input.statusCode ?? 503);
+    this.provider = input.provider;
+  }
+}
+
+export const isProviderUnavailableError = (value: unknown): value is ProviderUnavailableError =>
+  value instanceof ProviderUnavailableError;
