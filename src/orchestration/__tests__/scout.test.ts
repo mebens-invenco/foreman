@@ -1665,6 +1665,67 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test.each([
+    { checkpointMergeState: "unknown", liveMergeState: "clean", selectsReview: false },
+    { checkpointMergeState: "clean", liveMergeState: "unknown", selectsReview: false },
+    { checkpointMergeState: "clean", liveMergeState: "conflicting", selectsReview: true },
+    { checkpointMergeState: "unknown", liveMergeState: "conflicting", selectsReview: true },
+    { checkpointMergeState: "conflicting", liveMergeState: "clean", selectsReview: true },
+  ] satisfies Array<{
+    checkpointMergeState: ReviewContext["mergeState"];
+    liveMergeState: ReviewContext["mergeState"];
+    selectsReview: boolean;
+  }>)(
+    "$checkpointMergeState -> $liveMergeState merge state selects review: $selectsReview",
+    async ({ checkpointMergeState, liveMergeState, selectsReview }) => {
+      const tempDir = await createTempDir("foreman-scout-merge-state-checkpoint-");
+      cleanupDirs.push(tempDir);
+      const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      const reviewTask = task({
+        id: `TASK-MERGE-${checkpointMergeState}-${liveMergeState}`,
+        title: "Merge state checkpoint task",
+        state: "in_review",
+        providerState: "in_review",
+        priority: "normal",
+        updatedAt: "2026-03-14T12:00:00Z",
+        pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/12", source: "provider" } satisfies TaskPullRequest],
+      });
+      const checkpointContext = reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/12",
+        pullRequestNumber: 12,
+        state: "open",
+        headBranch: "task-merge-state",
+        baseBranch: "main",
+        mergeState: checkpointMergeState,
+        failingChecks: [{ name: "ci", state: "failure" }],
+      });
+      const liveContext = { ...checkpointContext, mergeState: liveMergeState };
+      seedReviewCheckpoint(db, reviewTask, checkpointContext);
+
+      try {
+        const result = await runScoutSelection({
+          config,
+          foremanRepos: db,
+          taskSystem: new FakeTaskSystem([reviewTask]),
+          reviewService: new FakeReviewService({ [reviewTask.id]: liveContext }),
+          repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+          triggerType: "manual",
+        });
+
+        expect(result.jobs).toHaveLength(selectsReview ? 1 : 0);
+        if (selectsReview) {
+          expect(result.jobs[0]?.action).toBe("review");
+        }
+        const reviewTarget = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
+        expect(reviewTarget).not.toBeNull();
+        expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTarget!.id) === null).toBe(selectsReview);
+      } finally {
+        db.close();
+      }
+    },
+  );
+
   test("reselects blocked review work when the failing check fingerprint changes", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);
