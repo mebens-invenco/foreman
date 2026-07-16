@@ -156,7 +156,7 @@ const checkpointMatchesReviewState = (
       checkpoint.latestConversationCommentId === latestActionableConversationCommentId(context) &&
       checkpoint.reviewThreadsFingerprint === actionableReviewThreadFingerprint(context) &&
       checkpoint.checksFingerprint === stableStringify({ failing: context.failingChecks, pending: context.pendingChecks }) &&
-      checkpoint.mergeState === context.mergeState
+      (checkpoint.mergeState === "conflicting") === (context.mergeState === "conflicting")
     : false;
 
 const reviewerCheckpointMatchesCommit = (

@@ -1109,7 +1109,7 @@ Checkpoint match requires:
 - same latest actionable review summary id on the current head
 - same latest actionable top-level PR conversation comment id after the current head
 - same checks fingerprint
-- same merge state
+- same merge-conflict status; transitions among non-conflicting provider states such as `unknown`, `clean`, and `dirty` do not invalidate the checkpoint
 
 If Scout sees a checkpoint that no longer matches live PR state, it must prune the checkpoint immediately and continue normal review evaluation.
 
