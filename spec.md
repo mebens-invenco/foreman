@@ -676,7 +676,7 @@ Review filtering rules:
 - actionable review summaries are top-level review summaries whose `commitId` equals the current PR `headSha`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
 - actionable conversation comments are top-level PR conversation comments created after `headIntroducedAt`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
 - actionable unresolved threads are file/line review threads where `isResolved == false` and the latest nested thread comment is not agent-authored, enriched with their nested thread comments
-- checks fingerprinting only considers failing and pending checks
+- review checkpoint check fingerprinting only considers failing checks; pending checks remain available in live review context but do not invalidate a review checkpoint
 
 ## Agent Runner
 
@@ -1108,7 +1108,7 @@ Checkpoint match requires:
 - same `head_sha`
 - same latest actionable review summary id on the current head
 - same latest actionable top-level PR conversation comment id after the current head
-- same checks fingerprint
+- every live failing check was present in the checkpoint; pending-check changes and removed failures do not invalidate the checkpoint
 - same merge-conflict status; transitions among non-conflicting provider states such as `unknown`, `clean`, and `dirty` do not invalidate the checkpoint
 
 If Scout sees a checkpoint that no longer matches live PR state, it must prune the checkpoint immediately and continue normal review evaluation.

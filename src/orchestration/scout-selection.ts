@@ -3,6 +3,7 @@ import {
   actionableReviewSummaries,
   actionableReviewThreadFingerprint,
   actionableReviewThreads,
+  failingChecksCoveredByFingerprint,
   latestActionableConversationCommentId,
   latestActionableReviewSummaryId,
   priorityToRank,
@@ -44,6 +45,15 @@ type TargetProgress = {
   latestAttempt: AttemptRecord | null;
   pullRequest: ResolvedPullRequest | null;
   state: TargetProgressState;
+};
+
+type ReviewCheckpointState = {
+  headSha: string;
+  latestReviewSummaryId: string | null;
+  latestConversationCommentId: string | null;
+  reviewThreadsFingerprint: string;
+  checksFingerprint: string;
+  mergeState: ReviewContext["mergeState"];
 };
 
 const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
@@ -100,7 +110,20 @@ const logBlockedOrdinaryWorkSkip = (logger: LoggerService | undefined, task: Tas
   logger?.info("skipping blocked ordinary work pending explicit unblock", context);
 };
 
-const reviewPriorityReason = (context: ReviewContext): string | null => {
+const checkpointMatchesReviewFeedback = (checkpoint: ReviewCheckpointState, context: ReviewContext): boolean =>
+  checkpoint.latestReviewSummaryId === latestActionableReviewSummaryId(context) &&
+  checkpoint.latestConversationCommentId === latestActionableConversationCommentId(context) &&
+  checkpoint.reviewThreadsFingerprint === actionableReviewThreadFingerprint(context);
+
+const reviewPriorityReason = (context: ReviewContext, checkpoint: ReviewCheckpointState | null): string | null => {
+  if (
+    checkpoint?.headSha === context.headSha &&
+    checkpointMatchesReviewFeedback(checkpoint, context) &&
+    !failingChecksCoveredByFingerprint(checkpoint.checksFingerprint, context) &&
+    context.failingChecks.length > 0
+  ) {
+    return "failing checks";
+  }
   if (actionableReviewThreads(context).length > 0) {
     return "unresolved review threads";
   }
@@ -157,24 +180,13 @@ const deploymentSelectionContext = (input: {
 });
 
 const checkpointMatchesReviewState = (
-  checkpoint:
-    | {
-        headSha: string;
-        latestReviewSummaryId: string | null;
-        latestConversationCommentId: string | null;
-        reviewThreadsFingerprint: string;
-        checksFingerprint: string;
-        mergeState: ReviewContext["mergeState"];
-      }
-    | null,
+  checkpoint: ReviewCheckpointState | null,
   context: ReviewContext,
 ): boolean =>
   checkpoint
     ? checkpoint.headSha === context.headSha &&
-      checkpoint.latestReviewSummaryId === latestActionableReviewSummaryId(context) &&
-      checkpoint.latestConversationCommentId === latestActionableConversationCommentId(context) &&
-      checkpoint.reviewThreadsFingerprint === actionableReviewThreadFingerprint(context) &&
-      checkpoint.checksFingerprint === stableStringify({ failing: context.failingChecks, pending: context.pendingChecks }) &&
+      checkpointMatchesReviewFeedback(checkpoint, context) &&
+      failingChecksCoveredByFingerprint(checkpoint.checksFingerprint, context) &&
       (checkpoint.mergeState === "conflicting") === (context.mergeState === "conflicting")
     : false;
 
@@ -862,7 +874,7 @@ export const runScoutSelection = async (input: {
           continue;
         }
 
-        const reason = reviewPriorityReason(context);
+        const reason = reviewPriorityReason(context, checkpoint);
         if (!reason) {
           continue;
         }

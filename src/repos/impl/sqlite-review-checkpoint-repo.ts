@@ -1,8 +1,8 @@
-import { stableStringify } from "../../lib/json.js";
 import { isoNow } from "../../lib/time.js";
 import { newId } from "../../lib/ids.js";
 import {
   actionableReviewThreadFingerprint,
+  failingChecksFingerprint,
   latestActionableConversationCommentId,
   latestActionableReviewSummaryId,
   type ReviewContext,
@@ -44,10 +44,7 @@ export class SqliteReviewCheckpointRepo implements ReviewCheckpointRepo {
     reviewContext: ReviewContext;
     sourceAttemptId: string;
   }): void {
-    const checksFingerprint = stableStringify({
-      failing: input.reviewContext.failingChecks,
-      pending: input.reviewContext.pendingChecks,
-    });
+    const checksFingerprint = failingChecksFingerprint(input.reviewContext);
     const latestReviewSummaryId = latestActionableReviewSummaryId(input.reviewContext);
     const latestConversationCommentId = latestActionableConversationCommentId(input.reviewContext);
     const reviewThreadsFingerprint = actionableReviewThreadFingerprint(input.reviewContext);
