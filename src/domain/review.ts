@@ -99,3 +99,20 @@ export const actionableReviewThreadFingerprint = (context: ReviewContext): strin
       .map((thread) => ({ id: thread.id, latestCommentId: thread.comments.at(-1)?.id ?? null }))
       .sort((left, right) => left.id.localeCompare(right.id)),
   );
+
+export const failingChecksFingerprint = (context: ReviewContext): string =>
+  stableStringify(context.failingChecks);
+
+export const failingChecksCoveredByFingerprint = (fingerprint: string, context: ReviewContext): boolean => {
+  try {
+    const checkpointedChecks: unknown = JSON.parse(fingerprint);
+    if (!Array.isArray(checkpointedChecks)) {
+      return false;
+    }
+
+    const checkpointedFailures = new Set(checkpointedChecks.map(stableStringify));
+    return context.failingChecks.every((check) => checkpointedFailures.has(stableStringify(check)));
+  } catch {
+    return false;
+  }
+};

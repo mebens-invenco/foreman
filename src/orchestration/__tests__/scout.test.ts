@@ -1675,6 +1675,83 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test.each`
+    transition                         | checkpointPending                                                                 | livePending                                                                       | checkpointFailing                                                            | liveFailing
+    ${"pending check appears"}        | ${[] satisfies ReviewContext["pendingChecks"]}                                    | ${[{ name: "lint", state: "pending" }] satisfies ReviewContext["pendingChecks"]} | ${[] satisfies ReviewContext["failingChecks"]}                               | ${[] satisfies ReviewContext["failingChecks"]}
+    ${"pending checks shrink"}        | ${[{ name: "lint", state: "pending" }, { name: "unit", state: "pending" }]}    | ${[{ name: "unit", state: "pending" }]}                                      | ${[] satisfies ReviewContext["failingChecks"]}                               | ${[] satisfies ReviewContext["failingChecks"]}
+    ${"pending checks reorder"}       | ${[{ name: "lint", state: "pending" }, { name: "unit", state: "pending" }]}    | ${[{ name: "unit", state: "pending" }, { name: "lint", state: "pending" }]} | ${[] satisfies ReviewContext["failingChecks"]}                               | ${[] satisfies ReviewContext["failingChecks"]}
+    ${"pending check completes"}      | ${[{ name: "lint", state: "pending" }]}                                           | ${[] satisfies ReviewContext["pendingChecks"]}                                 | ${[] satisfies ReviewContext["failingChecks"]}                               | ${[] satisfies ReviewContext["failingChecks"]}
+    ${"last failing check disappears"} | ${[] satisfies ReviewContext["pendingChecks"]}                                    | ${[] satisfies ReviewContext["pendingChecks"]}                                 | ${[{ name: "lint", state: "failure" }] satisfies ReviewContext["failingChecks"]} | ${[] satisfies ReviewContext["failingChecks"]}
+    ${"one failing check disappears"} | ${[] satisfies ReviewContext["pendingChecks"]}                                    | ${[] satisfies ReviewContext["pendingChecks"]}                                 | ${[{ name: "lint", state: "failure" }, { name: "unit", state: "failure" }]} | ${[{ name: "unit", state: "failure" }]}
+  `(
+    "keeps the review checkpoint when $transition",
+    async ({ checkpointPending, livePending, checkpointFailing, liveFailing }: {
+      checkpointPending: ReviewContext["pendingChecks"];
+      livePending: ReviewContext["pendingChecks"];
+      checkpointFailing: ReviewContext["failingChecks"];
+      liveFailing: ReviewContext["failingChecks"];
+    }) => {
+      const tempDir = await createTempDir("foreman-scout-check-transition-");
+      cleanupDirs.push(tempDir);
+      const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      const reviewTask = task({
+        id: "TASK-CHECK-TRANSITION",
+        title: "Check transition task",
+        state: "in_review",
+        providerState: "in_review",
+        priority: "normal",
+        updatedAt: "2026-03-14T12:00:00Z",
+        pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/13", source: "provider" } satisfies TaskPullRequest],
+      });
+      const checkpointContext = reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/13",
+        pullRequestNumber: 13,
+        state: "open",
+        headBranch: "task-check-transition",
+        baseBranch: "main",
+        reviewSummaries: [
+          {
+            id: "old-summary",
+            body: "Historical review feedback",
+            authorName: "reviewer",
+            authoredByAgent: false,
+            createdAt: "2026-03-14T12:01:00Z",
+            commitId: "abc",
+            isCurrentHead: true,
+          },
+        ],
+        pendingChecks: checkpointPending,
+        failingChecks: checkpointFailing,
+      });
+      const liveContext = {
+        ...checkpointContext,
+        pendingChecks: livePending,
+        failingChecks: liveFailing,
+      };
+      seedReviewerCheckpoint(db, reviewTask, checkpointContext);
+      seedReviewCheckpoint(db, reviewTask, checkpointContext);
+
+      try {
+        const result = await runScoutSelection({
+          config,
+          foremanRepos: db,
+          taskSystem: new FakeTaskSystem([reviewTask]),
+          reviewService: new FakeReviewService({ [reviewTask.id]: liveContext }),
+          repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+          triggerType: "manual",
+        });
+
+        expect(result.jobs).toHaveLength(0);
+        const reviewTarget = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
+        expect(reviewTarget).not.toBeNull();
+        expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTarget!.id)).not.toBeNull();
+      } finally {
+        db.close();
+      }
+    },
+  );
+
   test.each([
     { checkpointMergeState: "unknown", liveMergeState: "clean", selectsReview: false },
     { checkpointMergeState: "clean", liveMergeState: "unknown", selectsReview: false },
@@ -1736,69 +1813,72 @@ describe("runScoutSelection", () => {
     },
   );
 
-  test("reselects blocked review work when the failing check fingerprint changes", async () => {
-    const tempDir = await createTempDir("foreman-scout-test-");
-    cleanupDirs.push(tempDir);
-    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
-    const config = createDefaultWorkspaceConfig("foo", "file");
-
-    const reviewTask = task({
-      id: "TASK-0011",
-      title: "Changed blocked review task",
-      state: "in_review",
-      providerState: "in_review",
-      priority: "normal",
-      updatedAt: "2026-03-14T12:00:00Z",
-      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/11", source: "provider" } satisfies TaskPullRequest],
-    });
-    const blockedContext: ReviewContext = {
-      provider: "github",
-      pullRequestUrl: "https://github.com/acme/repo-a/pull/11",
-      pullRequestNumber: 11,
-      state: "open",
-      isDraft: false,
-      headSha: "blocked-head",
-      headBranch: "task-0011",
-      baseBranch: "main",
-      headIntroducedAt: "2026-03-14T12:00:00Z",
-      mergeState: "clean",
-      reviewSummaries: [],
-      conversationComments: [],
-      reviewThreads: [],
-      failingChecks: [{ name: "ci/circleci: DEV deploy compute", state: "failure" }],
-      pendingChecks: [],
-    };
-    const changedContext: ReviewContext = {
-      ...blockedContext,
-      failingChecks: [{ name: "ci/circleci: Browser tests", state: "failure" }],
-    };
-    seedReviewCheckpoint(db, reviewTask, blockedContext);
-
-    const taskSystem = new FakeTaskSystem([reviewTask]);
-    const reviewService = new FakeReviewService({
-      [reviewTask.id]: changedContext,
-    });
-
-    try {
-      const result = await runScoutSelection({
-        config,
-        foremanRepos: db,
-        taskSystem,
-        reviewService,
-        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
-        triggerType: "manual",
+  test.each`
+    transition                         | checkpointFailing                                                                                 | liveFailing
+    ${"a failing check appears"}      | ${[] satisfies ReviewContext["failingChecks"]}                                                    | ${[{ name: "lint", state: "failure" }] satisfies ReviewContext["failingChecks"]}
+    ${"the failing check is replaced"} | ${[{ name: "lint", state: "failure" }] satisfies ReviewContext["failingChecks"]}                | ${[{ name: "unit", state: "failure" }] satisfies ReviewContext["failingChecks"]}
+  `(
+    "reselects review for failing checks when $transition",
+    async ({ checkpointFailing, liveFailing }: {
+      checkpointFailing: ReviewContext["failingChecks"];
+      liveFailing: ReviewContext["failingChecks"];
+    }) => {
+      const tempDir = await createTempDir("foreman-scout-failing-check-transition-");
+      cleanupDirs.push(tempDir);
+      const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      const reviewTask = task({
+        id: "TASK-FAILING-CHECK-TRANSITION",
+        title: "Failing check transition task",
+        state: "in_review",
+        providerState: "in_review",
+        priority: "normal",
+        updatedAt: "2026-03-14T12:00:00Z",
+        pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/11", source: "provider" } satisfies TaskPullRequest],
       });
+      const checkpointContext = reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/11",
+        pullRequestNumber: 11,
+        state: "open",
+        headBranch: "task-failing-check-transition",
+        baseBranch: "main",
+        reviewSummaries: [
+          {
+            id: "old-summary",
+            body: "Historical review feedback",
+            authorName: "reviewer",
+            authoredByAgent: false,
+            createdAt: "2026-03-14T12:01:00Z",
+            commitId: "abc",
+            isCurrentHead: true,
+          },
+        ],
+        failingChecks: checkpointFailing,
+      });
+      const liveContext = { ...checkpointContext, failingChecks: liveFailing };
+      seedReviewCheckpoint(db, reviewTask, checkpointContext);
 
-      expect(result.jobs).toHaveLength(1);
-      expect(result.jobs[0]?.action).toBe("review");
-      expect(result.jobs[0]?.selectionReason).toBe("failing checks");
-      const reviewTarget = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
-      expect(reviewTarget).not.toBeNull();
-      expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTarget!.id)).toBeNull();
-    } finally {
-      db.close();
-    }
-  });
+      try {
+        const result = await runScoutSelection({
+          config,
+          foremanRepos: db,
+          taskSystem: new FakeTaskSystem([reviewTask]),
+          reviewService: new FakeReviewService({ [reviewTask.id]: liveContext }),
+          repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+          triggerType: "manual",
+        });
+
+        expect(result.jobs).toHaveLength(1);
+        expect(result.jobs[0]?.action).toBe("review");
+        expect(result.jobs[0]?.selectionReason).toBe("failing checks");
+        const reviewTarget = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
+        expect(reviewTarget).not.toBeNull();
+        expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTarget!.id)).toBeNull();
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   test("reselects review work when unresolved review thread activity changes after a checkpoint", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
