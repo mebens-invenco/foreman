@@ -2,10 +2,10 @@
   "name": "foreman",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@11.3.0",
+  "packageManager": "pnpm@11.11.0",
   "engines": {
     "node": ">=24.14.0 <25",
-    "pnpm": "11.3.0"
+    "pnpm": "11.11.0"
   },
   "type": "module",
   "bin": {
@@ -38,11 +38,11 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "24.13.2",
+    "@types/node": "24.13.3",
     "@types/better-sqlite3": "^7.6.13",
     "tsx": "^4.23.0",
     "typescript": "^5.9.2",
     "vite": "^7.3.6",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.7"
   }
 }
