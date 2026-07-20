@@ -1283,6 +1283,53 @@ describe("persistence repos", () => {
     }
   });
 
+  test("0035 clamps a pre-clamp proven learning to established and preserves its recency", async () => {
+    const tempDir = await createTempDir("foreman-db-test-");
+    cleanupDirs.push(tempDir);
+
+    // A project root staged WITHOUT 0035, so the fixture rows exist before it
+    // runs: the runner applies only pending migrations, so re-migrating against
+    // the real root fires exactly 0035 over them.
+    const stagedRoot = path.join(tempDir, "staged-root");
+    await fs.mkdir(path.join(stagedRoot, "migrations"), { recursive: true });
+    for (const file of await fs.readdir(path.join(projectRoot, "migrations"))) {
+      if (file === "0035_clamp_predeclared_proven.sql") continue;
+      await fs.copyFile(path.join(projectRoot, "migrations", file), path.join(stagedRoot, "migrations", file));
+    }
+
+    const dbPath = path.join(tempDir, "foreman.db");
+    const preservedUpdatedAt = "2026-07-17T06:05:57.416Z";
+    const before = await createMigratedDb(dbPath, stagedRoot);
+    try {
+      for (const [id, confidence] of [
+        ["learn-declared-proven", "proven"],
+        ["learn-declared-established", "established"],
+      ] as const) {
+        before.learnings.addLearning({ id, title: id, repo: "foreman", confidence, content: "body", tags: [] });
+        before.database.sqlite.prepare("UPDATE learning SET updated_at = ? WHERE id = ?").run(preservedUpdatedAt, id);
+      }
+    } finally {
+      before.close();
+    }
+
+    const db = await createMigratedDb(dbPath, projectRoot);
+    try {
+      const byId = new Map(
+        db.learnings.getLearningsByIds(["learn-declared-proven", "learn-declared-established"]).map((row) => [row.id, row]),
+      );
+      expect(byId.get("learn-declared-proven")).toMatchObject({
+        confidence: "established",
+        updatedAt: preservedUpdatedAt,
+      });
+      expect(byId.get("learn-declared-established")).toMatchObject({
+        confidence: "established",
+        updatedAt: preservedUpdatedAt,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   test("finds the nearest learning embedding by cosine within the model and repo scope", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
