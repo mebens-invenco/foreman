@@ -3,11 +3,16 @@ import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { Task } from "../domain/index.js";
 import { stringifyWorkspaceConfig, createDefaultWorkspaceConfig } from "../workspace/config.js";
 import { createMigratedDb, createWorkspacePaths, seedExecutionAttempt, testProjectRoot } from "../test-support/helpers.js";
+
+// Every test here spawns the built CLI as a real subprocess — some several times — which
+// outruns the 5s global default under full-suite load. Budgeted here rather than globally:
+// slow CLI spawns are expected only here.
+vi.setConfig({ testTimeout: 30_000 });
 
 const execFileAsync = promisify(execFile);
 const cleanupDirs: string[] = [];
