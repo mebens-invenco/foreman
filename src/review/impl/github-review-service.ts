@@ -399,7 +399,7 @@ export class GitHubReviewService implements ReviewService {
     const startedAt = Date.now();
     const method = (init.method ?? "GET").toUpperCase();
     const isRead = method === "GET";
-    const maxAttempts = isRead ? GITHUB_REQUEST_MAX_ATTEMPTS : 1;
+    const maxAttempts = GITHUB_REQUEST_MAX_ATTEMPTS;
     const requestContext: GitHubRequestContext = { kind: "REST", method, path };
     this.throwIfRateLimited(requestContext);
 
@@ -419,7 +419,7 @@ export class GitHubReviewService implements ReviewService {
         });
       } catch (error) {
         if (isAbortLikeError(error)) {
-          if (attempt < maxAttempts) {
+          if (isRead && attempt < maxAttempts) {
             const delayMs = retryDelayMs(attempt);
             this.logger.warn("GitHub REST request timed out; retrying", {
               method,
@@ -469,7 +469,8 @@ export class GitHubReviewService implements ReviewService {
           });
         }
 
-        if (isRead && isRetryableGitHubResponse(response.status, body) && attempt < maxAttempts) {
+        const shouldRetry = isRead ? isRetryableGitHubResponse(response.status, body) : isGitHubBadCredentialsResponse(response.status, body);
+        if (shouldRetry && attempt < maxAttempts) {
           const delayMs = retryDelayMs(attempt);
           this.logger.warn("GitHub REST request failed with transient status; retrying", {
             method,
@@ -528,7 +529,7 @@ export class GitHubReviewService implements ReviewService {
     const operationKind = query.match(/\b(query|mutation)\b/)?.[1] ?? "query";
     const operationName = query.match(/\b(?:query|mutation)\s+(\w+)/)?.[1] ?? "anonymous";
     const isRead = operationKind === "query";
-    const maxAttempts = isRead ? GITHUB_REQUEST_MAX_ATTEMPTS : 1;
+    const maxAttempts = GITHUB_REQUEST_MAX_ATTEMPTS;
     const variableKeys = Object.keys(variables).sort().join(",");
     const requestContext: GitHubRequestContext = { kind: "GraphQL", operationName };
     this.throwIfRateLimited(requestContext);
@@ -555,7 +556,7 @@ export class GitHubReviewService implements ReviewService {
         });
       } catch (error) {
         if (isAbortLikeError(error)) {
-          if (attempt < maxAttempts) {
+          if (isRead && attempt < maxAttempts) {
             const delayMs = retryDelayMs(attempt);
             this.logger.warn("GitHub GraphQL request timed out; retrying", {
               operationName,
@@ -603,7 +604,8 @@ export class GitHubReviewService implements ReviewService {
           });
         }
 
-        if (isRead && isRetryableGitHubResponse(response.status, body) && attempt < maxAttempts) {
+        const shouldRetry = isRead ? isRetryableGitHubResponse(response.status, body) : isGitHubBadCredentialsResponse(response.status, body);
+        if (shouldRetry && attempt < maxAttempts) {
           const delayMs = retryDelayMs(attempt);
           this.logger.warn("GitHub GraphQL request failed with transient status; retrying", {
             operationName,
