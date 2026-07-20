@@ -308,10 +308,11 @@ const seedReviewerCheckpoint = (
   });
 };
 
-const seedFailedReviewerAttempt = (
+const seedReviewerAttempt = (
   db: Awaited<ReturnType<typeof createMigratedDb>>,
   reviewTask: Task,
   context: ReviewContext,
+  status: "failed" | "canceled" | "completed" = "failed",
 ): { jobId: string; targetId: string } => {
   db.workers.ensureWorkerSlots(1);
   const worker = db.workers.listWorkers()[0];
@@ -342,14 +343,15 @@ const seedFailedReviewerAttempt = (
     leases: [],
   });
   expect(attempt).not.toBeNull();
-  db.attempts.finalizeAttempt(attempt!.id, "failed", {
+  const summary = status === "failed" ? "Reviewer runner failed" : `Reviewer runner ${status}`;
+  db.attempts.finalizeAttempt(attempt!.id, status, {
     finishedAt: "2026-03-14T12:04:00Z",
-    summary: "Reviewer runner failed",
-    errorMessage: "Reviewer runner failed",
+    summary,
+    errorMessage: status === "failed" ? summary : null,
   });
-  db.jobs.updateJobStatus(reviewerJob.id, "failed", {
+  db.jobs.updateJobStatus(reviewerJob.id, status, {
     finishedAt: "2026-03-14T12:04:00Z",
-    errorMessage: "Reviewer runner failed",
+    errorMessage: status === "failed" ? summary : null,
   });
   return { jobId: reviewerJob.id, targetId: target!.id };
 };
@@ -2124,7 +2126,7 @@ describe("runScoutSelection", () => {
       headBranch: "task-failed-reviewer",
       baseBranch: "main",
     });
-    seedFailedReviewerAttempt(db, reviewTask, context);
+    seedReviewerAttempt(db, reviewTask, context);
 
     try {
       const result = await runScoutSelection({
@@ -2141,6 +2143,50 @@ describe("runScoutSelection", () => {
       db.close();
     }
   });
+
+  test.each(["canceled", "completed"] as const)(
+    "reselects reviewer work when the latest reviewer job is %s",
+    async (status) => {
+      const tempDir = await createTempDir("foreman-scout-test-");
+      cleanupDirs.push(tempDir);
+      const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      const reviewTask = task({
+        id: `TASK-${status.toUpperCase()}-REVIEWER`,
+        title: `${status} reviewer task`,
+        state: "in_review",
+        providerState: "in_review",
+        priority: "normal",
+        updatedAt: "2026-03-14T12:00:00Z",
+        pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/154", source: "provider" } satisfies TaskPullRequest],
+      });
+      const context = reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/154",
+        pullRequestNumber: 154,
+        state: "open",
+        headSha: "non-failed-reviewer-head",
+        headBranch: "task-non-failed-reviewer",
+        baseBranch: "main",
+      });
+      seedReviewerAttempt(db, reviewTask, context, status);
+
+      try {
+        const result = await runScoutSelection({
+          config,
+          foremanRepos: db,
+          taskSystem: new FakeTaskSystem([reviewTask]),
+          reviewService: new FakeReviewService({ [reviewTask.id]: context }),
+          repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+          triggerType: "worker_finished",
+        });
+
+        expect(result.jobs).toHaveLength(1);
+        expect(result.jobs[0]?.action).toBe("reviewer");
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   test.each(["poll", "startup", "lease_change", "task_mutation", "manual"] as const)(
     "allows failed reviewers on later %s scouts",
@@ -2166,7 +2212,7 @@ describe("runScoutSelection", () => {
         headBranch: "task-failed-reviewer-later",
         baseBranch: "main",
       });
-      seedFailedReviewerAttempt(db, reviewTask, context);
+      seedReviewerAttempt(db, reviewTask, context);
 
       try {
         const result = await runScoutSelection({
@@ -2208,7 +2254,7 @@ describe("runScoutSelection", () => {
       headBranch: "task-stale-failed-reviewer",
       baseBranch: "main",
     });
-    seedFailedReviewerAttempt(db, reviewTask, failedContext);
+    seedReviewerAttempt(db, reviewTask, failedContext);
     const currentContext = { ...failedContext, headSha: "new-reviewer-head" };
 
     try {
@@ -2250,7 +2296,7 @@ describe("runScoutSelection", () => {
       headBranch: "task-old-failed-reviewer",
       baseBranch: "main",
     });
-    const failed = seedFailedReviewerAttempt(db, reviewTask, context);
+    const failed = seedReviewerAttempt(db, reviewTask, context);
     db.database.sqlite
       .prepare("UPDATE job SET created_at = ?, updated_at = ?, finished_at = ? WHERE id = ?")
       .run("2026-03-14T12:00:00Z", "2026-03-14T12:04:00Z", "2026-03-14T12:04:00Z", failed.jobId);
