@@ -1675,6 +1675,51 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test("does not select review work for a malformed checkpoint fingerprint without live failures", async () => {
+    const tempDir = await createTempDir("foreman-scout-malformed-checkpoint-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const reviewTask = task({
+      id: "TASK-MALFORMED-CHECKPOINT",
+      title: "Malformed review checkpoint task",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/14", source: "provider" } satisfies TaskPullRequest],
+    });
+    const context = reviewContext({
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/14",
+      pullRequestNumber: 14,
+      state: "open",
+      headBranch: "task-malformed-checkpoint",
+      baseBranch: "main",
+    });
+    seedReviewCheckpoint(db, reviewTask, context);
+    const reviewTarget = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
+    expect(reviewTarget).not.toBeNull();
+    db.database.sqlite
+      .prepare("UPDATE review_checkpoint SET checks_fingerprint = ? WHERE task_target_id = ?")
+      .run("not-json", reviewTarget!.id);
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({ [reviewTask.id]: context }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs.some((job) => job.action === "review")).toBe(false);
+      expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTarget!.id)).toBeNull();
+    } finally {
+      db.close();
+    }
+  });
+
   test.each`
     transition                         | checkpointPending                                                                 | livePending                                                                       | checkpointFailing                                                            | liveFailing
     ${"pending check appears"}        | ${[] satisfies ReviewContext["pendingChecks"]}                                    | ${[{ name: "lint", state: "pending" }] satisfies ReviewContext["pendingChecks"]} | ${[] satisfies ReviewContext["failingChecks"]}                               | ${[] satisfies ReviewContext["failingChecks"]}
@@ -1729,7 +1774,6 @@ describe("runScoutSelection", () => {
         pendingChecks: livePending,
         failingChecks: liveFailing,
       };
-      seedReviewerCheckpoint(db, reviewTask, checkpointContext);
       seedReviewCheckpoint(db, reviewTask, checkpointContext);
 
       try {
@@ -1742,7 +1786,7 @@ describe("runScoutSelection", () => {
           triggerType: "manual",
         });
 
-        expect(result.jobs).toHaveLength(0);
+        expect(result.jobs.some((job) => job.action === "review")).toBe(false);
         const reviewTarget = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
         expect(reviewTarget).not.toBeNull();
         expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTarget!.id)).not.toBeNull();
@@ -1753,18 +1797,18 @@ describe("runScoutSelection", () => {
   );
 
   test.each([
-    { checkpointMergeState: "unknown", liveMergeState: "clean", selectsReview: false },
-    { checkpointMergeState: "clean", liveMergeState: "unknown", selectsReview: false },
-    { checkpointMergeState: "clean", liveMergeState: "conflicting", selectsReview: true },
-    { checkpointMergeState: "unknown", liveMergeState: "conflicting", selectsReview: true },
-    { checkpointMergeState: "conflicting", liveMergeState: "clean", selectsReview: true },
+    { checkpointMergeState: "unknown", liveMergeState: "clean", expectedReason: null },
+    { checkpointMergeState: "clean", liveMergeState: "unknown", expectedReason: null },
+    { checkpointMergeState: "clean", liveMergeState: "conflicting", expectedReason: "merge conflict status changed" },
+    { checkpointMergeState: "unknown", liveMergeState: "conflicting", expectedReason: "merge conflict status changed" },
+    { checkpointMergeState: "conflicting", liveMergeState: "clean", expectedReason: "merge conflict status changed" },
   ] satisfies Array<{
     checkpointMergeState: ReviewContext["mergeState"];
     liveMergeState: ReviewContext["mergeState"];
-    selectsReview: boolean;
+    expectedReason: string | null;
   }>)(
-    "$checkpointMergeState -> $liveMergeState merge state selects review: $selectsReview",
-    async ({ checkpointMergeState, liveMergeState, selectsReview }) => {
+    "$checkpointMergeState -> $liveMergeState merge state selects review for: $expectedReason",
+    async ({ checkpointMergeState, liveMergeState, expectedReason }) => {
       const tempDir = await createTempDir("foreman-scout-merge-state-checkpoint-");
       cleanupDirs.push(tempDir);
       const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
@@ -1800,13 +1844,14 @@ describe("runScoutSelection", () => {
           triggerType: "manual",
         });
 
-        expect(result.jobs).toHaveLength(selectsReview ? 1 : 0);
-        if (selectsReview) {
+        expect(result.jobs).toHaveLength(expectedReason ? 1 : 0);
+        if (expectedReason) {
           expect(result.jobs[0]?.action).toBe("review");
+          expect(result.jobs[0]?.selectionReason).toBe(expectedReason);
         }
         const reviewTarget = db.taskMirror.getTaskTarget(reviewTask.id, "repo-a");
         expect(reviewTarget).not.toBeNull();
-        expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTarget!.id) === null).toBe(selectsReview);
+        expect(db.reviewCheckpoints.getReviewCheckpoint(reviewTarget!.id) === null).toBe(expectedReason !== null);
       } finally {
         db.close();
       }

@@ -1008,13 +1008,15 @@ Everything else is treated as potentially actionable.
 
 ### Review Action Ordering
 
-Pick the first matching review action in this order:
+Without a matching checkpoint on the current head, pick the first matching review action in this order:
 
 1. unresolved review threads
 2. actionable top-level review summaries on the current PR head
 3. actionable top-level PR conversation comments after the current PR head
 4. failing checks
 5. merge conflicts
+
+When a checkpoint exists on the current head, apply the same ordering only to review feedback or failing checks that changed since the checkpoint, followed by any change in merge-conflict status. Unchanged historical signals do not provide the reason for new review work.
 
 ### Retry Rule
 

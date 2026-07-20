@@ -1,6 +1,12 @@
 import { describe, expect, test } from "vitest";
 
-import { actionableReviewThreadFingerprint, actionableReviewThreads, type ReviewContext } from "../../domain/index.js";
+import {
+  actionableReviewThreadFingerprint,
+  actionableReviewThreads,
+  failingChecksCoveredByFingerprint,
+  failingChecksFingerprint,
+  type ReviewContext,
+} from "../../domain/index.js";
 
 const baseContext = (reviewThreads: ReviewContext["reviewThreads"]): ReviewContext => ({
   provider: "github",
@@ -72,5 +78,40 @@ describe("review thread actionability", () => {
 
     expect(actionableReviewThreads(context)).toEqual([]);
     expect(actionableReviewThreadFingerprint(context)).toBe("[]");
+  });
+});
+
+describe("failing check fingerprints", () => {
+  test("round-trips the checkpointed failures used for coverage", () => {
+    const checkpointContext = {
+      ...baseContext([]),
+      failingChecks: [
+        { name: "lint", state: "failure" },
+        { name: "unit", state: "failure" },
+      ],
+    } satisfies ReviewContext;
+    const fingerprint = failingChecksFingerprint(checkpointContext);
+
+    expect(fingerprint).toBe('[{"name":"lint","state":"failure"},{"name":"unit","state":"failure"}]');
+    expect(
+      failingChecksCoveredByFingerprint(fingerprint, {
+        ...checkpointContext,
+        failingChecks: [{ name: "unit", state: "failure" }],
+      }),
+    ).toBe(true);
+    expect(
+      failingChecksCoveredByFingerprint(fingerprint, {
+        ...checkpointContext,
+        failingChecks: [{ name: "browser", state: "failure" }],
+      }),
+    ).toBe(false);
+  });
+
+  test.each`
+    fingerprint
+    ${'{"failing":[],"pending":[]}'}
+    ${"not-json"}
+  `("rejects the legacy or malformed fingerprint $fingerprint", ({ fingerprint }: { fingerprint: string }) => {
+    expect(failingChecksCoveredByFingerprint(fingerprint, baseContext([]))).toBe(false);
   });
 });
