@@ -116,14 +116,34 @@ const checkpointMatchesReviewFeedback = (checkpoint: ReviewCheckpointState, cont
   checkpoint.reviewThreadsFingerprint === actionableReviewThreadFingerprint(context);
 
 const reviewPriorityReason = (context: ReviewContext, checkpoint: ReviewCheckpointState | null): string | null => {
-  if (
-    checkpoint?.headSha === context.headSha &&
-    checkpointMatchesReviewFeedback(checkpoint, context) &&
-    !failingChecksCoveredByFingerprint(checkpoint.checksFingerprint, context) &&
-    context.failingChecks.length > 0
-  ) {
-    return "failing checks";
+  if (checkpoint?.headSha === context.headSha) {
+    if (
+      checkpoint.reviewThreadsFingerprint !== actionableReviewThreadFingerprint(context) &&
+      actionableReviewThreads(context).length > 0
+    ) {
+      return "unresolved review threads";
+    }
+    if (
+      checkpoint.latestReviewSummaryId !== latestActionableReviewSummaryId(context) &&
+      actionableReviewSummaries(context).length > 0
+    ) {
+      return "actionable review summary on current head";
+    }
+    if (
+      checkpoint.latestConversationCommentId !== latestActionableConversationCommentId(context) &&
+      actionableConversationComments(context).length > 0
+    ) {
+      return "actionable pull request comment after current head";
+    }
+    if (!failingChecksCoveredByFingerprint(checkpoint.checksFingerprint, context) && context.failingChecks.length > 0) {
+      return "failing checks";
+    }
+    if ((checkpoint.mergeState === "conflicting") !== (context.mergeState === "conflicting")) {
+      return "merge conflict status changed";
+    }
+    return null;
   }
+
   if (actionableReviewThreads(context).length > 0) {
     return "unresolved review threads";
   }
