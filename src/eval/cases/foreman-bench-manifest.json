@@ -1,19 +1,33 @@
 {
   "repo": "invenco/foreman-bench",
-  "note": "Expectations for the live fixture PRs in invenco/foreman-bench. Kept here — never in the bench repo — because the reviewer explores its worktree during a pass and a manifest naming the planted findings would contaminate every case. Fixture PRs are frozen: the live-pr driver captures review mutations without applying them, so PR state never drifts. Do not merge or close the referenced PRs. 2026-07-23: PRs #1, #2, and #4 each carry ONE seeded COMMENT review (the sanctioned one-time exception) so continuation cases have real prior-review threads; the priorCheckpoint entries below pin those reviews' real node ids and thread fingerprints. No further reviews or comments may be added.",
+  "note": "Expectations for the live fixture PRs in invenco/foreman-bench. Kept here — never in the bench repo — because the reviewer explores its worktree during a pass and a manifest naming the planted findings would contaminate every case. Fixture PRs are frozen: the live-pr driver captures review mutations without applying them, so PR state never drifts. Do not merge or close the referenced PRs. 2026-07-23: PRs #1, #2, and #4 each carry ONE seeded COMMENT review (the sanctioned one-time exception) so continuation cases have real prior-review threads; the priorCheckpoint entries below pin those reviews' real node ids and thread fingerprints. No further reviews or comments may be added. PR #5 (and #3) must stay UNSEEDED — they carry the first-pass planted-finding coverage, which dies the moment a review exists on the PR.",
   "cases": [
     {
-      "id": "live-planted-silent-failure",
+      "id": "live-prior-review-standdown",
       "pullRequest": 1,
       "branch": "bench/live-carrier-rates",
       "headSha": "2e22aac5853172210affffc42adf06c39d978f32",
       "headIntroducedAt": "2026-07-22T07:06:56Z",
       "action": "reviewer",
       "variant": "first_pass",
-      "plantedFinding": "CarrierRateGateway.currentRateCents swallows the rate-fetch failure: the catch returns ok(fallbackCents) instead of the typed sad result, so callers cannot distinguish a live rate from a silent fallback and the CarrierRateError type is dead.",
+      "plantedFinding": "Re-scoped 2026-07-23 (was live-planted-silent-failure, expect completed): once the seeded review landed, the planted CarrierRateGateway silent fallback is already flagged by an open inline thread. A first-pass reviewer on an already-reviewed unchanged head must suppress duplicate feedback and stand down, not re-flag the settled finding. First-pass planted-finding coverage moved to live-planted-address-fallback (PR #5, unseeded).",
+      "expect": {
+        "outcome": "no_action_needed",
+        "summaryMaxChars": 450
+      }
+    },
+    {
+      "id": "live-planted-address-fallback",
+      "pullRequest": 5,
+      "branch": "bench/address-validation",
+      "headSha": "41b09cf6c7d9599a1a5e44f9af5b3c3c16184d8b",
+      "headIntroducedAt": "2026-07-23T08:48:14Z",
+      "action": "reviewer",
+      "variant": "first_pass",
+      "plantedFinding": "AddressValidationGateway.deliverability swallows the validation-outage failure: the catch returns ok({deliverable: true}) instead of the typed sad result, so an outage silently marks every address deliverable and the AddressValidationError type is dead. The committed tests only cover client verdicts, never the outage path.",
       "expect": {
         "outcome": "completed",
-        "mustFlagPaths": ["src/modules/quotes/gateways/CarrierRateGateway.ts"],
+        "mustFlagPaths": ["src/modules/quotes/gateways/AddressValidationGateway.ts"],
         "maxThreads": 3
       }
     },
