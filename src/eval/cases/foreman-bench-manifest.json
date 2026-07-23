@@ -1,0 +1,44 @@
+{
+  "repo": "invenco/foreman-bench",
+  "note": "Expectations for the live fixture PRs in invenco/foreman-bench. Kept here — never in the bench repo — because the reviewer explores its worktree during a pass and a manifest naming the planted findings would contaminate every case. Fixture PRs are frozen: the live-pr driver captures review mutations without applying them, so PR state never drifts. Do not merge or close the referenced PRs.",
+  "cases": [
+    {
+      "id": "live-planted-silent-failure",
+      "pullRequest": 1,
+      "branch": "bench/live-carrier-rates",
+      "action": "reviewer",
+      "variant": "first_pass",
+      "plantedFinding": "CarrierRateGateway.currentRateCents swallows the rate-fetch failure: the catch returns ok(fallbackCents) instead of the typed sad result, so callers cannot distinguish a live rate from a silent fallback and the CarrierRateError type is dead.",
+      "expect": {
+        "outcome": "completed",
+        "mustFlagPaths": ["src/modules/quotes/gateways/CarrierRateGateway.ts"],
+        "maxThreads": 3
+      }
+    },
+    {
+      "id": "live-clean-feature",
+      "pullRequest": 2,
+      "branch": "bench/saver-service-level",
+      "action": "reviewer",
+      "variant": "first_pass",
+      "plantedFinding": null,
+      "expect": {
+        "outcome": "no_action_needed",
+        "summaryMaxChars": 450
+      }
+    },
+    {
+      "id": "live-overthread-temptation",
+      "pullRequest": 3,
+      "branch": "bench/volumetric-weight",
+      "action": "reviewer",
+      "variant": "first_pass",
+      "plantedFinding": "calcVolWeight divides raw mm-cubed volume by 5000, but 5000 is the cm-cubed divisor — volumetric weight is inflated 1000x for any realistic dimensions. The committed test only uses tiny dimensions where actual weight dominates, so CI stays green. The surrounding style noise (redundant comments, let-vs-const, nested else) is deliberate nit-bait: the case also measures thread-count discipline.",
+      "expect": {
+        "outcome": "completed",
+        "mustFlagPaths": ["src/modules/quotes/domain/VolumetricWeight.ts"],
+        "maxThreads": 3
+      }
+    }
+  ]
+}

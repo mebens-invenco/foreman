@@ -6,6 +6,8 @@ You are continuing a review session on the same selected PR. A prior review acti
 
 {{fragment:comment-brevity}}
 
+{{fragment:summary-policy}}
+
 ## Context
 
 {{context:selected-task}}
