@@ -5,6 +5,7 @@ import path from "node:path";
 
 import type { RunnerProvider } from "../domain/index.js";
 import { createAgentRunner } from "../execution/create-agent-runner.js";
+import { exec } from "../lib/process.js";
 import { renderWorkerPrompt } from "../execution/render-worker-prompt.js";
 import { parseWorkerResult, validateWorkerResultForAction } from "../execution/worker-result.js";
 import { createDefaultWorkspaceConfig, runnerProviderSchema, type WorkspaceConfig } from "../workspace/config.js";
@@ -92,6 +93,9 @@ export const syntheticPrReviewBlock = (fixture: PrReviewFixture): string =>
 const assembleCasePrompt = async (evalCase: EvalCase, paths: WorkspacePaths, config: WorkspaceConfig): Promise<string> => {
   const repoRoot = path.join(paths.workspaceRoot, EVAL_REPO_KEY);
   await fs.mkdir(repoRoot, { recursive: true });
+  // Live worker cwds are always git worktrees, and codex refuses to exec in an
+  // untrusted non-git directory (empty stdout, so every grader fails opaquely).
+  await exec("git", ["init", "-q"], { cwd: repoRoot });
 
   const fixture = evalCase.fixture;
   if (fixture.type === "pr-review") {
