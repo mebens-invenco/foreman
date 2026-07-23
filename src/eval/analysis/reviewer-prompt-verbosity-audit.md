@@ -231,3 +231,29 @@ manifest-pinned `d4977e57` and the driver now fails loudly when checkout HEAD
 differs from the pinned `headSha`; the re-run passes with a concise
 stand-down. Carry the headSha guard into the driver's promotion to a
 `live-pr` fixture variant.
+
+## Cut 2 results (applied 2026-07-23)
+
+`review-github.md` split at the section boundary: access (1,249c, every
+consumer) + new `review-github-resolution.md` (3,184c, the six non-reviewer
+templates). Render-diff against the pre-split templates confirmed
+**byte-identical output for all six non-reviewer templates**. The reviewer
+templates drop the resolution section and fold in the three rules that bind
+the reviewer (check CI once per pass, no flip-flopping settled feedback, all
+GitHub writes as review mutations): **−2,869 chars each** vs the ~2,700
+estimate. The e3d7992 invariant holds — both reviewer templates still include
+every fragment the reviewer behavior depends on.
+
+Both gate layers re-run post-cut against the cut-1 baselines, raw reports in
+[`baselines/`](baselines/) (`2026-07-23-cut2-*`):
+
+| layer / model | pass-rate | continuous stats vs cut-1 baseline |
+|---|---|---|
+| L1 claude / claude-opus-4-8 | **15/15, 100% all dimensions** | summary med 154→138, body med 95→109, inline med 516→558 — within noise |
+| L1 codex / gpt-5.6-sol | **15/15, 100% all dimensions** | summary med 99→109, body med 88→86, inline med 270→238 — within noise |
+| L2 live bench / gpt-5.6-sol | **3/3 first run, zero direct writes** | clean-PR stand-down concise; planted findings pinned to the right files |
+
+Realized static totals per the cost-ranking baseline: reviewer first-pass
+28,946 → 18,986 (−34%); reviewer continuation 23,155 → 13,196 (−43%); every
+other worker action −7,091 (cut 1) with rendering otherwise byte-identical
+(cut 2 is a no-op for them). Matches the Expected effect table.

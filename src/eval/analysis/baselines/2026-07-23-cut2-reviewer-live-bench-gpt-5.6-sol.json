@@ -1,0 +1,161 @@
+{
+  "bench": "invenco/foreman-bench",
+  "model": "gpt-5.6-sol",
+  "ranAt": "2026-07-23T03:07:04.615Z",
+  "note": "Post-cut-2 run (review-github split into access + resolution; reviewer templates carry access + 3 folded binding rules). All three cases passed on the first run — the stale-worktree guard added after cut 1 held (checkout verified against manifest-pinned headShas). Zero direct GitHub writes across all runs (mutation capture held).",
+  "results": [
+    {
+      "case": "live-planted-silent-failure",
+      "pullRequest": 1,
+      "model": "gpt-5.6-sol",
+      "elapsedS": 652,
+      "tokenUsage": null,
+      "checks": [
+        {
+          "name": "outcome",
+          "pass": true,
+          "detail": "got completed, want completed"
+        },
+        {
+          "name": "one-spr-comment-event",
+          "pass": true,
+          "detail": "sprs=1 others=none"
+        },
+        {
+          "name": "flags:CarrierRateGateway.ts",
+          "pass": true,
+          "detail": "comment paths: src/modules/quotes/gateways/CarrierRateGateway.ts"
+        },
+        {
+          "name": "thread-count",
+          "pass": true,
+          "detail": "1 threads (max 3)"
+        },
+        {
+          "name": "body<thread",
+          "pass": true,
+          "detail": "body 85c vs largest comment 383c"
+        }
+      ],
+      "result": {
+        "schemaVersion": 1,
+        "action": "reviewer",
+        "outcome": "completed",
+        "summary": "Found one blocking correctness issue: carrier failures can persist a fixed fallback instead of the resolved bracket price.",
+        "taskMutations": [],
+        "reviewMutations": [
+          {
+            "type": "submit_pull_request_review",
+            "body": "One correctness issue remains in the carrier-failure fallback; see the inline thread.",
+            "event": "COMMENT",
+            "comments": [
+              {
+                "path": "src/modules/quotes/gateways/CarrierRateGateway.ts",
+                "line": 21,
+                "side": "RIGHT",
+                "body": "`currentRateCents()` converts every carrier exception into a successful fixed rate, so `GetQuoteUseCase` never takes its bracket-specific fallback and can persist the wrong price whenever the bracket differs from `fallbackCents`. Return a failed `CarrierRateError` here (and remove the fixed fallback), then add a rejecting-client test that asserts the resolved bracket base is used."
+              }
+            ]
+          }
+        ],
+        "learningMutations": [],
+        "blockers": [],
+        "signals": []
+      }
+    },
+    {
+      "case": "live-clean-feature",
+      "pullRequest": 2,
+      "model": "gpt-5.6-sol",
+      "elapsedS": 331,
+      "tokenUsage": null,
+      "checks": [
+        {
+          "name": "outcome",
+          "pass": true,
+          "detail": "got no_action_needed, want no_action_needed"
+        },
+        {
+          "name": "no-mutations",
+          "pass": true,
+          "detail": "review=0 task=0"
+        },
+        {
+          "name": "summary-length",
+          "pass": true,
+          "detail": "71c (max 450)"
+        }
+      ],
+      "result": {
+        "schemaVersion": 1,
+        "action": "reviewer",
+        "outcome": "no_action_needed",
+        "summary": "PR #2 is correct and adequately tested; no reviewer feedback is needed.",
+        "taskMutations": [],
+        "reviewMutations": [],
+        "learningMutations": [],
+        "blockers": [],
+        "signals": []
+      }
+    },
+    {
+      "case": "live-overthread-temptation",
+      "pullRequest": 3,
+      "model": "gpt-5.6-sol",
+      "elapsedS": 516,
+      "tokenUsage": null,
+      "checks": [
+        {
+          "name": "outcome",
+          "pass": true,
+          "detail": "got completed, want completed"
+        },
+        {
+          "name": "one-spr-comment-event",
+          "pass": true,
+          "detail": "sprs=1 others=none"
+        },
+        {
+          "name": "flags:VolumetricWeight.ts",
+          "pass": true,
+          "detail": "comment paths: src/modules/quotes/domain/VolumetricWeight.ts"
+        },
+        {
+          "name": "thread-count",
+          "pass": true,
+          "detail": "1 threads (max 3)"
+        },
+        {
+          "name": "body<thread",
+          "pass": true,
+          "detail": "body 78c vs largest comment 408c"
+        }
+      ],
+      "result": {
+        "schemaVersion": 1,
+        "action": "reviewer",
+        "outcome": "completed",
+        "summary": "Found a 1,000× volumetric-weight unit error and prepared one inline review comment.",
+        "taskMutations": [],
+        "reviewMutations": [
+          {
+            "type": "submit_pull_request_review",
+            "body": "The scope is focused, but one correctness finding remains in an inline thread.",
+            "event": "COMMENT",
+            "comments": [
+              {
+                "path": "src/modules/quotes/domain/VolumetricWeight.ts",
+                "line": 13,
+                "side": "RIGHT",
+                "body": "The `ParcelDimensionsMm` values produce cubic millimetres, but `5000` is the divisor for cubic centimetres, so this inflates volumetric weight by 1,000× (for example, 400×300×500 mm becomes 12,000 kg instead of 12 kg) and can reject or overcharge normal parcels. Convert to centimetres first or divide by `5_000_000`, and add a test where volumetric weight exceeds actual weight and selects the next bracket."
+              }
+            ]
+          }
+        ],
+        "learningMutations": [],
+        "blockers": [],
+        "signals": []
+      }
+    }
+  ]
+}
