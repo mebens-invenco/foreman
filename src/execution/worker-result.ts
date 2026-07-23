@@ -220,10 +220,12 @@ export const validateWorkerResultForAction = (value: unknown, action: WorkerResu
 // rendered worker prompts inline. Sourcing both from this single helper keeps
 // the inline prompt schema honest against the validator as the schema evolves.
 // Pass `undefined` for the generic, action-agnostic shape.
-export const renderAgentResultSchemaHelp = (action?: WorkerResultAction): string => {
+// Prompts inline the compact form (models don't need indentation); `--help`
+// keeps the pretty form for humans. Same Zod derivation either way.
+export const renderAgentResultSchemaHelp = (action?: WorkerResultAction, schemaFormat: "compact" | "pretty" = "compact"): string => {
   const actionLiteral = action ?? `<${workerResultActionValues.join("|")}>`;
   const schema = action ? workerResultSchema.safeExtend({ action: z.literal(action) }) : workerResultSchema;
-  const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, 2);
+  const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, schemaFormat === "pretty" ? 2 : undefined);
   const exampleJson = JSON.stringify({
     ...workerResultExample,
     action: actionLiteral,

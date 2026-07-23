@@ -22,11 +22,11 @@ const cleanupDirs: string[] = [];
 const cleanupDbs: Array<{ close(): void }> = [];
 const projectRoot = testProjectRoot;
 
-// The exact JSON schema the stdin `agent-result validate` step enforces for an action.
-// Asserting the rendered prompt contains this proves the inline schema is sourced from
-// the same validator, so the two cannot silently drift apart.
+// The exact JSON schema the stdin `agent-result validate` step enforces for an action,
+// in the compact form prompts inline. Asserting the rendered prompt contains this proves
+// the inline schema is sourced from the same validator, so the two cannot silently drift apart.
 const validatorJsonSchema = (action: WorkerResultAction): string =>
-  JSON.stringify(z.toJSONSchema(workerResultSchema.safeExtend({ action: z.literal(action) })), null, 2);
+  JSON.stringify(z.toJSONSchema(workerResultSchema.safeExtend({ action: z.literal(action) })));
 
 afterEach(async () => {
   cleanupDbs.splice(0).forEach((db) => db.close());
