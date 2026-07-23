@@ -1,4 +1,4 @@
-import type { Task, WorkerResult } from "../domain/index.js";
+import type { Task, TokenUsage, WorkerResult } from "../domain/index.js";
 import type { WorkerPromptPullRequestReference } from "../execution/render-worker-prompt.js";
 import type { WorkerResultAction } from "../execution/worker-result.js";
 
@@ -38,8 +38,30 @@ export type PrReviewFixture = {
   discovery: string;
 };
 
+/**
+ * Live-PR fixture: the layer-2 counterpart of `PrReviewFixture`. The harness
+ * clones `repo` into the eval workspace, force-checkouts `branch` at the pinned
+ * `headSha` (a checkout that cannot land on the sha fails the run loudly —
+ * frozen fixture PRs must never drift silently), renders the real reviewer
+ * prompt against that worktree, and runs the sample with live `gh` discovery.
+ * No synthetic block is appended: the reviewer performs its own PR discovery.
+ * The worker result is captured and graded WITHOUT applying any mutations, so
+ * the fixture PRs stay byte-frozen across runs.
+ */
+export type LivePrFixture = {
+  type: "live-pr";
+  /** GitHub `owner/name` of the fixture repo (e.g. "invenco/foreman-bench"). */
+  repo: string;
+  pullRequest: number;
+  branch: string;
+  /** Pinned head commit; the checkout is verified against this before every case. */
+  headSha: string;
+  /** Rendered as `headIntroducedAt` in the PR reference (post-head comment cutoff). */
+  headIntroducedAt: string;
+};
+
 /** The scenario a case feeds into the rendered prompt — see `assembleCasePrompt`. */
-export type EvalFixture = CompletedSessionFixture | PrReviewFixture;
+export type EvalFixture = CompletedSessionFixture | PrReviewFixture | LivePrFixture;
 
 /**
  * A single behavioral eval case: a scenario engineered to elicit (or to
@@ -113,6 +135,9 @@ export type SampleResult = {
   graderResults: GraderResult[];
   /** A sample passes only when every non-advisory grader passes. */
   pass: boolean;
+  /** Runner-reported usage for this sample, when the runner surfaces it. */
+  tokensUsed?: TokenUsage;
+  elapsedSeconds?: number;
 };
 
 export type CaseResult = {

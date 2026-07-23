@@ -145,6 +145,34 @@ summary-policy standard ceiling — reviewer first_pass good summaries max at
 largest inline comment — good reviews keep the weight in the thread), and
 `mentions` (durable path tokens pinned by inline comments).
 
+## Cases & sourcing (reviewer-live)
+
+The layer-2 counterpart of the reviewer eval: instead of a synthetic discovery
+block, each case carries a **`live-pr` fixture** pointing at a frozen fixture
+PR in [`invenco/foreman-bench`](https://github.com/invenco/foreman-bench) (a
+minimal parcel-quotes service with planted findings). The harness clones the
+bench repo into the eval workspace, force-checkouts the case branch at its
+**manifest-pinned head sha** (an unreachable sha fails the run loudly — frozen
+fixtures must never drift silently), renders the real reviewer prompt against
+that worktree, and lets the reviewer run its own live `gh` discovery. The
+worker result is captured and graded, **never applied** — zero GitHub writes,
+so the fixture PRs stay byte-frozen across runs. Do not merge, close, or
+comment on the fixture PRs.
+
+Expectations live in `cases/foreman-bench-manifest.json` — driver-side, never
+in the bench repo, because the reviewer explores its worktree during a pass and
+an in-repo manifest naming the planted findings would contaminate every case.
+
+Graders (`live-pr-graders.ts`, all deterministic): `outcome`, `mutation-shape`
+(one COMMENT review for completed; zero mutations for a stand-down),
+`planted-paths` (the planted file pinned by an inline comment), `thread-count`
+(nit-bait discipline), `body-discipline` (body < largest inline comment), and
+`summary-length` (stand-down ceiling).
+
+Live runs need `gh` authenticated for the bench repo and take ~5–11 min per
+sample: `foreman eval reviewer-live --samples 1 --timeout 1500000 --runner codex`.
+Samples record `tokensUsed` and `elapsedSeconds` for cost-per-quality tracking.
+
 ## Judge calibration
 
 The `quality` judge is **advisory** (it never gates a sample) and was calibrated

@@ -11,7 +11,7 @@ import { parseWorkerResult, validateWorkerResultForAction } from "../execution/w
 import { createDefaultWorkspaceConfig, runnerProviderSchema, type WorkspaceConfig } from "../workspace/config.js";
 import { findProjectRoot, type WorkspacePaths } from "../workspace/workspace-paths.js";
 import { EVAL_REGISTRY } from "./registry.js";
-import type { CaseResult, EvalCase, EvalReport, GradeContext, Grader, PrReviewFixture, SampleResult } from "./types.js";
+import type { CaseResult, EvalCase, EvalReport, GradeContext, Grader, LivePrFixture, PrReviewFixture, SampleResult } from "./types.js";
 
 export type RunEvalOptions = {
   prompt: string;
@@ -90,14 +90,71 @@ export const syntheticPrReviewBlock = (fixture: PrReviewFixture): string =>
     fixture.discovery.trim(),
   ].join("\n");
 
-const assembleCasePrompt = async (evalCase: EvalCase, paths: WorkspacePaths, config: WorkspaceConfig): Promise<string> => {
+/**
+ * Clones the live fixture repo (once per eval run) and force-checkouts the
+ * case's branch at its pinned head. `checkout -B <branch> <headSha>` makes a
+ * stale local branch impossible by construction, and a sha the fetch cannot
+ * reach fails the run loudly — that means the frozen fixture PR drifted and
+ * every result against it would silently grade the wrong code.
+ */
+const checkoutLivePrWorktree = async (fixture: LivePrFixture, paths: WorkspacePaths): Promise<string> => {
+  const repoRoot = path.join(paths.workspaceRoot, "live-repos", fixture.repo.replace("/", "-"));
+  const cloned = await fs.access(path.join(repoRoot, ".git")).then(() => true, () => false);
+  if (!cloned) {
+    await fs.mkdir(path.dirname(repoRoot), { recursive: true });
+    // `gh repo clone` so the fixture repo's auth rides on the same `gh` login
+    // the live discovery uses.
+    await exec("gh", ["repo", "clone", fixture.repo, repoRoot, "--", "-q"], { cwd: paths.workspaceRoot });
+  }
+  await exec("git", ["fetch", "-q", "origin", fixture.branch], { cwd: repoRoot });
+  await exec("git", ["checkout", "-q", "-B", fixture.branch, fixture.headSha], { cwd: repoRoot });
+  return repoRoot;
+};
+
+const assembleLivePrCase = async (
+  evalCase: EvalCase,
+  fixture: LivePrFixture,
+  paths: WorkspacePaths,
+  config: WorkspaceConfig,
+): Promise<{ prompt: string; cwd: string }> => {
+  const worktree = await checkoutLivePrWorktree(fixture, paths);
+  const prompt = await renderWorkerPrompt({
+    action: evalCase.action,
+    config,
+    paths,
+    task: evalCase.task,
+    repo: { key: fixture.repo.split("/")[1] ?? fixture.repo, rootPath: worktree, defaultBranch: "main" },
+    worktreePath: worktree,
+    baseBranch: "main",
+    pullRequestReference: {
+      provider: "github",
+      url: `https://github.com/${fixture.repo}/pull/${fixture.pullRequest}`,
+      number: fixture.pullRequest,
+      state: "open",
+      isDraft: false,
+      headSha: fixture.headSha,
+      headBranch: fixture.branch,
+      baseBranch: "main",
+      headIntroducedAt: fixture.headIntroducedAt,
+      mergeState: "clean",
+    },
+    gitState: { worktreeHeadSha: fixture.headSha, reviewHeadSha: fixture.headSha, baseBranch: "main", previousSessionHeadSha: null },
+  });
+  // No synthetic block: the live case runs the real discovery loop via `gh`.
+  return { prompt, cwd: worktree };
+};
+
+const assembleCasePrompt = async (evalCase: EvalCase, paths: WorkspacePaths, config: WorkspaceConfig): Promise<{ prompt: string; cwd: string }> => {
+  const fixture = evalCase.fixture;
+  if (fixture.type === "live-pr") {
+    return assembleLivePrCase(evalCase, fixture, paths, config);
+  }
+
   const repoRoot = path.join(paths.workspaceRoot, EVAL_REPO_KEY);
   await fs.mkdir(repoRoot, { recursive: true });
   // Live worker cwds are always git worktrees, and codex refuses to exec in an
   // untrusted non-git directory (empty stdout, so every grader fails opaquely).
   await exec("git", ["init", "-q"], { cwd: repoRoot });
-
-  const fixture = evalCase.fixture;
   if (fixture.type === "pr-review") {
     const rendered = await renderWorkerPrompt({
       action: evalCase.action,
@@ -111,7 +168,7 @@ const assembleCasePrompt = async (evalCase: EvalCase, paths: WorkspacePaths, con
       ...(fixture.continuation ? { continuation: true } : {}),
       ...(fixture.priorCheckpoint ? { priorCheckpoint: fixture.priorCheckpoint } : {}),
     });
-    return `${rendered}\n\n${syntheticPrReviewBlock(fixture)}\n`;
+    return { prompt: `${rendered}\n\n${syntheticPrReviewBlock(fixture)}\n`, cwd: repoRoot };
   }
 
   const rendered = await renderWorkerPrompt({
@@ -123,7 +180,7 @@ const assembleCasePrompt = async (evalCase: EvalCase, paths: WorkspacePaths, con
     worktreePath: repoRoot,
     baseBranch: "main",
   });
-  return `${rendered}\n\n${syntheticSessionBlock(fixture.session)}\n`;
+  return { prompt: `${rendered}\n\n${syntheticSessionBlock(fixture.session)}\n`, cwd: repoRoot };
 };
 
 const buildJudgeInvoker =
@@ -145,13 +202,14 @@ type CaseRunDeps = {
 
 const runCase = async (evalCase: EvalCase, graders: Grader[], config: WorkspaceConfig, paths: WorkspacePaths, deps: CaseRunDeps): Promise<CaseResult> => {
   // The rendered prompt is identical across samples; only the model output varies.
-  const prompt = await assembleCasePrompt(evalCase, paths, config);
-  const repoRoot = path.join(paths.workspaceRoot, EVAL_REPO_KEY);
+  const { prompt, cwd } = await assembleCasePrompt(evalCase, paths, config);
   const samples: SampleResult[] = [];
 
   for (let sampleIndex = 0; sampleIndex < deps.samplesPerCase; sampleIndex += 1) {
     const runner = createAgentRunner({ config, action: evalCase.action });
-    const captured = await runner.invoke({ attemptId: randomUUID(), cwd: repoRoot, env: {}, prompt, timeoutMs: deps.timeoutMs, action: evalCase.action });
+    const startedAt = Date.now();
+    const captured = await runner.invoke({ attemptId: randomUUID(), cwd, env: {}, prompt, timeoutMs: deps.timeoutMs, action: evalCase.action });
+    const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
 
     if (deps.showOutput) {
       process.stderr.write(`\n--- ${evalCase.id} sample ${sampleIndex} raw stdout ---\n${captured.stdout}\n--- end raw stdout ---\n`);
@@ -178,7 +236,14 @@ const runCase = async (evalCase: EvalCase, graders: Grader[], config: WorkspaceC
     const graderResults = graded.map((entry, index) => (graders[index]?.advisory ? { ...entry, advisory: true } : entry));
     // Advisory graders (the uncalibrated judge) are reported but do not gate.
     const pass = graders.every((grader, index) => grader.advisory === true || (graderResults[index]?.pass ?? false));
-    samples.push({ sampleIndex, parsed: result !== null, graderResults, pass });
+    samples.push({
+      sampleIndex,
+      parsed: result !== null,
+      graderResults,
+      pass,
+      elapsedSeconds,
+      ...(captured.tokensUsed ? { tokensUsed: captured.tokensUsed } : {}),
+    });
   }
 
   const passRate = samples.length > 0 ? samples.filter((sample) => sample.pass).length / samples.length : 0;
