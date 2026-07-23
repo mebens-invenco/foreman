@@ -1,0 +1,238 @@
+{
+  "prompt": "reviewer-live",
+  "runner": "codex",
+  "model": "gpt-5.6-sol",
+  "samplesPerCase": 1,
+  "cases": [
+    {
+      "caseId": "live-planted-silent-failure",
+      "description": "PR #1 (bench/live-carrier-rates @ 2e22aac) → completed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got completed, want completed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "sprs=1 others=none"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "comment paths: src/modules/quotes/gateways/CarrierRateGateway.ts"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "1 threads (max 3)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 57c vs largest comment 379c"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "n/a (no summary ceiling)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Raised one must-fix outage-path pricing defect inline.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "One must-fix outage-path pricing defect is raised inline.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/modules/quotes/gateways/CarrierRateGateway.ts",
+                    "line": 21,
+                    "side": "RIGHT",
+                    "body": "`catch` turns every carrier rejection into a successful gateway-wide price, so `resolveBaseCents` can never use the request's bracket fallback; a 1000-cent bracket can silently quote 999 cents. Remove `fallbackCents`, return a failed `CarrierRateError` for carrier unavailability (rethrow unexpected errors), and add a rejection-path test that asserts `bracketBaseCents` is used."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [
+              {
+                "type": "add",
+                "title": "Keep fallback policy in one Result layer",
+                "repo": "shared",
+                "confidence": "emerging",
+                "content": "**Rule:** Ensure a Result-returning gateway constructs its error variant and let exactly one layer own fallback policy.\n**When to apply:** Review adapters that catch dependency failures while callers also branch on the Result error case or apply their own fallback.\n**Anti-pattern:** Returning ok(default) inside the gateway makes the caller's failure branch unreachable, disguises outages as success, and can select a fallback without request context.\n**Example:** A carrier gateway returned one constructor-wide fallback price, bypassing the quote use case's weight-bracket fallback.",
+                "tags": [
+                  "reviewer",
+                  "review-blocker",
+                  "skill-candidate"
+                ]
+              }
+            ],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 469,
+          "tokensUsed": {
+            "inputTokens": 92468,
+            "outputTokens": 11133,
+            "cacheReadInputTokens": 2072320,
+            "reasoningOutputTokens": 4876
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "live-clean-feature",
+      "description": "PR #2 (bench/saver-service-level @ 94572c7) → no_action_needed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got no_action_needed, want no_action_needed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "review=0 task=0"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "n/a (no planted paths)"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "n/a (no thread budget)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "127c (max 450)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "No reportable findings; saver pricing, rounding boundaries, type expansion, and existing history are consistent, with CI green.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 357,
+          "tokensUsed": {
+            "inputTokens": 71767,
+            "outputTokens": 10160,
+            "cacheReadInputTokens": 1812480,
+            "reasoningOutputTokens": 3474
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "live-overthread-temptation",
+      "description": "PR #3 (bench/volumetric-weight @ a141dc2) → completed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got completed, want completed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "sprs=1 others=none"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "comment paths: src/modules/quotes/domain/VolumetricWeight.ts"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "1 threads (max 3)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 68c vs largest comment 309c"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "n/a (no summary ceiling)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Found a 1,000× volumetric-weight unit error and prepared one inline review thread; remote CI is green.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "One correctness finding is in the inline thread; remote CI is green.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/modules/quotes/domain/VolumetricWeight.ts",
+                    "line": 13,
+                    "side": "RIGHT",
+                    "body": "`ParcelDimensionsMm` is in millimetres, but the 5,000 divisor applies to cubic centimetres. For example, 500×400×300 mm computes as 12,000 kg here instead of 12 kg, so dimensional parcels resolve the wrong bracket. Convert to centimetres or divide mm³ by 5,000,000, and add a volumetric-dominates-actual test."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 335,
+          "tokensUsed": {
+            "inputTokens": 70822,
+            "outputTokens": 7871,
+            "cacheReadInputTokens": 1676800,
+            "reasoningOutputTokens": 2953
+          }
+        }
+      ],
+      "passRate": 1
+    }
+  ],
+  "overallPassRate": 1
+}
