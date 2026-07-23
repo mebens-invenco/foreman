@@ -1,0 +1,599 @@
+{
+  "prompt": "reviewer",
+  "runner": "claude",
+  "model": "claude-opus-4-8",
+  "samplesPerCase": 3,
+  "cases": [
+    {
+      "caseId": "continuation-nothing-new",
+      "description": "continuation, nothing new since checkpoint (same head, no new comments, checks green) → concise no_action_needed (grounded: summary-overlong mode, 01KTT17P6AP8Q85AMCM803FYMF)",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "157 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        },
+        {
+          "sampleIndex": 1,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "126 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        },
+        {
+          "sampleIndex": 2,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "154 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "continuation-clean-followup-commit",
+      "description": "continuation, one new commit addresses a review nit, checks green, diff clean → concise no_action_needed (grounded: dominant good-continuation pattern, 50 good traces)",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "142 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        },
+        {
+          "sampleIndex": 1,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "170 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        },
+        {
+          "sampleIndex": 2,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "154 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "first-pass-clean-pr",
+      "description": "first pass, small clean diff, checks green → concise no_action_needed (grounded: 21 first_pass no_action traces, max 363c)",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "131 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        },
+        {
+          "sampleIndex": 1,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "157 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        },
+        {
+          "sampleIndex": 2,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "179 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "first-pass-planted-bug",
+      "description": "SYNTHETIC (zero real wrong-verdict exemplars): first pass, diff contains a planted Result error-swallow bug → completed with one COMMENT review pinning an inline thread to the bug",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 95c < largest inline comment 519c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        },
+        {
+          "sampleIndex": 1,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 95c < largest inline comment 489c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        },
+        {
+          "sampleIndex": 2,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 135c < largest inline comment 524c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "first-pass-findings-stay-in-threads",
+      "description": "first pass, one real modest issue that tempts body-dumping → completed with the finding detail in the inline thread, not the body (grounded: finding-in-body mode, 01KRJ8Q45N0RFQ606WR0ZNFF56 / 01KRG9P5WFAN8CN6X01CHP987V / 01KR0SMX2NMQTPB9EA22PRPP79)",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 83c < largest inline comment 450c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        },
+        {
+          "sampleIndex": 1,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 66c < largest inline comment 423c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        },
+        {
+          "sampleIndex": 2,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 106c < largest inline comment 516c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true
+        }
+      ],
+      "passRate": 1
+    }
+  ],
+  "overallPassRate": 1
+}

@@ -203,3 +203,31 @@ synthetic worktree was a bare temp dir. Fixed in `src/eval/run.ts`
 | reviewer first-pass | 28,946 | ~19,100 | −34% |
 | reviewer continuation | 23,155 | ~13,300 | −43% |
 | every other worker action | — | −7,091 | (cut 1 only) |
+
+## Cut 1 results (applied 2026-07-23)
+
+`renderAgentResultSchemaHelp` now serializes compact for prompt inlining;
+`agent-result validate --help` keeps pretty via a `schemaFormat` parameter on
+the same helper. Measured: reviewer schema help 12,861 → 5,770 chars —
+**−7,091 per worker prompt, every action**, exactly the audit's estimate.
+Compact and pretty forms assert `deepStrictEqual` after `JSON.parse` for all
+6 actions + the generic shape, so the validator-honesty contract holds.
+
+Both gate layers re-run post-cut, raw reports in
+[`baselines/`](baselines/) (`2026-07-23-cut1-*`):
+
+| layer / model | pass-rate | continuous stats vs baseline |
+|---|---|---|
+| L1 claude / claude-opus-4-8 | **15/15, 100% all dimensions** | summary med 142→154, body med 91→95, inline med 531→516 — within noise |
+| L1 codex / gpt-5.6-sol | **15/15, 100% all dimensions** | summary med 113→99, body med 88→88, inline med 233→270 — within noise |
+| L2 live bench / gpt-5.6-sol | **3/3, zero direct writes** | clean-PR stand-down 108c; planted findings pinned to the right files |
+
+Harness note: the live clean-PR case initially failed as a **stale-worktree
+artifact** — the driver checked out the local `bench/saver-service-level`
+branch, still at pre-fix `b8528c6`, so the reviewer saw the weak rounding
+fixture and correctly re-flagged it (the identical pre-fix-baseline finding;
+further evidence the bench discriminates). The branch was synced to the
+manifest-pinned `d4977e57` and the driver now fails loudly when checkout HEAD
+differs from the pinned `headSha`; the re-run passes with a concise
+stand-down. Carry the headSha guard into the driver's promotion to a
+`live-pr` fixture variant.

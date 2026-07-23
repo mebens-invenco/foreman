@@ -1,0 +1,234 @@
+{
+  "bench": "invenco/foreman-bench",
+  "model": "gpt-5.6-sol",
+  "ranAt": "2026-07-23T02:02:25.619Z",
+  "note": "Post-cut-1 run (compact schema serialization). live-clean-feature initially FAILED as a harness artifact: the driver checked out the local bench/saver-service-level branch, which was stale at pre-fix b8528c6, so the reviewer saw the weak rounding fixture and correctly re-flagged it — the identical finding the pre-fix baseline recorded. Not a prompt regression. Branch synced to the manifest-pinned d4977e57 and the driver now fails loudly when checkout HEAD differs from the pinned headSha; the case re-run PASSES with a concise stand-down. Stale-branch result kept under supersededResults. Zero direct GitHub writes across all runs (mutation capture held).",
+  "results": [
+    {
+      "case": "live-planted-silent-failure",
+      "pullRequest": 1,
+      "model": "gpt-5.6-sol",
+      "elapsedS": 650,
+      "tokenUsage": null,
+      "checks": [
+        {
+          "name": "outcome",
+          "pass": true,
+          "detail": "got completed, want completed"
+        },
+        {
+          "name": "one-spr-comment-event",
+          "pass": true,
+          "detail": "sprs=1 others=none"
+        },
+        {
+          "name": "flags:CarrierRateGateway.ts",
+          "pass": true,
+          "detail": "comment paths: src/modules/quotes/gateways/CarrierRateGateway.ts, src/modules/quotes/useCases/getQuote/GetQuoteUseCase.ts"
+        },
+        {
+          "name": "thread-count",
+          "pass": true,
+          "detail": "2 threads (max 3)"
+        },
+        {
+          "name": "body<thread",
+          "pass": true,
+          "detail": "body 155c vs largest comment 450c"
+        }
+      ],
+      "result": {
+        "schemaVersion": 1,
+        "action": "reviewer",
+        "outcome": "completed",
+        "summary": "Found two pricing correctness defects: failed carrier calls bypass bracket fallback, and service-specific live rates are multiplied twice.",
+        "taskMutations": [],
+        "reviewMutations": [
+          {
+            "type": "submit_pull_request_review",
+            "body": "Two pricing correctness findings are captured in inline threads: carrier failures bypass the bracket fallback, and live express rates are multiplied twice.",
+            "event": "COMMENT",
+            "comments": [
+              {
+                "path": "src/modules/quotes/gateways/CarrierRateGateway.ts",
+                "line": 21,
+                "side": "RIGHT",
+                "body": "This converts every carrier exception into a successful, arbitrary gateway fallback, so `resolveBaseCents` never reaches the advertised bracket fallback (for example, a configured 999 replaces a 1000-cent bracket). Return a failed `CarrierRateError` for expected unavailability, rethrow unexpected faults, remove `fallbackCents`, and let the use case apply the bracket fallback with observable failure context; add a rejecting-client regression test."
+              },
+              {
+                "path": "src/modules/quotes/useCases/getQuote/GetQuoteUseCase.ts",
+                "line": 37,
+                "side": "RIGHT",
+                "body": "`fetchRateCents` already receives the requested `serviceLevel`, so the returned live rate is service-specific; multiplying it here charges express rates 1.5× again (1800 becomes 2700). Apply the multiplier only to bracket-derived fallback pricing, or redefine and rename the gateway contract as an unadjusted base rate and test live express plus fallback express paths."
+              }
+            ]
+          }
+        ],
+        "learningMutations": [],
+        "blockers": [],
+        "signals": []
+      }
+    },
+    {
+      "case": "live-overthread-temptation",
+      "pullRequest": 3,
+      "model": "gpt-5.6-sol",
+      "elapsedS": 375,
+      "tokenUsage": null,
+      "checks": [
+        {
+          "name": "outcome",
+          "pass": true,
+          "detail": "got completed, want completed"
+        },
+        {
+          "name": "one-spr-comment-event",
+          "pass": true,
+          "detail": "sprs=1 others=none"
+        },
+        {
+          "name": "flags:VolumetricWeight.ts",
+          "pass": true,
+          "detail": "comment paths: src/modules/quotes/domain/VolumetricWeight.ts"
+        },
+        {
+          "name": "thread-count",
+          "pass": true,
+          "detail": "1 threads (max 3)"
+        },
+        {
+          "name": "body<thread",
+          "pass": true,
+          "detail": "body 49c vs largest comment 293c"
+        }
+      ],
+      "result": {
+        "schemaVersion": 1,
+        "action": "reviewer",
+        "outcome": "completed",
+        "summary": "Found one blocking volumetric-weight unit error and prepared a single inline review finding.",
+        "taskMutations": [],
+        "reviewMutations": [
+          {
+            "type": "submit_pull_request_review",
+            "body": "One blocking pricing defect is called out inline.",
+            "event": "COMMENT",
+            "comments": [
+              {
+                "path": "src/modules/quotes/domain/VolumetricWeight.ts",
+                "line": 13,
+                "side": "RIGHT",
+                "body": "`ParcelDimensionsMm` supplies millimetres, but 5,000 is the cm³/kg divisor. A 500×400×300 mm parcel becomes 12,000 kg here instead of 12 kg, so valid parcels can miss every bracket. Convert mm to cm (or divide by `5_000_000`) and add a test where volumetric weight selects the 5–25 kg bracket."
+              }
+            ]
+          }
+        ],
+        "learningMutations": [],
+        "blockers": [],
+        "signals": []
+      }
+    },
+    {
+      "case": "live-clean-feature",
+      "pullRequest": 2,
+      "model": "gpt-5.6-sol",
+      "elapsedS": 271,
+      "tokenUsage": null,
+      "checks": [
+        {
+          "name": "outcome",
+          "pass": true,
+          "detail": "got no_action_needed, want no_action_needed"
+        },
+        {
+          "name": "no-mutations",
+          "pass": true,
+          "detail": "review=0 task=0"
+        },
+        {
+          "name": "summary-length",
+          "pass": true,
+          "detail": "108c (max 450)"
+        }
+      ],
+      "result": {
+        "schemaVersion": 1,
+        "action": "reviewer",
+        "outcome": "no_action_needed",
+        "summary": "Reviewed the current saver-pricing diff; no reportable findings, with 4 tests and TypeScript checks passing.",
+        "taskMutations": [],
+        "reviewMutations": [],
+        "learningMutations": [],
+        "blockers": [],
+        "signals": [
+          "reviewer_checkpoint_eligible"
+        ]
+      }
+    }
+  ],
+  "supersededResults": [
+    {
+      "case": "live-clean-feature",
+      "pullRequest": 2,
+      "model": "gpt-5.6-sol",
+      "elapsedS": 548,
+      "tokenUsage": null,
+      "checks": [
+        {
+          "name": "outcome",
+          "pass": false,
+          "detail": "got completed, want no_action_needed"
+        },
+        {
+          "name": "no-mutations",
+          "pass": false,
+          "detail": "review=1 task=0"
+        },
+        {
+          "name": "summary-length",
+          "pass": true,
+          "detail": "73c (max 450)"
+        }
+      ],
+      "result": {
+        "schemaVersion": 1,
+        "action": "reviewer",
+        "outcome": "completed",
+        "summary": "Found one actionable rounding-test gap; tests and TypeScript checks pass.",
+        "taskMutations": [],
+        "reviewMutations": [
+          {
+            "type": "submit_pull_request_review",
+            "body": "One actionable test-coverage finding is captured inline; no other reportable issues surfaced.",
+            "event": "COMMENT",
+            "comments": [
+              {
+                "path": "src/modules/quotes/useCases/getQuote/GetQuoteUseCase.test.ts",
+                "line": 37,
+                "side": "RIGHT",
+                "body": "This input never exercises the rounding behavior named by the test: `1000 * 0.85` is exactly `850`, so replacing `Math.round` with truncation still passes. Use a bracket with `baseCents: 1001` and assert `851`."
+              }
+            ]
+          }
+        ],
+        "learningMutations": [
+          {
+            "type": "add",
+            "title": "Use discriminating fixtures in rounding tests",
+            "repo": "shared",
+            "confidence": "emerging",
+            "content": "**Rule:** Make rounding tests use inputs whose unrounded result has a fractional component and whose expected result distinguishes the intended rounding mode.\n**When to apply:** Reviewing or adding pricing, percentage, tax, discount, currency-conversion, or other fixed-unit arithmetic tests.\n**Anti-pattern:** Round-number fixtures can let floor, truncation, or missing rounding pass.\n**Example:** Use 1001 cents at a 0.85 multiplier and assert 851 cents.",
+            "tags": [
+              "reviewer",
+              "skill-candidate"
+            ]
+          }
+        ],
+        "blockers": [],
+        "signals": [
+          "reviewer_checkpoint_eligible"
+        ]
+      }
+    }
+  ]
+}
