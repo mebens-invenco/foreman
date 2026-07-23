@@ -135,6 +135,12 @@ export type SampleResult = {
   graderResults: GraderResult[];
   /** A sample passes only when every non-advisory grader passes. */
   pass: boolean;
+  /**
+   * The parsed worker result, kept so a failing sample is diagnosable from the
+   * report alone (what did the reviewer actually flag?) instead of only via
+   * grader detail strings. Absent when parsing failed.
+   */
+  result?: WorkerResult;
   /** Runner-reported usage for this sample, when the runner surfaces it. */
   tokensUsed?: TokenUsage;
   elapsedSeconds?: number;
