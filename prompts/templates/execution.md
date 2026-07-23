@@ -9,6 +9,7 @@ The task has already been selected. Do not scout, reprioritize, or choose a diff
 {{fragment:task-system-worker}}
 
 {{fragment:review-github}}
+{{fragment:review-github-resolution}}
 
 {{fragment:learning-policy}}
 

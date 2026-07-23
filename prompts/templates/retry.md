@@ -9,6 +9,7 @@ Foreman has already determined that retry is appropriate.
 {{fragment:task-system-worker}}
 
 {{fragment:review-github}}
+{{fragment:review-github-resolution}}
 
 {{fragment:learning-policy}}
 

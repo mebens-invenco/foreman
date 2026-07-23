@@ -9,6 +9,7 @@ The task and PR have already been selected. Do not scout, reprioritize, or choos
 {{fragment:task-system-worker}}
 
 {{fragment:review-github}}
+{{fragment:review-github-resolution}}
 
 {{fragment:comment-brevity}}
 

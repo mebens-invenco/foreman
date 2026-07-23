@@ -34,6 +34,10 @@ Restrict this pass to what is new since the prior reviewer pass:
 
 Do not re-review code that was already covered in the prior pass unless newer activity explicitly revisits it. A continuation pass should be narrower and cheaper than the initial review — fewer agents, smaller diff window, no re-litigation of settled findings.
 
+- Check remote CI/check status once per pass; do not poll, sleep, wait, or loop for pending checks to finish.
+- Use historical GitHub context to avoid undoing prior decisions or flip-flopping on already-settled feedback.
+- Return all GitHub writes as Foreman review mutations instead of calling write APIs directly.
+
 ## How To Review
 
 If you invoke the `review-changes` skill, scope its fan-out to the new diff only.

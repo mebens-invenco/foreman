@@ -399,6 +399,7 @@ describe("prompt rendering", () => {
     expect(result).toContain("## Common Worker Rules");
     expect(result).toContain("## File Task Access");
     expect(result).toContain("## GitHub Provider Access");
+    expect(result).toContain("## GitHub Review Rules");
     expect(result).toContain("## Selected Task");
     expect(result).toContain("## Task Provider Context");
     expect(result).toContain("## Current Git State");
@@ -618,6 +619,13 @@ describe("prompt rendering", () => {
     expect(reviewerPrompt).toContain("ignore comments whose review metadata is missing");
     expect(reviewerPrompt).toContain("include image links or uploaded assets");
     expect(reviewerPrompt).toContain("## Comment Brevity");
+    // The reviewer never replies/resolves or edits code, so the review/retry-only
+    // resolution rules stay out; the three rules that do bind it are folded into
+    // Reviewer Rules.
+    expect(reviewerPrompt).not.toContain("## GitHub Review Rules");
+    expect(reviewerPrompt).toContain("Check remote CI/check status once per pass");
+    expect(reviewerPrompt).toContain("flip-flopping on already-settled feedback");
+    expect(reviewerPrompt).toContain("Return all GitHub writes as Foreman review mutations");
     expect(reviewerPrompt).not.toContain("### Actionable Now");
 
     const continuationPrompt = await renderWorkerPrompt({
@@ -644,6 +652,7 @@ describe("prompt rendering", () => {
     expect(continuationPrompt).toContain("ignore comments whose review metadata is missing");
     expect(continuationPrompt).toContain("## Common Worker Rules");
     expect(continuationPrompt).toContain("## GitHub Provider Access");
+    expect(continuationPrompt).toContain("## GitHub Review Rules");
     expect(continuationPrompt).toContain("## Comment Brevity");
     expect(continuationPrompt).toContain("include image links or uploaded assets");
     expect(continuationPrompt).toContain("## Current Git State");
@@ -701,6 +710,10 @@ describe("prompt rendering", () => {
     expect(reviewerContinuationPrompt).toContain("previous-reviewer-head");
     expect(reviewerContinuationPrompt).toContain("## Common Worker Rules");
     expect(reviewerContinuationPrompt).toContain("## GitHub Provider Access");
+    expect(reviewerContinuationPrompt).not.toContain("## GitHub Review Rules");
+    expect(reviewerContinuationPrompt).toContain("Check remote CI/check status once per pass");
+    expect(reviewerContinuationPrompt).toContain("flip-flopping on already-settled feedback");
+    expect(reviewerContinuationPrompt).toContain("Return all GitHub writes as Foreman review mutations");
     expect(reviewerContinuationPrompt).toContain("## Consumer Context");
     expect(reviewerContinuationPrompt).toContain("## Comment Brevity");
     expect(reviewerContinuationPrompt).toContain("include image links or uploaded assets");
