@@ -26,6 +26,8 @@ type ManifestCase = {
   branch: string;
   headSha: string;
   headIntroducedAt: string;
+  continuation?: boolean;
+  priorCheckpoint?: Record<string, unknown>;
   expect: LiveBenchExpect;
 };
 
@@ -65,7 +67,7 @@ const benchTask = (entry: ManifestCase): Task => ({
  */
 export const foremanBenchCases: EvalCase<LiveBenchExpect>[] = (manifest.cases as ManifestCase[]).map((entry) => ({
   id: entry.id,
-  description: `PR #${entry.pullRequest} (${entry.branch} @ ${entry.headSha.slice(0, 7)}) → ${entry.expect.outcome}`,
+  description: `PR #${entry.pullRequest} (${entry.branch} @ ${entry.headSha.slice(0, 7)}${entry.continuation ? ", continuation" : ""}) → ${entry.expect.outcome}`,
   action: "reviewer",
   provider: "file",
   task: benchTask(entry),
@@ -76,6 +78,8 @@ export const foremanBenchCases: EvalCase<LiveBenchExpect>[] = (manifest.cases as
     branch: entry.branch,
     headSha: entry.headSha,
     headIntroducedAt: entry.headIntroducedAt,
+    ...(entry.continuation ? { continuation: true } : {}),
+    ...(entry.priorCheckpoint ? { priorCheckpoint: entry.priorCheckpoint } : {}),
   },
   expect: entry.expect,
 }));

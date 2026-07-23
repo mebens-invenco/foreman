@@ -147,6 +147,8 @@ const assembleLivePrCase = async (
       mergeState: "clean",
     },
     gitState: { worktreeHeadSha: fixture.headSha, reviewHeadSha: fixture.headSha, baseBranch: "main", previousSessionHeadSha: null },
+    ...(fixture.continuation ? { continuation: true } : {}),
+    ...(fixture.priorCheckpoint ? { priorCheckpoint: fixture.priorCheckpoint } : {}),
   });
   // No synthetic block: the live case runs the real discovery loop via `gh`.
   return { prompt, cwd: worktree };
