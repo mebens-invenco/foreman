@@ -257,3 +257,30 @@ Realized static totals per the cost-ranking baseline: reviewer first-pass
 28,946 → 18,986 (−34%); reviewer continuation 23,155 → 13,196 (−43%); every
 other worker action −7,091 (cut 1) with rendering otherwise byte-identical
 (cut 2 is a no-op for them). Matches the Expected effect table.
+
+## Cut 3 results (applied 2026-07-23)
+
+The design call landed on the audit's prescribed shape: an explicit per-action
+allowlist in code (`displayedReviewMutationTypes` in `worker-result.ts`). The
+displayed schema is the validator's JSON schema with the `reviewMutations`
+union filtered — derived, never hand-written, throwing on shape or allowlist
+drift — and carries an explicit note that the display is restricted to the
+action's permitted types. The reviewer displays only
+`submit_pull_request_review` (its template forbids the rest; 123/123 observed
+traces used exactly that type). The validator is unchanged; every other action
+and the generic shape render byte-identically.
+
+Measured: reviewer schema help 5,770 → 4,531 chars — **−1,239 per reviewer
+prompt** (both templates), net of the ~80c honesty note. Cumulative cuts 1–3:
+reviewer first-pass 28,946 → 17,747 (−39%); continuation 23,155 → 11,957
+(−48%).
+
+Both gate layers re-run post-cut against the cut-2 baselines (layer 2 through
+the promoted `reviewer-live` eval on the fully-pinned fixture), raw reports in
+[`baselines/`](baselines/) (`2026-07-23-cut3-*`):
+
+| layer / model | pass-rate | continuous stats vs cut-2 baseline |
+|---|---|---|
+| L1 claude / claude-opus-4-8 | **15/15, 100% all dimensions** | summary med 138→140, body med 109→93, inline med 558→592 — within noise |
+| L1 codex / gpt-5.6-sol | **15/15, 100% all dimensions** | summary med 109→111, body med 86→99, inline med 238→241 — within noise |
+| L2 reviewer-live / gpt-5.6-sol | **3/3, zero direct writes** | structural conformance clean — no malformed mutations from the pruned display |

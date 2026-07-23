@@ -1,0 +1,1032 @@
+{
+  "prompt": "reviewer",
+  "runner": "claude",
+  "model": "claude-opus-4-8",
+  "samplesPerCase": 3,
+  "cases": [
+    {
+      "caseId": "continuation-nothing-new",
+      "description": "continuation, nothing new since checkpoint (same head, no new comments, checks green) → concise no_action_needed (grounded: summary-overlong mode, 01KTT17P6AP8Q85AMCM803FYMF)",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "115 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "No new commits, thread activity, or check changes since the prior reviewer checkpoint; nothing to review this pass.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 67,
+          "tokensUsed": {
+            "inputTokens": 6,
+            "outputTokens": 1108,
+            "cacheCreationInputTokens": 45783,
+            "cacheReadInputTokens": 89480
+          }
+        },
+        {
+          "sampleIndex": 1,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "160 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "No new commits, comments, or check changes since the prior reviewer checkpoint; the one existing bracket-boundary thread remains unresolved with no new replies.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 15,
+          "tokensUsed": {
+            "inputTokens": 4,
+            "outputTokens": 721,
+            "cacheCreationInputTokens": 25187,
+            "cacheReadInputTokens": 61273
+          }
+        },
+        {
+          "sampleIndex": 2,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "116 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "No new commits, thread activity, or check changes since the prior reviewer checkpoint; nothing actionable this pass.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 53,
+          "tokensUsed": {
+            "inputTokens": 6,
+            "outputTokens": 756,
+            "cacheCreationInputTokens": 2085,
+            "cacheReadInputTokens": 133005
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "continuation-clean-followup-commit",
+      "description": "continuation, one new commit addresses a review nit, checks green, diff clean → concise no_action_needed (grounded: dominant good-continuation pattern, 50 good traces)",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "121 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "New head applies exactly the requested trim-before-lowercase fix; thread addressed, checks green, nothing new actionable.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 77,
+          "tokensUsed": {
+            "inputTokens": 6,
+            "outputTokens": 1385,
+            "cacheCreationInputTokens": 27861,
+            "cacheReadInputTokens": 104533
+          }
+        },
+        {
+          "sampleIndex": 1,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "145 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "New commit b2c3d4e applies exactly the requested trim-before-lowercase fix on both codes; thread addressed, checks green, nothing new actionable.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "code_changed",
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 104,
+          "tokensUsed": {
+            "inputTokens": 6,
+            "outputTokens": 934,
+            "cacheCreationInputTokens": 26937,
+            "cacheReadInputTokens": 104377
+          }
+        },
+        {
+          "sampleIndex": 2,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "144 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "New head applies exactly the trim-before-lowercase fix the prior thread asked for; checks green and no new threads, so nothing further to raise.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 17,
+          "tokensUsed": {
+            "inputTokens": 4,
+            "outputTokens": 781,
+            "cacheCreationInputTokens": 509,
+            "cacheReadInputTokens": 86090
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "first-pass-clean-pr",
+      "description": "first pass, small clean diff, checks green → concise no_action_needed (grounded: 21 first_pass no_action traces, max 363c)",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "143 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "PR 214 adds a pure readonly `isOpen` getter over existing state with a covering unit test and green checks; nothing warrants reviewer feedback.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 26,
+          "tokensUsed": {
+            "inputTokens": 8,
+            "outputTokens": 1396,
+            "cacheCreationInputTokens": 42641,
+            "cacheReadInputTokens": 169851
+          }
+        },
+        {
+          "sampleIndex": 1,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "138 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "PR 214 adds a pure readonly `isOpen` getter over existing state with a covering test and green checks; no reviewer findings worth raising.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 86,
+          "tokensUsed": {
+            "inputTokens": 12,
+            "outputTokens": 2106,
+            "cacheCreationInputTokens": 17466,
+            "cacheReadInputTokens": 319554
+          }
+        },
+        {
+          "sampleIndex": 2,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"no_action_needed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "no_action_needed with zero review mutations, as required"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "140 chars / 1 sentence(s), within the standard stand-down ceiling"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "PR 214 adds a pure readonly `isOpen` getter over existing state with a covering test and green checks; nothing warranting reviewer feedback.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 85,
+          "tokensUsed": {
+            "inputTokens": 10,
+            "outputTokens": 1593,
+            "cacheCreationInputTokens": 42283,
+            "cacheReadInputTokens": 225707
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "first-pass-planted-bug",
+      "description": "SYNTHETIC (zero real wrong-verdict exemplars): first pass, diff contains a planted Result error-swallow bug → completed with one COMMENT review pinning an inline thread to the bug",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 88c < largest inline comment 634c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Flagged one blocking issue on PR #1171: persistCacheEntry swallows the upsert error and still returns ok, leaving the declared PersistError variant unreachable.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "Scope looks right and checks are green; 1 finding in a thread on `persistCacheEntry.ts`.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/modules/carrierRate/appServices/persistCacheEntry.ts",
+                    "line": 9,
+                    "side": "RIGHT",
+                    "body": "This returns `ok(undefined)` after `saved.isErr()`, so the declared `PersistError` variant is unreachable and every caller reads a failed cache write as a success. Make the signature match the behaviour — either propagate (`if (saved.isErr()) return err(saved.error)`), or keep it best-effort but log the error and change the return type to `Promise<void>` so it stops advertising a failure mode it never returns. An empty `isErr()` branch also means a permanently failing upsert is invisible in production. Add a unit test that stubs `repo.upsert` to the error branch and asserts the chosen contract; that path has no coverage today."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [
+              {
+                "type": "add",
+                "title": "Swallowed Result errors: review the contract, not the swallow",
+                "repo": "shared",
+                "confidence": "emerging",
+                "content": "**Rule:** When a function handles the `isErr()` branch and still returns `ok(...)`, raise the unreachable error variant as the defect and require either propagating the error or narrowing the return type to drop `Result`; do not argue that best-effort behaviour is itself wrong.\n**When to apply:** Reviewing any function declared `Result<T, E>` (or Either) whose sad branch falls through to a success return, typically justified by a `// best-effort` comment.\n**Anti-pattern:** Demanding error propagation outright — best-effort writes are often intended, so the author dismisses the thread and the lying signature survives. Framing it as a signature/behaviour mismatch holds under either intent, and pairing it with a log request keeps the failure observable.\n**Example:** `persistCacheEntry` returned `Promise<Result<void, PersistError>>` but discarded `repo.upsert`'s error and returned `ok(undefined)`, making `PersistError` unconstructable.",
+                "tags": [
+                  "reviewer",
+                  "review",
+                  "silent-failure",
+                  "type-design",
+                  "review-blocker"
+                ]
+              }
+            ],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 164,
+          "tokensUsed": {
+            "inputTokens": 19,
+            "outputTokens": 5443,
+            "cacheCreationInputTokens": 48024,
+            "cacheReadInputTokens": 542850
+          }
+        },
+        {
+          "sampleIndex": 1,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 88c < largest inline comment 763c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Reviewed PR #1171; raised one inline finding that persistCacheEntry swallows an upsert failure and returns ok(undefined) despite promising Result<void, PersistError>.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "Scope is right and checks are green. One finding, in a thread on `persistCacheEntry.ts`.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/modules/carrierRate/appServices/persistCacheEntry.ts",
+                    "line": 9,
+                    "side": "RIGHT",
+                    "body": "`persistCacheEntry` returns `ok(undefined)` even when `repo.upsert` fails, so the declared `Result<void, PersistError>` error path is dead and callers are told a failed write succeeded. Pick one: propagate the failure (`if (saved.isErr()) return err(saved.error)`, or just `return saved`) and let the caller decide whether to ignore it; or, if this really is fire-and-forget, change the return type to `Promise<void>` so no caller can branch on an error that never arrives. Propagation is the better default here — someone declared `PersistError` deliberately.\n\nWhichever you take, add a unit test covering the upsert-failure branch; nothing exercises it today. The `// swallow: best-effort cache write` comment should go with the fix rather than stand in for it."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [
+              {
+                "type": "add",
+                "title": "A Result-returning function that never returns err is a signature/behavior mismatch",
+                "repo": "shared",
+                "confidence": "emerging",
+                "content": "**Rule:** When a function declares `Result<T, E>` but every path returns `ok`, flag it — either propagate the underlying error, or narrow the return type to the plain value so no caller can branch on an error that never arrives.\n\n**When to apply:** Reviewing any function whose body discards a `Result` from a downstream call (repo, gateway, client) and returns success anyway, especially when justified as \"best-effort\".\n\n**Anti-pattern:** The typed error path stays declared but dead; callers write `isErr()` handling that never fires, and real write failures become invisible in production with no test covering the branch.\n\n**Example:** `const saved = await repo.upsert(entry); if (saved.isErr()) { /* swallow */ } return ok(undefined);` in a function typed `Promise<Result<void, PersistError>>`.",
+                "tags": [
+                  "reviewer",
+                  "review",
+                  "silent-failure",
+                  "result-type",
+                  "high-impact",
+                  "skill-candidate"
+                ]
+              }
+            ],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 159,
+          "tokensUsed": {
+            "inputTokens": 16,
+            "outputTokens": 4623,
+            "cacheCreationInputTokens": 20026,
+            "cacheReadInputTokens": 440066
+          }
+        },
+        {
+          "sampleIndex": 2,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 93c < largest inline comment 592c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Reviewed PR #1171; raised one inline finding on persistCacheEntry swallowing the upsert error and returning ok.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "Scope of the change looks right and checks are green. One finding raised in an inline thread.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/modules/carrierRate/appServices/persistCacheEntry.ts",
+                    "line": 9,
+                    "side": "RIGHT",
+                    "body": "An `upsert` failure is discarded here and the function still returns `ok(undefined)`, so callers cannot distinguish a persisted entry from a dropped one and `PersistError` is unreachable — the typed error channel is dead. Either propagate it (`return saved` in the err branch) and let the caller decide, or, if best-effort really is the contract, drop the `Result` and return `Promise<void>` while logging the failure so it stays observable. Whichever you pick, add a unit test that drives `repo.upsert` into the err branch and asserts the chosen behaviour; nothing exercises that path today."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [
+              {
+                "type": "add",
+                "title": "A swallowed err branch under a Result signature is a type error, not a logging gap",
+                "repo": "shared",
+                "confidence": "emerging",
+                "content": "**Rule:** When a function declares `Result<T, E>` but discards the sad branch and returns `ok(...)`, require either propagation of the error or a signature change to a type that cannot fail — do not accept a log line as the fix.\n**When to apply:** Reviewing any Result-returning function whose err branch is empty, commented `best-effort`, or handled only by logging.\n**Anti-pattern:** The declared error type becomes unreachable, callers get success on failure, and the dead error path silently outlives the intent that created it.\n**Example:** `persistCacheEntry` returned `Result<void, PersistError>` but swallowed `repo.upsert` failures and always returned `ok(undefined)`.",
+                "tags": [
+                  "reviewer",
+                  "review",
+                  "silent-failure",
+                  "result-type",
+                  "skill-candidate"
+                ]
+              }
+            ],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 145,
+          "tokensUsed": {
+            "inputTokens": 112,
+            "outputTokens": 4019,
+            "cacheCreationInputTokens": 19492,
+            "cacheReadInputTokens": 300364
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "first-pass-findings-stay-in-threads",
+      "description": "first pass, one real modest issue that tempts body-dumping → completed with the finding detail in the inline thread, not the body (grounded: finding-in-body mode, 01KRJ8Q45N0RFQ606WR0ZNFF56 / 01KRG9P5WFAN8CN6X01CHP987V / 01KR0SMX2NMQTPB9EA22PRPP79)",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 99c < largest inline comment 469c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Reviewed the attempts pagination change; scope is right, raised one correctness finding (missing ORDER BY) in a single inline thread.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "Scope of the change looks right. One correctness finding raised in a thread on the paginated query.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/repos/attempts-repo.ts",
+                    "line": 14,
+                    "side": "RIGHT",
+                    "body": "`listAttempts` now applies `LIMIT ? OFFSET ?` but the query has no `ORDER BY`, so SQLite's row order is unspecified and can differ between calls — pages can repeat or skip attempts. Add a deterministic ordering to the query, e.g. `ORDER BY created_at, id` (the `id` tiebreaker matters because `created_at` values can collide). The existing unit test only asserts the first page's length; add one that walks two pages and asserts the union has no duplicates and no gaps."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [
+              {
+                "type": "add",
+                "title": "LIMIT/OFFSET pagination needs a deterministic ORDER BY",
+                "repo": "shared",
+                "confidence": "emerging",
+                "content": "**Rule:** When a query gains `LIMIT`/`OFFSET`, require a total, deterministic `ORDER BY` on the same query — a timestamp column plus a unique tiebreaker such as `id`.\n**When to apply:** Reviewing any diff that adds pagination parameters to an existing SQL query, especially SQLite/Postgres `SELECT`s that previously returned a full result set.\n**Anti-pattern:** Without an explicit ordering the engine's row order is unspecified, so consecutive pages can repeat or skip rows; unit tests that assert only page length still pass, so the bug ships silently.\n**Example:** `SELECT * FROM attempts WHERE task_id = ? LIMIT ? OFFSET ?` needs `ORDER BY created_at, id` before the `LIMIT`.",
+                "tags": [
+                  "review",
+                  "reviewer",
+                  "sql",
+                  "pagination",
+                  "correctness",
+                  "skill-candidate"
+                ]
+              }
+            ],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 142,
+          "tokensUsed": {
+            "inputTokens": 19,
+            "outputTokens": 4454,
+            "cacheCreationInputTokens": 46406,
+            "cacheReadInputTokens": 533158
+          }
+        },
+        {
+          "sampleIndex": 1,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 84c < largest inline comment 459c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Reviewed PR #231 (paginate attempts list); left one inline finding on the missing ORDER BY in the paginated query.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "Scope of the change looks right and checks are green. 1 finding in an inline thread.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/repos/attempts-repo.ts",
+                    "line": 24,
+                    "side": "RIGHT",
+                    "body": "This query has no `ORDER BY`, so `LIMIT`/`OFFSET` page over SQLite's unspecified row order — rows can be repeated or skipped across pages once the table changes between calls. Add a deterministic ordering: `SELECT * FROM attempts WHERE task_id = ? ORDER BY created_at, id LIMIT ? OFFSET ?`. The existing unit test only asserts the first page's length; add one that pages through a multi-page result and asserts the concatenation covers every row exactly once."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 104,
+          "tokensUsed": {
+            "inputTokens": 112,
+            "outputTokens": 2685,
+            "cacheCreationInputTokens": 18536,
+            "cacheReadInputTokens": 299019
+          }
+        },
+        {
+          "sampleIndex": 2,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "schema",
+              "pass": true,
+              "detail": "parsed and validated against the worker-result schema"
+            },
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "outcome is \"completed\" as expected"
+            },
+            {
+              "dimension": "review-mutation",
+              "pass": true,
+              "detail": "one COMMENT review with 1 inline comment(s), each path+line pinned"
+            },
+            {
+              "dimension": "summary-conciseness",
+              "pass": true,
+              "detail": "n/a (not a stand-down)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 105c < largest inline comment 487c, within the discipline ceiling"
+            },
+            {
+              "dimension": "mentions",
+              "pass": true,
+              "detail": "all expected paths pinned"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Reviewed PR #231; left one inline thread on the paginated attempts query missing a deterministic ORDER BY.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "Scope of the change looks right and checks are green. One correctness finding raised in an inline thread.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/repos/attempts-repo.ts",
+                    "line": 24,
+                    "side": "RIGHT",
+                    "body": "Add a deterministic `ORDER BY` to this query — e.g. `... WHERE task_id = ? ORDER BY created_at, id LIMIT ? OFFSET ?`. SQLite does not guarantee row order without one, so `LIMIT`/`OFFSET` can return the same row on two pages or skip a row entirely as the plan or table state changes. The existing unit test only asserts the first page's length, so it cannot catch this; extend it to page through a fixture set and assert the concatenated ids equal the full ordered set with no duplicates."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 101,
+          "tokensUsed": {
+            "inputTokens": 10,
+            "outputTokens": 2127,
+            "cacheCreationInputTokens": 45028,
+            "cacheReadInputTokens": 217880
+          }
+        }
+      ],
+      "passRate": 1
+    }
+  ],
+  "overallPassRate": 1
+}
