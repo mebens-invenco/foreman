@@ -1,7 +1,9 @@
+import { foremanBenchCases } from "./cases/foreman-bench.js";
 import { learningPolicyCases } from "./cases/learning-policy.js";
 import { reviewerCases } from "./cases/reviewer.js";
 import { summaryPolicyCases } from "./cases/summary-policy.js";
 import { learningWritebackGraders, summaryPolicyGraders } from "./graders.js";
+import { livePrGraders } from "./live-pr-graders.js";
 import { reviewerGraders } from "./reviewer-graders.js";
 import type { EvalDefinition } from "./types.js";
 
@@ -37,6 +39,14 @@ export const EVAL_REGISTRY: Record<string, EvalDefinition> = {
     prompt: "reviewer",
     cases: reviewerCases,
     graders: reviewerGraders,
+  }),
+  // Layer 2: live-PR reviewer cases against the frozen foreman-bench fixture
+  // PRs — real worktree, real `gh` discovery, mutations captured never applied.
+  // Needs GitHub access; run with `--samples 1 --timeout 1500000`.
+  "reviewer-live": defineEval({
+    prompt: "reviewer-live",
+    cases: foremanBenchCases,
+    graders: livePrGraders,
   }),
 };
 
