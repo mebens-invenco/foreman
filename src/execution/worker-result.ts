@@ -215,6 +215,53 @@ export const validateWorkerResult = (value: unknown): WorkerResult => workerResu
 export const validateWorkerResultForAction = (value: unknown, action: WorkerResultAction): WorkerResult =>
   workerResultSchema.safeExtend({ action: z.literal(action) }).parse(value) as WorkerResult;
 
+// Review-mutation variants the DISPLAYED schema advertises per action. The
+// validator is unchanged — this prunes only what the help/prompt shows, so an
+// action stops advertising mutation types its template then has to forbid in
+// prose (the reviewer is prose-forbidden from everything but submitting one
+// review, and all observed reviewer traces use exactly that one type). Actions
+// without an entry display every variant.
+const displayedReviewMutationTypes: Partial<Record<WorkerResultAction, ReadonlySet<string>>> = {
+  reviewer: new Set(["submit_pull_request_review"]),
+};
+
+type JsonSchemaObject = Record<string, unknown>;
+
+const asRecord = (value: unknown): JsonSchemaObject | null => (typeof value === "object" && value !== null && !Array.isArray(value) ? (value as JsonSchemaObject) : null);
+
+/**
+ * The JSON Schema the help/prompt displays for an action: the validator's
+ * schema with the `reviewMutations` union filtered to the action's allowlist.
+ * Derived by filtering — never hand-written — so the displayed subset cannot
+ * drift from the validator's variant shapes. Throws when the serialized shape
+ * no longer matches expectations, rather than silently displaying an unpruned
+ * (or over-pruned) schema.
+ */
+export const displayedAgentResultJsonSchema = (action?: WorkerResultAction): JsonSchemaObject => {
+  const schema = action ? workerResultSchema.safeExtend({ action: z.literal(action) }) : workerResultSchema;
+  const jsonSchema = z.toJSONSchema(schema) as JsonSchemaObject;
+  const allowed = action ? displayedReviewMutationTypes[action] : undefined;
+  if (!allowed) {
+    return jsonSchema;
+  }
+
+  const properties = asRecord(jsonSchema.properties);
+  const reviewMutations = asRecord(properties?.reviewMutations);
+  const items = asRecord(reviewMutations?.items);
+  const variants = Array.isArray(items?.oneOf) ? items.oneOf : null;
+  if (!properties || !reviewMutations || !items || !variants) {
+    throw new Error("worker result JSON schema no longer matches the expected reviewMutations union shape; update displayedAgentResultJsonSchema");
+  }
+  const kept = variants.filter((variant) => {
+    const constType = asRecord(asRecord(asRecord(variant)?.properties)?.type)?.const;
+    return typeof constType === "string" && allowed.has(constType);
+  });
+  if (kept.length !== allowed.size) {
+    throw new Error(`displayed review-mutation allowlist for "${action}" kept ${kept.length} of ${allowed.size} expected variants; allowlist and schema have drifted`);
+  }
+  return { ...jsonSchema, properties: { ...properties, reviewMutations: { ...reviewMutations, items: { ...items, oneOf: kept } } } };
+};
+
 // Serialises the worker result schema for a given action to the human-readable
 // help text that both the `agent-result validate --help` command and the
 // rendered worker prompts inline. Sourcing both from this single helper keeps
@@ -224,8 +271,7 @@ export const validateWorkerResultForAction = (value: unknown, action: WorkerResu
 // keeps the pretty form for humans. Same Zod derivation either way.
 export const renderAgentResultSchemaHelp = (action?: WorkerResultAction, schemaFormat: "compact" | "pretty" = "compact"): string => {
   const actionLiteral = action ?? `<${workerResultActionValues.join("|")}>`;
-  const schema = action ? workerResultSchema.safeExtend({ action: z.literal(action) }) : workerResultSchema;
-  const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, schemaFormat === "pretty" ? 2 : undefined);
+  const jsonSchema = JSON.stringify(displayedAgentResultJsonSchema(action), null, schemaFormat === "pretty" ? 2 : undefined);
   const exampleJson = JSON.stringify({
     ...workerResultExample,
     action: actionLiteral,
@@ -235,6 +281,10 @@ export const renderAgentResultSchemaHelp = (action?: WorkerResultAction, schemaF
     action === "review" || action === "reviewer"
       ? "\n- For no-op review results, use outcome `no_action_needed`; `completed` requires mutations or code changes."
       : "";
+  const pruneNote =
+    action && displayedReviewMutationTypes[action]
+      ? "\n- The schema shows only the review mutation types permitted for this action."
+      : "";
 
   return `
 Action-specific accepted output shape
@@ -243,7 +293,7 @@ Action-specific accepted output shape
 - Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block containing JSON.
 - The final answer returned to Foreman must contain exactly one <agent-result> block and no prose after it.
 - The worker result JSON schema below is generated from Foreman's Zod worker result schema.
-${reviewGuidance}
+${reviewGuidance}${pruneNote}
 
 Worker result JSON schema:
 

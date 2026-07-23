@@ -140,7 +140,11 @@ describe("agent-result cli", () => {
     expect(result.stdout).toContain("Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block");
     expect(result.stdout).toContain("generated from Foreman's Zod worker result schema");
     expect(result.stdout).toContain('"const": "reviewer"');
-    expect(result.stdout).toContain('"const": "create_pull_request"');
+    // The reviewer's displayed schema is pruned to its permitted mutation types;
+    // the other variants stay validator-only (see displayedAgentResultJsonSchema).
+    expect(result.stdout).toContain('"const": "submit_pull_request_review"');
+    expect(result.stdout).not.toContain('"const": "create_pull_request"');
+    expect(result.stdout).toContain("only the review mutation types permitted");
     expect(result.stdout).toContain('"required"');
     expect(result.stdout).toContain("Minimal raw JSON example");
     expect(result.stdout).toContain("For no-op review results, use outcome `no_action_needed`");
