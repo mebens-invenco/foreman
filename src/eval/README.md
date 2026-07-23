@@ -159,6 +159,16 @@ worker result is captured and graded, **never applied** — zero GitHub writes,
 so the fixture PRs stay byte-frozen across runs. Do not merge, close, or
 comment on the fixture PRs.
 
+Continuation cases (`continuation: true` in the manifest) select the
+reviewer-continuation template and carry a driver-side `priorCheckpoint`
+pinning a real seeded review on the fixture PR (its review node id and thread
+fingerprint). Each fixture PR carries at most ONE seeded COMMENT review — a
+sanctioned one-time exception to the freeze, recorded in the manifest note.
+The three continuation shapes: nothing-new (stand down, no re-litigation of
+the still-open seeded thread), fix-verified (commits since the checkpoint
+address the thread → stand down), and bad-fix (the "fix" contradicts the
+requested change → flag it).
+
 Expectations live in `cases/foreman-bench-manifest.json` — driver-side, never
 in the bench repo, because the reviewer explores its worktree during a pass and
 an in-repo manifest naming the planted findings would contaminate every case.

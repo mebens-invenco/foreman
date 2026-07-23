@@ -58,6 +58,16 @@ export type LivePrFixture = {
   headSha: string;
   /** Rendered as `headIntroducedAt` in the PR reference (post-head comment cutoff). */
   headIntroducedAt: string;
+  /** Selects the reviewer-continuation template when true. */
+  continuation?: boolean;
+  /**
+   * Pre-resolved checkpoint for continuation cases, rendered into
+   * `{{context:prior-checkpoint}}`. The seeded prior-review threads live on the
+   * real fixture PR; this carries the driver-side record of that prior pass
+   * (its head, review id, and thread fingerprint), mirroring
+   * `resolvePriorCheckpointContext` in render-worker-prompt.
+   */
+  priorCheckpoint?: Record<string, unknown>;
 };
 
 /** The scenario a case feeds into the rendered prompt — see `assembleCasePrompt`. */

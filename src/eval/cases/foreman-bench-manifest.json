@@ -1,6 +1,6 @@
 {
   "repo": "invenco/foreman-bench",
-  "note": "Expectations for the live fixture PRs in invenco/foreman-bench. Kept here — never in the bench repo — because the reviewer explores its worktree during a pass and a manifest naming the planted findings would contaminate every case. Fixture PRs are frozen: the live-pr driver captures review mutations without applying them, so PR state never drifts. Do not merge or close the referenced PRs.",
+  "note": "Expectations for the live fixture PRs in invenco/foreman-bench. Kept here — never in the bench repo — because the reviewer explores its worktree during a pass and a manifest naming the planted findings would contaminate every case. Fixture PRs are frozen: the live-pr driver captures review mutations without applying them, so PR state never drifts. Do not merge or close the referenced PRs. 2026-07-23: PRs #1, #2, and #4 each carry ONE seeded COMMENT review (the sanctioned one-time exception) so continuation cases have real prior-review threads; the priorCheckpoint entries below pin those reviews' real node ids and thread fingerprints. No further reviews or comments may be added.",
   "cases": [
     {
       "id": "live-planted-silent-failure",
@@ -44,6 +44,82 @@
         "outcome": "completed",
         "mustFlagPaths": ["src/modules/quotes/domain/VolumetricWeight.ts"],
         "maxThreads": 3
+      }
+    },
+    {
+      "id": "live-cont-nothing-new",
+      "pullRequest": 1,
+      "branch": "bench/live-carrier-rates",
+      "headSha": "2e22aac5853172210affffc42adf06c39d978f32",
+      "headIntroducedAt": "2026-07-22T07:06:56Z",
+      "action": "reviewer",
+      "variant": "continuation",
+      "continuation": true,
+      "plantedFinding": "Nothing is new since the checkpoint: same head, no new comments, checks green. The planted silent failure is still present in the worktree but was already flagged by the prior pass (the seeded thread). The case measures no-re-litigation discipline: a reviewer that re-reviews the unchanged diff and re-flags the settled finding fails.",
+      "priorCheckpoint": {
+        "priorPassSummary": "Reviewed the carrier-rate gateway addition; flagged one thread: the catch in CarrierRateGateway.currentRateCents returns ok(fallbackCents), hiding rate-fetch failures from callers and leaving CarrierRateError unused. Otherwise clean.",
+        "headSha": "2e22aac5853172210affffc42adf06c39d978f32",
+        "latestReviewSummaryId": "PRR_kwDOTf3-us8AAAABG9e56Q",
+        "latestConversationCommentId": null,
+        "reviewThreadsFingerprint": "[{\"id\":\"PRRT_kwDOTf3-us6TLhnu\",\"latestCommentId\":\"PRRC_kwDOTf3-us7YwW9N\"}]",
+        "checksFingerprint": "[]",
+        "mergeState": "clean",
+        "recordedAt": "2026-07-23T08:13:00Z"
+      },
+      "expect": {
+        "outcome": "no_action_needed",
+        "summaryMaxChars": 450
+      }
+    },
+    {
+      "id": "live-cont-fix-verified",
+      "pullRequest": 2,
+      "branch": "bench/saver-service-level",
+      "headSha": "94572c761563ba672924226af42e17eb2fbf5438",
+      "headIntroducedAt": "2026-07-23T04:48:49Z",
+      "action": "reviewer",
+      "variant": "continuation",
+      "continuation": true,
+      "plantedFinding": "The prior pass (seeded thread at b8528c6) flagged the rounding contract as unpinned by tests. The three commits since the checkpoint (d4977e5, c868b5b, 94572c7) pin upper-half, lower-half, and exact half-cent rounding — fully addressing the thread. The correct continuation verdict is a concise stand-down, not a re-review of the whole PR.",
+      "priorCheckpoint": {
+        "priorPassSummary": "Reviewed the saver service level; flagged one thread on the rounding test: it only pins the integer-result case (1000 × 0.85 = 850), leaving the fractional-cent rounding contract unpinned.",
+        "headSha": "b8528c6a2934f42990ee9ffbaca30f714b3784e5",
+        "latestReviewSummaryId": "PRR_kwDOTf3-us8AAAABG9e6WQ",
+        "latestConversationCommentId": null,
+        "reviewThreadsFingerprint": "[{\"id\":\"PRRT_kwDOTf3-us6TLho0\",\"latestCommentId\":\"PRRC_kwDOTf3-us7YwW-0\"}]",
+        "checksFingerprint": "[]",
+        "mergeState": "clean",
+        "recordedAt": "2026-07-23T08:13:00Z"
+      },
+      "expect": {
+        "outcome": "no_action_needed",
+        "summaryMaxChars": 450
+      }
+    },
+    {
+      "id": "live-cont-bad-fix",
+      "pullRequest": 4,
+      "branch": "bench/fuel-surcharge",
+      "headSha": "efca35fa51c22c6b6ca1e69b58b23e1df6739bb8",
+      "headIntroducedAt": "2026-07-23T08:14:04Z",
+      "action": "reviewer",
+      "variant": "continuation",
+      "continuation": true,
+      "plantedFinding": "The prior pass (seeded thread at e97ade3) flagged applyFuelSurcharge returning fractional cents and asked for whole-cent rounding matching GetQuoteUseCase's Math.round convention. The fix commit (efca35f) uses Math.trunc instead: prices with a fractional part >= half a cent are silently undercharged by one cent, contradicting both the requested fix and the module's rounding convention. The new test only pins a below-half fraction (1041 → 1093.05), where trunc and round agree.",
+      "priorCheckpoint": {
+        "priorPassSummary": "Reviewed the fuel surcharge; flagged one thread: applyFuelSurcharge returns fractional cents, which Quote.create rejects, so quoting fails at runtime for most bracket/service-level combinations. Asked for whole-cent rounding matching GetQuoteUseCase's Math.round convention.",
+        "headSha": "e97ade3e34dcc5650f645def5ccc1b13068a2fdd",
+        "latestReviewSummaryId": "PRR_kwDOTf3-us8AAAABG9fYwA",
+        "latestConversationCommentId": null,
+        "reviewThreadsFingerprint": "[{\"id\":\"PRRT_kwDOTf3-us6TLioL\",\"latestCommentId\":\"PRRC_kwDOTf3-us7YwYZa\"}]",
+        "checksFingerprint": "[]",
+        "mergeState": "clean",
+        "recordedAt": "2026-07-23T08:13:50Z"
+      },
+      "expect": {
+        "outcome": "completed",
+        "mustFlagPaths": ["src/modules/quotes/domain/FuelSurcharge.ts"],
+        "maxThreads": 2
       }
     }
   ]
