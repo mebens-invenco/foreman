@@ -118,6 +118,14 @@ const assembleLivePrCase = async (
   config: WorkspaceConfig,
 ): Promise<{ prompt: string; cwd: string }> => {
   const worktree = await checkoutLivePrWorktree(fixture, paths);
+  // The rendered file-provider context points at the task's files; a live
+  // reviewer can (and does) read them, so they must exist.
+  await fs.mkdir(paths.tasksDir, { recursive: true });
+  await fs.writeFile(
+    path.join(paths.tasksDir, `${evalCase.task.id}.md`),
+    `# ${evalCase.task.title}\n\nstate: ${evalCase.task.state}\n\n${evalCase.task.description}\n`,
+  );
+  await fs.writeFile(path.join(paths.tasksDir, `${evalCase.task.id}.comments.ndjson`), "");
   const prompt = await renderWorkerPrompt({
     action: evalCase.action,
     config,
@@ -241,6 +249,7 @@ const runCase = async (evalCase: EvalCase, graders: Grader[], config: WorkspaceC
       parsed: result !== null,
       graderResults,
       pass,
+      ...(result ? { result } : {}),
       elapsedSeconds,
       ...(captured.tokensUsed ? { tokensUsed: captured.tokensUsed } : {}),
     });
