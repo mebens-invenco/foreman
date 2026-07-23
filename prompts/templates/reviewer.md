@@ -48,8 +48,11 @@ Do not fan out for the sake of fanning out.
 
 - Focus on correctness, regressions, risky changes, and missing tests.
 - Review the current diff and changed code directly; use discovered review history to interpret the current state.
+- Use historical GitHub context to avoid undoing prior decisions or flip-flopping on already-settled feedback.
 - This reviewer pass runs even on draft PRs.
+- Check remote CI/check status once per pass; do not poll, sleep, wait, or loop for pending checks to finish.
 - If you leave feedback, use a `submit_pull_request_review` mutation with `event: "COMMENT"`.
+- Return all GitHub writes as Foreman review mutations instead of calling write APIs directly.
 - Put actionable findings in inline thread comments pinned to the specific changed line — each thread becomes a discrete resolver work unit (see Consumer Context above).
 - Keep the top-level summary short: one paragraph stating overall stance and the thread count. Do not put actionable findings in the summary.
 - Do not request code changes through task mutations.
