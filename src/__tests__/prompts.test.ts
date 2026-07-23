@@ -7,6 +7,7 @@ import { createDefaultWorkspaceConfig } from "../workspace/config.js";
 import { priorityToRank, type ReviewContext, type Task } from "../domain/index.js";
 import { renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
 import {
+  displayedAgentResultJsonSchema,
   renderAgentResultSchemaHelp,
   workerResultActionValues,
   workerResultSchema,
@@ -22,11 +23,12 @@ const cleanupDirs: string[] = [];
 const cleanupDbs: Array<{ close(): void }> = [];
 const projectRoot = testProjectRoot;
 
-// The exact JSON schema the stdin `agent-result validate` step enforces for an action,
-// in the compact form prompts inline. Asserting the rendered prompt contains this proves
-// the inline schema is sourced from the same validator, so the two cannot silently drift apart.
-const validatorJsonSchema = (action: WorkerResultAction): string =>
-  JSON.stringify(z.toJSONSchema(workerResultSchema.safeExtend({ action: z.literal(action) })));
+// The exact JSON schema the prompt displays for an action, in the compact form
+// prompts inline: the validator's schema with the reviewMutations union filtered
+// to the action's display allowlist (identity for every action without one).
+// Asserting the rendered prompt contains this proves the inline schema is derived
+// from the same validator, so the two cannot silently drift apart.
+const validatorJsonSchema = (action: WorkerResultAction): string => JSON.stringify(displayedAgentResultJsonSchema(action));
 
 afterEach(async () => {
   cleanupDbs.splice(0).forEach((db) => db.close());
@@ -510,10 +512,38 @@ describe("prompt rendering", () => {
       // Two renders of the same action produce the identical inline schema (deterministic).
       expect(first).toContain(schemaText);
       expect(second).toContain(schemaText);
-      // The inline schema embeds exactly the validator's JSON schema, so any change to
+      // The inline schema embeds exactly the displayed JSON schema (validator-derived,
+      // reviewMutations filtered by the action's display allowlist), so any change to
       // workerResultSchema moves this fixture in lockstep and keeps the inline text honest.
       expect(schemaText).toContain(validatorJsonSchema(action));
     }
+  });
+
+  test("prunes the displayed review-mutation variants to the reviewer's allowlist", () => {
+    const variantTypes = (schema: Record<string, unknown>): string[] => {
+      const properties = schema.properties as Record<string, { items?: { oneOf?: { properties?: { type?: { const?: string } } }[] } }>;
+      return (properties.reviewMutations?.items?.oneOf ?? []).map((variant) => variant.properties?.type?.const ?? "?");
+    };
+
+    // Reviewer display: only the one mutation type its template permits; the
+    // validator itself is untouched and still accepts every variant.
+    expect(variantTypes(displayedAgentResultJsonSchema("reviewer"))).toEqual(["submit_pull_request_review"]);
+    const validatorVariants = variantTypes(z.toJSONSchema(workerResultSchema) as Record<string, unknown>);
+    expect(validatorVariants).toContain("reply_to_thread_comment");
+    expect(validatorVariants.length).toBeGreaterThan(1);
+
+    // Every other action (and the generic shape) displays the full validator union.
+    for (const action of workerResultActionValues.filter((value) => value !== "reviewer")) {
+      expect(variantTypes(displayedAgentResultJsonSchema(action))).toEqual(validatorVariants);
+    }
+    expect(variantTypes(displayedAgentResultJsonSchema(undefined))).toEqual(validatorVariants);
+
+    // The reviewer prompt stops advertising the forbidden variants entirely.
+    const reviewerHelp = renderAgentResultSchemaHelp("reviewer");
+    expect(reviewerHelp).not.toContain("reply_to_thread_comment");
+    expect(reviewerHelp).not.toContain("resolve_threads");
+    expect(reviewerHelp).toContain("only the review mutation types permitted");
+    expect(renderAgentResultSchemaHelp("review")).toContain("reply_to_thread_comment");
   });
 
   test("renders Linear provider access for Linear worker prompts", async () => {
