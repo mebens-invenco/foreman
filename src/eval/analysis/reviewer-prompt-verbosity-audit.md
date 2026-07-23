@@ -143,6 +143,18 @@ review-github cut touches.
   captures review mutations without applying them. A `live-pr` fixture
   variant in the eval registry is the pending driver work.
 
+  First live run (2026-07-23, gpt-5.6-sol, raw report in `baselines/`):
+  **3/3 cases pass** — planted silent-failure flagged (2 threads), the
+  over-thread temptation held to exactly 1 thread on the real mm³/cm³ bug,
+  and the clean PR got a concise stand-down. The clean case initially
+  *failed* because the reviewer correctly caught a weak fixture test
+  (`1000×0.85` can't distinguish round from floor) — the fixture was
+  strengthened (foreman-bench `d4977e57`) rather than the grader loosened;
+  the superseded result is kept in the report as evidence the bench
+  discriminates in both directions. Zero direct GitHub writes across all
+  runs. Live reviews ran 262–473s; the driver does not yet surface codex
+  token usage (needed for the quality-per-dollar column).
+
 ## Layer-1 baseline (captured 2026-07-22, current prompt, pre-cut)
 
 `foreman eval reviewer --samples 3`, raw reports committed in
