@@ -370,7 +370,7 @@ function runnerForType(type: RunnerProvider["type"], current: RunnerProvider): R
     case "codex":
       return {
         type,
-        model: current.model || "gpt-5.5",
+        model: current.model || "gpt-5.6-sol",
         effort: "high",
         timeoutMs: current.timeoutMs,
       }
