@@ -24,8 +24,8 @@ export class ClaudeRunner implements AgentRunner {
     return this.run(request, randomUUID(), false);
   }
 
-  private run(request: AgentRunnerInvokeRequest, nativeSessionId: string, resume: boolean): Promise<CapturedAgentRunResult> {
-    return runAgentProcess({
+  private async run(request: AgentRunnerInvokeRequest, nativeSessionId: string, resume: boolean): Promise<CapturedAgentRunResult> {
+    const result = await runAgentProcess({
       command: process.env.FOREMAN_CLAUDE_BIN ?? "claude",
       args: [
         "-p",
@@ -53,5 +53,12 @@ export class ClaudeRunner implements AgentRunner {
         };
       },
     });
+
+    if (resume && result.exitCode !== 0 && result.stderr.includes("No conversation found with session ID")) {
+      const { nativeSessionId: _missingSessionId, ...resultWithoutSession } = result;
+      return resultWithoutSession;
+    }
+
+    return result;
   }
 }
