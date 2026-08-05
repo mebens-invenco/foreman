@@ -58,6 +58,7 @@ type ReviewCheckpointState = {
 
 const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
 const stopIntentPhrases = ["abandon", "do not continue", "do not retry"];
+const failedReviewerRetryCooldownMs = 5 * 60 * 1000;
 
 const latestRetryWasManuallyStopped = (input: { foremanRepos: ForemanRepos; target: TaskTarget }): boolean => {
   const latestJob = input.foremanRepos.jobs.latestJobForTaskTarget(input.target.id);
@@ -75,23 +76,38 @@ const latestRetryWasManuallyStopped = (input: { foremanRepos: ForemanRepos; targ
     .some((event) => event.eventType === "attempt_stop_requested");
 };
 
-const latestReviewerFailedForHead = (input: {
+const failedReviewerRetryCooldown = (input: {
   foremanRepos: ForemanRepos;
   target: TaskTarget;
   reviewContext: ReviewContext;
-}): boolean => {
+}): { failedAttemptId: string; retryAt: string } | null => {
   const latestJob = input.foremanRepos.jobs.latestJobForTaskTarget(input.target.id);
   if (!latestJob || latestJob.action !== "reviewer" || latestJob.status !== "failed") {
-    return false;
+    return null;
   }
 
   const failedReviewContext = latestJob.selectionContext.reviewContext;
-  return (
-    typeof failedReviewContext === "object" &&
-    failedReviewContext !== null &&
-    "headSha" in failedReviewContext &&
-    failedReviewContext.headSha === input.reviewContext.headSha
-  );
+  if (
+    typeof failedReviewContext !== "object" ||
+    failedReviewContext === null ||
+    !("headSha" in failedReviewContext) ||
+    failedReviewContext.headSha !== input.reviewContext.headSha
+  ) {
+    return null;
+  }
+
+  const latestAttempt = input.foremanRepos.attempts.latestAttemptForJob(latestJob.id);
+  if (!latestAttempt || latestAttempt.status !== "failed" || !latestAttempt.finishedAt) {
+    return null;
+  }
+
+  const finishedAt = Date.parse(latestAttempt.finishedAt);
+  if (!Number.isFinite(finishedAt)) {
+    return null;
+  }
+
+  const retryAt = finishedAt + failedReviewerRetryCooldownMs;
+  return retryAt > Date.now() ? { failedAttemptId: latestAttempt.id, retryAt: new Date(retryAt).toISOString() } : null;
 };
 
 const logBlockedOrdinaryWorkSkip = (logger: LoggerService | undefined, task: Task, target: TaskTarget, progress: TargetProgress): void => {
@@ -1030,11 +1046,17 @@ export const runScoutSelection = async (input: {
             continue;
           }
 
-          if (
-            input.triggerType === "worker_finished" &&
-            latestReviewerFailedForHead({ foremanRepos: input.foremanRepos, target, reviewContext })
-          ) {
-            continue;
+          if (input.triggerType !== "manual") {
+            const cooldown = failedReviewerRetryCooldown({ foremanRepos: input.foremanRepos, target, reviewContext });
+            if (cooldown) {
+              logger?.info("skipping unchanged failed reviewer during retry cooldown", {
+                taskId: task.id,
+                taskTargetId: target.id,
+                failedAttemptId: cooldown.failedAttemptId,
+                retryAt: cooldown.retryAt,
+              });
+              continue;
+            }
           }
 
           chosen = {
