@@ -572,6 +572,7 @@ export class LinearTaskSystem implements TaskSystem {
         }
       }`,
       identifier ? { teamKey: identifier.teamKey, number: identifier.number } : { id: taskId },
+      { retryTransient: true },
     );
 
     const issue = data.issues.nodes[0];
