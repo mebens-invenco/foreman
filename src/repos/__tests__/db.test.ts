@@ -2546,7 +2546,7 @@ describe("persistence repos", () => {
     }
   });
 
-  test("mirrors multi-target tasks, persists metadata dependencies, and preserves target ids", async () => {
+  test("mirrors multi-target tasks and replaces only their metadata dependencies", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
@@ -2660,6 +2660,57 @@ describe("persistence repos", () => {
         ]),
       );
       expect(db.taskMirror.getTargetDependenciesForTask(task.id)).toHaveLength(4);
+
+      db.taskMirror.saveTasks([{ ...dependencyTask, title: "Updated upstream repo rollout" }]);
+
+      expect(db.taskMirror.getTargetDependenciesForTask(task.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            taskTargetId: targetIdsByRepo.get("lynk-frontend"),
+            dependsOnTaskTargetId: targetIdsByRepo.get("common"),
+            source: "metadata",
+          }),
+          expect.objectContaining({
+            taskTargetId: targetIdsByRepo.get("common"),
+            dependsOnTaskTargetId: dependencyIdsByRepo.get("common"),
+            source: "derived",
+          }),
+        ]),
+      );
+      expect(db.taskMirror.getTargetDependenciesForTask(task.id)).toHaveLength(4);
+
+      db.taskMirror.saveTasks([
+        {
+          ...task,
+          targetDependencies: [{ taskTargetRepoKey: "web-front-door", dependsOnRepoKey: "common", position: 0 }],
+        },
+      ]);
+
+      expect(db.taskMirror.getTargetDependenciesForTask(task.id).filter((dependency) => dependency.source === "metadata")).toEqual([
+        expect.objectContaining({
+          taskTargetId: targetIdsByRepo.get("web-front-door"),
+          dependsOnTaskTargetId: targetIdsByRepo.get("common"),
+          position: 0,
+        }),
+      ]);
+
+      db.taskMirror.saveTasks([{ ...task, targetDependencies: [] }]);
+
+      expect(db.taskMirror.getTargetDependenciesForTask(task.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            taskTargetId: targetIdsByRepo.get("common"),
+            dependsOnTaskTargetId: dependencyIdsByRepo.get("common"),
+            source: "derived",
+          }),
+          expect.objectContaining({
+            taskTargetId: targetIdsByRepo.get("lynk-frontend"),
+            dependsOnTaskTargetId: dependencyIdsByRepo.get("lynk-frontend"),
+            source: "derived",
+          }),
+        ]),
+      );
+      expect(db.taskMirror.getTargetDependenciesForTask(task.id)).toHaveLength(2);
     } finally {
       db.close();
     }
