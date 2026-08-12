@@ -110,6 +110,13 @@ const logBlockedOrdinaryWorkSkip = (logger: LoggerService | undefined, task: Tas
   logger?.info("skipping blocked ordinary work pending explicit unblock", context);
 };
 
+// GitHub reports mergeable=UNKNOWN while it recomputes mergeability, so an
+// unknown live state carries no information — comparing it against a definite
+// checkpoint state flaps and reschedules reviews on an unchanged head.
+const mergeConflictStatusChanged = (checkpoint: ReviewCheckpointState, context: ReviewContext): boolean =>
+  context.mergeState !== "unknown" &&
+  (checkpoint.mergeState === "conflicting") !== (context.mergeState === "conflicting");
+
 const checkpointMatchesReviewFeedback = (checkpoint: ReviewCheckpointState, context: ReviewContext): boolean =>
   checkpoint.latestReviewSummaryId === latestActionableReviewSummaryId(context) &&
   checkpoint.latestConversationCommentId === latestActionableConversationCommentId(context) &&
@@ -138,7 +145,7 @@ const reviewPriorityReason = (context: ReviewContext, checkpoint: ReviewCheckpoi
     if (!failingChecksCoveredByFingerprint(checkpoint.checksFingerprint, context) && context.failingChecks.length > 0) {
       return "failing checks";
     }
-    if ((checkpoint.mergeState === "conflicting") !== (context.mergeState === "conflicting")) {
+    if (mergeConflictStatusChanged(checkpoint, context)) {
       return "merge conflict status changed";
     }
     return null;
@@ -207,7 +214,7 @@ const checkpointMatchesReviewState = (
     ? checkpoint.headSha === context.headSha &&
       checkpointMatchesReviewFeedback(checkpoint, context) &&
       failingChecksCoveredByFingerprint(checkpoint.checksFingerprint, context) &&
-      (checkpoint.mergeState === "conflicting") === (context.mergeState === "conflicting")
+      !mergeConflictStatusChanged(checkpoint, context)
     : false;
 
 const reviewerCheckpointMatchesCommit = (

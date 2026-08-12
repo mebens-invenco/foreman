@@ -1847,6 +1847,7 @@ describe("runScoutSelection", () => {
   test.each([
     { checkpointMergeState: "unknown", liveMergeState: "clean", expectedReason: null },
     { checkpointMergeState: "clean", liveMergeState: "unknown", expectedReason: null },
+    { checkpointMergeState: "conflicting", liveMergeState: "unknown", expectedReason: null },
     { checkpointMergeState: "clean", liveMergeState: "conflicting", expectedReason: "merge conflict status changed" },
     { checkpointMergeState: "unknown", liveMergeState: "conflicting", expectedReason: "merge conflict status changed" },
     { checkpointMergeState: "conflicting", liveMergeState: "clean", expectedReason: "merge conflict status changed" },
