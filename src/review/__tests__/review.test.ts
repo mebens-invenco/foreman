@@ -1408,6 +1408,98 @@ describe("GitHubReviewService rate-limit handling", () => {
   });
 });
 
+describe("GitHubReviewService.createPullRequest", () => {
+  test("recovers an existing open pull request after GitHub rejects the duplicate head", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { message: "Validation Failed", errors: [{ message: "A pull request already exists for acme:eng-5994." }] },
+          422,
+        ),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse([
+          {
+            html_url: "https://github.com/acme/repo/pull/999",
+            number: 999,
+            state: "open",
+            draft: true,
+            merged_at: null,
+            head: { ref: "eng-5994" },
+            base: { ref: "master" },
+          },
+        ]),
+      ) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(
+      service.createPullRequest({
+        cwd: "/repos/repo-a",
+        title: "ENG-5994: Recover pull requests",
+        body: "Existing implementation.",
+        draft: true,
+        baseBranch: "master",
+        headBranch: "eng-5994",
+      }),
+    ).resolves.toEqual({ url: "https://github.com/acme/repo/pull/999", number: 999 });
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toBe(
+      "https://api.github.com/repos/acme/repo/pulls?state=open&head=acme%3Aeng-5994&per_page=20",
+    );
+  });
+
+  test("keeps unrelated 422 responses fatal", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse({ message: "Validation Failed", errors: [{ message: "No commits between master and eng-5994" }] }, 422),
+    ) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(
+      service.createPullRequest({
+        cwd: "/repos/repo-a",
+        title: "ENG-5994: Recover pull requests",
+        body: "Existing implementation.",
+        draft: true,
+        baseBranch: "master",
+        headBranch: "eng-5994",
+      }),
+    ).rejects.toMatchObject({ code: "github_request_failed" });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("keeps the duplicate-head error fatal when no open pull request resolves", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { message: "Validation Failed", errors: [{ message: "A pull request already exists for acme:eng-5994." }] },
+          422,
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse([])) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(
+      service.createPullRequest({
+        cwd: "/repos/repo-a",
+        title: "ENG-5994: Recover pull requests",
+        body: "Existing implementation.",
+        draft: true,
+        baseBranch: "master",
+        headBranch: "eng-5994",
+      }),
+    ).rejects.toThrow("A pull request already exists for acme:eng-5994.");
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("GitHubReviewService reply mutations", () => {
   test("does not retry or defer REST mutation timeouts", async () => {
     global.fetch = vi.fn().mockRejectedValueOnce(timeoutError()) as typeof fetch;
