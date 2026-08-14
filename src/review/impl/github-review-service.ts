@@ -58,6 +58,11 @@ const isExistingPendingReviewError = (error: unknown): boolean =>
   error.message.includes("GitHub request failed: 422") &&
   error.message.includes("User can only have one pending review per pull request");
 
+const isExistingPullRequestError = (error: unknown, owner: string, headBranch: string): boolean =>
+  error instanceof ForemanError &&
+  error.message.includes("GitHub request failed: 422") &&
+  error.message.includes(`A pull request already exists for ${owner}:${headBranch}.`);
+
 const fallbackReviewBodyForUnresolvableComments = (body: string, comments: PullRequestReviewInlineComment[]): string => {
   const inlineFeedback = comments
     .map((comment, index) => {
@@ -1063,29 +1068,15 @@ export class GitHubReviewService implements ReviewService {
     return promise;
   }
 
-  private async resolvePullRequestByBranch(task: Task, repo: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null> {
-    const effectiveTarget = target ?? resolveTaskTargetRef(task, repo.key);
-    if (!effectiveTarget) {
-      this.logger.debug("skipping branch-based GitHub pull request lookup because task has no target for repo", {
-        taskId: task.id,
-        repoKey: repo.key,
-      });
-      return null;
-    }
-    const branchName = resolveTaskBranchName(task, effectiveTarget);
-
-    const descriptor = await this.repoDescriptorFromRepo(repo);
+  private async resolvePullRequestByHead(
+    descriptor: RepoDescriptor,
+    branchName: string,
+    state: "all" | "open" = "all",
+  ): Promise<ResolvedPullRequest | null> {
     const query = new URLSearchParams({
-      state: "all",
+      state,
       head: `${descriptor.owner}:${branchName}`,
       per_page: "20",
-    });
-    this.logger.debug("resolving GitHub pull request by task branch", {
-      taskId: task.id,
-      repoKey: repo.key,
-      owner: descriptor.owner,
-      repo: descriptor.repo,
-      branchName,
     });
     const pullRequests = await this.rest<GitHubRestPullRequest[]>(`/repos/${descriptor.owner}/${descriptor.repo}/pulls?${query.toString()}`);
     const bestMatch = pullRequests
@@ -1100,11 +1091,6 @@ export class GitHubReviewService implements ReviewService {
       })[0];
 
     if (!bestMatch) {
-      this.logger.debug("no GitHub pull request matched task branch", {
-        taskId: task.id,
-        repoKey: repo.key,
-        branchName,
-      });
       return null;
     }
 
@@ -1117,6 +1103,36 @@ export class GitHubReviewService implements ReviewService {
       headBranch: bestMatch.head.ref,
       baseBranch: bestMatch.base.ref,
     });
+  }
+
+  private async resolvePullRequestByBranch(task: Task, repo: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null> {
+    const effectiveTarget = target ?? resolveTaskTargetRef(task, repo.key);
+    if (!effectiveTarget) {
+      this.logger.debug("skipping branch-based GitHub pull request lookup because task has no target for repo", {
+        taskId: task.id,
+        repoKey: repo.key,
+      });
+      return null;
+    }
+    const branchName = resolveTaskBranchName(task, effectiveTarget);
+
+    const descriptor = await this.repoDescriptorFromRepo(repo);
+    this.logger.debug("resolving GitHub pull request by task branch", {
+      taskId: task.id,
+      repoKey: repo.key,
+      owner: descriptor.owner,
+      repo: descriptor.repo,
+      branchName,
+    });
+    const pullRequest = await this.resolvePullRequestByHead(descriptor, branchName);
+    if (!pullRequest) {
+      this.logger.debug("no GitHub pull request matched task branch", {
+        taskId: task.id,
+        repoKey: repo.key,
+        branchName,
+      });
+    }
+    return pullRequest;
   }
 
   async resolvePullRequest(task: Task, repo?: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null> {
@@ -1304,19 +1320,50 @@ export class GitHubReviewService implements ReviewService {
       titleLength: input.title.length,
       bodyLength: input.body.length,
     });
-    const result = await this.rest<{ html_url: string; number: number }>(`/repos/${repo.owner}/${repo.repo}/pulls`, {
-      method: "POST",
-      body: JSON.stringify({
-        title: input.title,
-        body: input.body,
-        draft: input.draft,
-        base: input.baseBranch,
-        head: input.headBranch,
-      }),
-      headers: {
-        "content-type": "application/json",
-      },
-    });
+    let result: { html_url: string; number: number };
+    try {
+      result = await this.rest<{ html_url: string; number: number }>(`/repos/${repo.owner}/${repo.repo}/pulls`, {
+        method: "POST",
+        body: JSON.stringify({
+          title: input.title,
+          body: input.body,
+          draft: input.draft,
+          base: input.baseBranch,
+          head: input.headBranch,
+        }),
+        headers: {
+          "content-type": "application/json",
+        },
+      });
+    } catch (error) {
+      if (!isExistingPullRequestError(error, repo.owner, input.headBranch)) {
+        throw error;
+      }
+
+      let existingPullRequest: ResolvedPullRequest | null = null;
+      try {
+        existingPullRequest = await this.resolvePullRequestByHead(repo, input.headBranch, "open");
+      } catch (lookupError) {
+        this.logger.warn("failed to resolve existing GitHub pull request after duplicate-head response", {
+          owner: repo.owner,
+          repo: repo.repo,
+          headBranch: input.headBranch,
+          error: lookupError instanceof Error ? lookupError.message : String(lookupError),
+        });
+      }
+
+      if (!existingPullRequest || existingPullRequest.state !== "open") {
+        throw error;
+      }
+
+      this.logger.info("recovered existing GitHub pull request", {
+        owner: repo.owner,
+        repo: repo.repo,
+        pullRequestUrl: existingPullRequest.pullRequestUrl,
+        pullRequestNumber: existingPullRequest.pullRequestNumber,
+      });
+      return { url: existingPullRequest.pullRequestUrl, number: existingPullRequest.pullRequestNumber };
+    }
     this.logger.info("created GitHub pull request", { owner: repo.owner, repo: repo.repo, pullRequestUrl: result.html_url, pullRequestNumber: result.number });
     return { url: result.html_url, number: result.number };
   }
