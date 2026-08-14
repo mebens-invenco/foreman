@@ -188,6 +188,12 @@ const areGitHubGraphqlRateLimitErrors = (errors: Array<{ message: string }>): bo
     return message.includes("rate limit") || message.includes("abuse detection mechanism");
   });
 
+const areGitHubGraphqlInternalErrors = (errors: Array<{ message: string }>): boolean =>
+  errors.length === 1 &&
+  /^Something went wrong while executing your query on \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\. Please include `(?:[0-9A-F]+:)+[0-9A-F]+` when reporting this issue\.$/.test(
+    errors[0]!.message,
+  );
+
 type PageInfo = {
   hasNextPage: boolean;
   endCursor: string | null;
@@ -730,6 +736,32 @@ export class GitHubReviewService implements ReviewService {
             body: json.errors.map((error) => error.message).join("; "),
             headers: rateLimitHeaders,
             durationMs: Date.now() - startedAt,
+          });
+        }
+
+        if (isRead && areGitHubGraphqlInternalErrors(json.errors)) {
+          if (attempt < maxAttempts) {
+            const delayMs = retryDelayMs(attempt);
+            this.logger.warn("GitHub GraphQL query returned an internal error; retrying", {
+              operationName,
+              attempt,
+              maxAttempts,
+              delayMs,
+              durationMs: Date.now() - startedAt,
+            });
+            await sleep(delayMs);
+            continue;
+          }
+
+          this.logger.error("GitHub GraphQL query unavailable after internal errors", {
+            operationName,
+            attempt,
+            maxAttempts,
+            durationMs: Date.now() - startedAt,
+          });
+          throw new ProviderUnavailableError({
+            provider: "github",
+            message: `GitHub GraphQL query ${operationName} unavailable after ${maxAttempts} internal errors`,
           });
         }
 
