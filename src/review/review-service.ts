@@ -1,4 +1,10 @@
-import type { RepoRef, ResolvedPullRequest, ReviewContext, Task, TaskTargetRef } from "../domain/index.js";
+import type { RepoRef, ResolvedPullRequest, ReviewContext, RunnerProvider, Task, TaskTargetRef } from "../domain/index.js";
+
+export type ReviewCommentAttribution = {
+  label: string;
+  runnerName: RunnerProvider;
+  runnerModel: string;
+};
 
 export interface ReviewService {
   resolvePullRequest(task: Task, repo?: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null>;
@@ -24,9 +30,10 @@ export interface ReviewService {
         body: string;
       }>;
     },
+    attribution: ReviewCommentAttribution,
   ): Promise<void>;
-  replyToReviewSummary(prUrl: string, reviewId: string, body: string): Promise<void>;
-  replyToThreadComment(prUrl: string, threadId: string, body: string): Promise<void>;
-  replyToPrComment(prUrl: string, commentId: string, body: string): Promise<void>;
+  replyToReviewSummary(prUrl: string, reviewId: string, body: string, attribution: ReviewCommentAttribution): Promise<void>;
+  replyToThreadComment(prUrl: string, threadId: string, body: string, attribution: ReviewCommentAttribution): Promise<void>;
+  replyToPrComment(prUrl: string, commentId: string, body: string, attribution: ReviewCommentAttribution): Promise<void>;
   resolveThreads(prUrl: string, threadIds: string[]): Promise<void>;
 }

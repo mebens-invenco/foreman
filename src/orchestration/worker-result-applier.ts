@@ -17,7 +17,7 @@ import { addSeconds } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
 import type { DeploymentStatus } from "../repos/deployment-tracking-repo.js";
 import type { AttemptRecord, ForemanRepos, JobRecord } from "../repos/index.js";
-import type { ReviewService } from "../review/index.js";
+import type { ReviewCommentAttribution, ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import { blockedTaskUpdatedAtContextKey } from "./blocked-ordinary-work.js";
@@ -35,12 +35,6 @@ const consolidationLabels = (config: WorkspaceConfig): { remove: string[]; add: 
     add: ["Agent Consolidated"],
   };
 };
-
-const ensureAgentPrefix = (body: string, agentPrefix: string): string =>
-  body.startsWith(agentPrefix) ? body : `${agentPrefix}${body}`;
-
-const ensureReviewCommentPrefix = (body: string, prefix: string): string =>
-  body.startsWith(prefix) ? body : `${prefix}${body}`;
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const blockedTaskReloadAttempts = 3;
@@ -193,7 +187,7 @@ export class WorkerResultApplier {
         logger.info("saved blocked ordinary work checkpoint", { blockedTaskUpdatedAt });
       }
       if (input.job.action === "review" && pullRequestUrl) {
-        await this.applyReviewMutations(workerResult.reviewMutations, pullRequestUrl, logger);
+        await this.applyReviewMutations(workerResult.reviewMutations, pullRequestUrl, input.attempt, logger);
         await this.saveReviewCheckpoint(input, pullRequestUrl, logger);
       }
       return pullRequestUrl;
@@ -256,7 +250,7 @@ export class WorkerResultApplier {
       }
     }
 
-    await this.applyReviewMutations(workerResult.reviewMutations, pullRequestUrl, logger);
+    await this.applyReviewMutations(workerResult.reviewMutations, pullRequestUrl, input.attempt, logger);
 
     for (const mutation of workerResult.taskMutations) {
       if (mutation.type === "add_comment") {
@@ -608,7 +602,18 @@ export class WorkerResultApplier {
     }
   }
 
-  private async applyReviewMutations(mutations: ReviewMutation[], pullRequestUrl: string | null, logger: LoggerService): Promise<void> {
+  private async applyReviewMutations(
+    mutations: ReviewMutation[],
+    pullRequestUrl: string | null,
+    attempt: AttemptRecord,
+    logger: LoggerService,
+  ): Promise<void> {
+    const attribution = (label: string): ReviewCommentAttribution => ({
+      label,
+      runnerName: attempt.runnerName,
+      runnerModel: attempt.runnerModel,
+    });
+
     for (const mutation of mutations) {
       if (mutation.type === "create_pull_request") {
         continue;
@@ -622,7 +627,8 @@ export class WorkerResultApplier {
         await this.deps.reviewService.replyToReviewSummary(
           pullRequestUrl,
           mutation.reviewId,
-          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+          mutation.body,
+          attribution(this.deps.config.workspace.agentPrefix),
         );
         logger.info("replied to review summary", { reviewId: mutation.reviewId });
       }
@@ -630,7 +636,8 @@ export class WorkerResultApplier {
         await this.deps.reviewService.replyToThreadComment(
           pullRequestUrl,
           mutation.threadId,
-          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+          mutation.body,
+          attribution(this.deps.config.workspace.agentPrefix),
         );
         logger.info("replied to review thread", { threadId: mutation.threadId });
       }
@@ -638,19 +645,21 @@ export class WorkerResultApplier {
         await this.deps.reviewService.replyToPrComment(
           pullRequestUrl,
           mutation.commentId,
-          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
+          mutation.body,
+          attribution(this.deps.config.workspace.agentPrefix),
         );
         logger.info("replied to pull request comment", { commentId: mutation.commentId });
       }
       if (mutation.type === "submit_pull_request_review") {
-        await this.deps.reviewService.submitPullRequestReview(pullRequestUrl, {
-          body: ensureReviewCommentPrefix(mutation.body, this.deps.config.reviewer.agentPrefix),
-          event: mutation.event,
-          comments: mutation.comments.map((comment) => ({
-            ...comment,
-            body: ensureReviewCommentPrefix(comment.body, this.deps.config.reviewer.agentPrefix),
-          })),
-        });
+        await this.deps.reviewService.submitPullRequestReview(
+          pullRequestUrl,
+          {
+            body: mutation.body,
+            event: mutation.event,
+            comments: mutation.comments,
+          },
+          attribution(this.deps.config.reviewer.agentPrefix),
+        );
         logger.info("submitted pull request review", { commentCount: mutation.comments.length, event: mutation.event });
       }
       if (mutation.type === "resolve_threads") {

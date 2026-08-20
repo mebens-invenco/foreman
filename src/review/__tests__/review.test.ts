@@ -15,6 +15,21 @@ const fakeLogger = {
   error() {},
 };
 
+const implementationAttribution = {
+  label: "[agent] ",
+  runnerName: "opencode" as const,
+  runnerModel: "openai/gpt-5.6-sol",
+};
+
+const reviewerAttribution = {
+  label: "[review agent] ",
+  runnerName: "claude" as const,
+  runnerModel: "claude-opus-4-8",
+};
+
+const implementationBadge = "![agent | opencode | openai/gpt-5.6-sol](https://img.shields.io/badge/sol-agent-555?logo=opencode&logoColor=white&labelColor=1A1A1A)";
+const reviewerBadge = "![review agent | claude | claude-opus-4-8](https://img.shields.io/badge/opus-review_agent-555?logo=claude&logoColor=white&labelColor=D97757)";
+
 const sampleTask = (overrides: Partial<Task> = {}): Task => ({
   id: "ENG-4737",
   provider: "linear",
@@ -616,7 +631,7 @@ describe("GitHubReviewService.getContext", () => {
                     },
                     {
                       id: "review-3",
-                      body: "[agent] Addressed in latest head",
+                      body: `${implementationBadge}\n\nAddressed in latest head`,
                       submittedAt: "2026-03-16T03:35:00Z",
                       author: { login: "foreman-bot" },
                       commit: { oid: "abc123" },
@@ -784,7 +799,7 @@ describe("GitHubReviewService.getContext", () => {
       },
       {
         id: "review-3",
-        body: "[agent] Addressed in latest head",
+        body: `${implementationBadge}\n\nAddressed in latest head`,
         authorName: "foreman-bot",
         authoredByAgent: true,
         createdAt: "2026-03-16T03:35:00Z",
@@ -1267,12 +1282,12 @@ describe("GitHubReviewService rate-limit handling", () => {
     ) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toMatchObject({
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
       code: "provider_rate_limited",
       provider: "github",
       statusCode: 429,
     });
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toMatchObject({
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
       code: "provider_rate_limited",
       provider: "github",
       statusCode: 429,
@@ -1288,7 +1303,7 @@ describe("GitHubReviewService rate-limit handling", () => {
       .mockResolvedValueOnce(jsonResponse({ data: { addPullRequestReviewThreadReply: { comment: { id: "comment-1" } } } })) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).resolves.toBeUndefined();
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).resolves.toBeUndefined();
 
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
@@ -1299,7 +1314,7 @@ describe("GitHubReviewService rate-limit handling", () => {
       global.fetch = vi.fn().mockResolvedValue(jsonResponse({ message: "Bad credentials" }, 401)) as typeof fetch;
 
       const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-      const result = expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toThrow(
+      const result = expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toThrow(
         "GitHub GraphQL request failed: 401",
       );
       await vi.runAllTimersAsync();
@@ -1394,10 +1409,10 @@ describe("GitHubReviewService rate-limit handling", () => {
       ) as typeof fetch;
 
       const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-      await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks")).rejects.toThrow(
+      await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks", implementationAttribution)).rejects.toThrow(
         "GitHub REST rate limit exceeded until 2026-05-07T04:01:00.000Z",
       );
-      await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks")).rejects.toThrow(
+      await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks", implementationAttribution)).rejects.toThrow(
         "GitHub REST rate limit is active until 2026-05-07T04:01:00.000Z",
       );
 
@@ -1505,7 +1520,7 @@ describe("GitHubReviewService reply mutations", () => {
     global.fetch = vi.fn().mockRejectedValueOnce(timeoutError()) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks")).rejects.toMatchObject({
+    await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
       code: "github_request_timeout",
     });
 
@@ -1516,7 +1531,7 @@ describe("GitHubReviewService reply mutations", () => {
     global.fetch = vi.fn().mockResolvedValueOnce(textResponse("Service Unavailable", 503)) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks")).rejects.toMatchObject({
+    await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
       code: "github_request_failed",
     });
 
@@ -1527,7 +1542,7 @@ describe("GitHubReviewService reply mutations", () => {
     global.fetch = vi.fn().mockResolvedValueOnce(textResponse("Service Unavailable", 503)) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toMatchObject({
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
       code: "github_request_failed",
     });
 
@@ -1539,29 +1554,29 @@ describe("GitHubReviewService reply mutations", () => {
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
     await service.submitPullRequestReview("https://github.com/acme/repo/pull/946", {
-      body: "[review agent] Please tighten this validation.",
+      body: `${reviewerBadge}\n\nPlease tighten this validation.`,
       event: "COMMENT",
       comments: [
         {
           path: "src/example.ts",
           line: 42,
-          body: "[review agent] This branch is missing a null check.",
+          body: `${reviewerBadge}\n\nThis branch is missing a null check.`,
         },
       ],
-    });
+    }, reviewerAttribution);
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews");
     const init = vi.mocked(global.fetch).mock.calls[0]?.[1] as RequestInit;
     expect(JSON.parse(String(init.body))).toEqual({
-      body: "[review agent] Please tighten this validation.",
+      body: `${reviewerBadge}\n\nPlease tighten this validation.`,
       event: "COMMENT",
       comments: [
         {
           path: "src/example.ts",
           line: 42,
           side: "RIGHT",
-          body: "[review agent] This branch is missing a null check.",
+          body: `${reviewerBadge}\n\nThis branch is missing a null check.`,
         },
       ],
     });
@@ -1586,7 +1601,7 @@ describe("GitHubReviewService reply mutations", () => {
           body: "[review agent] This branch is missing a null check.",
         },
       ],
-    });
+    }, reviewerAttribution);
 
     expect(global.fetch).toHaveBeenCalledTimes(4);
     expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews?per_page=100&page=1");
@@ -1595,14 +1610,14 @@ describe("GitHubReviewService reply mutations", () => {
 
     const retryInit = vi.mocked(global.fetch).mock.calls[3]?.[1] as RequestInit;
     expect(JSON.parse(String(retryInit.body))).toEqual({
-      body: "[review agent] Please tighten this validation.",
+      body: `${reviewerBadge}\n\nPlease tighten this validation.`,
       event: "COMMENT",
       comments: [
         {
           path: "src/example.ts",
           line: 42,
           side: "RIGHT",
-          body: "[review agent] This branch is missing a null check.",
+          body: `${reviewerBadge}\n\nThis branch is missing a null check.`,
         },
       ],
     });
@@ -1623,7 +1638,7 @@ describe("GitHubReviewService reply mutations", () => {
             body: "[review agent] This branch is missing a null check.",
           },
         ],
-      }),
+      }, reviewerAttribution),
     ).rejects.toThrow("GitHub request failed: 422");
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
@@ -1648,7 +1663,7 @@ describe("GitHubReviewService reply mutations", () => {
             body: "[review agent] This branch is missing a null check.",
           },
         ],
-      });
+      }, reviewerAttribution);
 
       expect(global.fetch).toHaveBeenCalledTimes(2);
       expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews");
@@ -1659,20 +1674,20 @@ describe("GitHubReviewService reply mutations", () => {
         event: "COMMENT",
       });
       expect(retryBody.body).toContain("Location: `src/example.ts:42` (RIGHT)");
-      expect(retryBody.body).toContain("[review agent] This branch is missing a null check.");
+      expect(retryBody.body).toContain(`${reviewerBadge}\n\nThis branch is missing a null check.`);
     },
   );
 
-  test("posts review-summary replies as prefixed top-level comments", async () => {
+  test("posts review-summary replies as badged top-level comments", async () => {
     global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 1 }, 201)) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await service.replyToReviewSummary("https://github.com/acme/repo/pull/946", "review-1", "[agent] Thanks");
+    await service.replyToReviewSummary("https://github.com/acme/repo/pull/946", "review-1", "[agent] Thanks", implementationAttribution);
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments");
     const init = vi.mocked(global.fetch).mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({ body: "[agent] Thanks\n\nIn reply to review review-1." });
+    expect(JSON.parse(String(init.body))).toEqual({ body: `${implementationBadge}\n\nThanks\n\nIn reply to review review-1.` });
   });
 
   test("replies to review threads via GitHub GraphQL", async () => {
@@ -1689,13 +1704,13 @@ describe("GitHubReviewService reply mutations", () => {
       ) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks");
+    await service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution);
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe("https://api.github.com/graphql");
     const init = vi.mocked(global.fetch).mock.calls[0]?.[1] as RequestInit;
     expect(JSON.parse(String(init.body))).toMatchObject({
-      variables: { threadId: "thread-1", body: "[agent] Thanks" },
+      variables: { threadId: "thread-1", body: `${implementationBadge}\n\nThanks` },
     });
   });
 
@@ -1703,7 +1718,7 @@ describe("GitHubReviewService reply mutations", () => {
     global.fetch = vi.fn().mockRejectedValueOnce(timeoutError()) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toMatchObject({
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
       code: "github_request_timeout",
     });
 
@@ -1714,7 +1729,7 @@ describe("GitHubReviewService reply mutations", () => {
     global.fetch = vi.fn().mockResolvedValue(jsonResponse({ message: "Service Unavailable" }, 503)) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toThrow(
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toThrow(
       "GitHub GraphQL request failed: 503",
     );
 
@@ -1725,7 +1740,7 @@ describe("GitHubReviewService reply mutations", () => {
     global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ errors: [{ message: "Could not resolve to a node" }] })) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toThrow(
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toThrow(
       "GitHub GraphQL request failed: Could not resolve to a node",
     );
 

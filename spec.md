@@ -249,6 +249,9 @@ runner:
     effort: high
     timeoutMs: 3600000
 
+reviewer:
+  agentPrefix: "[review agent] "
+
 scheduler:
   workerConcurrency: 4
   scoutPollIntervalSeconds: 60
@@ -273,7 +276,10 @@ http:
 - `repos.explicit` entries must resolve to git repos
 - `repos.roots` entries must exist
 - `workspace.agentPrefix` must be non-empty
+- `reviewer.agentPrefix` must be non-empty
 - all configured Linear states and labels must exist exactly or scheduler startup fails
+
+For GitHub comments and reviews, these prefix values provide the user-controlled right-hand label of a Shields.io static badge. Foreman trims whitespace and one surrounding bracket pair, so the defaults render as `agent` and `review agent`. Linear and file task comments continue to use the configured text prefixes unchanged.
 
 ## Auth
 
@@ -673,8 +679,8 @@ type CheckState = {
 
 Review filtering rules:
 
-- actionable review summaries are top-level review summaries whose `commitId` equals the current PR `headSha`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
-- actionable conversation comments are top-level PR conversation comments created after `headIntroducedAt`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
+- actionable review summaries are top-level review summaries whose `commitId` equals the current PR `headSha`, excluding empty bodies and bodies carrying either the legacy `workspace.agentPrefix` or its implementation-agent badge
+- actionable conversation comments are top-level PR conversation comments created after `headIntroducedAt`, excluding empty bodies and bodies carrying either the legacy `workspace.agentPrefix` or its implementation-agent badge
 - actionable unresolved threads are file/line review threads where `isResolved == false` and the latest nested thread comment is not agent-authored, enriched with their nested thread comments
 - review checkpoint check fingerprinting only considers failing checks; pending checks remain available in live review context but do not invalidate a review checkpoint
 
@@ -867,7 +873,7 @@ type ReviewMutation =
   | { type: "resolve_threads"; threadIds: string[] }
 ```
 
-Foreman prepends `workspace.agentPrefix` to outbound review replies if the worker body does not already include it.
+Foreman prepends a Shields.io static badge on its own line to outbound GitHub review replies and reviewer comments. The left side is a short model family (`fable`, `opus`, `sonnet`, `haiku`, `sol`, `terra`, or `luna`) when recognized, otherwise the provider-stripped model identifier. The right side is the normalized configured prefix. Claude and OpenCode runners use their corresponding Simple Icons logo; Codex has no logo because Shields does not provide an accurate one. Badge alt text contains the configured label, runner, and full model identifier. Existing badges and legacy text prefixes are normalized without duplication.
 
 ### Learning Mutations
 
@@ -1003,6 +1009,7 @@ Scout ignores comments that are:
 
 - empty
 - prefixed with `workspace.agentPrefix`
+- marked with the corresponding implementation-agent badge on GitHub
 
 Everything else is treated as potentially actionable.
 

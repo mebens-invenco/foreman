@@ -1011,7 +1011,7 @@ describe("SchedulerService applyWorkerResult", () => {
     expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
   });
 
-  test("submits reviewer comment reviews with the reviewer prefix", async () => {
+  test("passes reviewer attribution with comment reviews", async () => {
     const submitPullRequestReview = vi.fn(async () => undefined);
     const scheduler = new SchedulerService({
       embedder: new FakeEmbedder(),
@@ -1049,7 +1049,7 @@ describe("SchedulerService applyWorkerResult", () => {
 
     await expect(
       applyWorkerResult({
-        attempt: { id: "attempt-2c" },
+        attempt: { id: "attempt-2c", runnerName: "claude", runnerModel: "claude-opus-4-8" },
         job: { action: "reviewer", taskTargetId: sampleTarget.id },
         task: sampleTask({ pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }] }),
         target: sampleTarget,
@@ -1070,9 +1070,13 @@ describe("SchedulerService applyWorkerResult", () => {
     ).resolves.toBe(reviewContext.pullRequestUrl);
 
     expect(submitPullRequestReview).toHaveBeenCalledWith(reviewContext.pullRequestUrl, {
-      body: "[review agent] Please add coverage for this branch.",
+      body: "Please add coverage for this branch.",
       event: "COMMENT",
-      comments: [{ path: "src/example.ts", line: 12, body: "[review agent] Guard this branch." }],
+      comments: [{ path: "src/example.ts", line: 12, body: "Guard this branch." }],
+    }, {
+      label: "[review agent] ",
+      runnerName: "claude",
+      runnerModel: "claude-opus-4-8",
     });
   });
 
@@ -1503,7 +1507,7 @@ describe("SchedulerService applyWorkerResult", () => {
     expect(transition).toHaveBeenCalledWith({ taskId: "TASK-0001", toState: "in_review" });
   });
 
-  test("prefixes review replies and routes thread replies explicitly", async () => {
+  test("passes implementation attribution and routes thread replies explicitly", async () => {
     const replyToReviewSummary = vi.fn(async () => undefined);
     const replyToThreadComment = vi.fn(async () => undefined);
     const replyToPrComment = vi.fn(async () => undefined);
@@ -1548,7 +1552,7 @@ describe("SchedulerService applyWorkerResult", () => {
 
     await expect(
       applyWorkerResult({
-        attempt: { id: "attempt-3b" },
+        attempt: { id: "attempt-3b", runnerName: "opencode", runnerModel: "openai/gpt-5.6-sol" },
         job: { action: "review", taskTargetId: sampleTarget.id },
         task: sampleTask({ pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }] }),
         target: sampleTarget,
@@ -1565,9 +1569,10 @@ describe("SchedulerService applyWorkerResult", () => {
       }),
     ).resolves.toBe(reviewContext.pullRequestUrl);
 
-    expect(replyToReviewSummary).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "review-1", "[agent] Looks good now");
-    expect(replyToThreadComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "thread-1", "[agent] Addressed in latest head");
-    expect(replyToPrComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "comment-1", "[agent] Please take another look");
+    const attribution = { label: "[agent] ", runnerName: "opencode", runnerModel: "openai/gpt-5.6-sol" };
+    expect(replyToReviewSummary).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "review-1", "Looks good now", attribution);
+    expect(replyToThreadComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "thread-1", "[agent] Addressed in latest head", attribution);
+    expect(replyToPrComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "comment-1", "Please take another look", attribution);
     expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
     expect(resolvePullRequest).toHaveBeenCalled();
   });
@@ -1613,7 +1618,7 @@ describe("SchedulerService applyWorkerResult", () => {
 
     await expect(
       applyWorkerResult({
-        attempt: { id: "attempt-3c" },
+        attempt: { id: "attempt-3c", runnerName: "opencode", runnerModel: "openai/gpt-5.6-sol" },
         job: { action: "review", taskTargetId: sampleTarget.id },
         task: sampleTask({ pullRequests: [] }),
         target: sampleTarget,
@@ -1633,7 +1638,11 @@ describe("SchedulerService applyWorkerResult", () => {
       rootPath: "/repos/repo-a",
       defaultBranch: "main",
     }, sampleTarget);
-    expect(replyToThreadComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "thread-1", "[agent] Addressed in latest head");
+    expect(replyToThreadComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "thread-1", "Addressed in latest head", {
+      label: "[agent] ",
+      runnerName: "opencode",
+      runnerModel: "openai/gpt-5.6-sol",
+    });
     expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
   });
 

@@ -17,7 +17,8 @@ import {
   type Task,
   type TaskTargetRef,
 } from "../../domain/index.js";
-import type { ReviewService } from "../review-service.js";
+import type { ReviewCommentAttribution, ReviewService } from "../review-service.js";
+import { formatGitHubAgentComment, isGitHubAgentComment } from "./github-comment-badge.js";
 
 type RepoDescriptor = { owner: string; repo: string };
 
@@ -711,13 +712,13 @@ export class GitHubReviewService implements ReviewService {
       return true;
     }
 
-    if (body.startsWith(agentPrefix)) {
+    if (body.startsWith(agentPrefix) || isGitHubAgentComment(body, agentPrefix)) {
       return true;
     }
 
     const reviewReplyPrefix = /^In reply to review [^:]+:\n\n/;
     const nestedAgentBody = body.replace(reviewReplyPrefix, "");
-    return nestedAgentBody.startsWith(agentPrefix);
+    return nestedAgentBody.startsWith(agentPrefix) || isGitHubAgentComment(nestedAgentBody, agentPrefix);
   }
 
   private isSubmittedReview(review: GitHubPullRequestReviewRef): boolean {
@@ -1428,26 +1429,35 @@ export class GitHubReviewService implements ReviewService {
       event: "COMMENT";
       comments: PullRequestReviewInlineComment[];
     },
+    attribution: ReviewCommentAttribution,
   ): Promise<void> {
     const { owner, repo, number } = parseGitHubUrl(prUrl);
+    const attributedInput = {
+      ...input,
+      body: formatGitHubAgentComment(input.body, attribution),
+      comments: input.comments.map((comment) => ({
+        ...comment,
+        body: formatGitHubAgentComment(comment.body, attribution),
+      })),
+    };
     this.logger.info("submitting GitHub pull request review", {
       owner,
       repo,
       pullRequestNumber: number,
       event: input.event,
-      bodyLength: input.body.length,
-      commentCount: input.comments.length,
+      bodyLength: attributedInput.body.length,
+      commentCount: attributedInput.comments.length,
     });
     try {
       await this.createPullRequestReviewWithPendingRecovery({
         owner,
         repo,
         number,
-        commentCount: input.comments.length,
+        commentCount: attributedInput.comments.length,
         body: {
-          body: input.body,
-          event: input.event,
-          comments: input.comments.map((comment) => ({
+          body: attributedInput.body,
+          event: attributedInput.event,
+          comments: attributedInput.comments.map((comment) => ({
             path: comment.path,
             line: comment.line,
             side: comment.side ?? "RIGHT",
@@ -1456,7 +1466,7 @@ export class GitHubReviewService implements ReviewService {
         },
       });
     } catch (error) {
-      if (!isUnresolvableReviewCommentError(error) || input.comments.length === 0) {
+      if (!isUnresolvableReviewCommentError(error) || attributedInput.comments.length === 0) {
         throw error;
       }
 
@@ -1464,7 +1474,7 @@ export class GitHubReviewService implements ReviewService {
         owner,
         repo,
         pullRequestNumber: number,
-        commentCount: input.comments.length,
+        commentCount: attributedInput.comments.length,
       });
       await this.createPullRequestReviewWithPendingRecovery({
         owner,
@@ -1472,33 +1482,35 @@ export class GitHubReviewService implements ReviewService {
         number,
         commentCount: 0,
         body: {
-          body: fallbackReviewBodyForUnresolvableComments(input.body, input.comments),
-          event: input.event,
+          body: fallbackReviewBodyForUnresolvableComments(attributedInput.body, attributedInput.comments),
+          event: attributedInput.event,
         },
       });
     }
-    this.logger.info("submitted GitHub pull request review", { owner, repo, pullRequestNumber: number, commentCount: input.comments.length });
+    this.logger.info("submitted GitHub pull request review", { owner, repo, pullRequestNumber: number, commentCount: attributedInput.comments.length });
   }
 
-  async replyToReviewSummary(prUrl: string, reviewId: string, body: string): Promise<void> {
+  async replyToReviewSummary(prUrl: string, reviewId: string, body: string, attribution: ReviewCommentAttribution): Promise<void> {
     const { owner, repo, number } = parseGitHubUrl(prUrl);
-    this.logger.info("replying to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl, bodyLength: body.length });
+    const attributedBody = formatGitHubAgentComment(body, attribution);
+    this.logger.info("replying to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl, bodyLength: attributedBody.length });
     await this.rest(`/repos/${owner}/${repo}/issues/${number}/comments`, {
       method: "POST",
-      body: JSON.stringify({ body: `${body}\n\nIn reply to review ${reviewId}.` }),
+      body: JSON.stringify({ body: `${attributedBody}\n\nIn reply to review ${reviewId}.` }),
       headers: { "content-type": "application/json" },
     });
     this.logger.info("replied to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl });
   }
 
-  async replyToThreadComment(prUrl: string, threadId: string, body: string): Promise<void> {
+  async replyToThreadComment(prUrl: string, threadId: string, body: string, attribution: ReviewCommentAttribution): Promise<void> {
     const { owner, repo, number } = parseGitHubUrl(prUrl);
+    const attributedBody = formatGitHubAgentComment(body, attribution);
     this.logger.info("replying to GitHub review thread", {
       owner,
       repo,
       pullRequestNumber: number,
       threadId,
-      bodyLength: body.length,
+      bodyLength: attributedBody.length,
     });
     await this.graphql(
       `mutation AddPullRequestReviewThreadReply($threadId: ID!, $body: String!) {
@@ -1506,23 +1518,24 @@ export class GitHubReviewService implements ReviewService {
           comment { id }
         }
       }`,
-      { threadId, body },
+      { threadId, body: attributedBody },
     );
     this.logger.info("replied to GitHub review thread", { owner, repo, pullRequestNumber: number, threadId });
   }
 
-  async replyToPrComment(prUrl: string, commentId: string, body: string): Promise<void> {
+  async replyToPrComment(prUrl: string, commentId: string, body: string, attribution: ReviewCommentAttribution): Promise<void> {
     const { owner, repo, number } = parseGitHubUrl(prUrl);
+    const attributedBody = formatGitHubAgentComment(body, attribution);
     this.logger.info("replying to GitHub pull request comment", {
       owner,
       repo,
       pullRequestNumber: number,
       commentId,
-      bodyLength: body.length,
+      bodyLength: attributedBody.length,
     });
     await this.rest(`/repos/${owner}/${repo}/issues/${number}/comments`, {
       method: "POST",
-      body: JSON.stringify({ body }),
+      body: JSON.stringify({ body: attributedBody }),
       headers: { "content-type": "application/json" },
     });
     this.logger.info("replied to GitHub pull request comment", { owner, repo, pullRequestNumber: number, commentId });
