@@ -878,6 +878,65 @@ describe("parseLinearMetadata", () => {
 });
 
 describe("LinearTaskSystem.getTask", () => {
+  test("retries a transient status and returns the task", async () => {
+    vi.useFakeTimers();
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("Service Unavailable", { status: 503, statusText: "Service Unavailable" }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: linearIssue([], "Test User") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+
+    const taskPromise = taskSystem.getTask("ENG-123");
+    await vi.advanceTimersByTimeAsync(250);
+    const task = await taskPromise;
+
+    expect(task.id).toBe("ENG-123");
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test("retries a request timeout and returns the task", async () => {
+    vi.useFakeTimers();
+    global.fetch = vi
+      .fn()
+      .mockRejectedValueOnce(timeoutError())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: linearIssue([], "Test User") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+
+    const taskPromise = taskSystem.getTask("ENG-123");
+    await vi.advanceTimersByTimeAsync(250);
+    const task = await taskPromise;
+
+    expect(task.id).toBe("ENG-123");
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test("surfaces a transient status after bounded retries", async () => {
+    vi.useFakeTimers();
+    global.fetch = vi.fn(async () => new Response("Service Unavailable", { status: 503, statusText: "Service Unavailable" })) as typeof fetch;
+
+    const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], fakeLogger as any);
+
+    const taskPromise = taskSystem.getTask("ENG-123");
+    const expectation = expect(taskPromise).rejects.toMatchObject({ code: "linear_request_failed" });
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expectation;
+
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
+
   test("looks up identifier-style task ids by team key and number", async () => {
     const requests: Array<{ query: string; variables: Record<string, unknown> }> = [];
     global.fetch = vi.fn(async (_url, init) => {
@@ -1463,6 +1522,7 @@ describe("LinearTaskSystem.upsertPullRequest", () => {
   });
 
   test("logs a warning and continues when Linear issue lookup fails", async () => {
+    vi.useFakeTimers();
     const logger = {
       child() {
         return this;
@@ -1492,7 +1552,7 @@ describe("LinearTaskSystem.upsertPullRequest", () => {
     }) as typeof fetch;
 
     const taskSystem = new LinearTaskSystem(createDefaultWorkspaceConfig("foo", "linear"), { LINEAR_API_KEY: "test-key" }, [], logger as any);
-    await expect(
+    const expectation = expect(
       taskSystem.upsertPullRequest({
         taskId: "ENG-123",
         pullRequest: {
@@ -1503,8 +1563,11 @@ describe("LinearTaskSystem.upsertPullRequest", () => {
         },
       }),
     ).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expectation;
 
-    expect(requests).toHaveLength(1);
+    expect(requests).toHaveLength(3);
     expect(logger.warn).toHaveBeenCalledWith("failed to sync Linear pull request attachment", {
       taskId: "ENG-123",
       repoKey: "repo-a",
