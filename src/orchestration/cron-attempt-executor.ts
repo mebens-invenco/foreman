@@ -200,12 +200,20 @@ export class CronAttemptExecutor {
                 });
                 throw error;
               }
-              this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "slack_notification_sent", "Sent the requested cron Slack message.", {
-                kind: "cron_result",
-                cronJobId: cronJob.id,
-                channelId: receipt.channelId,
-                messageTs: receipt.messageTs,
-              });
+              try {
+                this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "slack_notification_sent", "Sent the requested cron Slack message.", {
+                  kind: "cron_result",
+                  cronJobId: cronJob.id,
+                  channelId: receipt.channelId,
+                  messageTs: receipt.messageTs,
+                });
+              } catch (error) {
+                attemptLogger.error("sent requested cron Slack message but failed to store its receipt", {
+                  channelId: receipt.channelId,
+                  messageTs: receipt.messageTs,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              }
             }
           } catch (error) {
             attemptStatus = "failed";

@@ -297,7 +297,7 @@ describe("CronAttemptExecutor", () => {
     }
   });
 
-  test("sends one opted-in terminating Slack action and stores its receipt", async () => {
+  test("stores requested Slack receipts without letting receipt failures change the cron outcome", async () => {
     const workspaceRoot = await createTempDir("foreman-cron-attempt-test-");
     cleanupDirs.push(workspaceRoot);
     const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
@@ -351,6 +351,40 @@ describe("CronAttemptExecutor", () => {
         eventType: "slack_notification_sent",
         payload: { kind: "cron_result", cronJobId: "cron/check.md", channelId: "D123", messageTs: "123.456" },
       });
+
+      runnerMocks.invoke.mockImplementationOnce(async (request: { onStdoutLine?: (line: string) => void }) => {
+        request.onStdoutLine?.(output);
+        return {
+          exitCode: 0,
+          signal: null,
+          startedAt: "2026-03-14T12:02:00.000Z",
+          finishedAt: "2026-03-14T12:03:00.000Z",
+          stdoutBytes: Buffer.byteLength(output),
+          stderrBytes: 0,
+          stdout: output,
+          stderr: "",
+        };
+      });
+      const secondJob = db.jobs.createCronJob({
+        cronJobId: "cron/check.md",
+        dedupeKey: "cron:cron/check.md:receipt-failure",
+        selectionReason: "test",
+      });
+      db.jobs.claimQueuedJobForWorker(secondJob.id, worker.id);
+      const addAttemptEvent = db.attempts.addAttemptEvent.bind(db.attempts);
+      const eventSpy = vi.spyOn(db.attempts, "addAttemptEvent").mockImplementation((attemptId, eventType, message, payload) => {
+        if (eventType === "slack_notification_sent") {
+          throw new Error("database busy");
+        }
+        addAttemptEvent(attemptId, eventType, message, payload);
+      });
+
+      await executor.execute(worker, db.jobs.getJob(secondJob.id), new AbortController());
+      eventSpy.mockRestore();
+
+      expect(db.attempts.latestAttemptForJob(secondJob.id)!.status).toBe("completed");
+      expect(db.jobs.getJob(secondJob.id).status).toBe("completed");
+      expect(sendSlackDm).toHaveBeenCalledTimes(2);
     } finally {
       db.close();
     }
