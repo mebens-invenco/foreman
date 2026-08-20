@@ -15,6 +15,7 @@ import { isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, RecoveredAttemptRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
+import { SlackProblemNotifier, type ProblemNotification, type SlackDmReceipt } from "../slack/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
@@ -67,6 +68,8 @@ type SchedulerDeps = {
   embedder: Embedder;
   env: Record<string, string>;
   logger: LoggerService;
+  isSlackConfigured?: () => boolean;
+  sendSlackDm?: (text: string) => Promise<SlackDmReceipt>;
 };
 
 export class SchedulerService extends EventEmitter {
@@ -105,6 +108,16 @@ export class SchedulerService extends EventEmitter {
       logger: this.logger,
       scheduleScout: () => this.scheduleScout("task_mutation"),
     });
+    const slackProblemNotifier = deps.sendSlackDm
+      ? new SlackProblemNotifier({
+          attempts: deps.foremanRepos.attempts,
+          isConfigured: deps.isSlackConfigured ?? (() => false),
+          send: deps.sendSlackDm,
+          logger: this.logger.child({ component: "slack-problem-notifier" }),
+        })
+      : null;
+    const notifyProblem = (input: ProblemNotification): Promise<void> =>
+      slackProblemNotifier?.notify(input) ?? Promise.resolve();
     this.attemptExecutor = new AttemptExecutor({
       config: deps.config,
       paths: deps.paths,
@@ -116,6 +129,7 @@ export class SchedulerService extends EventEmitter {
       env: deps.env,
       logger: this.logger,
       applyWorkerResult: (input) => this.applyWorkerResult(input),
+      notifyProblem,
       onWorkerUpdated: ({ workerId, status, attemptId }) => {
         this.emit("worker_updated", { workerId, status, ...(attemptId ? { attemptId } : {}) });
       },
@@ -133,6 +147,8 @@ export class SchedulerService extends EventEmitter {
       repos: deps.repos,
       env: deps.env,
       logger: this.logger,
+      ...(deps.sendSlackDm ? { sendSlackDm: deps.sendSlackDm } : {}),
+      notifyProblem,
       onWorkerUpdated: ({ workerId, status, attemptId }) => {
         this.emit("worker_updated", { workerId, status, ...(attemptId ? { attemptId } : {}) });
       },

@@ -24,6 +24,10 @@ export const cronSchema = z.object({
   jobsDir: z.string().min(1).default("cron"),
 });
 
+export const slackSchema = z.object({
+  targetUserId: z.string().trim().min(1).nullable().default(null),
+});
+
 export const agentTaskCreationSchema = z.object({
   enabled: z.boolean().default(false),
 });
@@ -252,6 +256,7 @@ export const workspaceConfigSchema = z.preprocess(
       runner: runnerSchema,
       reviewer: reviewerSchema.default({ agentPrefix: "[review agent] " }),
       cron: cronSchema.default({ enabled: false, jobsDir: "cron" }),
+      slack: slackSchema.default({ targetUserId: null }),
       agentTaskCreation: agentTaskCreationSchema.default({ enabled: false }),
       deployment: deploymentSchema.default({ minRetryIntervalMinutes: 10, maxRetryIntervalMinutes: 180 }),
       scheduler: schedulerSchema.default({
@@ -349,6 +354,9 @@ export const createDefaultWorkspaceConfig = (
   cron: {
     enabled: false,
     jobsDir: "cron",
+  },
+  slack: {
+    targetUserId: null,
   },
   agentTaskCreation: {
     enabled: false,

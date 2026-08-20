@@ -13,6 +13,7 @@ import type { Embedder } from "../embeddings/embedder.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, RunnerSessionRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
+import type { ProblemNotification } from "../slack/index.js";
 import { runnerSessionRoleForAction, runnerTuningValue, type WorkspaceConfig, type WorkspaceRunnerConfig } from "../workspace/config.js";
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
@@ -102,15 +103,16 @@ type AttemptExecutorDeps = {
   repos: RepoRef[];
   env: Record<string, string>;
   logger: LoggerService;
-    applyWorkerResult: (input: {
-      attempt: AttemptRecord;
-      job: JobRecord;
-      task: Task;
-      target: TaskTarget;
-      repo: RepoRef;
-      worktreePath: string;
-      reviewContext?: ReviewContext;
-      workerResult: WorkerResult;
+  notifyProblem?: (input: ProblemNotification) => Promise<void>;
+  applyWorkerResult: (input: {
+    attempt: AttemptRecord;
+    job: JobRecord;
+    task: Task;
+    target: TaskTarget;
+    repo: RepoRef;
+    worktreePath: string;
+    reviewContext?: ReviewContext;
+    workerResult: WorkerResult;
   }) => Promise<string | null>;
   onWorkerUpdated: (input: { workerId: string; status: string; attemptId?: string | null }) => void;
   onAttemptChanged: (input: { attemptId: string; status: string }) => void;
@@ -470,6 +472,15 @@ export class AttemptExecutor {
           finishedAt: finalRunResult.finishedAt,
           errorMessage: workerResult.outcome === "failed" ? workerResult.summary : null,
         });
+        await this.notifyProblem({
+          attemptId: attempt.id,
+          subjectKey: taskTargetId,
+          subject: task.id,
+          action: job.action,
+          status: attemptStatus,
+          summary: workerResult.summary,
+          url: task.url,
+        }, attemptLogger);
         attemptLogger.info("finalized attempt and job", { attemptStatus, jobStatus, afterSha: afterSha ?? "unknown" });
 
         if (job.action === "consolidation" && workerResult.outcome === "completed" && worktreePath !== repo.rootPath) {
@@ -525,6 +536,17 @@ export class AttemptExecutor {
         finishedAt: isoNow(),
         errorMessage: interruptedByProviderRateLimit ? null : message,
       });
+      if (attempt && task && job.taskTargetId) {
+        await this.notifyProblem({
+          attemptId: attempt.id,
+          subjectKey: job.taskTargetId,
+          subject: task.id,
+          action: job.action,
+          status: interruptedStatus,
+          summary: message,
+          url: task.url,
+        }, jobLogger.child({ attemptId: attempt.id }));
+      }
       if (interruptedByProviderRateLimit) {
         jobLogger.warn("job blocked by provider rate limit", {
           provider: error.provider,
@@ -546,6 +568,16 @@ export class AttemptExecutor {
       this.deps.onWorkerUpdated({ workerId, status: "idle" });
       jobLogger.info("worker returned to idle");
       this.deps.onWorkerFinished();
+    }
+  }
+
+  private async notifyProblem(input: ProblemNotification, logger: LoggerService): Promise<void> {
+    try {
+      await this.deps.notifyProblem?.(input);
+    } catch (error) {
+      logger.warn("problem notification failed without changing the attempt outcome", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

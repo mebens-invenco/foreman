@@ -66,6 +66,7 @@ describe("CronAttemptExecutor", () => {
     const config = createDefaultWorkspaceConfig("foo", "file");
     config.cron.enabled = true;
     const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), testProjectRoot);
+    const sendSlackDm = vi.fn();
 
     try {
       db.workers.ensureWorkerSlots(1);
@@ -84,6 +85,7 @@ describe("CronAttemptExecutor", () => {
         repos: [],
         env: {},
         logger: LoggerService.create({ paths, stdout: nullWritable, minLevel: "error" }),
+        sendSlackDm,
         onWorkerUpdated: vi.fn(),
         onAttemptChanged: vi.fn(),
         onWorkerFinished: vi.fn(),
@@ -97,6 +99,7 @@ describe("CronAttemptExecutor", () => {
       expect(artifacts.map((artifact) => artifact.artifactType).sort()).toEqual(["log", "rendered_prompt", "runner_output"]);
       const outputArtifact = artifacts.find((artifact) => artifact.artifactType === "runner_output")!;
       await expect(fs.readFile(path.join(workspaceRoot, outputArtifact.relativePath), "utf8")).resolves.toBe("Cron found nothing.");
+      expect(sendSlackDm).not.toHaveBeenCalled();
     } finally {
       db.close();
     }
@@ -183,6 +186,7 @@ describe("CronAttemptExecutor", () => {
       };
     });
     const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), testProjectRoot);
+    const sendSlackDm = vi.fn();
 
     try {
       db.workers.ensureWorkerSlots(1);
@@ -202,6 +206,7 @@ describe("CronAttemptExecutor", () => {
         repos: [],
         env: {},
         logger: LoggerService.create({ paths, stdout: nullWritable, minLevel: "error" }),
+        sendSlackDm,
         onWorkerUpdated: vi.fn(),
         onAttemptChanged: vi.fn(),
         onWorkerFinished: vi.fn(),
@@ -217,6 +222,243 @@ describe("CronAttemptExecutor", () => {
       expect(finishedWorker.status).toBe("idle");
       expect(finishedWorker.currentAttemptId).toBeNull();
       expect(db.jobs.hasActiveDedupeKey(dedupeKey)).toBe(false);
+      expect(sendSlackDm).not.toHaveBeenCalled();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not apply terminating Slack actions after non-clean runner exits", async () => {
+    const workspaceRoot = await createTempDir("foreman-cron-attempt-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
+    await fs.mkdir(path.join(workspaceRoot, "cron"), { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "cron", "check.md"), "---\ninterval: 15m\nallowSlackDm: true\n---\nCheck the workspace.");
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const output = '<cron-result>{"schemaVersion":1,"summary":"Scan complete.","action":{"type":"send_slack_dm","text":"Notify me."}}</cron-result>';
+    const sendSlackDm = vi.fn();
+    const notifyProblem = vi.fn();
+    const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), testProjectRoot);
+    const cases = [
+      { suffix: "nonzero", exitCode: 1, signal: null, aborted: false, expectedStatus: "failed" },
+      { suffix: "signal", exitCode: null, signal: "SIGTERM", aborted: false, expectedStatus: "failed" },
+      { suffix: "canceled", exitCode: 0, signal: null, aborted: true, expectedStatus: "canceled" },
+    ] as const;
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0]!;
+      for (const testCase of cases) {
+        runnerMocks.invoke.mockImplementationOnce(async (request: { onStdoutLine?: (line: string) => void }) => {
+          request.onStdoutLine?.(output);
+          return {
+            exitCode: testCase.exitCode,
+            signal: testCase.signal,
+            startedAt: "2026-03-14T12:00:00.000Z",
+            finishedAt: "2026-03-14T12:01:00.000Z",
+            stdoutBytes: Buffer.byteLength(output),
+            stderrBytes: 0,
+            stdout: output,
+            stderr: "",
+          };
+        });
+        const job = db.jobs.createCronJob({
+          cronJobId: "cron/check.md",
+          dedupeKey: `cron:cron/check.md:${testCase.suffix}`,
+          selectionReason: "test",
+        });
+        db.jobs.claimQueuedJobForWorker(job.id, worker.id);
+        const controller = new AbortController();
+        if (testCase.aborted) {
+          controller.abort();
+        }
+        const executor = new CronAttemptExecutor({
+          config,
+          paths,
+          foremanRepos: db,
+          repos: [],
+          env: {},
+          logger: LoggerService.create({ paths, stdout: nullWritable, minLevel: "error" }),
+          sendSlackDm,
+          notifyProblem,
+          onWorkerUpdated: vi.fn(),
+          onAttemptChanged: vi.fn(),
+          onWorkerFinished: vi.fn(),
+        });
+
+        await executor.execute(worker, db.jobs.getJob(job.id), controller);
+        expect(db.attempts.latestAttemptForJob(job.id)!.status).toBe(testCase.expectedStatus);
+      }
+
+      expect(sendSlackDm).not.toHaveBeenCalled();
+      expect(notifyProblem.mock.calls.map(([notification]) => notification.status)).toEqual(["failed", "failed", "canceled"]);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("sends one opted-in terminating Slack action and stores its receipt", async () => {
+    const workspaceRoot = await createTempDir("foreman-cron-attempt-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
+    await fs.mkdir(path.join(workspaceRoot, "cron"), { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "cron", "check.md"), "---\ninterval: 15m\nallowSlackDm: true\n---\nCheck the workspace.");
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.cron.enabled = true;
+    const output = '<cron-result>\n{"schemaVersion":1,"summary":"Scan complete.","action":{"type":"send_slack_dm","text":"Review <https://example.com|the report>."}}\n</cron-result>';
+    runnerMocks.invoke.mockImplementationOnce(async (request: { onStdoutLine?: (line: string) => void }) => {
+      request.onStdoutLine?.(output);
+      return {
+        exitCode: 0,
+        signal: null,
+        startedAt: "2026-03-14T12:00:00.000Z",
+        finishedAt: "2026-03-14T12:01:00.000Z",
+        stdoutBytes: Buffer.byteLength(output),
+        stderrBytes: 0,
+        stdout: output,
+        stderr: "",
+      };
+    });
+    const sendSlackDm = vi.fn(async () => ({ channelId: "D123", messageTs: "123.456" }));
+    const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), testProjectRoot);
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0]!;
+      const job = db.jobs.createCronJob({ cronJobId: "cron/check.md", dedupeKey: "cron:cron/check.md", selectionReason: "test" });
+      db.jobs.claimQueuedJobForWorker(job.id, worker.id);
+      const executor = new CronAttemptExecutor({
+        config,
+        paths,
+        foremanRepos: db,
+        repos: [],
+        env: {},
+        logger: LoggerService.create({ paths, stdout: nullWritable, minLevel: "error" }),
+        sendSlackDm,
+        onWorkerUpdated: vi.fn(),
+        onAttemptChanged: vi.fn(),
+        onWorkerFinished: vi.fn(),
+      });
+
+      await executor.execute(worker, db.jobs.getJob(job.id), new AbortController());
+
+      const attempt = db.attempts.latestAttemptForJob(job.id)!;
+      expect(attempt.summary).toBe("Scan complete.");
+      expect(attempt.status).toBe("completed");
+      expect(sendSlackDm).toHaveBeenCalledOnce();
+      expect(sendSlackDm).toHaveBeenCalledWith("Review <https://example.com|the report>.");
+      expect(db.attempts.listAttemptEvents(attempt.id).find((event) => event.eventType === "slack_notification_sent")).toMatchObject({
+        eventType: "slack_notification_sent",
+        payload: { kind: "cron_result", cronJobId: "cron/check.md", channelId: "D123", messageTs: "123.456" },
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("fails unauthorized cron results without sending", async () => {
+    const workspaceRoot = await createTempDir("foreman-cron-attempt-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
+    await fs.mkdir(path.join(workspaceRoot, "cron"), { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "cron", "check.md"), "---\ninterval: 15m\n---\nCheck the workspace.");
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const output = '<cron-result>{"schemaVersion":1,"summary":"Scan complete.","action":{"type":"send_slack_dm","text":"Notify me."}}</cron-result>';
+    runnerMocks.invoke.mockImplementationOnce(async (request: { onStdoutLine?: (line: string) => void }) => {
+      request.onStdoutLine?.(output);
+      return {
+        exitCode: 0,
+        signal: null,
+        startedAt: "2026-03-14T12:00:00.000Z",
+        finishedAt: "2026-03-14T12:01:00.000Z",
+        stdoutBytes: Buffer.byteLength(output),
+        stderrBytes: 0,
+        stdout: output,
+        stderr: "",
+      };
+    });
+    const sendSlackDm = vi.fn();
+    const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), testProjectRoot);
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0]!;
+      const job = db.jobs.createCronJob({ cronJobId: "cron/check.md", dedupeKey: "cron:cron/check.md", selectionReason: "test" });
+      db.jobs.claimQueuedJobForWorker(job.id, worker.id);
+      const executor = new CronAttemptExecutor({
+        config,
+        paths,
+        foremanRepos: db,
+        repos: [],
+        env: {},
+        logger: LoggerService.create({ paths, stdout: nullWritable, minLevel: "error" }),
+        sendSlackDm,
+        onWorkerUpdated: vi.fn(),
+        onAttemptChanged: vi.fn(),
+        onWorkerFinished: vi.fn(),
+      });
+
+      await executor.execute(worker, db.jobs.getJob(job.id), new AbortController());
+
+      expect(db.attempts.latestAttemptForJob(job.id)!.status).toBe("failed");
+      expect(db.jobs.getJob(job.id).status).toBe("failed");
+      expect(sendSlackDm).not.toHaveBeenCalled();
+    } finally {
+      db.close();
+    }
+  });
+
+  test("does not recursively notify when requested Slack delivery fails", async () => {
+    const workspaceRoot = await createTempDir("foreman-cron-attempt-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
+    await fs.mkdir(path.join(workspaceRoot, "cron"), { recursive: true });
+    await fs.writeFile(path.join(workspaceRoot, "cron", "check.md"), "---\ninterval: 15m\nallowSlackDm: true\n---\nCheck the workspace.");
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const output = '<cron-result>{"schemaVersion":1,"summary":"Scan complete.","action":{"type":"send_slack_dm","text":"Notify me."}}</cron-result>';
+    runnerMocks.invoke.mockImplementationOnce(async (request: { onStdoutLine?: (line: string) => void }) => {
+      request.onStdoutLine?.(output);
+      return {
+        exitCode: 0,
+        signal: null,
+        startedAt: "2026-03-14T12:00:00.000Z",
+        finishedAt: "2026-03-14T12:01:00.000Z",
+        stdoutBytes: Buffer.byteLength(output),
+        stderrBytes: 0,
+        stdout: output,
+        stderr: "",
+      };
+    });
+    const sendSlackDm = vi.fn(async () => { throw new Error("Slack unavailable"); });
+    const notifyProblem = vi.fn();
+    const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), testProjectRoot);
+
+    try {
+      db.workers.ensureWorkerSlots(1);
+      const worker = db.workers.listWorkers()[0]!;
+      const job = db.jobs.createCronJob({ cronJobId: "cron/check.md", dedupeKey: "cron:cron/check.md", selectionReason: "test" });
+      db.jobs.claimQueuedJobForWorker(job.id, worker.id);
+      const executor = new CronAttemptExecutor({
+        config,
+        paths,
+        foremanRepos: db,
+        repos: [],
+        env: {},
+        logger: LoggerService.create({ paths, stdout: nullWritable, minLevel: "error" }),
+        sendSlackDm,
+        notifyProblem,
+        onWorkerUpdated: vi.fn(),
+        onAttemptChanged: vi.fn(),
+        onWorkerFinished: vi.fn(),
+      });
+
+      await executor.execute(worker, db.jobs.getJob(job.id), new AbortController());
+
+      const attempt = db.attempts.latestAttemptForJob(job.id)!;
+      expect(attempt.status).toBe("failed");
+      expect(sendSlackDm).toHaveBeenCalledOnce();
+      expect(notifyProblem).not.toHaveBeenCalled();
+      expect(db.attempts.listAttemptEvents(attempt.id).some((event) => event.eventType === "slack_notification_failed")).toBe(true);
     } finally {
       db.close();
     }
