@@ -338,7 +338,17 @@ export class SqliteTaskMirrorRepo implements TaskMirrorRepo {
   }
 
   private rebuildTargetDependencies(tasks: Task[]): void {
-    this.sqlite.prepare("DELETE FROM task_target_dependency").run();
+    const taskIds = normalizeIds(tasks.map((task) => task.id));
+    this.sqlite
+      .prepare(
+        `DELETE FROM task_target_dependency
+          WHERE source = 'metadata'
+            AND task_target_id IN (
+              SELECT id FROM task_target WHERE task_id IN (${taskIds.map(() => "?").join(", ")})
+            )`,
+      )
+      .run(...taskIds);
+    this.sqlite.prepare("DELETE FROM task_target_dependency WHERE source = 'derived'").run();
     const insertTargetDependency = this.sqlite.prepare(
       `INSERT INTO task_target_dependency(
          id, task_target_id, depends_on_task_target_id, position, source

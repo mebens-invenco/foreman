@@ -4263,6 +4263,63 @@ describe("runScoutSelection", () => {
     }
   });
 
+  test("preserves listed repo dependencies while reconciling a stale mirror row", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.scheduler.workerConcurrency = 2;
+
+    const staleTask = task({
+      id: "TASK-STALE-DONE",
+      title: "Dropped out of candidacy",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    const multiTargetTask = task({
+      id: "TASK-SEQUENCED",
+      title: "Sequenced multi-target task",
+      state: "ready",
+      providerState: "ready",
+      priority: "high",
+      updatedAt: "2026-03-14T12:05:00Z",
+      targets: [
+        { repoKey: "repo-a", branchName: "task-sequenced", position: 0 },
+        { repoKey: "repo-b", branchName: "task-sequenced", position: 1 },
+      ],
+      targetDependencies: [{ taskTargetRepoKey: "repo-b", dependsOnRepoKey: "repo-a", position: 0 }],
+    });
+    db.taskMirror.saveTasks([staleTask]);
+
+    const taskSystem = new FakeTaskSystem([multiTargetTask]);
+    taskSystem.getTaskOverrides.set(
+      staleTask.id,
+      task({ ...staleTask, state: "done", providerState: "done", labels: [] }),
+    );
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem,
+        reviewService: new FakeReviewService({}),
+        repos: [
+          { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
+          { key: "repo-b", rootPath: "/repos/repo-b", defaultBranch: "main" },
+        ],
+        triggerType: "manual",
+      });
+
+      expect(taskSystem.getTaskCalls).toEqual([staleTask.id]);
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.target.repoKey).toBe("repo-a");
+    } finally {
+      db.close();
+    }
+  });
+
   test("prunes a stale mirror row when its live re-fetch reports task_not_found", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);
