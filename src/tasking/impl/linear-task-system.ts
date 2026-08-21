@@ -1,5 +1,6 @@
 import type { RepoRef, Task, TaskComment, TaskCreateMutation, TaskPullRequest, TaskState, TaskTargetDependencyRef, TaskTargetRef } from "../../domain/index.js";
 import { ForemanError, isForemanError } from "../../lib/errors.js";
+import { fetchTransportErrorContext } from "../../lib/fetch-transport-error.js";
 import { createTimeoutSignal, isAbortLikeError, PROVIDER_REQUEST_TIMEOUT_MS } from "../../lib/fetch-timeout.js";
 import { exec } from "../../lib/process.js";
 import { sleep } from "../../lib/time.js";
@@ -272,6 +273,39 @@ export class LinearClient {
             timeoutMs: PROVIDER_REQUEST_TIMEOUT_MS,
           });
           throw new ForemanError("linear_request_timeout", `Linear request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
+        }
+        const transportError = fetchTransportErrorContext(error);
+        if (transportError) {
+          if (attempt < maxAttempts) {
+            const delayMs = retryDelayMs(attempt);
+            this.logger.warn("Linear GraphQL request failed at transport; retrying", {
+              provider: "linear",
+              operationKind,
+              operationName,
+              attempt,
+              maxAttempts,
+              delayMs,
+              durationMs: Date.now() - startedAt,
+              ...transportError,
+            });
+            await sleep(delayMs);
+            continue;
+          }
+
+          this.logger.error("Linear GraphQL request failed at transport", {
+            provider: "linear",
+            operationKind,
+            operationName,
+            attempt,
+            maxAttempts,
+            durationMs: Date.now() - startedAt,
+            ...transportError,
+          });
+          throw new ForemanError(
+            "linear_request_failed",
+            `Linear GraphQL ${operationKind} ${operationName} failed at transport after ${attempt} attempt${attempt === 1 ? "" : "s"} (${transportError.transportCauseCode})`,
+            502,
+          );
         }
         throw error;
       }

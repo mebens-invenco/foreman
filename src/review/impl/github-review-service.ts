@@ -1,4 +1,5 @@
 import { ForemanError, ProviderRateLimitError, ProviderUnavailableError } from "../../lib/errors.js";
+import { fetchTransportErrorContext } from "../../lib/fetch-transport-error.js";
 import { createTimeoutSignal, isAbortLikeError, PROVIDER_REQUEST_TIMEOUT_MS } from "../../lib/fetch-timeout.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
@@ -457,6 +458,45 @@ export class GitHubReviewService implements ReviewService {
           }
           throw new ForemanError("github_request_timeout", `GitHub request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
         }
+        const transportError = fetchTransportErrorContext(error);
+        if (transportError) {
+          if (isRead && attempt < maxAttempts) {
+            const delayMs = retryDelayMs(attempt);
+            this.logger.warn("GitHub REST request failed at transport; retrying", {
+              provider: "github",
+              method,
+              path,
+              attempt,
+              maxAttempts,
+              delayMs,
+              durationMs: Date.now() - startedAt,
+              ...transportError,
+            });
+            await sleep(delayMs);
+            continue;
+          }
+
+          this.logger.error("GitHub REST request failed at transport", {
+            provider: "github",
+            method,
+            path,
+            attempt,
+            maxAttempts,
+            durationMs: Date.now() - startedAt,
+            ...transportError,
+          });
+          if (isRead) {
+            throw new ProviderUnavailableError({
+              provider: "github",
+              message: `GitHub REST ${method} request unavailable after ${maxAttempts} attempts (${transportError.transportCauseCode})`,
+            });
+          }
+          throw new ForemanError(
+            "github_request_failed",
+            `GitHub REST ${method} request failed at transport (${transportError.transportCauseCode})`,
+            502,
+          );
+        }
         throw error;
       }
 
@@ -591,6 +631,43 @@ export class GitHubReviewService implements ReviewService {
             });
           }
           throw new ForemanError("github_request_timeout", `GitHub GraphQL request timed out after ${PROVIDER_REQUEST_TIMEOUT_MS}ms`, 504);
+        }
+        const transportError = fetchTransportErrorContext(error);
+        if (transportError) {
+          if (isRead && attempt < maxAttempts) {
+            const delayMs = retryDelayMs(attempt);
+            this.logger.warn("GitHub GraphQL request failed at transport; retrying", {
+              provider: "github",
+              operationName,
+              attempt,
+              maxAttempts,
+              delayMs,
+              durationMs: Date.now() - startedAt,
+              ...transportError,
+            });
+            await sleep(delayMs);
+            continue;
+          }
+
+          this.logger.error("GitHub GraphQL request failed at transport", {
+            provider: "github",
+            operationName,
+            attempt,
+            maxAttempts,
+            durationMs: Date.now() - startedAt,
+            ...transportError,
+          });
+          if (isRead) {
+            throw new ProviderUnavailableError({
+              provider: "github",
+              message: `GitHub GraphQL query ${operationName} unavailable after ${maxAttempts} attempts (${transportError.transportCauseCode})`,
+            });
+          }
+          throw new ForemanError(
+            "github_request_failed",
+            `GitHub GraphQL mutation ${operationName} failed at transport (${transportError.transportCauseCode})`,
+            502,
+          );
         }
         throw error;
       }

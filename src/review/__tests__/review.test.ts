@@ -137,6 +137,8 @@ const emptyReviewThreadsResponse = jsonResponse({
 });
 
 const timeoutError = (): Error => Object.assign(new Error("Timed out"), { name: "TimeoutError" });
+const transportError = (code = "ECONNRESET"): TypeError =>
+  new TypeError("fetch failed", { cause: Object.assign(new Error("socket closed with secret request context"), { code }) });
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -436,6 +438,77 @@ describe("GitHubReviewService.getContext", () => {
     expect(global.fetch).toHaveBeenCalledTimes(8);
     expect(vi.mocked(global.fetch).mock.calls[5]?.[0]).toBe("https://api.github.com/repos/acme/repo/commits/abc123/check-runs");
     expect(vi.mocked(global.fetch).mock.calls[6]?.[0]).toBe("https://api.github.com/repos/acme/repo/commits/abc123/check-runs");
+  });
+
+  test("retries REST GET transport failures with safe cause context", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+      const logger = spyLogger();
+      global.fetch = vi.fn().mockRejectedValueOnce(transportError()).mockResolvedValueOnce(jsonResponse([])) as typeof fetch;
+
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, logger as any);
+      const result = service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo);
+      await vi.advanceTimersByTimeAsync(250);
+
+      await expect(result).resolves.toBeNull();
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      expect(logger.warn).toHaveBeenCalledWith(
+        "GitHub REST request failed at transport; retrying",
+        expect.objectContaining({
+          provider: "github",
+          method: "GET",
+          attempt: 1,
+          maxAttempts: 3,
+          transportCauseName: "Error",
+          transportCauseCode: "ECONNRESET",
+        }),
+      );
+      expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("secret request context");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("classifies exhausted REST GET transport failures as provider unavailable", async () => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+      global.fetch = vi.fn().mockRejectedValue(transportError("UND_ERR_SOCKET")) as typeof fetch;
+
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      const result = service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo).catch((error: unknown) => error);
+      await vi.runAllTimersAsync();
+      const error = await result;
+
+      expect(error).toMatchObject({ code: "provider_unavailable", provider: "github", statusCode: 503 });
+      expect((error as Error).message).toContain("UND_ERR_SOCKET");
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not classify arbitrary REST exceptions as transport failures", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    const programmingError = new TypeError("Cannot read properties of undefined");
+    global.fetch = vi.fn().mockRejectedValueOnce(programmingError) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+
+    await expect(service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo)).rejects.toBe(programmingError);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not classify unsupported fetch failure causes as transport failures", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    const invalidRequestError = transportError("ERR_INVALID_URL");
+    global.fetch = vi.fn().mockRejectedValueOnce(invalidRequestError) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+
+    await expect(service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo)).rejects.toBe(invalidRequestError);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   test("classifies exhausted transient REST GET failures without including the response body", async () => {
@@ -1343,6 +1416,39 @@ describe("GitHubReviewService rate-limit handling", () => {
     }
   });
 
+  test("retries GraphQL query transport failures", async () => {
+    vi.useFakeTimers();
+    try {
+      global.fetch = vi.fn().mockRejectedValueOnce(transportError("EAI_AGAIN")).mockResolvedValueOnce(pullRequestSummaryResponse) as typeof fetch;
+
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      const result = service.resolvePullRequest(sampleTask());
+      await vi.advanceTimersByTimeAsync(250);
+
+      await expect(result).resolves.toMatchObject({ pullRequestNumber: 946 });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("classifies exhausted GraphQL query transport failures as provider unavailable", async () => {
+    vi.useFakeTimers();
+    try {
+      global.fetch = vi.fn().mockRejectedValue(transportError("UND_ERR_CONNECT_TIMEOUT")) as typeof fetch;
+
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      const result = service.resolvePullRequest(sampleTask()).catch((error: unknown) => error);
+      await vi.runAllTimersAsync();
+      const error = await result;
+
+      expect(error).toMatchObject({ code: "provider_unavailable", provider: "github", statusCode: 503 });
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   test("keeps exhausted GraphQL query bad credentials out of provider outage cooldown", async () => {
     vi.useFakeTimers();
     try {
@@ -1516,6 +1622,17 @@ describe("GitHubReviewService.createPullRequest", () => {
 });
 
 describe("GitHubReviewService reply mutations", () => {
+  test("does not retry REST mutation transport failures", async () => {
+    global.fetch = vi.fn().mockRejectedValueOnce(transportError()) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks")).rejects.toMatchObject({
+      code: "github_request_failed",
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   test("does not retry or defer REST mutation timeouts", async () => {
     global.fetch = vi.fn().mockRejectedValueOnce(timeoutError()) as typeof fetch;
 
@@ -1720,6 +1837,17 @@ describe("GitHubReviewService reply mutations", () => {
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
     await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
       code: "github_request_timeout",
+    });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("does not retry GraphQL mutation transport failures", async () => {
+    global.fetch = vi.fn().mockRejectedValueOnce(transportError()) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks")).rejects.toMatchObject({
+      code: "github_request_failed",
     });
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
