@@ -19,7 +19,7 @@ export type CronResult = z.infer<typeof cronResultSchema>;
 
 export const parseCronResult = (stdout: string): CronResult | null => {
   const trimmed = stdout.trim();
-  if (!trimmed.includes("<cron-result>")) {
+  if (!trimmed.startsWith("<cron-result>")) {
     return null;
   }
 

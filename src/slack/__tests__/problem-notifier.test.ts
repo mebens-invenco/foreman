@@ -152,4 +152,49 @@ describe("SlackProblemNotifier", () => {
       db.close();
     }
   });
+
+  test("serializes matching fingerprints without delaying unrelated problems", async () => {
+    const workspaceRoot = await createTempDir("foreman-slack-notifier-test-");
+    cleanupDirs.push(workspaceRoot);
+    const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
+    const db = await createMigratedDb(path.join(workspaceRoot, "foreman.db"), testProjectRoot);
+    const releases: Array<() => void> = [];
+    const send = vi.fn(() => new Promise<{ channelId: string; messageTs: string }>((resolve) => {
+      releases.push(() => resolve({ channelId: "D123", messageTs: "123.456" }));
+    }));
+
+    try {
+      const firstAttempt = createAttempt(db, "first-concurrent");
+      const duplicateAttempt = createAttempt(db, "duplicate-concurrent");
+      const unrelatedAttempt = createAttempt(db, "unrelated-concurrent");
+      const notifier = new SlackProblemNotifier({
+        attempts: db.attempts,
+        isConfigured: () => true,
+        send,
+        logger: LoggerService.create({ paths, stdout: nullWritable, minLevel: "error" }),
+      });
+      const problem = {
+        subjectKey: "target-1",
+        subject: "ENG-1",
+        action: "execution" as const,
+        status: "failed" as const,
+        summary: "Runner failed.",
+      };
+
+      const first = notifier.notify({ ...problem, attemptId: firstAttempt.id });
+      const duplicate = notifier.notify({ ...problem, attemptId: duplicateAttempt.id });
+      const unrelated = notifier.notify({ ...problem, attemptId: unrelatedAttempt.id, subjectKey: "target-2", subject: "ENG-2" });
+
+      await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+      for (const release of releases) {
+        release();
+      }
+      await Promise.all([first, duplicate, unrelated]);
+
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(db.attempts.listAttemptEvents(duplicateAttempt.id).at(-1)?.eventType).toBe("slack_notification_suppressed");
+    } finally {
+      db.close();
+    }
+  });
 });

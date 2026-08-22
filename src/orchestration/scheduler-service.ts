@@ -68,9 +68,16 @@ type SchedulerDeps = {
   embedder: Embedder;
   env: Record<string, string>;
   logger: LoggerService;
-  isSlackConfigured?: () => boolean;
-  sendSlackDm?: (text: string) => Promise<SlackDmReceipt>;
-};
+} & (
+  | {
+      isSlackConfigured: () => boolean;
+      sendSlackDm: (text: string) => Promise<SlackDmReceipt>;
+    }
+  | {
+      isSlackConfigured?: never;
+      sendSlackDm?: never;
+    }
+);
 
 export class SchedulerService extends EventEmitter {
   private status: SchedulerStatus = "stopped";
@@ -111,7 +118,7 @@ export class SchedulerService extends EventEmitter {
     const slackProblemNotifier = deps.sendSlackDm
       ? new SlackProblemNotifier({
           attempts: deps.foremanRepos.attempts,
-          isConfigured: deps.isSlackConfigured ?? (() => false),
+          isConfigured: deps.isSlackConfigured,
           send: deps.sendSlackDm,
           logger: this.logger.child({ component: "slack-problem-notifier" }),
         })

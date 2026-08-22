@@ -20,7 +20,7 @@ const problemStatuses = new Set<AttemptStatus>(["blocked", "failed", "timed_out"
 const suppressionWindowMs = 60 * 60 * 1_000;
 
 export class SlackProblemNotifier {
-  private queue = Promise.resolve();
+  private readonly queues = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: {
     attempts: AttemptRepo;
@@ -30,19 +30,33 @@ export class SlackProblemNotifier {
   }) {}
 
   notify(input: ProblemNotification): Promise<void> {
-    const notification = this.queue.then(() => this.sendIfNeeded(input));
-    this.queue = notification.catch(() => undefined);
+    if (!problemStatuses.has(input.status) || !this.deps.isConfigured()) {
+      return Promise.resolve();
+    }
+
+    const fingerprint = this.fingerprint(input);
+    const notification = (this.queues.get(fingerprint) ?? Promise.resolve()).then(() => this.sendIfNeeded(input, fingerprint));
+    const queued = notification.catch(() => undefined);
+    this.queues.set(fingerprint, queued);
+    void queued.then(() => {
+      if (this.queues.get(fingerprint) === queued) {
+        this.queues.delete(fingerprint);
+      }
+    });
     return notification;
   }
 
-  private async sendIfNeeded(input: ProblemNotification): Promise<void> {
-    if (!problemStatuses.has(input.status) || !this.deps.isConfigured()) {
+  private fingerprint(input: ProblemNotification): string {
+    return createHash("sha256")
+      .update(stableStringify({ subjectKey: input.subjectKey, action: input.action, status: input.status, summary: input.summary }))
+      .digest("hex");
+  }
+
+  private async sendIfNeeded(input: ProblemNotification, fingerprint: string): Promise<void> {
+    if (!this.deps.isConfigured()) {
       return;
     }
 
-    const fingerprint = createHash("sha256")
-      .update(stableStringify({ subjectKey: input.subjectKey, action: input.action, status: input.status, summary: input.summary }))
-      .digest("hex");
     const since = new Date(Date.now() - suppressionWindowMs).toISOString();
 
     try {

@@ -5,6 +5,7 @@ import { parseCronResult } from "../cron-result.js";
 describe("parseCronResult", () => {
   test("keeps natural-language cron output valid", () => {
     expect(parseCronResult("No follow-up work was found.")).toBeNull();
+    expect(parseCronResult("I did not emit a `<cron-result>` block.")).toBeNull();
   });
 
   test("parses one strict terminating Slack action", () => {
