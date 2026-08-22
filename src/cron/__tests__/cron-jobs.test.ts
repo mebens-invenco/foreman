@@ -19,6 +19,7 @@ describe("cron jobs", () => {
     expect(parseCronIntervalMs("1h")).toBe(60 * 60_000);
     expect(parseCronIntervalMs("2d")).toBe(2 * 24 * 60 * 60_000);
     expect(() => parseCronIntervalMs("every hour")).toThrow(/Cron interval/);
+    expect(() => parseCronIntervalMs("0s")).toThrow(/greater than zero/);
   });
 
   test("discovers markdown jobs and optional enabled flags", async () => {
@@ -27,14 +28,14 @@ describe("cron jobs", () => {
     const config = createDefaultWorkspaceConfig("foo", "file");
     const paths = createWorkspacePaths(testProjectRoot, workspaceRoot);
     await fs.mkdir(path.join(workspaceRoot, "cron", "nested"), { recursive: true });
-    await fs.writeFile(path.join(workspaceRoot, "cron", "enabled.md"), "---\ninterval: 15m\n---\nFind work.");
+    await fs.writeFile(path.join(workspaceRoot, "cron", "enabled.md"), "---\ninterval: 15m\nallowSlackDm: true\n---\nFind work.");
     await fs.writeFile(path.join(workspaceRoot, "cron", "nested", "disabled.md"), "---\ninterval: 1h\nenabled: false\n---\nSkip.");
 
     const jobs = await discoverCronJobs(config, paths);
 
-    expect(jobs.map((job) => ({ id: job.id, enabled: job.enabled, interval: job.interval, body: job.body }))).toEqual([
-      { id: "cron/enabled.md", enabled: true, interval: "15m", body: "Find work." },
-      { id: "cron/nested/disabled.md", enabled: false, interval: "1h", body: "Skip." },
+    expect(jobs.map((job) => ({ id: job.id, enabled: job.enabled, allowSlackDm: job.allowSlackDm, interval: job.interval, body: job.body }))).toEqual([
+      { id: "cron/enabled.md", enabled: true, allowSlackDm: true, interval: "15m", body: "Find work." },
+      { id: "cron/nested/disabled.md", enabled: false, allowSlackDm: false, interval: "1h", body: "Skip." },
     ]);
   });
 });

@@ -4,6 +4,8 @@
 
 Execute the selected workspace-defined cron job. Natural-language output is valid; do not emit `<agent-result>` or JSON worker result blocks.
 
+{{fragment:cron-slack-policy}}
+
 {{context:workspace}}
 
 {{context:repos}}

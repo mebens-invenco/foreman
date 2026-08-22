@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-import { discoverCronJobs, renderCronPrompt } from "../cron/index.js";
+import { discoverCronJobs, parseCronResult, renderCronPrompt } from "../cron/index.js";
 import type { AttemptStatus, RepoRef } from "../domain/index.js";
 import { createAgentRunner } from "../execution/index.js";
 import { ForemanError } from "../lib/errors.js";
@@ -9,6 +9,7 @@ import { atomicWriteFile, ensureDir, sha256File } from "../lib/fs.js";
 import { addSeconds, isoNow } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../repos/index.js";
+import type { ProblemNotification, SlackDmReceipt } from "../slack/index.js";
 import { runnerForAction, runnerTuningValue, type WorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { nextLeaseConflictEligibleAt } from "./lease-conflict.js";
@@ -20,6 +21,8 @@ type CronAttemptExecutorDeps = {
   repos: RepoRef[];
   env: Record<string, string>;
   logger: LoggerService;
+  sendSlackDm?: (text: string) => Promise<SlackDmReceipt>;
+  notifyProblem?: (input: ProblemNotification) => Promise<void>;
   onWorkerUpdated: (input: { workerId: string; status: string; attemptId?: string | null }) => void;
   onAttemptChanged: (input: { attemptId: string; status: string }) => void;
   onWorkerFinished: () => void;
@@ -165,14 +168,59 @@ export class CronAttemptExecutor {
           sha256: await sha256File(logAbsolutePath),
         });
 
-        const attemptStatus = cronAttemptStatus({
+        let attemptStatus = cronAttemptStatus({
           exitCode: runResult.exitCode,
           signal: runResult.signal,
           timedOut: runResult.timedOut === true,
           aborted: controller.signal.aborted,
         });
+        let summary = summarizeOutput(runResult.stdout, attemptStatus);
+        let requestedSlackDeliveryAttempted = false;
+        if (attemptStatus === "completed") {
+          try {
+            const cronResult = parseCronResult(runResult.stdout);
+            if (cronResult) {
+              summary = cronResult.summary;
+              if (!cronJob.allowSlackDm) {
+                throw new ForemanError("cron_slack_not_allowed", `Cron job ${cronJob.id} is not authorized to send Slack messages.`);
+              }
+              if (!this.deps.sendSlackDm) {
+                throw new ForemanError("slack_not_configured", "Slack delivery is not configured.");
+              }
+
+              let receipt: SlackDmReceipt;
+              requestedSlackDeliveryAttempted = true;
+              try {
+                receipt = await this.deps.sendSlackDm(cronResult.action.text);
+              } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "slack_notification_failed", "Failed to send the requested cron Slack message.", {
+                  kind: "cron_result",
+                  error: message.slice(0, 500),
+                });
+                throw error;
+              }
+              try {
+                this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "slack_notification_sent", "Sent the requested cron Slack message.", {
+                  kind: "cron_result",
+                  cronJobId: cronJob.id,
+                  channelId: receipt.channelId,
+                  messageTs: receipt.messageTs,
+                });
+              } catch (error) {
+                attemptLogger.error("sent requested cron Slack message but failed to store its receipt", {
+                  channelId: receipt.channelId,
+                  messageTs: receipt.messageTs,
+                  error: error instanceof Error ? error.message : String(error),
+                });
+              }
+            }
+          } catch (error) {
+            attemptStatus = "failed";
+            summary = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+          }
+        }
         const jobStatus = attemptStatus === "timed_out" ? "failed" : attemptStatus;
-        const summary = summarizeOutput(runResult.stdout, attemptStatus);
         this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "runner_output_recorded", summary);
         this.deps.foremanRepos.attempts.finalizeAttempt(attempt.id, attemptStatus, {
           finishedAt: runResult.finishedAt,
@@ -186,6 +234,16 @@ export class CronAttemptExecutor {
           finishedAt: runResult.finishedAt,
           errorMessage: attemptStatus === "failed" || attemptStatus === "timed_out" ? summary : null,
         });
+        if (!requestedSlackDeliveryAttempted) {
+          await this.notifyProblem({
+            attemptId: attempt.id,
+            subjectKey: cronJob.id,
+            subject: cronJob.id,
+            action: "cron",
+            status: attemptStatus,
+            summary,
+          }, attemptLogger);
+        }
         this.deps.onAttemptChanged({ attemptId: attempt.id, status: attemptStatus });
         attemptLogger.info("finalized cron attempt and job", { attemptStatus, jobStatus });
       } finally {
@@ -206,6 +264,16 @@ export class CronAttemptExecutor {
         finishedAt: isoNow(),
         errorMessage: message,
       });
+      if (attempt) {
+        await this.notifyProblem({
+          attemptId: attempt.id,
+          subjectKey: job.cronJobId ?? job.id,
+          subject: job.cronJobId ?? job.id,
+          action: "cron",
+          status: controller.signal.aborted ? "canceled" : "failed",
+          summary: message,
+        }, jobLogger.child({ attemptId: attempt.id }));
+      }
       jobLogger.error("cron job failed", { error: message, aborted: controller.signal.aborted });
     } finally {
       if (attempt) {
@@ -215,6 +283,16 @@ export class CronAttemptExecutor {
       this.deps.onWorkerUpdated({ workerId, status: "idle" });
       jobLogger.info("worker returned to idle");
       this.deps.onWorkerFinished();
+    }
+  }
+
+  private async notifyProblem(input: ProblemNotification, logger: LoggerService): Promise<void> {
+    try {
+      await this.deps.notifyProblem?.(input);
+    } catch (error) {
+      logger.warn("problem notification failed without changing the attempt outcome", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }

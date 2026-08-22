@@ -465,6 +465,21 @@ export class SqliteAttemptRepo implements AttemptRepo {
       });
   }
 
+  hasAttemptEventWithFingerprintSince(eventType: string, fingerprint: string, since: string): boolean {
+    return Boolean(
+      this.sqlite
+        .prepare(
+          `SELECT 1
+             FROM execution_attempt_event
+            WHERE event_type = ?
+              AND created_at >= ?
+              AND json_extract(payload_json, '$.fingerprint') = ?
+            LIMIT 1`,
+        )
+        .get(eventType, since, fingerprint),
+    );
+  }
+
   recoverOrphanedRunningAttempts(reason: string, options: { excludeWorkerIds?: string[] } = {}): RecoveredAttemptRecord[] {
     const now = isoNow();
     const recovered: RecoveredAttemptRecord[] = [];

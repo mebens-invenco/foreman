@@ -33,6 +33,7 @@ describe("renderCronPrompt", () => {
         intervalMs: 900_000,
         interval: "15m",
         enabled: true,
+        allowSlackDm: false,
         body: "Inspect the plan.",
       },
     });
@@ -40,6 +41,7 @@ describe("renderCronPrompt", () => {
     expect(prompt).toContain("Do useful work.");
     expect(prompt).toContain("Do not create provider tasks");
     expect(prompt).toContain("Natural-language output is valid");
+    expect(prompt).toContain("not authorized to send Slack messages");
   });
 
   test("renders Linear task creation guidance without token values", async () => {
@@ -62,6 +64,7 @@ describe("renderCronPrompt", () => {
         intervalMs: 900_000,
         interval: "15m",
         enabled: true,
+        allowSlackDm: true,
         body: "Create follow-ups when useful.",
       },
     });
@@ -69,5 +72,6 @@ describe("renderCronPrompt", () => {
     expect(prompt).toContain("LINEAR_API_KEY");
     expect(prompt).toContain("never print, log, or expose its value");
     expect(prompt).toContain("apply these labels: Agent, AI Generated");
+    expect(prompt).toContain("<cron-result>");
   });
 });

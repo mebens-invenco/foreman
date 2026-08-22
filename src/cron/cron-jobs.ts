@@ -14,6 +14,7 @@ const intervalPattern = /^(\d+)([smhd])$/;
 const cronFrontmatterSchema = z.object({
   interval: z.string().min(1),
   enabled: z.boolean().default(true),
+  allowSlackDm: z.boolean().default(false),
 });
 
 export type CronJobDefinition = {
@@ -24,6 +25,7 @@ export type CronJobDefinition = {
   intervalMs: number;
   interval: string;
   enabled: boolean;
+  allowSlackDm: boolean;
   body: string;
 };
 
@@ -34,6 +36,9 @@ export const parseCronIntervalMs = (value: string): number => {
   }
 
   const amount = Number.parseInt(match[1]!, 10);
+  if (amount === 0) {
+    throw new ForemanError("invalid_cron_interval", "Cron interval must be greater than zero.", 400);
+  }
   const unit = match[2]!;
   const multipliers: Record<string, number> = {
     s: 1_000,
@@ -87,6 +92,7 @@ export const discoverCronJobs = async (config: WorkspaceConfig, paths: Workspace
         intervalMs: parseCronIntervalMs(frontmatter.interval),
         interval: frontmatter.interval,
         enabled: frontmatter.enabled,
+        allowSlackDm: frontmatter.allowSlackDm,
         body: parsed.content.trim(),
       };
     }),

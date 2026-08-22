@@ -105,6 +105,7 @@ function TextField({
   placeholder,
   help,
   suggestions,
+  allowEmpty = false,
 }: {
   label: string
   value: string
@@ -113,6 +114,7 @@ function TextField({
   placeholder?: string
   help: string
   suggestions?: readonly string[]
+  allowEmpty?: boolean
 }) {
   const [draft, setDraft] = useState(value)
   const reactId = useId()
@@ -123,7 +125,7 @@ function TextField({
   }, [value])
 
   function commit() {
-    if (draft.trim().length === 0) {
+    if (!allowEmpty && draft.trim().length === 0) {
       setDraft(value)
       return
     }
@@ -571,6 +573,20 @@ export function SettingsPage() {
           <RunnerFields role="execution" runner={config.runner.execution} disabled={disabled} patch={patch} />
           <RunnerFields role="reviewer" runner={config.runner.reviewer} disabled={disabled} patch={patch} />
         </div>
+      </SectionCard>
+
+      <SectionCard title="Slack" meta={config.slack.targetUserId ? "configured" : "disabled"}>
+        <FieldGrid>
+          <TextField
+            label="Target user ID"
+            help="Slack member ID that receives Foreman direct messages. Clear this field to disable delivery; the bot token remains environment-only."
+            value={config.slack.targetUserId ?? ""}
+            placeholder="U123456789"
+            allowEmpty
+            disabled={disabled}
+            onCommit={(targetUserId) => patch({ slack: { targetUserId: targetUserId.trim() || null } })}
+          />
+        </FieldGrid>
       </SectionCard>
 
       <SectionCard title="Task System" meta={taskType}>

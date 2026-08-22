@@ -32,6 +32,7 @@ describe("workspace config", () => {
     });
     expect(parsed.reviewer.agentPrefix).toBe("[review agent] ");
     expect(parsed.cron).toEqual({ enabled: false, jobsDir: "cron" });
+    expect(parsed.slack).toEqual({ targetUserId: null });
     expect(parsed.agentTaskCreation).toEqual({ enabled: false });
     expect(parsed.deployment).toEqual({ minRetryIntervalMinutes: 10, maxRetryIntervalMinutes: 180 });
     expect(parsed.scheduler.workerConcurrency).toBe(4);
@@ -85,6 +86,19 @@ describe("workspace config", () => {
 
     expect(parsed.cron).toEqual({ enabled: true, jobsDir: "automation" });
     expect(parsed.agentTaskCreation).toEqual({ enabled: true });
+  });
+
+  test("defaults, persists, and clears the Slack target user", () => {
+    const legacy = createDefaultWorkspaceConfig("foo", "file");
+    const legacyYaml = stringifyWorkspaceConfig(legacy).replace(/slack:\n  targetUserId: null\n/, "");
+
+    expect(parseWorkspaceConfig(legacyYaml).slack).toEqual({ targetUserId: null });
+
+    legacy.slack.targetUserId = "U123456789";
+    expect(parseWorkspaceConfig(stringifyWorkspaceConfig(legacy)).slack.targetUserId).toBe("U123456789");
+
+    legacy.slack.targetUserId = null;
+    expect(parseWorkspaceConfig(stringifyWorkspaceConfig(legacy)).slack.targetUserId).toBeNull();
   });
 
   test("persists Linear agent-created label", () => {
