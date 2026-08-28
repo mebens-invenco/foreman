@@ -2,7 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 
 import { resolveTaskBranchName as resolveTaskTargetBranchName, type ActionType, type RepoRef, type Task, type TaskTargetRef } from "../domain/index.js";
-import { ForemanError } from "../lib/errors.js";
+import { ForemanError, isForemanError } from "../lib/errors.js";
 import { ensureDir, pathExists } from "../lib/fs.js";
 import { exec } from "../lib/process.js";
 import type { WorkspacePaths } from "./workspace-paths.js";
@@ -14,10 +14,17 @@ const worktreePathForTask = (paths: WorkspacePaths, repo: RepoRef, task: Task): 
 
 const isGitWorktree = async (targetPath: string): Promise<boolean> => {
   try {
-    await exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd: targetPath });
-    return true;
-  } catch {
-    return false;
+    const result = await exec("git", ["rev-parse", "--is-inside-work-tree"], { cwd: targetPath });
+    return result.stdout.trim() === "true";
+  } catch (error) {
+    if (
+      isForemanError(error) &&
+      error.code === "process_failed" &&
+      error.message.includes("fatal: not a git repository")
+    ) {
+      return false;
+    }
+    throw error;
   }
 };
 
