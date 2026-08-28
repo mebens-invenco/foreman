@@ -17,6 +17,7 @@ const execFileAsync = promisify(execFile);
 const cleanupDirs: string[] = [];
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -129,6 +130,52 @@ describe("ensureTaskWorktree", () => {
         action: "execution",
       }),
     ).rejects.toThrow("git fetch origin missing-base failed");
+  });
+
+  test("classifies an existing non-worktree path as invalid", async () => {
+    const fixture = await createFixture();
+    const paths = createWorkspacePaths("/project", fixture.workspaceRoot);
+    await fs.mkdir(path.join(paths.worktreesDir, fixture.repo.key, fixture.task.id), { recursive: true });
+
+    await expect(
+      ensureTaskWorktree({
+        paths,
+        repo: fixture.repo,
+        task: fixture.task,
+        baseBranch: "main",
+        action: "execution",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_worktree" });
+  });
+
+  test("preserves Git ownership rejections for an existing worktree", async () => {
+    const fixture = await createFixture();
+    const paths = createWorkspacePaths("/project", fixture.workspaceRoot);
+    await ensureTaskWorktree({
+      paths,
+      repo: fixture.repo,
+      task: fixture.task,
+      baseBranch: "main",
+      action: "execution",
+    });
+
+    vi.stubEnv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1");
+    vi.stubEnv("GIT_CONFIG_COUNT", "1");
+    vi.stubEnv("GIT_CONFIG_KEY_0", "safe.directory");
+    vi.stubEnv("GIT_CONFIG_VALUE_0", fixture.localPath);
+
+    await expect(
+      ensureTaskWorktree({
+        paths,
+        repo: fixture.repo,
+        task: fixture.task,
+        baseBranch: "main",
+        action: "review",
+      }),
+    ).rejects.toMatchObject({
+      code: "process_failed",
+      message: expect.stringContaining("dubious ownership"),
+    });
   });
 
   test("resets a clean existing scaffold branch to the latest origin base", async () => {
