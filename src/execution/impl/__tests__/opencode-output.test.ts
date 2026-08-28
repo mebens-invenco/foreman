@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 
+import { parseWorkerResult } from "../../worker-result.js";
 import { extractOpenCodeStepUsage, normalizeOpenCodeJsonOutput } from "../opencode-output.js";
 
 describe("normalizeOpenCodeJsonOutput", () => {
@@ -47,6 +48,80 @@ describe("normalizeOpenCodeJsonOutput", () => {
     expect(normalizeOpenCodeJsonOutput(opencodeFinalAnswerOutput).stdout).toBe(
       '<agent-result>{"schemaVersion":1}</agent-result>',
     );
+  });
+
+  test("preserves a result block when compaction emits later final prose", () => {
+    const workerResult = {
+      schemaVersion: 1,
+      action: "execution",
+      outcome: "completed",
+      summary: "Implemented the change.",
+      taskMutations: [],
+      reviewMutations: [],
+      learningMutations: [],
+      blockers: [],
+      signals: ["code_changed"],
+    };
+    const resultText = `<agent-result>${JSON.stringify(workerResult)}</agent-result>`;
+    const compactedOutput = [
+      JSON.stringify({
+        type: "text",
+        part: { type: "text", text: resultText, metadata: { openai: { phase: "final_answer" } } },
+      }),
+      JSON.stringify({ type: "step_finish", part: { type: "step-finish", reason: "compaction" } }),
+      JSON.stringify({
+        type: "text",
+        part: { type: "text", text: "Continue from the summary.", metadata: { openai: { phase: "commentary" } } },
+      }),
+      JSON.stringify({
+        type: "text",
+        part: {
+          type: "text",
+          text: "The requested implementation and verification are complete.",
+          metadata: { openai: { phase: "final_answer" } },
+        },
+      }),
+    ].join("\n");
+
+    const normalized = normalizeOpenCodeJsonOutput(compactedOutput);
+
+    expect(normalized.stdout).toBe(resultText);
+    expect(parseWorkerResult(normalized.stdout)).toEqual(workerResult);
+  });
+
+  test("selects the latest final answer containing a result block", () => {
+    const resultText = (summary: string) => `<agent-result>{"summary":"${summary}"}</agent-result>`;
+    const opencodeOutput = [
+      JSON.stringify({
+        type: "text",
+        part: { type: "text", text: resultText("first"), metadata: { openai: { phase: "final_answer" } } },
+      }),
+      JSON.stringify({
+        type: "text",
+        part: { type: "text", text: resultText("second"), metadata: { openai: { phase: "final_answer" } } },
+      }),
+      JSON.stringify({
+        type: "text",
+        part: { type: "text", text: "Later prose.", metadata: { openai: { phase: "final_answer" } } },
+      }),
+    ].join("\n");
+
+    expect(normalizeOpenCodeJsonOutput(opencodeOutput).stdout).toBe(resultText("second"));
+  });
+
+  test("uses the latest final answer when none contains a result block", () => {
+    const opencodeOutput = [
+      JSON.stringify({
+        type: "text",
+        part: { type: "text", text: "First answer.", metadata: { openai: { phase: "final_answer" } } },
+      }),
+      JSON.stringify({
+        type: "text",
+        part: { type: "text", text: "Latest answer.", metadata: { openai: { phase: "final_answer" } } },
+      }),
+    ].join("\n");
+
+    expect(normalizeOpenCodeJsonOutput(opencodeOutput).stdout).toBe("Latest answer.");
   });
 
   test("surfaces error records as a warning", () => {
