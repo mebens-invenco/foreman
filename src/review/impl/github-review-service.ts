@@ -81,7 +81,20 @@ const fallbackReviewBodyForUnresolvableComments = (body: string, comments: PullR
     .join("\n\n");
 };
 
-type GitHubGraphqlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
+type GitHubGraphqlError = { type?: string; message: string };
+type GitHubGraphqlResponse<T> = { data?: T; errors?: GitHubGraphqlError[] };
+
+class GitHubGraphqlRequestError extends ForemanError {
+  constructor(readonly errors: GitHubGraphqlError[]) {
+    super("github_request_failed", `GitHub GraphQL request failed: ${errors.map((error) => error.message).join("; ")}`, 502);
+  }
+}
+
+const isMissingGitHubNodeError = (error: unknown, nodeId: string): boolean =>
+  error instanceof GitHubGraphqlRequestError &&
+  error.errors.length === 1 &&
+  error.errors[0]?.type === "NOT_FOUND" &&
+  error.errors[0].message === `Could not resolve to a node with the global id of '${nodeId}'.`;
 
 const GITHUB_REQUEST_MAX_ATTEMPTS = 3;
 const GITHUB_REQUEST_RETRY_BACKOFF_MS = [250, 1_000];
@@ -669,11 +682,7 @@ export class GitHubReviewService implements ReviewService {
           attempt,
           durationMs: Date.now() - startedAt,
         });
-        throw new ForemanError(
-          "github_request_failed",
-          `GitHub GraphQL request failed: ${json.errors.map((error) => error.message).join("; ")}`,
-          502,
-        );
+        throw new GitHubGraphqlRequestError(json.errors);
       }
 
       if (!json.data) {
@@ -1512,14 +1521,23 @@ export class GitHubReviewService implements ReviewService {
       threadId,
       bodyLength: attributedBody.length,
     });
-    await this.graphql(
-      `mutation AddPullRequestReviewThreadReply($threadId: ID!, $body: String!) {
-        addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
-          comment { id }
-        }
-      }`,
-      { threadId, body: attributedBody },
-    );
+    try {
+      await this.graphql(
+        `mutation AddPullRequestReviewThreadReply($threadId: ID!, $body: String!) {
+          addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
+            comment { id }
+          }
+        }`,
+        { threadId, body: attributedBody },
+      );
+    } catch (error) {
+      if (!isMissingGitHubNodeError(error, threadId)) {
+        throw error;
+      }
+
+      this.logger.warn("skipping stale GitHub review thread reply", { owner, repo, pullRequestNumber: number, threadId });
+      return;
+    }
     this.logger.info("replied to GitHub review thread", { owner, repo, pullRequestNumber: number, threadId });
   }
 
@@ -1551,12 +1569,20 @@ export class GitHubReviewService implements ReviewService {
     });
     for (const threadId of threadIds) {
       this.logger.debug("resolving GitHub review thread", { owner, repo, pullRequestNumber: number, threadId });
-      await this.graphql(
-        `mutation ResolveReviewThread($threadId: ID!) {
-          resolveReviewThread(input: { threadId: $threadId }) { thread { id isResolved } }
-        }`,
-        { threadId },
-      );
+      try {
+        await this.graphql(
+          `mutation ResolveReviewThread($threadId: ID!) {
+            resolveReviewThread(input: { threadId: $threadId }) { thread { id isResolved } }
+          }`,
+          { threadId },
+        );
+      } catch (error) {
+        if (!isMissingGitHubNodeError(error, threadId)) {
+          throw error;
+        }
+
+        this.logger.warn("skipping stale GitHub review thread resolution", { owner, repo, pullRequestNumber: number, threadId });
+      }
     }
     this.logger.info("resolved GitHub review threads", { owner, repo, pullRequestNumber: number, threadCount: threadIds.length });
   }

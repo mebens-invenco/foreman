@@ -1714,6 +1714,68 @@ describe("GitHubReviewService reply mutations", () => {
     });
   });
 
+  test("skips a stale review thread reply", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(
+      jsonResponse({
+        errors: [
+          {
+            type: "NOT_FOUND",
+            message: "Could not resolve to a node with the global id of 'thread-stale'.",
+          },
+        ],
+      }),
+    ) as typeof fetch;
+    const logger = spyLogger();
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, logger as any);
+    await service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-stale", "[agent] Thanks", implementationAttribution);
+
+    expect(logger.warn).toHaveBeenCalledWith("skipping stale GitHub review thread reply", {
+      owner: "acme",
+      repo: "repo",
+      pullRequestNumber: 946,
+      threadId: "thread-stale",
+    });
+  });
+
+  test("continues resolving review threads after a stale thread", async () => {
+    global.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          errors: [
+            {
+              type: "NOT_FOUND",
+              message: "Could not resolve to a node with the global id of 'thread-stale'.",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          data: {
+            resolveReviewThread: {
+              thread: { id: "thread-valid", isResolved: true },
+            },
+          },
+        }),
+      ) as typeof fetch;
+    const logger = spyLogger();
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, logger as any);
+    await service.resolveThreads("https://github.com/acme/repo/pull/946", ["thread-stale", "thread-valid"]);
+
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    const validInit = vi.mocked(global.fetch).mock.calls[1]?.[1] as RequestInit;
+    expect(JSON.parse(String(validInit.body))).toMatchObject({ variables: { threadId: "thread-valid" } });
+    expect(logger.warn).toHaveBeenCalledWith("skipping stale GitHub review thread resolution", {
+      owner: "acme",
+      repo: "repo",
+      pullRequestNumber: 946,
+      threadId: "thread-stale",
+    });
+  });
+
   test("does not retry GraphQL mutation timeouts", async () => {
     global.fetch = vi.fn().mockRejectedValueOnce(timeoutError()) as typeof fetch;
 
@@ -1737,7 +1799,7 @@ describe("GitHubReviewService reply mutations", () => {
   });
 
   test("does not retry GraphQL semantic errors", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ errors: [{ message: "Could not resolve to a node" }] })) as typeof fetch;
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ errors: [{ type: "NOT_FOUND", message: "Could not resolve to a node" }] })) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
     await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toThrow(
