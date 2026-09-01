@@ -670,6 +670,51 @@ describe("AttemptExecutor", () => {
     }
   });
 
+  test("uses the task's profile override on the attempt record and runner session", async () => {
+    const profileTask: Task = {
+      ...task,
+      runnerOverride: { execution: { profile: "claude" } },
+    };
+    const { db, claimedJob, executor, logger, target, config } = await createExecutorContext({ selectedTask: profileTask });
+    config.runner.profiles = {
+      claude: { type: "claude", model: "claude-opus-4-8", effort: "max", timeoutMs: 3_600_000 },
+    };
+
+    try {
+      const workerResult = createWorkerResult({ summary: "Used profile runner." });
+      runnerMocks.invoke.mockResolvedValueOnce({
+        exitCode: 0,
+        signal: null,
+        startedAt: "2026-05-06T00:00:00.000Z",
+        finishedAt: "2026-05-06T00:01:00.000Z",
+        stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+        stderrBytes: 0,
+        stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+        stderr: "",
+        nativeSessionId: "native-session-profile",
+      });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      const attempt = db.attempts.latestAttemptForJob(claimedJob.id)!;
+      expect(attempt.runnerName).toBe("claude");
+      expect(attempt.runnerModel).toBe("claude-opus-4-8");
+      expect(attempt.runnerVariant).toBe("max");
+
+      const session = db.runnerSessions.getActiveSession({
+        taskTargetId: target.id,
+        role: "implementation",
+        runnerName: "claude",
+        runnerModel: "claude-opus-4-8",
+        runnerVariant: "max",
+      });
+      expect(session?.nativeSessionId).toBe("native-session-profile");
+    } finally {
+      db.close();
+    }
+  });
+
   test("builds a first-pass runner with continuation false when no session is resumed", async () => {
     const { db, claimedJob, executor, logger } = await createExecutorContext({ action: "execution" });
 
