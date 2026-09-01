@@ -2,9 +2,10 @@ import type { ActionType, Task, TaskRunnerRoleOverride } from "../domain/index.j
 import { ForemanError } from "../lib/errors.js";
 import type { WorkspaceConfig, WorkspaceRunnerConfig } from "../workspace/config.js";
 import {
+  applyContinuationTuning,
   CLAUDE_EFFORT_VALUES,
   CODEX_EFFORT_VALUES,
-  runnerForActionAndContinuation,
+  runnerForAction,
   runnerRoleForAction,
 } from "../workspace/config.js";
 import type { AgentRunner } from "./agent-runner.js";
@@ -82,15 +83,34 @@ const applyRoleOverride = (
   return overridden;
 };
 
+// A profile override replaces the role's base config wholesale — provider
+// type included — so a ticket can pin a provider without cross-provider
+// model/tuning mismatches. Model/tuning overrides then apply on top.
+const resolveBaseConfig = (config: WorkspaceConfig, action: ActionType, profileName: string | undefined): WorkspaceRunnerConfig => {
+  if (profileName === undefined) {
+    return runnerForAction(config, action);
+  }
+
+  const profile = config.runner.profiles[profileName];
+  if (!profile) {
+    const configured = Object.keys(config.runner.profiles);
+    throw new ForemanError(
+      "invalid_runner_override",
+      `Unknown runner profile '${profileName}'. Configured profiles: ${configured.length > 0 ? configured.join(", ") : "none"}.`,
+    );
+  }
+  return profile;
+};
+
 export const resolveRunnerConfigForAction = (
   config: WorkspaceConfig,
   action: ActionType,
   task?: Pick<Task, "runnerOverride"> | null,
   continuation = false,
 ): WorkspaceRunnerConfig => {
-  const baseConfig = runnerForActionAndContinuation(config, action, continuation);
   const role = runnerRoleForAction(action);
   const override = task?.runnerOverride?.[role];
+  const baseConfig = applyContinuationTuning(resolveBaseConfig(config, action, override?.profile), continuation);
   return applyRoleOverride(baseConfig, override);
 };
 

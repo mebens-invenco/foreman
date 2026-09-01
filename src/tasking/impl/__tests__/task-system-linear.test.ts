@@ -770,6 +770,15 @@ describe("parseLinearMetadata", () => {
     ).toEqual({ execution: { model: "gpt-5.5" } });
   });
 
+  test("parses Runner.profile keys, lowercasing the profile name", () => {
+    expect(
+      parseLinearMetadata("Agent:\n  Repos: foreman\n  Runner.profile: Claude\n  Runner.reviewer.profile: codex\n").runnerOverride,
+    ).toEqual({
+      execution: { profile: "claude" },
+      reviewer: { profile: "codex" },
+    });
+  });
+
   test("rejects deprecated branch dependency metadata", () => {
     expect(() => parseLinearMetadata("Agent:\n  Repo: repo-a\n  Depends on branches: eng-123\n")).toThrow(
       "Depends on branches is no longer supported",

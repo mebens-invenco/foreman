@@ -29,6 +29,9 @@ export type TaskPullRequest = {
 };
 
 export type TaskRunnerRoleOverride = {
+  // Names a workspace runner profile that replaces the role's base config
+  // (including provider type) before model/tuning overrides apply.
+  profile?: string;
   model?: string;
   tuning?: string;
 };

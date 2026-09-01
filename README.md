@@ -141,3 +141,55 @@ Behavior notes:
 - **Omitting the field preserves current behavior** — every dispatch uses `effort` (or `variant`).
 - It only takes effect on a **continuation** — a dispatch that resumes a live runner session, in practice a `review` or `reviewer` follow-up. A first-pass `execution` and a `retry` are never continuations (a `retry` always starts a fresh session), so they keep using the base `effort`/`variant`.
 - It **composes with `maxBudgetUsd`** rather than replacing it: `continuationEffort` lowers the thinking budget of continuation runs, while `maxBudgetUsd` still caps per-invocation spend. Use either or both.
+
+## Runner Profiles: Assigning A Provider Per Ticket
+
+`runner.profiles` holds named, complete runner configs. A ticket selects one by name, and the profile replaces that role's runner config wholesale — provider type included. This is the supported way to run one ticket on Claude and the next on Codex without editing the workspace config between them.
+
+```yaml
+runner:
+  execution:
+    type: codex
+    model: gpt-5.6-sol
+    effort: high
+    timeoutMs: 3600000
+  reviewer:
+    type: claude
+    model: claude-opus-4-8
+    effort: max
+    timeoutMs: 3600000
+  profiles:
+    claude:
+      type: claude
+      model: claude-opus-4-8
+      effort: max
+      timeoutMs: 3600000
+    codex:
+      type: codex
+      model: gpt-5.6-sol
+      effort: high
+      timeoutMs: 3600000
+```
+
+Select a profile from ticket metadata. For Linear, in the `Agent:` block:
+
+```text
+Agent:
+  Repos: foreman
+  Runner.profile: claude
+```
+
+For file workspaces, in frontmatter:
+
+```yaml
+runner:
+  profile: claude
+```
+
+Behavior notes:
+
+- `Runner.profile` (or `runner.profile` / `runner.execution.profile`) applies to the execution role; `Runner.reviewer.profile` applies to the reviewer role. Each role resolves independently.
+- Profile names must be lowercase (`[a-z0-9-]`, starting alphanumeric). Ticket values are lowercased on the way in, so `Runner.profile: Claude` still matches the `claude` profile.
+- A profile replaces the **whole** base config for the role — type, model, tuning, `timeoutMs`, and optional fields like `maxBudgetUsd` and `continuationEffort`. Per-ticket `Runner.model` / `Runner.tuning` overrides then apply on top of the profile and are validated against the profile's provider.
+- Naming a profile that is not configured fails the attempt with an `invalid_runner_override` error listing the configured profile names.
+- Without a `profile` key, behavior is unchanged: the role uses `runner.execution` / `runner.reviewer`, and per-ticket overrides can only change `model` and `tuning`, never the provider type.
