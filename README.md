@@ -190,6 +190,6 @@ Behavior notes:
 
 - `Runner.profile` (or `runner.profile` / `runner.execution.profile`) applies to the execution role; `Runner.reviewer.profile` applies to the reviewer role. Each role resolves independently.
 - Profile names must be lowercase (`[a-z0-9-]`, starting alphanumeric). Ticket values are lowercased on the way in, so `Runner.profile: Claude` still matches the `claude` profile.
-- A profile replaces the **whole** base config for the role — type, model, tuning, `timeoutMs`, and optional fields like `maxBudgetUsd` and `continuationEffort`. Per-ticket `Runner.model` / `Runner.tuning` overrides then apply on top of the profile and are validated against the profile's provider.
+- A profile replaces the **whole** base config for the role — type, model, tuning, `timeoutMs`, and optional fields like `maxBudgetUsd` and `continuationEffort`. Per-ticket `Runner.model` / `Runner.tuning` overrides then apply on top of the profile. Only `tuning` is validated against the profile's provider; `model` is any non-empty string, and the provider CLI rejects an unrecognized model id when the attempt runs.
 - Naming a profile that is not configured fails the attempt with an `invalid_runner_override` error listing the configured profile names.
 - Without a `profile` key, behavior is unchanged: the role uses `runner.execution` / `runner.reviewer`, and per-ticket overrides can only change `model` and `tuning`, never the provider type.

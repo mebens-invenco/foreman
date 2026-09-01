@@ -91,7 +91,7 @@ const resolveBaseConfig = (config: WorkspaceConfig, action: ActionType, profileN
     return runnerForAction(config, action);
   }
 
-  const profile = config.runner.profiles[profileName];
+  const profile = Object.hasOwn(config.runner.profiles, profileName) ? config.runner.profiles[profileName] : undefined;
   if (!profile) {
     const configured = Object.keys(config.runner.profiles);
     throw new ForemanError(

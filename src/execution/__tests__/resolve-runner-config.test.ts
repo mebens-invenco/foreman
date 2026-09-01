@@ -195,4 +195,12 @@ describe("resolveRunnerConfigForAction", () => {
       /Unknown runner profile 'codex'. Configured profiles: claude./,
     );
   });
+
+  test("treats inherited object keys as unknown profiles", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    for (const name of ["constructor", "__proto__"]) {
+      const task = baseTask({ runnerOverride: { execution: { profile: name } } });
+      expect(() => resolveRunnerConfigForAction(config, "execution", task)).toThrow(/Unknown runner profile/);
+    }
+  });
 });

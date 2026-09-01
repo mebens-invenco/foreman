@@ -697,6 +697,8 @@ describe("AttemptExecutor", () => {
       await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
       await logger.flush();
 
+      expect(runnerMocks.createAgentRunner).toHaveBeenCalledWith(expect.objectContaining({ task: profileTask }));
+
       const attempt = db.attempts.latestAttemptForJob(claimedJob.id)!;
       expect(attempt.runnerName).toBe("claude");
       expect(attempt.runnerModel).toBe("claude-opus-4-8");

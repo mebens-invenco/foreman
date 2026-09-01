@@ -124,8 +124,9 @@ export const codexRunnerSchema = z.object({
 
 export const runnerProviderSchema = z.discriminatedUnion("type", [opencodeRunnerSchema, claudeRunnerSchema, codexRunnerSchema]);
 
-// Profile names must be lowercase so ticket metadata (whose keys and values
-// are normalized to lowercase on the way in) can never miss on casing.
+// Profile names must be lowercase so ticket metadata (whose keys — and, for
+// profile overrides specifically, values — are lowercased on the way in) can
+// never miss on casing. Other override values (e.g. model ids) keep their case.
 export const RUNNER_PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 export const runnerProfilesSchema = z
