@@ -17,6 +17,7 @@ import { runnerSessionRoleForAction, runnerTuningValue, type WorkspaceConfig, ty
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { nextLeaseConflictEligibleAt } from "./lease-conflict.js";
+import { planRunnerInterruptionRetry } from "./runner-interruption-retry.js";
 import { assertTaskActionableTarget, leaseResourceKeysForAction } from "./scout-selection.js";
 
 const runnerOutputLimit = 4_000;
@@ -90,6 +91,13 @@ const readReviewContext = (selectionContext: Record<string, unknown>): ReviewCon
 const readDeploymentInstructionBody = (selectionContext: Record<string, unknown>): string | undefined => {
   const raw = selectionContext.deployment;
   return isRecord(raw) && typeof raw.instructionBody === "string" ? raw.instructionBody : undefined;
+};
+
+const readRunnerInterruptionTaskState = (selectionContext: Record<string, unknown> | undefined): TaskState | null => {
+  const raw = selectionContext?.runnerInterruption;
+  return isRecord(raw) && typeof raw.taskStateBeforeExecution === "string"
+    ? (raw.taskStateBeforeExecution as TaskState)
+    : null;
 };
 
 type AttemptExecutorDeps = {
@@ -187,7 +195,7 @@ export class AttemptExecutor {
       });
       if (!attempt) {
         const nextEligibleAt = nextLeaseConflictEligibleAt(this.deps.config);
-        this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id, { nextEligibleAt });
+        this.deps.foremanRepos.jobs.returnJobToQueue(job.id, { nextEligibleAt });
         jobLogger.warn("returned leased job to queue because required execution leases could not be acquired", { nextEligibleAt });
         return;
       }
@@ -250,7 +258,7 @@ export class AttemptExecutor {
         const reviewHeadSha = pullRequestReference?.headSha ?? reviewContext?.headSha ?? null;
         const usesRunnerSession = job.action !== "consolidation";
         const activeRunnerSession =
-          usesRunnerSession && job.action !== "retry"
+          usesRunnerSession && (job.action !== "retry" || attempt.attemptNumber > 1)
             ? this.deps.foremanRepos.runnerSessions.getActiveSession(runnerSessionSelector)
             : null;
         const runnerSession = usesRunnerSession
@@ -373,6 +381,65 @@ export class AttemptExecutor {
           sha256: await sha256File(logAbsolutePath),
         });
         attemptLogger.info("recorded attempt log artifact", { logPath: logAbsolutePath, sizeBytes: logStat.size });
+
+        if (runResult.retryableInterruption) {
+          const retry = planRunnerInterruptionRetry({
+            interruption: runResult.retryableInterruption,
+            attemptNumber: attempt.attemptNumber,
+            finishedAt: runResult.finishedAt,
+          });
+          this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "runner_interrupted", retry.summary, {
+            nextEligibleAt: retry.nextEligibleAt,
+          });
+          this.deps.foremanRepos.attempts.finalizeAttempt(attempt.id, "failed", {
+            finishedAt: runResult.finishedAt,
+            exitCode: runResult.exitCode,
+            signal: runResult.signal,
+            summary: retry.summary,
+            errorMessage: retry.summary,
+            tokensUsed: runResult.tokensUsed ?? null,
+          });
+          this.deps.onAttemptChanged({ attemptId: attempt.id, status: "failed" });
+
+          if (retry.nextEligibleAt) {
+            const originalTaskState = readRunnerInterruptionTaskState(job.selectionContext) ?? taskStateBeforeExecution;
+            this.deps.foremanRepos.jobs.updateJobSelectionContext(job.id, {
+              ...job.selectionContext,
+              runnerInterruption: { taskStateBeforeExecution: originalTaskState },
+            });
+            if (runnerSession && runResult.nativeSessionId) {
+              this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
+                nativeSessionId: runResult.nativeSessionId,
+                lastAttemptId: attempt.id,
+                lastWorktreeHeadSha: beforeSha,
+                lastReviewHeadSha: reviewHeadSha,
+                isActive: true,
+              });
+            }
+            this.deps.foremanRepos.jobs.returnJobToQueue(job.id, { nextEligibleAt: retry.nextEligibleAt });
+            attemptLogger.warn("queued job after retryable runner interruption", { nextEligibleAt: retry.nextEligibleAt });
+            return;
+          }
+
+          const originalTaskState = readRunnerInterruptionTaskState(job.selectionContext) ?? taskStateBeforeExecution;
+          if (task && transitionedTaskToInProgress && originalTaskState && originalTaskState !== "in_progress") {
+            try {
+              await this.deps.taskSystem.transition({ taskId: task.id, toState: originalTaskState });
+              attemptLogger.info("restored task state after exhausted runner retries", { restoredState: originalTaskState });
+            } catch (restoreError) {
+              attemptLogger.warn("failed to restore task state after exhausted runner retries", {
+                restoreState: originalTaskState,
+                error: restoreError instanceof Error ? restoreError.message : String(restoreError),
+              });
+            }
+          }
+          this.deps.foremanRepos.jobs.updateJobStatus(job.id, "failed", {
+            finishedAt: runResult.finishedAt,
+            errorMessage: retry.summary,
+          });
+          attemptLogger.error("runner interruption retries exhausted", { error: retry.summary });
+          return;
+        }
 
         const { workerResult, finalRunResult, tokensUsed } = await this.parseOrRecoverWorkerResult({
           runner,
@@ -502,13 +569,14 @@ export class AttemptExecutor {
         } else {
           attemptLogger.error("attempt failed", { error: message, aborted: controller.signal.aborted });
         }
-        if (task && transitionedTaskToInProgress && taskStateBeforeExecution && taskStateBeforeExecution !== "in_progress") {
+        const originalTaskState = readRunnerInterruptionTaskState(job.selectionContext) ?? taskStateBeforeExecution;
+        if (task && transitionedTaskToInProgress && originalTaskState && originalTaskState !== "in_progress") {
           try {
-            await this.deps.taskSystem.transition({ taskId: task.id, toState: taskStateBeforeExecution });
-            attemptLogger.info("restored task state after failed attempt", { restoredState: taskStateBeforeExecution });
+            await this.deps.taskSystem.transition({ taskId: task.id, toState: originalTaskState });
+            attemptLogger.info("restored task state after failed attempt", { restoredState: originalTaskState });
           } catch (restoreError) {
             attemptLogger.warn("failed to restore task state after failed attempt", {
-              restoreState: taskStateBeforeExecution,
+              restoreState: originalTaskState,
               error: restoreError instanceof Error ? restoreError.message : String(restoreError),
             });
           }

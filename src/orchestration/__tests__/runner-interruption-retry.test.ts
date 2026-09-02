@@ -1,0 +1,26 @@
+import { describe, expect, test } from "vitest";
+
+import { planRunnerInterruptionRetry } from "../runner-interruption-retry.js";
+
+describe("planRunnerInterruptionRetry", () => {
+  const interruption = { summary: "Runner provider returned retryable HTTP 503." };
+
+  test.each([
+    [1, "2026-09-02T02:00:30.000Z"],
+    [2, "2026-09-02T02:01:00.000Z"],
+  ])("backs off attempt %i", (attemptNumber, nextEligibleAt) => {
+    expect(
+      planRunnerInterruptionRetry({ interruption, attemptNumber, finishedAt: "2026-09-02T02:00:00.000Z" }),
+    ).toEqual({
+      summary: expect.stringContaining(`Retrying attempt ${attemptNumber + 1} of 3 at ${nextEligibleAt}.`),
+      nextEligibleAt,
+    });
+  });
+
+  test("stops after three total attempts", () => {
+    expect(planRunnerInterruptionRetry({ interruption, attemptNumber: 3, finishedAt: "2026-09-02T02:00:00.000Z" })).toEqual({
+      summary: "Runner provider returned retryable HTTP 503. Automatic retry limit reached after 3 attempts.",
+      nextEligibleAt: null,
+    });
+  });
+});

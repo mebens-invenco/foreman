@@ -74,6 +74,30 @@ const openCodeErrorSummary = (record: JsonRecord): string | null => {
   return compactJson(errorRecord);
 };
 
+const retryableOpenCodeInterruption = (records: JsonRecord[], valueCount: number): { summary: string } | undefined => {
+  if (records.length === 0 || records.length !== valueCount) {
+    return undefined;
+  }
+
+  const terminalRecord = records[records.length - 1]!;
+  if (
+    terminalRecord.type !== "error" ||
+    records.slice(0, -1).some((record) => record.type !== "step_start" && record.type !== "step_finish") ||
+    !isRecord(terminalRecord.error)
+  ) {
+    return undefined;
+  }
+
+  const data = isRecord(terminalRecord.error.data) ? terminalRecord.error.data : null;
+  const statusCode = data ? numberField(data, "statusCode") : undefined;
+  if (data?.isRetryable !== true || statusCode === undefined || !Number.isInteger(statusCode) || statusCode < 500 || statusCode > 599) {
+    return undefined;
+  }
+
+  const name = stringField(terminalRecord.error, ["name"]);
+  return { summary: `OpenCode ${name ?? "provider"} returned retryable HTTP ${statusCode}.` };
+};
+
 export const extractOpenCodeStepUsage = (stepFinishRecord: JsonRecord): TokenUsage | undefined => {
   const part = isRecord(stepFinishRecord.part) ? stepFinishRecord.part : null;
   const tokens = part && isRecord(part.tokens) ? part.tokens : null;
@@ -142,6 +166,7 @@ export const normalizeOpenCodeJsonOutput = (stdout: string): NormalizedJsonOutpu
     }
     return sumTokenUsage(totals, extractOpenCodeStepUsage(record));
   }, undefined);
+  const retryableInterruption = retryableOpenCodeInterruption(records, values.length);
 
   return {
     stdout: text || stdout,
@@ -150,5 +175,6 @@ export const normalizeOpenCodeJsonOutput = (stdout: string): NormalizedJsonOutpu
       ? { warning: `OpenCode JSON output contained error record(s): ${errorSummaries.join("; ")}` }
       : {}),
     ...(tokensUsed ? { tokensUsed } : {}),
+    ...(retryableInterruption ? { retryableInterruption } : {}),
   };
 };

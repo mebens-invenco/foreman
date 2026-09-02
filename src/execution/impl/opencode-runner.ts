@@ -16,8 +16,8 @@ export class OpenCodeRunner implements AgentRunner {
     return this.run(request);
   }
 
-  private run(request: AgentRunnerInvokeRequest, nativeSessionId?: string): Promise<CapturedAgentRunResult> {
-    return runAgentProcess({
+  private async run(request: AgentRunnerInvokeRequest, nativeSessionId?: string): Promise<CapturedAgentRunResult> {
+    const result = await runAgentProcess({
       command: process.env.FOREMAN_OPENCODE_BIN ?? "opencode",
       args: [
         "run",
@@ -40,5 +40,11 @@ export class OpenCodeRunner implements AgentRunner {
       request,
       normalizeStdout: normalizeOpenCodeJsonOutput,
     });
+    if (result.exitCode === 0 || result.signal || result.timedOut || request.abortSignal?.aborted) {
+      const { retryableInterruption: _retryableInterruption, ...nonRetryableResult } = result;
+      return nonRetryableResult;
+    }
+
+    return result;
   }
 }

@@ -26,6 +26,78 @@ const setUpFakeOpencode = (): Promise<string> => fakeOpencode.setUp();
 afterEach(fakeOpencode.cleanup);
 
 describe("OpenCodeRunner", () => {
+  test("emits retryable provider interruptions only for non-zero terminal errors", async () => {
+    const providerErrorRunner = createFakeRunnerBin({
+      envVar: "FOREMAN_OPENCODE_BIN",
+      script: [
+        "#!/usr/bin/env node",
+        `process.stdout.write(${JSON.stringify(
+          JSON.stringify({
+            type: "error",
+            sessionID: "ses_provider_error",
+            error: { name: "APIError", data: { statusCode: 503, isRetryable: true } },
+          }),
+        )});`,
+        "process.exitCode = 1;",
+      ].join("\n"),
+      scriptName: "fake-opencode-provider-error.js",
+    });
+    const tempDir = await providerErrorRunner.setUp();
+
+    try {
+      const result = await new OpenCodeRunner("openai/gpt-5.5", "high").invoke({
+        attemptId: "attempt-provider-error",
+        action: "execution",
+        cwd: tempDir,
+        env: {},
+        prompt: "prompt",
+        timeoutMs: 5_000,
+      });
+
+      expect(result).toMatchObject({
+        exitCode: 1,
+        nativeSessionId: "ses_provider_error",
+        retryableInterruption: { summary: "OpenCode APIError returned retryable HTTP 503." },
+      });
+    } finally {
+      await providerErrorRunner.cleanup();
+    }
+  });
+
+  test("does not emit a provider interruption when the invocation times out", async () => {
+    const timedOutRunner = createFakeRunnerBin({
+      envVar: "FOREMAN_OPENCODE_BIN",
+      script: [
+        "#!/usr/bin/env node",
+        `process.stdout.write(${JSON.stringify(
+          JSON.stringify({
+            type: "error",
+            error: { name: "APIError", data: { statusCode: 503, isRetryable: true } },
+          }),
+        )});`,
+        "setTimeout(() => {}, 60_000);",
+      ].join("\n"),
+      scriptName: "fake-opencode-timeout.js",
+    });
+    const tempDir = await timedOutRunner.setUp();
+
+    try {
+      const result = await new OpenCodeRunner("openai/gpt-5.5", "high").invoke({
+        attemptId: "attempt-timeout",
+        action: "execution",
+        cwd: tempDir,
+        env: {},
+        prompt: "prompt",
+        timeoutMs: 100,
+      });
+
+      expect(result.timedOut).toBe(true);
+      expect(result.retryableInterruption).toBeUndefined();
+    } finally {
+      await timedOutRunner.cleanup();
+    }
+  });
+
   // Regression pin for ENG-5447: foreman workers (and `foreman eval`) run
   // unattended with stdin closed. Without --dangerously-skip-permissions
   // opencode auto-rejects its `ask` permissions (e.g. external_directory) and
