@@ -1,6 +1,12 @@
+import { execFile } from "node:child_process";
+import { resolve as resolvePath } from "node:path";
+import { promisify } from "node:util";
+
 import type { AgentRunner, AgentRunnerInvokeRequest, CapturedAgentRunResult } from "../agent-runner.js";
 import { normalizeCodexJsonOutput } from "./codex-output.js";
 import { runAgentProcess } from "./run-agent-process.js";
+
+const execFileAsync = promisify(execFile);
 
 // Codex CLI sandbox config override applied to every invocation. Resume mode
 // (`codex exec resume`) does not accept the `-s/--sandbox` flag, so we pass
@@ -10,6 +16,10 @@ import { runAgentProcess } from "./run-agent-process.js";
 // worktree (and conventionally writable system paths like /tmp); broader
 // `disk-full-write-access` is intentionally not used.
 const CODEX_SANDBOX_OVERRIDE = 'sandbox_mode="workspace-write"';
+
+// `workspace-write` denies network by default, which blocks `git push` and any
+// dependency fetch the task needs.
+const CODEX_NETWORK_OVERRIDE = "sandbox_workspace_write.network_access=true";
 
 // Clears every `[mcp_servers.*]` entry that would otherwise load from
 // `~/.codex/config.toml`. Passed as a `-c` TOML override (consistent with how
@@ -53,7 +63,22 @@ export class CodexRunner implements AgentRunner {
     return this.run(request, undefined, false);
   }
 
-  private run(
+  // Tasks run in a linked git worktree whose real git directory lives under the
+  // origin clone (`<repo>/.git/worktrees/<name>`), outside the sandbox's cwd
+  // root — without this, git cannot take its index lock and no commit is
+  // possible. Resolving to the common dir also covers the objects and refs a
+  // commit writes. Unresolvable (not a repo, no git) leaves the roots untouched.
+  private async resolveGitCommonDir(cwd: string): Promise<string | undefined> {
+    try {
+      const { stdout } = await execFileAsync("git", ["rev-parse", "--git-common-dir"], { cwd });
+      const gitCommonDir = stdout.trim();
+      return gitCommonDir ? resolvePath(cwd, gitCommonDir) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async run(
     request: AgentRunnerInvokeRequest,
     nativeSessionId: string | undefined,
     resume: boolean,
@@ -70,9 +95,13 @@ export class CodexRunner implements AgentRunner {
     // flag by clap; the upstream validator in `invoke()` is the primary guard,
     // and `--` is defence in depth.
     const baseArgs = ["exec"];
+    const gitCommonDir = await this.resolveGitCommonDir(request.cwd);
     const sharedConfigArgs = [
       "-c",
       CODEX_SANDBOX_OVERRIDE,
+      "-c",
+      CODEX_NETWORK_OVERRIDE,
+      ...(gitCommonDir ? ["-c", `sandbox_workspace_write.writable_roots=[${JSON.stringify(gitCommonDir)}]`] : []),
       "-c",
       `model=${JSON.stringify(this.model)}`,
       "-c",

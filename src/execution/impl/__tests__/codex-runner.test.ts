@@ -1,3 +1,8 @@
+import { execFile } from "node:child_process";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
 import { afterEach, describe, expect, test } from "vitest";
 
 import { CodexRunner, isValidCodexThreadId } from "../codex-runner.js";
@@ -30,6 +35,19 @@ const fakeCodex = createFakeRunnerBin({
 });
 const setUpFakeCodex = (): Promise<string> => fakeCodex.setUp();
 
+const execFileAsync = promisify(execFile);
+
+const setUpGitWorktree = async (root: string): Promise<{ worktree: string; commonDir: string }> => {
+  const origin = join(root, "origin");
+  const worktree = join(root, "worktree");
+  await mkdir(origin, { recursive: true });
+  const git = (args: string[], cwd: string) => execFileAsync("git", args, { cwd });
+  await git(["init", "-q", "-b", "main", "."], origin);
+  await git(["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], origin);
+  await git(["worktree", "add", "-q", worktree, "-b", "task"], origin);
+  return { worktree, commonDir: join(origin, ".git") };
+};
+
 afterEach(fakeCodex.cleanup);
 
 describe("CodexRunner", () => {
@@ -55,6 +73,8 @@ describe("CodexRunner", () => {
       "--json",
       "-c",
       'sandbox_mode="workspace-write"',
+      "-c",
+      "sandbox_workspace_write.network_access=true",
       "-c",
       'model="gpt-5.5"',
       "-c",
@@ -87,6 +107,8 @@ describe("CodexRunner", () => {
       "--json",
       "-c",
       'sandbox_mode="workspace-write"',
+      "-c",
+      "sandbox_workspace_write.network_access=true",
       "-c",
       'model="gpt-5.5"',
       "-c",
@@ -148,6 +170,8 @@ describe("CodexRunner", () => {
       "-c",
       'sandbox_mode="workspace-write"',
       "-c",
+      "sandbox_workspace_write.network_access=true",
+      "-c",
       'model="gpt-5.5"',
       "-c",
       'model_reasoning_effort="high"',
@@ -155,6 +179,41 @@ describe("CodexRunner", () => {
       "mcp_servers={}",
       "-",
     ]);
+  });
+
+  test("adds the worktree's shared git directory as a writable root so the sandbox can take git's index lock", async () => {
+    const tempDir = await setUpFakeCodex();
+    const { worktree, commonDir } = await setUpGitWorktree(tempDir);
+
+    const runner = new CodexRunner("gpt-5.5", "high");
+    const result = await runner.invoke({
+      attemptId: "attempt-codex-worktree",
+      action: "execution",
+      cwd: worktree,
+      env: {},
+      prompt: "probe",
+      timeoutMs: 5_000,
+    });
+
+    const invocation = JSON.parse(result.stdout) as { argv: string[]; stdin: string };
+    expect(invocation.argv).toContain(`sandbox_workspace_write.writable_roots=[${JSON.stringify(commonDir)}]`);
+  });
+
+  test("omits the writable_roots override when the cwd is not a git repository", async () => {
+    const tempDir = await setUpFakeCodex();
+
+    const runner = new CodexRunner("gpt-5.5", "high");
+    const result = await runner.invoke({
+      attemptId: "attempt-codex-no-repo",
+      action: "execution",
+      cwd: tempDir,
+      env: {},
+      prompt: "probe",
+      timeoutMs: 5_000,
+    });
+
+    const invocation = JSON.parse(result.stdout) as { argv: string[]; stdin: string };
+    expect(invocation.argv.some((arg) => arg.startsWith("sandbox_workspace_write.writable_roots="))).toBe(false);
   });
 
   test("omits the mcp_servers override when excludeMcp is not set so normal runs keep their MCP servers", async () => {
