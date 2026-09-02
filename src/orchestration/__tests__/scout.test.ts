@@ -265,6 +265,44 @@ const seedBlockedOrdinaryJob = (
   db.jobs.updateJobStatus(job.id, "blocked", { finishedAt: "2026-03-14T12:04:00Z" });
 };
 
+const seedExhaustedRunnerInterruption = (
+  db: Awaited<ReturnType<typeof createMigratedDb>>,
+  interruptedTask: Task,
+  action: ActionType,
+): void => {
+  db.workers.ensureWorkerSlots(1);
+  const worker = db.workers.listWorkers()[0];
+  expect(worker).toBeDefined();
+  db.taskMirror.saveTasks([interruptedTask]);
+  const target = db.taskMirror.getTaskTarget(interruptedTask.id, interruptedTask.targets[0]?.repoKey ?? "repo-a");
+  expect(target).not.toBeNull();
+
+  const job = db.jobs.createJob({
+    taskId: interruptedTask.id,
+    taskTargetId: target!.id,
+    taskProvider: interruptedTask.provider,
+    action,
+    priorityRank: priorityToRank(interruptedTask.priority),
+    repoKey: target!.repoKey,
+    baseBranch: "main",
+    dedupeKey: `${interruptedTask.id}:${target!.repoKey}:${action}`,
+    selectionReason: "test exhausted runner interruption",
+    selectionContext: { runnerInterruption: { retriesExhausted: true } },
+  });
+  const attempt = db.attempts.createAttemptWithLeases({
+    jobId: job.id,
+    workerId: worker!.id,
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-5.4",
+    runnerVariant: "high",
+    expiresAt: "2026-03-14T12:05:00Z",
+    leases: [],
+  });
+  expect(attempt).not.toBeNull();
+  db.attempts.finalizeAttempt(attempt!.id, "failed", { finishedAt: "2026-03-14T12:04:00Z" });
+  db.jobs.updateJobStatus(job.id, "failed", { finishedAt: "2026-03-14T12:04:00Z" });
+};
+
 const seedReviewerCheckpoint = (
   db: Awaited<ReturnType<typeof createMigratedDb>>,
   reviewTask: Task,
@@ -473,6 +511,72 @@ Task body
 };
 
 describe("runScoutSelection", () => {
+  test.each(["startup", "poll", "worker_finished", "task_mutation", "lease_change"] as const)(
+    "does not automatically restart exhausted runner interruptions on %s scouts",
+    async (triggerType) => {
+      const tempDir = await createTempDir("foreman-scout-test-");
+      cleanupDirs.push(tempDir);
+      const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      const interruptedTask = task({
+        id: `TASK-INTERRUPTED-${triggerType.toUpperCase()}`,
+        title: "Exhausted runner interruption",
+        state: "ready",
+        providerState: "ready",
+        priority: "normal",
+        updatedAt: "2026-03-14T12:00:00Z",
+      });
+      seedExhaustedRunnerInterruption(db, interruptedTask, "execution");
+
+      try {
+        const result = await runScoutSelection({
+          config,
+          foremanRepos: db,
+          taskSystem: new FakeTaskSystem([interruptedTask]),
+          reviewService: new FakeReviewService({}),
+          repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+          triggerType,
+        });
+
+        expect(result.jobs).toHaveLength(0);
+      } finally {
+        db.close();
+      }
+    },
+  );
+
+  test("allows a manual scout to restart an exhausted runner interruption", async () => {
+    const tempDir = await createTempDir("foreman-scout-test-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const interruptedTask = task({
+      id: "TASK-INTERRUPTED-MANUAL",
+      title: "Manually restart exhausted runner interruption",
+      state: "ready",
+      providerState: "ready",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+    });
+    seedExhaustedRunnerInterruption(db, interruptedTask, "execution");
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([interruptedTask]),
+        reviewService: new FakeReviewService({}),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "manual",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("execution");
+    } finally {
+      db.close();
+    }
+  });
+
   test("does not immediately reselect a manually stopped retry on worker-finished scout", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");
     cleanupDirs.push(tempDir);

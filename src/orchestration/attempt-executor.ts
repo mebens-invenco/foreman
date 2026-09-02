@@ -407,9 +407,10 @@ export class AttemptExecutor {
               ...job.selectionContext,
               runnerInterruption: { taskStateBeforeExecution: originalTaskState },
             });
-            if (runnerSession && runResult.nativeSessionId) {
+            const nativeSessionId = runResult.nativeSessionId ?? activeRunnerSession?.nativeSessionId;
+            if (runnerSession && nativeSessionId) {
               this.deps.foremanRepos.runnerSessions.updateSession(runnerSession.id, {
-                nativeSessionId: runResult.nativeSessionId,
+                nativeSessionId,
                 lastAttemptId: attempt.id,
                 lastWorktreeHeadSha: beforeSha,
                 lastReviewHeadSha: reviewHeadSha,
@@ -422,6 +423,10 @@ export class AttemptExecutor {
           }
 
           const originalTaskState = readRunnerInterruptionTaskState(job.selectionContext) ?? taskStateBeforeExecution;
+          this.deps.foremanRepos.jobs.updateJobSelectionContext(job.id, {
+            ...job.selectionContext,
+            runnerInterruption: { taskStateBeforeExecution: originalTaskState, retriesExhausted: true },
+          });
           if (task && transitionedTaskToInProgress && originalTaskState && originalTaskState !== "in_progress") {
             try {
               await this.deps.taskSystem.transition({ taskId: task.id, toState: originalTaskState });
@@ -569,8 +574,15 @@ export class AttemptExecutor {
         } else {
           attemptLogger.error("attempt failed", { error: message, aborted: controller.signal.aborted });
         }
-        const originalTaskState = readRunnerInterruptionTaskState(job.selectionContext) ?? taskStateBeforeExecution;
-        if (task && transitionedTaskToInProgress && originalTaskState && originalTaskState !== "in_progress") {
+        const retryOriginalTaskState = readRunnerInterruptionTaskState(job.selectionContext);
+        const originalTaskState = retryOriginalTaskState ?? taskStateBeforeExecution;
+        if (
+          task &&
+          (job.action === "execution" || job.action === "retry") &&
+          (transitionedTaskToInProgress || retryOriginalTaskState !== null) &&
+          originalTaskState &&
+          originalTaskState !== "in_progress"
+        ) {
           try {
             await this.deps.taskSystem.transition({ taskId: task.id, toState: originalTaskState });
             attemptLogger.info("restored task state after failed attempt", { restoredState: originalTaskState });

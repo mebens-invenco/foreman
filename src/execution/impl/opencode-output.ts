@@ -74,28 +74,65 @@ const openCodeErrorSummary = (record: JsonRecord): string | null => {
   return compactJson(errorRecord);
 };
 
-const retryableOpenCodeInterruption = (records: JsonRecord[], valueCount: number): { summary: string } | undefined => {
-  if (records.length === 0 || records.length !== valueCount) {
+const retryableOpenCodeStatus = (record: JsonRecord): number | undefined => {
+  if (record.type !== "error" || !isRecord(record.error) || record.error.name !== "APIError") {
+    return undefined;
+  }
+
+  const data = isRecord(record.error.data) ? record.error.data : null;
+  const statusCode = data ? numberField(data, "statusCode") : undefined;
+  return data?.isRetryable === true && statusCode !== undefined && Number.isInteger(statusCode) && statusCode >= 500 && statusCode <= 599
+    ? statusCode
+    : undefined;
+};
+
+const isOpenCodeLifecycleRecord = (record: JsonRecord): boolean => {
+  const part = isRecord(record.part) ? record.part : null;
+  return (
+    (record.type === "step_start" && part?.type === "step-start") ||
+    (record.type === "step_finish" && part?.type === "step-finish")
+  );
+};
+
+const retryableOpenCodeInterruption = (
+  records: JsonRecord[],
+  valueCount: number,
+  hasUsableOutput: boolean,
+): { summary: string } | undefined => {
+  if (records.length === 0 || records.length !== valueCount || hasUsableOutput) {
     return undefined;
   }
 
   const terminalRecord = records[records.length - 1]!;
-  if (
-    terminalRecord.type !== "error" ||
-    records.slice(0, -1).some((record) => record.type !== "step_start" && record.type !== "step_finish") ||
-    !isRecord(terminalRecord.error)
-  ) {
+  const statusCode = retryableOpenCodeStatus(terminalRecord);
+  if (statusCode === undefined || records.slice(0, -1).some((record) => !isOpenCodeLifecycleRecord(record))) {
     return undefined;
   }
 
-  const data = isRecord(terminalRecord.error.data) ? terminalRecord.error.data : null;
-  const statusCode = data ? numberField(data, "statusCode") : undefined;
-  if (data?.isRetryable !== true || statusCode === undefined || !Number.isInteger(statusCode) || statusCode < 500 || statusCode > 599) {
-    return undefined;
-  }
+  return { summary: `OpenCode APIError returned retryable HTTP ${statusCode}.` };
+};
 
-  const name = stringField(terminalRecord.error, ["name"]);
-  return { summary: `OpenCode ${name ?? "provider"} returned retryable HTTP ${statusCode}.` };
+export const redactRetryableOpenCodeErrorLine = (line: string): string => {
+  try {
+    const record: unknown = JSON.parse(line);
+    if (!isRecord(record)) {
+      return line;
+    }
+
+    const statusCode = retryableOpenCodeStatus(record);
+    if (statusCode === undefined) {
+      return line;
+    }
+
+    const sessionID = stringField(record, ["sessionID", "sessionId", "session_id"]);
+    return JSON.stringify({
+      type: "error",
+      ...(sessionID ? { sessionID } : {}),
+      error: { name: "APIError", data: { statusCode, isRetryable: true } },
+    });
+  } catch {
+    return line;
+  }
 };
 
 export const extractOpenCodeStepUsage = (stepFinishRecord: JsonRecord): TokenUsage | undefined => {
@@ -155,6 +192,7 @@ export const normalizeOpenCodeJsonOutput = (stdout: string): NormalizedJsonOutpu
     .map((record) => stringField(record, ["text", "content", "result", "output"]))
     .find(Boolean);
   const text = finalAnswerText ?? finalText ?? records.map((record) => stringField(record, ["text", "content"])).filter(Boolean).join("");
+  const hasUsableOutput = records.some((record) => stringField(record, ["text", "content", "result", "output"]) !== null);
   const errorSummaries = records.map(openCodeErrorSummary).filter(Boolean);
   // OpenCode emits one `step_finish` event per agent step. Each event's
   // `part.tokens` carries the delta for that step (verified empirically against
@@ -166,13 +204,15 @@ export const normalizeOpenCodeJsonOutput = (stdout: string): NormalizedJsonOutpu
     }
     return sumTokenUsage(totals, extractOpenCodeStepUsage(record));
   }, undefined);
-  const retryableInterruption = retryableOpenCodeInterruption(records, values.length);
+  const retryableInterruption = retryableOpenCodeInterruption(records, values.length, hasUsableOutput);
 
   return {
     stdout: text || stdout,
     ...(nativeSessionId ? { nativeSessionId } : {}),
     ...(errorSummaries.length > 0
-      ? { warning: `OpenCode JSON output contained error record(s): ${errorSummaries.join("; ")}` }
+      ? {
+          warning: retryableInterruption?.summary ?? `OpenCode JSON output contained error record(s): ${errorSummaries.join("; ")}`,
+        }
       : {}),
     ...(tokensUsed ? { tokensUsed } : {}),
     ...(retryableInterruption ? { retryableInterruption } : {}),

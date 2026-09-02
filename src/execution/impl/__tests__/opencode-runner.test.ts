@@ -27,6 +27,7 @@ afterEach(fakeOpencode.cleanup);
 
 describe("OpenCodeRunner", () => {
   test("emits retryable provider interruptions only for non-zero terminal errors", async () => {
+    const stdoutLines: string[] = [];
     const providerErrorRunner = createFakeRunnerBin({
       envVar: "FOREMAN_OPENCODE_BIN",
       script: [
@@ -52,13 +53,22 @@ describe("OpenCodeRunner", () => {
         env: {},
         prompt: "prompt",
         timeoutMs: 5_000,
+        onStdoutLine: (line) => stdoutLines.push(line),
       });
 
       expect(result).toMatchObject({
         exitCode: 1,
         nativeSessionId: "ses_provider_error",
+        stdout: "OpenCode APIError returned retryable HTTP 503.",
         retryableInterruption: { summary: "OpenCode APIError returned retryable HTTP 503." },
       });
+      expect(stdoutLines).toEqual([
+        JSON.stringify({
+          type: "error",
+          sessionID: "ses_provider_error",
+          error: { name: "APIError", data: { statusCode: 503, isRetryable: true } },
+        }),
+      ]);
     } finally {
       await providerErrorRunner.cleanup();
     }
