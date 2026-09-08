@@ -50,13 +50,13 @@ describe("rollupUsage", () => {
     const [day20, day21] = rollup.buckets;
     expect(day20!.groupKey).toBe("2026-05-20");
     expect(day20!.attemptsCount).toBe(2);
-    expect(day20!.cost.totalUsd).toBeCloseTo(15 + 75);
+    expect(day20!.cost.totalUsd).toBeCloseTo(5 + 25);
     expect(day21!.groupKey).toBe("2026-05-21");
     expect(day21!.attemptsCount).toBe(1);
-    expect(day21!.cost.totalUsd).toBeCloseTo(1.5);
+    expect(day21!.cost.totalUsd).toBeCloseTo(0.5);
 
     expect(rollup.totals.attemptsCount).toBe(3);
-    expect(rollup.totals.cost.totalUsd).toBeCloseTo(15 + 75 + 1.5);
+    expect(rollup.totals.cost.totalUsd).toBeCloseTo(5 + 25 + 0.5);
   });
 
   test("groups by runner+model and uses the matching rate per row", () => {
@@ -74,7 +74,7 @@ describe("rollupUsage", () => {
       "claude/claude-opus-4-7",
       "claude/claude-sonnet-4-6",
     ]);
-    expect(rollup.buckets[0]!.cost.totalUsd).toBeCloseTo(75);
+    expect(rollup.buckets[0]!.cost.totalUsd).toBeCloseTo(25);
     expect(rollup.buckets[1]!.cost.totalUsd).toBeCloseTo(15);
   });
 
@@ -97,6 +97,28 @@ describe("rollupUsage", () => {
     expect(rollup.buckets[0]!.attemptsCount).toBe(1);
     expect(rollup.buckets[0]!.cost.totalUsd).toBe(0);
     expect(rollup.totals.attemptsCount).toBe(1);
+  });
+
+  test("prices historical token-bearing attempts from newly supported exact models", () => {
+    const rollup = rollupUsage({
+      rows: [
+        {
+          runnerName: "opencode",
+          runnerModel: "openai/gpt-5.6-sol-fast",
+          runnerVariant: "high",
+          startedAt: "2026-08-06T01:37:16Z",
+          tokensUsed: {
+            inputTokens: 1_000_000,
+            outputTokens: 0,
+          },
+        },
+      ],
+      groupBy: "model",
+      fromInclusive: "2026-08-06T00:00:00Z",
+      toExclusive: "2026-08-07T00:00:00Z",
+    });
+
+    expect(rollup.totals.cost.totalUsd).toBeCloseTo(8);
   });
 });
 
