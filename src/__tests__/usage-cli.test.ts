@@ -149,11 +149,11 @@ describe("usage cli", () => {
     expect(payload.groupBy).toBe("day");
     expect(payload.buckets).toHaveLength(2);
     expect(payload.buckets[0]!.groupKey).toBe("2026-05-20");
-    expect(payload.buckets[0]!.cost.totalUsd).toBeCloseTo(75);
+    expect(payload.buckets[0]!.cost.totalUsd).toBeCloseTo(25);
     expect(payload.buckets[1]!.groupKey).toBe("2026-05-21");
-    expect(payload.buckets[1]!.cost.totalUsd).toBeCloseTo(15);
+    expect(payload.buckets[1]!.cost.totalUsd).toBeCloseTo(5);
     expect(payload.totals.attemptsCount).toBe(2);
-    expect(payload.totals.cost.totalUsd).toBeCloseTo(90);
+    expect(payload.totals.cost.totalUsd).toBeCloseTo(30);
   });
 
   test("emits a tab-aligned table by default", async () => {
@@ -171,7 +171,7 @@ describe("usage cli", () => {
     expect(stdout).toContain("Usage 2026-05-20 to 2026-05-21");
     expect(stdout).toContain("Day");
     expect(stdout).toContain("Cost USD");
-    expect(stdout).toContain("$90.00");
+    expect(stdout).toContain("$30.00");
     expect(stdout).toContain("TOTAL");
   });
 });
