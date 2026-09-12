@@ -3854,7 +3854,7 @@ describe("runScoutSelection", () => {
         pullRequestNumber: 50,
         state: "merged",
         headBranch: "task-deploy",
-        baseBranch: "main",
+        baseBranch: "deleted-stack-base",
       }),
     });
 
@@ -3871,9 +3871,15 @@ describe("runScoutSelection", () => {
 
       expect(active.jobs).toHaveLength(1);
       expect(active.jobs[0]?.action).toBe("deployment");
+      expect(active.jobs[0]?.baseBranch).toBe("main");
       expect(active.jobs[0]?.selectionContext).toMatchObject({
         deployment: { instructionBody: "Check production once." },
-        pullRequestReference: { url: "https://github.com/acme/repo-a/pull/50", state: "merged" },
+        pullRequestReference: {
+          url: "https://github.com/acme/repo-a/pull/50",
+          state: "merged",
+          baseBranch: "deleted-stack-base",
+          headBranch: "task-deploy",
+        },
       });
 
       const inactiveRoot = await createTempDir("foreman-scout-deployment-missing-");
