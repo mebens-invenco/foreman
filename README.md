@@ -16,7 +16,7 @@ Initialization creates `workspaces/<workspace>/` with `foreman.workspace.yml`, `
 
 Before serving:
 
-- Fill in `workspaces/<workspace>/.env`: `GH_TOKEN` is used for GitHub review/PR context, `LINEAR_API_KEY` is required for Linear workspaces, and `GH_CONFIG_DIR` is optional.
+- Fill in `workspaces/<workspace>/.env`: `GH_TOKEN` is used for GitHub review/PR context, `LINEAR_API_KEY` is required for Linear workspaces, `GH_CONFIG_DIR` is optional, and `SLACK_BOT_TOKEN` enables Slack direct messages when a target user is configured.
 - Edit `workspaces/<workspace>/foreman.workspace.yml`: configure `repos.explicit` or `repos.roots`, task states/labels, runners, scheduler concurrency, and the HTTP port if needed.
 - Repos are discovered by basename, so ticket repo keys must match the discovered repo directory name.
 
@@ -27,6 +27,8 @@ pnpm run foreman -- serve <workspace>
 ```
 
 The UI and API are served on the configured HTTP host/port, defaulting to `http://127.0.0.1:8765`.
+
+Slack delivery is disabled by default. Set `slack.targetUserId` in Settings or `foreman.workspace.yml` while keeping `SLACK_BOT_TOKEN` only in the workspace `.env`. Automatic blocked, failed, and timed-out attempt alerts are best-effort. A cron markdown file may additionally opt into one terminating direct message with `allowSlackDm: true` in its frontmatter.
 
 ## Plan Tickets With `plan.md`
 

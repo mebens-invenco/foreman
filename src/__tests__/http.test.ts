@@ -85,6 +85,7 @@ describe("HTTP query validation", () => {
           agentTaskCreation: { enabled: true },
           scheduler: { workerConcurrency: 2 },
           runner: { execution: { model: "openai/gpt-5.5" } },
+          slack: { targetUserId: "U123456789" },
         },
       });
 
@@ -94,13 +95,25 @@ describe("HTTP query validation", () => {
       expect(response.json().config.scheduler.workerConcurrency).toBe(2);
       expect(response.json().config.runner.execution.model).toBe("openai/gpt-5.5");
       expect(response.json().config.workspace.agentPrefix).toBe("[bot] ");
+      expect(response.json().config.slack).toEqual({ targetUserId: "U123456789" });
       expect(response.json().deploymentInstructions).toEqual({ active: false, relativePath: "deployment.md" });
       expect(config.cron.enabled).toBe(true);
       expect(config.scheduler.workerConcurrency).toBe(2);
+      expect(config.slack.targetUserId).toBe("U123456789");
       const persisted = await fs.readFile(paths.configPath, "utf8");
       expect(persisted).toContain("jobsDir: automation");
       expect(persisted).toContain("agentPrefix");
       expect(persisted).toContain("[bot] ");
+
+      const cleared = await server.inject({
+        method: "PATCH",
+        url: "/api/settings",
+        payload: { slack: { targetUserId: null } },
+      });
+      expect(cleared.statusCode).toBe(200);
+      expect(cleared.json().config.slack.targetUserId).toBeNull();
+      expect(config.slack.targetUserId).toBeNull();
+      expect(await fs.readFile(paths.configPath, "utf8")).toContain("targetUserId: null");
     } finally {
       await server.close();
       db.close();
