@@ -121,7 +121,7 @@ const createMockRepos = (overrides: Record<string, unknown> = {}): any => ({
     latestJobForTaskTarget: vi.fn(() => null),
     getJob: vi.fn(),
     updateJobStatus: vi.fn(),
-    returnLeasedJobToQueue: vi.fn(),
+    returnJobToQueue: vi.fn(),
     claimQueuedJobForWorker: vi.fn(() => true),
     ...((overrides.jobs as object | undefined) ?? {}),
   },
@@ -2071,7 +2071,7 @@ describe("SchedulerService applyWorkerResult", () => {
 
   test("returns leased job to queue when execution leases cannot be acquired", async () => {
     const updateWorkerStatus = vi.fn();
-    const returnLeasedJobToQueue = vi.fn();
+    const returnJobToQueue = vi.fn();
     const releaseLeaseByResource = vi.fn();
     const scheduler = new SchedulerService({
       embedder: new FakeEmbedder(),
@@ -2094,7 +2094,7 @@ describe("SchedulerService applyWorkerResult", () => {
           createAttemptWithLeases: vi.fn(() => null),
         },
         workers: { updateWorkerStatus },
-        jobs: { updateJobStatus: vi.fn(), returnLeasedJobToQueue },
+        jobs: { updateJobStatus: vi.fn(), returnJobToQueue },
         leases: { releaseLeasesForAttempt: vi.fn(), releaseLeaseByResource },
       }),
       taskSystem: {
@@ -2125,7 +2125,7 @@ describe("SchedulerService applyWorkerResult", () => {
       },
     );
 
-    const nextEligibleAt = returnLeasedJobToQueue.mock.calls[0]?.[1]?.nextEligibleAt;
+    const nextEligibleAt = returnJobToQueue.mock.calls[0]?.[1]?.nextEligibleAt;
     expect(nextEligibleAt).toEqual(expect.any(String));
     expect(Date.parse(nextEligibleAt)).toBeGreaterThanOrEqual(before + 14_000);
     expect(releaseLeaseByResource).not.toHaveBeenCalled();

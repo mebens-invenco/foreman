@@ -97,6 +97,34 @@ const createWorkerResult = (overrides: Partial<WorkerResult> = {}): WorkerResult
   ...overrides,
 });
 
+const createSuccessfulRunResult = (workerResult: WorkerResult) => ({
+  exitCode: 0,
+  signal: null,
+  startedAt: "2026-05-06T00:01:30.000Z",
+  finishedAt: "2026-05-06T00:02:00.000Z",
+  stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+  stderrBytes: 0,
+  stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+  stderr: "",
+  nativeSessionId: "native-session-1",
+});
+
+const createInterruptedRunResult = (overrides: { nativeSessionId?: string | null } = {}) => {
+  const nativeSessionId = overrides.nativeSessionId === undefined ? "native-session-1" : overrides.nativeSessionId;
+  return {
+    exitCode: 1,
+    signal: null,
+    startedAt: "2026-05-06T00:00:00.000Z",
+    finishedAt: "2026-05-06T00:01:00.000Z",
+    stdoutBytes: 128,
+    stderrBytes: 0,
+    stdout: '{"type":"error"}',
+    stderr: "",
+    ...(nativeSessionId ? { nativeSessionId } : {}),
+    retryableInterruption: { summary: "OpenCode APIError returned retryable HTTP 503." },
+  };
+};
+
 const createExecutorContext = async (options: { action?: ActionType; selectedTask?: Task; selectionContext?: Record<string, unknown> } = {}) => {
   const selectedTask = options.selectedTask ?? task;
   const action = options.action ?? "execution";
@@ -161,7 +189,7 @@ const createExecutorContext = async (options: { action?: ActionType; selectedTas
     onWorkerFinished: vi.fn(),
   });
 
-  return { workspaceRoot, db, job, claimedJob, executor, logger, applyWorkerResult, target, config };
+  return { workspaceRoot, db, job, claimedJob, executor, logger, applyWorkerResult, target, config, taskSystem };
 };
 
 afterEach(async () => {
@@ -175,6 +203,163 @@ afterEach(async () => {
 });
 
 describe("AttemptExecutor", () => {
+  test("requeues an interrupted task job and resumes its native session", async () => {
+    const { db, job, claimedJob, executor, logger, applyWorkerResult, target, config } = await createExecutorContext();
+    const worker = db.workers.listWorkers()[0]!;
+    const workerResult = createWorkerResult({ summary: "Succeeded after provider recovery." });
+    runnerMocks.invoke.mockResolvedValueOnce(createInterruptedRunResult()).mockResolvedValueOnce(createSuccessfulRunResult(workerResult));
+
+    try {
+      await executor.execute(worker, claimedJob, new AbortController());
+
+      const queuedJob = db.jobs.getJob(job.id);
+      const firstAttempt = db.attempts.latestAttemptForJob(job.id)!;
+      expect(queuedJob).toMatchObject({
+        status: "queued",
+        nextEligibleAt: "2026-05-06T00:01:30.000Z",
+        finishedAt: null,
+      });
+      expect(firstAttempt).toMatchObject({
+        status: "failed",
+        attemptNumber: 1,
+        errorMessage: expect.stringContaining("OpenCode APIError returned retryable HTTP 503."),
+      });
+      expect(db.jobs.hasActiveDedupeKey(job.dedupeKey)).toBe(true);
+      expect(applyWorkerResult).not.toHaveBeenCalled();
+      expect(
+        db.runnerSessions.getActiveSession({
+          taskTargetId: target.id,
+          role: "implementation",
+          runnerName: config.runner.execution.type,
+          runnerModel: config.runner.execution.model,
+          runnerVariant: runnerTuningValue(config.runner.execution),
+        }),
+      ).toMatchObject({ nativeSessionId: "native-session-1" });
+
+      expect(db.jobs.claimQueuedJobForWorker(job.id, worker.id)).toBe(true);
+      await executor.execute(worker, db.jobs.getJob(job.id), new AbortController());
+      await logger.flush();
+
+      expect(runnerMocks.invoke.mock.calls[1]![0]).toMatchObject({ nativeSessionId: "native-session-1" });
+      expect(db.attempts.listAttempts({ jobId: job.id }).map((attempt) => attempt.attemptNumber).sort()).toEqual([1, 2]);
+      expect(db.jobs.getJob(job.id)).toMatchObject({ status: "completed", errorMessage: null });
+      expect(applyWorkerResult).toHaveBeenCalledWith(expect.objectContaining({ workerResult }));
+    } finally {
+      db.close();
+    }
+  });
+
+  test("retains an existing native session when an interrupted continuation omits its session id", async () => {
+    const { db, job, claimedJob, executor, logger, target, config } = await createExecutorContext();
+    const worker = db.workers.listWorkers()[0]!;
+    const runnerSelector = {
+      taskTargetId: target.id,
+      role: "implementation" as const,
+      runnerName: config.runner.execution.type,
+      runnerModel: config.runner.execution.model,
+      runnerVariant: runnerTuningValue(config.runner.execution),
+    };
+    db.runnerSessions.createSession({
+      ...runnerSelector,
+      isActive: true,
+      nativeSessionId: "existing-native-session",
+    });
+    runnerMocks.invoke
+      .mockResolvedValueOnce(createInterruptedRunResult({ nativeSessionId: null }))
+      .mockResolvedValueOnce(createSuccessfulRunResult(createWorkerResult()));
+
+    try {
+      await executor.execute(worker, claimedJob, new AbortController());
+
+      expect(db.runnerSessions.getActiveSession(runnerSelector)).toMatchObject({ nativeSessionId: "existing-native-session" });
+      expect(db.jobs.claimQueuedJobForWorker(job.id, worker.id)).toBe(true);
+      await executor.execute(worker, db.jobs.getJob(job.id), new AbortController());
+      await logger.flush();
+
+      expect(runnerMocks.invoke.mock.calls[1]![0]).toMatchObject({ nativeSessionId: "existing-native-session" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("fails a task job after three retryable runner interruptions", async () => {
+    const { db, job, claimedJob, executor, logger, applyWorkerResult } = await createExecutorContext();
+    const worker = db.workers.listWorkers()[0]!;
+    runnerMocks.invoke.mockResolvedValue(createInterruptedRunResult());
+
+    try {
+      await executor.execute(worker, claimedJob, new AbortController());
+      expect(db.jobs.claimQueuedJobForWorker(job.id, worker.id)).toBe(true);
+      await executor.execute(worker, db.jobs.getJob(job.id), new AbortController());
+      expect(db.jobs.claimQueuedJobForWorker(job.id, worker.id)).toBe(true);
+      await executor.execute(worker, db.jobs.getJob(job.id), new AbortController());
+      await logger.flush();
+
+      expect(db.attempts.listAttempts({ jobId: job.id }).map((attempt) => attempt.attemptNumber).sort()).toEqual([1, 2, 3]);
+      expect(db.jobs.getJob(job.id)).toMatchObject({
+        status: "failed",
+        errorMessage: "OpenCode APIError returned retryable HTTP 503. Automatic retry limit reached after 3 attempts.",
+        selectionContext: { runnerInterruption: { taskStateBeforeExecution: "ready", retriesExhausted: true } },
+      });
+      expect(applyWorkerResult).not.toHaveBeenCalled();
+      expect(runnerMocks.invoke).toHaveBeenCalledTimes(3);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("restores the pre-retry task state when a later attempt fails for another reason", async () => {
+    const { db, job, claimedJob, executor, logger, taskSystem } = await createExecutorContext();
+    const worker = db.workers.listWorkers()[0]!;
+    vi.mocked(taskSystem.getTask)
+      .mockResolvedValueOnce(task)
+      .mockResolvedValueOnce({ ...task, state: "in_progress", providerState: "in_progress" });
+    runnerMocks.invoke.mockResolvedValueOnce(createInterruptedRunResult()).mockResolvedValueOnce({
+      exitCode: 1,
+      signal: null,
+      startedAt: "2026-05-06T00:01:30.000Z",
+      finishedAt: "2026-05-06T00:02:00.000Z",
+      stdoutBytes: 0,
+      stderrBytes: 4,
+      stdout: "",
+      stderr: "boom",
+    });
+
+    try {
+      await executor.execute(worker, claimedJob, new AbortController());
+      expect(db.jobs.claimQueuedJobForWorker(job.id, worker.id)).toBe(true);
+      await executor.execute(worker, db.jobs.getJob(job.id), new AbortController());
+      await logger.flush();
+
+      expect(taskSystem.transition).toHaveBeenLastCalledWith({ taskId: task.id, toState: "ready" });
+      expect(db.jobs.getJob(job.id)).toMatchObject({ status: "failed", errorMessage: expect.stringContaining("boom") });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("restores the pre-retry task state when a later attempt fails before task transition", async () => {
+    const { db, job, claimedJob, executor, logger, taskSystem } = await createExecutorContext();
+    const worker = db.workers.listWorkers()[0]!;
+    vi.mocked(taskSystem.getTask)
+      .mockResolvedValueOnce(task)
+      .mockResolvedValueOnce({ ...task, state: "in_progress", providerState: "in_progress" });
+    runnerMocks.invoke.mockResolvedValueOnce(createInterruptedRunResult({ nativeSessionId: "native-session-1" }));
+    worktreeMocks.ensureTaskWorktree.mockResolvedValueOnce(worktreeMocks.worktreePath).mockRejectedValueOnce(new Error("worktree failed"));
+
+    try {
+      await executor.execute(worker, claimedJob, new AbortController());
+      expect(db.jobs.claimQueuedJobForWorker(job.id, worker.id)).toBe(true);
+      await executor.execute(worker, db.jobs.getJob(job.id), new AbortController());
+      await logger.flush();
+
+      expect(taskSystem.transition).toHaveBeenLastCalledWith({ taskId: task.id, toState: "ready" });
+      expect(db.jobs.getJob(job.id)).toMatchObject({ status: "failed", errorMessage: "worktree failed" });
+    } finally {
+      db.close();
+    }
+  });
+
   test("recovers a valid worker result when a successful runner emits natural final text", async () => {
     const workspaceRoot = await createTempDir("foreman-attempt-executor-test-");
     cleanupDirs.push(workspaceRoot);

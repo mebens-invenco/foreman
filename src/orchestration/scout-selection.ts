@@ -76,6 +76,25 @@ const latestRetryWasManuallyStopped = (input: { foremanRepos: ForemanRepos; targ
     .some((event) => event.eventType === "attempt_stop_requested");
 };
 
+const runnerInterruptionRetriesExhausted = (input: {
+  foremanRepos: ForemanRepos;
+  target: TaskTarget;
+  action: ActionType;
+}): boolean => {
+  const latestJob = input.foremanRepos.jobs.latestJobForTaskTarget(input.target.id);
+  if (!latestJob || latestJob.action !== input.action || latestJob.status !== "failed") {
+    return false;
+  }
+
+  const interruption = latestJob.selectionContext.runnerInterruption;
+  if (typeof interruption !== "object" || interruption === null || !("retriesExhausted" in interruption) || interruption.retriesExhausted !== true) {
+    return false;
+  }
+
+  const latestAttempt = input.foremanRepos.attempts.latestAttemptForJob(latestJob.id);
+  return latestAttempt?.status === "failed";
+};
+
 const failedReviewerRetryCooldown = (input: {
   foremanRepos: ForemanRepos;
   target: TaskTarget;
@@ -832,6 +851,14 @@ export const runScoutSelection = async (input: {
       return false;
     }
     if (actionConsumesBranchLease(action) && (activeJobsByTarget.get(target.id) ?? []).some((job) => actionConsumesBranchLease(job.action))) {
+      return false;
+    }
+    if (input.triggerType !== "manual" && runnerInterruptionRetriesExhausted({ foremanRepos: input.foremanRepos, target, action })) {
+      logger?.info("skipping automatically reselected action after runner interruption retries exhausted", {
+        taskId: task.id,
+        repoKey: target.repoKey,
+        action,
+      });
       return false;
     }
     return !input.foremanRepos.jobs.hasActiveDedupeKey(dedupeKey);
