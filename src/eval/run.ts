@@ -32,11 +32,12 @@ const buildEvalConfig = (provider: "file" | "linear", runner?: RunnerProvider, m
   const config = createDefaultWorkspaceConfig("eval", provider);
   if (runner) {
     const runnerConfig = runnerProviderSchema.parse({ type: runner, ...(model ? { model } : {}) });
-    config.runner = { execution: runnerConfig, reviewer: runnerConfig };
+    config.runner = { execution: runnerConfig, reviewer: runnerConfig, profiles: {} };
   } else if (model) {
     config.runner = {
       execution: runnerProviderSchema.parse({ ...config.runner.execution, model }),
       reviewer: runnerProviderSchema.parse({ ...config.runner.reviewer, model }),
+      profiles: {},
     };
   }
   return config;

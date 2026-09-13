@@ -124,6 +124,18 @@ export const codexRunnerSchema = z.object({
 
 export const runnerProviderSchema = z.discriminatedUnion("type", [opencodeRunnerSchema, claudeRunnerSchema, codexRunnerSchema]);
 
+// Profile names must be lowercase so ticket metadata (whose keys — and, for
+// profile overrides specifically, values — are lowercased on the way in) can
+// never miss on casing. Other override values (e.g. model ids) keep their case.
+export const RUNNER_PROFILE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
+
+export const runnerProfilesSchema = z
+  .record(
+    z.string().regex(RUNNER_PROFILE_NAME_PATTERN, "Profile names must be lowercase alphanumeric with dashes"),
+    runnerProviderSchema,
+  )
+  .default({});
+
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -200,19 +212,21 @@ export const runnerSchema = z.preprocess(
       };
     }
 
-    const { reviewer, ...legacyExecutionRunner } = input;
+    const { reviewer, profiles, ...legacyExecutionRunner } = input;
     const normalizedReviewer = normalizeLegacyRunnerProvider(reviewer);
+    const withProfiles = (value: Record<string, unknown>): Record<string, unknown> =>
+      profiles === undefined ? value : { ...value, profiles };
 
     if (Object.keys(legacyExecutionRunner).length > 0) {
       const execution = normalizeLegacyRunnerProvider(legacyExecutionRunner);
-      return {
+      return withProfiles({
         execution,
         reviewer: normalizedReviewer ?? execution,
-      };
+      });
     }
 
     if (normalizedReviewer !== undefined) {
-      return { reviewer: normalizedReviewer };
+      return withProfiles({ reviewer: normalizedReviewer });
     }
 
     return input;
@@ -221,8 +235,9 @@ export const runnerSchema = z.preprocess(
     .object({
       execution: runnerProviderSchema.default(defaultExecutionRunner),
       reviewer: runnerProviderSchema.default(defaultReviewerRunner),
+      profiles: runnerProfilesSchema,
     })
-    .default({ execution: defaultExecutionRunner, reviewer: defaultReviewerRunner }),
+    .default({ execution: defaultExecutionRunner, reviewer: defaultReviewerRunner, profiles: {} }),
 );
 
 export const reviewerSchema = z.object({
@@ -342,6 +357,7 @@ export const createDefaultWorkspaceConfig = (
   runner: {
     execution: { ...defaultExecutionRunner },
     reviewer: { ...defaultReviewerRunner },
+    profiles: {},
   },
   reviewer: {
     agentPrefix: "[review agent] ",

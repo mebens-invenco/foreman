@@ -127,4 +127,80 @@ describe("resolveRunnerConfigForAction", () => {
 
     expect(resolveRunnerConfigForAction(config, "review", task, true)).toMatchObject({ effort: "low" });
   });
+
+  test("a profile override replaces the role's base config, provider type included", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.runner.execution = { type: "codex", model: "gpt-5.6-sol", effort: "high", timeoutMs: 3_600_000 };
+    config.runner.profiles = {
+      claude: { type: "claude", model: "claude-opus-4-8", effort: "max", timeoutMs: 1_800_000 },
+    };
+    const task = baseTask({ runnerOverride: { execution: { profile: "claude" } } });
+
+    expect(resolveRunnerConfigForAction(config, "execution", task)).toEqual({
+      type: "claude",
+      model: "claude-opus-4-8",
+      effort: "max",
+      timeoutMs: 1_800_000,
+    });
+  });
+
+  test("selects the profile per role", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.runner.profiles = {
+      claude: { type: "claude", model: "claude-opus-4-8", effort: "max", timeoutMs: 3_600_000 },
+    };
+    const task = baseTask({ runnerOverride: { reviewer: { profile: "claude" } } });
+
+    expect(resolveRunnerConfigForAction(config, "execution", task)).toEqual(config.runner.execution);
+    expect(resolveRunnerConfigForAction(config, "reviewer", task)).toEqual(config.runner.profiles.claude);
+  });
+
+  test("validates model and tuning overrides against the profile's provider", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.runner.execution = { type: "claude", model: "claude-opus-4-8", effort: "max", timeoutMs: 3_600_000 };
+    config.runner.profiles = {
+      codex: { type: "codex", model: "gpt-5.6-sol", effort: "high", timeoutMs: 3_600_000 },
+    };
+    const xhighTask = baseTask({ runnerOverride: { execution: { profile: "codex", model: "gpt-5.6-luna", tuning: "xhigh" } } });
+    expect(resolveRunnerConfigForAction(config, "execution", xhighTask)).toEqual({
+      type: "codex",
+      model: "gpt-5.6-luna",
+      effort: "xhigh",
+      timeoutMs: 3_600_000,
+    });
+
+    const maxTask = baseTask({ runnerOverride: { execution: { profile: "codex", tuning: "max" } } });
+    expect(() => resolveRunnerConfigForAction(config, "execution", maxTask)).toThrow(/Invalid runner override/);
+  });
+
+  test("applies the profile's continuationEffort on continuation dispatches", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.runner.profiles = {
+      claude: { type: "claude", model: "claude-opus-4-8", effort: "max", continuationEffort: "low", timeoutMs: 3_600_000 },
+    };
+    const task = baseTask({ runnerOverride: { execution: { profile: "claude" } } });
+
+    expect(resolveRunnerConfigForAction(config, "review", task, true)).toMatchObject({ effort: "low" });
+    expect(resolveRunnerConfigForAction(config, "review", task, false)).toMatchObject({ effort: "max" });
+  });
+
+  test("rejects an unknown profile name with the configured names in the error", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    config.runner.profiles = {
+      claude: { type: "claude", model: "claude-opus-4-8", effort: "max", timeoutMs: 3_600_000 },
+    };
+    const task = baseTask({ runnerOverride: { execution: { profile: "codex" } } });
+
+    expect(() => resolveRunnerConfigForAction(config, "execution", task)).toThrow(
+      /Unknown runner profile 'codex'. Configured profiles: claude./,
+    );
+  });
+
+  test("treats inherited object keys as unknown profiles", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    for (const name of ["constructor", "__proto__"]) {
+      const task = baseTask({ runnerOverride: { execution: { profile: name } } });
+      expect(() => resolveRunnerConfigForAction(config, "execution", task)).toThrow(/Unknown runner profile/);
+    }
+  });
 });
