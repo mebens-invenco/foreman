@@ -1202,6 +1202,39 @@ describe("GitHubReviewService.getContext", () => {
   });
 });
 
+describe("GitHubReviewService.getSubmittedReviews", () => {
+  const prUrl = "https://github.com/acme/repo/pull/946";
+  const submitted = {
+    __typename: "PullRequestReview", id: "PRR_1", viewerDidAuthor: true,
+    state: "COMMENTED", submittedAt: "2026-09-17T07:00:00Z",
+    commit: { oid: "a".repeat(40) }, pullRequest: { url: prUrl },
+  };
+
+  test("verifies delivery independently of summary text and attribution", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ data: { nodes: [submitted] } })) as typeof fetch;
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(service.getSubmittedReviews(prUrl, ["PRR_1"])).resolves.toEqual([{ id: "PRR_1", commitId: "a".repeat(40) }]);
+    const request = JSON.parse(String(vi.mocked(global.fetch).mock.calls[0]?.[1]?.body));
+    expect(request.variables).toEqual({ ids: ["PRR_1"] });
+    expect(request.query).toContain("viewerDidAuthor");
+    expect(request.query).not.toContain("body");
+  });
+
+  test.each([
+    null,
+    { ...submitted, __typename: "IssueComment" },
+    { ...submitted, viewerDidAuthor: false },
+    { ...submitted, state: "PENDING" },
+    { ...submitted, submittedAt: null },
+    { ...submitted, commit: null },
+    { ...submitted, pullRequest: { url: "https://github.com/other/repo/pull/946" } },
+  ])("does not accept missing, foreign, or unsubmitted review nodes: %j", async (node) => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ data: { nodes: [node] } })) as typeof fetch;
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    await expect(service.getSubmittedReviews(prUrl, ["PRR_1"])).resolves.toEqual([]);
+  });
+});
+
 describe("GitHubReviewService rate-limit handling", () => {
   test("throws a distinct error and fails fast during REST rate-limit backoff", async () => {
     vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });

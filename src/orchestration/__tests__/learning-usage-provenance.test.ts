@@ -75,6 +75,8 @@ class FakeTaskSystem implements TaskSystem {
 }
 
 class FakeReviewService implements ReviewService {
+  async getSubmittedReviews() { return []; }
+
   async resolvePullRequest(): Promise<ResolvedPullRequest | null> {
     return null;
   }

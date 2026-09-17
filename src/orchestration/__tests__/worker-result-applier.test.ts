@@ -2,7 +2,7 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import { PassThrough } from "node:stream";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { priorityToRank, type RepoRef, type ResolvedPullRequest, type ReviewContext, type Task, type TaskComment, type WorkerResult } from "../../domain/index.js";
 import { LoggerService } from "../../logger.js";
@@ -19,6 +19,7 @@ const cleanupDirs: string[] = [];
 const projectRoot = testProjectRoot;
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -84,6 +85,11 @@ class FakeTaskSystem implements TaskSystem {
 
 class FakeReviewService implements ReviewService {
   resolvedThreads: Array<{ pullRequestUrl: string; threadIds: string[] }> = [];
+  submittedReviews: Array<{ id: string; commitId: string }> = [];
+
+  async getSubmittedReviews() {
+    return this.submittedReviews;
+  }
 
   constructor(
     private readonly pullRequest: ResolvedPullRequest | Record<string, ResolvedPullRequest>,
@@ -259,7 +265,7 @@ describe("WorkerResultApplier review result mutations", () => {
 });
 
 describe("agent-owned GitHub results", () => {
-  const setUp = async (action: "execution" | "reviewer" = "execution") => {
+  const setUp = async (action: "execution" | "reviewer" | "review" = "execution") => {
     const tempDir = await createTempDir("foreman-github-result-");
     cleanupDirs.push(tempDir);
     const dbPath = path.join(tempDir, "foreman.db");
@@ -280,6 +286,7 @@ describe("agent-owned GitHub results", () => {
     const attempt = db.attempts.createAttempt({ jobId: job.id, workerId: db.workers.listWorkers()[0]!.id, runnerName: "opencode", runnerModel: "test", runnerVariant: "high" });
     const taskSystem = new FakeTaskSystem([selectedTask]);
     const reviewService = new FakeReviewService(pr, context);
+    reviewService.submittedReviews = [{ id: "PRR_1", commitId: context.headSha }];
     const applier = new WorkerResultApplier({ config, foremanRepos: db, taskSystem, reviewService, repos: [repo], embedder: new FakeEmbedder(), logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }), scheduleScout: () => undefined });
     const result: WorkerResult = {
       schemaVersion: 2, action, outcome: "completed", summary: "Published GitHub work", taskMutations: [], learningMutations: [], blockers: [], signals: [],
@@ -319,21 +326,29 @@ describe("agent-owned GitHub results", () => {
     } finally { subject.db.close(); }
   });
 
-  test.each(["verified", "missing", "wrong-commit", "human", "new-head"] as const)("verifies submitted review evidence: %s", async (scenario) => {
+  test.each(["verified", "missing", "wrong-commit", "missing-attribution", "empty-summary", "new-head"] as const)("verifies submitted review evidence: %s", async (scenario) => {
     const subject = await setUp("reviewer");
     try {
-      if (scenario === "missing") subject.context.reviewSummaries = [];
-      if (scenario === "wrong-commit") subject.context.reviewSummaries[0]!.commitId = "b".repeat(40);
-      if (scenario === "human") subject.context.reviewSummaries[0]!.authoredByAgent = false;
+      if (scenario === "missing") subject.reviewService.submittedReviews = [];
+      if (scenario === "wrong-commit") subject.reviewService.submittedReviews[0]!.commitId = "b".repeat(40);
+      if (scenario === "missing-attribution") subject.context.reviewSummaries[0]!.authoredByAgent = false;
+      if (scenario === "empty-summary") subject.context.reviewSummaries = [];
       if (scenario === "new-head") subject.context.headSha = "b".repeat(40);
-      if (["missing", "wrong-commit", "human"].includes(scenario)) {
+      if (["missing", "wrong-commit"].includes(scenario)) {
         await expect(subject.apply()).rejects.toMatchObject({ code: "unverified_review" });
       } else {
         await subject.apply();
       }
       const checkpoint = subject.db.reviewerCheckpoints.getReviewerCheckpoint(subject.target.id);
-      if (scenario === "verified") expect(checkpoint?.headSha).toBe("a".repeat(40));
-      else expect(checkpoint).toBeNull();
+      if (["verified", "missing-attribution", "empty-summary"].includes(scenario)) {
+        expect(checkpoint?.headSha).toBe("a".repeat(40));
+        subject.db.attempts.finalizeAttempt(subject.attempt.id, "completed");
+        subject.db.jobs.updateJobStatus(subject.job.id, "completed");
+        const selection = await runScoutSelection({ config: subject.config, foremanRepos: subject.db, taskSystem: subject.taskSystem, reviewService: subject.reviewService, repos: [subject.repo], triggerType: "worker_finished" });
+        expect(selection.jobs.map((job) => job.action)).not.toContain("reviewer");
+      } else {
+        expect(checkpoint).toBeNull();
+      }
     } finally { subject.db.close(); }
   });
 
@@ -349,6 +364,80 @@ describe("agent-owned GitHub results", () => {
       expect(selection.jobs.map((job) => job.action)).toEqual(["execution"]);
       expect(db.taskMirror.getTask(subject.selectedTask.id)?.pullRequests).toMatchObject([{ url: subject.pr.pullRequestUrl }]);
       expect(subject.taskSystem.transitions).toEqual([]);
+    } finally { db.close(); }
+  });
+
+  test.each(["unchanged", "checks-finished", "new-feedback", "new-head", "elapsed", "manual"] as const)(
+    "bounds blocked resolver retries while preserving recovery: %s", async (scenario) => {
+      const subject = await setUp("review");
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+      try {
+        subject.selectedTask.state = "in_progress";
+        subject.selectedTask.providerState = "in_progress";
+        subject.context.pendingChecks = [{ name: "ci", state: "pending" }];
+        subject.context.reviewThreads = [{
+          id: "thread-1", path: "src/a.ts", line: 1, isResolved: false,
+          comments: [{ id: "comment-1", body: "Fix this", authorName: "reviewer", authoredByAgent: false, createdAt: new Date(now).toISOString() }],
+        }];
+        subject.db.jobs.updateJobSelectionContext(subject.job.id, { reviewContext: subject.context });
+        subject.result.outcome = "blocked";
+        subject.result.blockers = ["Waiting for checks"];
+        await subject.apply();
+        subject.db.attempts.finalizeAttempt(subject.attempt.id, "blocked", { finishedAt: new Date(now).toISOString() });
+        subject.db.jobs.updateJobStatus(subject.job.id, "blocked");
+
+        if (scenario === "checks-finished") subject.context.pendingChecks = [];
+        if (scenario === "new-feedback") subject.context.reviewThreads[0]!.comments[0]!.id = "comment-2";
+        if (scenario === "new-head") subject.context.headSha = "b".repeat(40);
+        if (scenario === "elapsed") clock.mockReturnValue(now + 5 * 60_000);
+        const selection = await runScoutSelection({
+          config: subject.config, foremanRepos: subject.db, taskSystem: subject.taskSystem,
+          reviewService: subject.reviewService, repos: [subject.repo],
+          triggerType: scenario === "manual" ? "manual" : "worker_finished",
+        });
+        expect(selection.jobs.map((job) => job.action)).toEqual(scenario === "unchanged" ? [] : ["review"]);
+        expect(subject.db.reviewCheckpoints.getReviewCheckpoint(subject.target.id)).toBeNull();
+      } finally { subject.db.close(); }
+    },
+  );
+
+  test("backs off open-PR execution recovery and preserves its retry limit across restart", async () => {
+    const subject = await setUp();
+    let db = subject.db;
+    let now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const select = (triggerType: "poll" | "manual" = "poll") => runScoutSelection({
+      config: subject.config, foremanRepos: db, taskSystem: subject.taskSystem,
+      reviewService: subject.reviewService, repos: [subject.repo], triggerType,
+    });
+    try {
+      db.attempts.finalizeAttempt(subject.attempt.id, "failed", { finishedAt: new Date(now).toISOString() });
+      db.jobs.updateJobStatus(subject.job.id, "failed");
+      for (let recovery = 1; recovery <= 3; recovery += 1) {
+        expect((await select()).jobs).toEqual([]);
+        now += 5 * 60_000 * 2 ** (recovery - 1);
+        const [selection] = (await select()).jobs;
+        expect(selection?.action).toBe("execution");
+        expect(selection?.selectionContext.pullRequestRecovery).toMatchObject({ attempts: recovery });
+        const job = db.jobs.createJob({
+          taskId: subject.selectedTask.id, taskTargetId: subject.target.id, taskProvider: "file",
+          action: "execution", priorityRank: 2, repoKey: subject.repo.key, baseBranch: "main",
+          dedupeKey: `${subject.selectedTask.id}:${subject.repo.key}:execution`,
+          selectionReason: "recovery", selectionContext: selection!.selectionContext,
+        });
+        const attempt = db.attempts.createAttempt({ jobId: job.id, workerId: db.workers.listWorkers()[0]!.id, runnerName: "opencode", runnerModel: "test", runnerVariant: "high" });
+        db.attempts.finalizeAttempt(attempt.id, "failed", { finishedAt: new Date(now).toISOString(), errorMessage: "PR base mismatch" });
+        db.jobs.updateJobStatus(job.id, "failed");
+      }
+      now += 24 * 60 * 60_000;
+      db.close();
+      db = await createMigratedDb(subject.dbPath, projectRoot);
+      expect((await select()).jobs).toEqual([]);
+      expect((await select("manual")).jobs[0]?.selectionContext.pullRequestRecovery).toMatchObject({ attempts: 1 });
+      subject.context.headSha = "b".repeat(40);
+      expect((await select()).jobs[0]?.selectionContext.pullRequestRecovery).toMatchObject({ attempts: 1 });
+      clock.mockRestore();
     } finally { db.close(); }
   });
 });

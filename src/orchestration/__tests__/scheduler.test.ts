@@ -1033,6 +1033,7 @@ describe("SchedulerService applyWorkerResult", () => {
       reviewService: {
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
         submitPullRequestReview,
+        getSubmittedReviews: vi.fn(async () => [{ id: "review-1", commitId: reviewContext.headSha }]),
         getContext: vi.fn(async () => ({ ...reviewContext, reviewSummaries: [{
           id: "review-1", commitId: reviewContext.headSha, authoredByAgent: true,
         }] })),

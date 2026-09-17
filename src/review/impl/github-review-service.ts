@@ -17,7 +17,7 @@ import {
   type Task,
   type TaskTargetRef,
 } from "../../domain/index.js";
-import type { ReviewService } from "../review-service.js";
+import type { ReviewService, SubmittedReview } from "../review-service.js";
 import { isGitHubAgentComment } from "./github-comment-badge.js";
 
 type RepoDescriptor = { owner: string; repo: string };
@@ -1251,6 +1251,45 @@ export class GitHubReviewService implements ReviewService {
       default:
         return "unknown";
     }
+  }
+
+  async getSubmittedReviews(prUrl: string, reviewIds: string[]): Promise<SubmittedReview[]> {
+    parseGitHubUrl(prUrl);
+    if (reviewIds.length === 0) {
+      return [];
+    }
+    const data = await this.graphql<{
+      nodes: Array<{
+        __typename: string;
+        id: string;
+        viewerDidAuthor: boolean;
+        state: string;
+        submittedAt: string | null;
+        commit: { oid: string } | null;
+        pullRequest: { url: string };
+      } | null>;
+    }>(
+      `query ForemanSubmittedReviews($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          __typename
+          ... on PullRequestReview {
+            id
+            viewerDidAuthor
+            state
+            submittedAt
+            commit { oid }
+            pullRequest { url }
+          }
+        }
+      }`,
+      { ids: reviewIds },
+    );
+    return data.nodes.flatMap((review) =>
+      review?.__typename === "PullRequestReview" && review.viewerDidAuthor &&
+      review.pullRequest.url === prUrl && review.commit && this.isSubmittedReview(review)
+        ? [{ id: review.id, commitId: review.commit.oid }]
+        : [],
+    );
   }
 
   async findLatestOpenPullRequestBranch(task: Task, repo?: RepoRef, target?: TaskTargetRef): Promise<string | null> {

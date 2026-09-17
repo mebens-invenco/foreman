@@ -865,6 +865,12 @@ Foreman renders an exact Shields.io attribution header into worker context using
 
 Writes may succeed before a runner or attachment upload fails. Workers inspect remote state before retrying; result recovery is read-only. Scout discovers existing PRs and resumes unfinished ordinary work on the same branch instead of treating PR existence as completion. A retry after an externally closed PR still uses the fresh-implementation workflow.
 
+Unchanged blocked/failed resolver work waits five minutes before automatic reselection. New feedback, a changed head/base, changed failing or pending checks, or a manual scout can resume it sooner. This delay does not record unfinished work as a completed review checkpoint.
+
+Failed or canceled execution with an open PR gets at most three automatic recovery attempts for the same PR/head/branch/base, delayed by five, ten, and twenty minutes. Recovery counts live in job selection context and survive restart. A manual scout or changed PR state starts a new recovery allowance; exhausted work does not repeatedly spawn workers.
+
+Submitted-review verification reads the supplied GitHub review node IDs directly and checks publication, PR ownership, authenticated authorship, and commit identity. Missing badge formatting or an empty summary produces an attribution warning, not another publication attempt. A new head after submission remains eligible for a new review.
+
 Before upgrading from schema version 1, pause new scheduling and drain active attempts, then restart with the new code and prompts. New/resumed workers use version 2; old mutation-bearing results are rejected and sent through read-only result recovery. Historical v1 artifacts remain readable through eval harvesting and are never replayed.
 
 ### Learning Mutations

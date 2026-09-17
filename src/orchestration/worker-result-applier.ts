@@ -287,11 +287,17 @@ export class WorkerResultApplier {
       );
       const reviewedHeadSha = workerResult.reviewResult?.reviewedHeadSha;
       const reviewIds = workerResult.reviewResult?.submittedReviewIds ?? [];
+      const submittedReviews = reviewIds.length > 0
+        ? await this.deps.reviewService.getSubmittedReviews(pullRequestUrl, reviewIds)
+        : [];
       if (!reviewContext || reviewContext.pullRequestUrl !== pullRequestUrl || !reviewedHeadSha ||
           (workerResult.outcome === "completed" && reviewIds.length === 0) ||
-          reviewIds.some((id) => !reviewContext.reviewSummaries.some((review) =>
-            review.id === id && review.commitId === reviewedHeadSha && review.authoredByAgent))) {
+          reviewIds.some((id) => !submittedReviews.some((review) =>
+            review.id === id && review.commitId === reviewedHeadSha))) {
         throw new ForemanError("unverified_review", "Could not verify the reported submitted reviews and reviewed head");
+      }
+      if (reviewIds.some((id) => !reviewContext.reviewSummaries.some((review) => review.id === id && review.authoredByAgent))) {
+        logger.warn("published review is missing its attributed summary", { pullRequestUrl, reviewIds: reviewIds.join(",") });
       }
       if (reviewContext.headSha === reviewedHeadSha) {
         try {
