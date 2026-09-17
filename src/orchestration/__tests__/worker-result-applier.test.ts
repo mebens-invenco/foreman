@@ -154,7 +154,7 @@ const task = (): Task => ({
 });
 
 describe("WorkerResultApplier review result mutations", () => {
-  test("applies review mutations and saves checkpoints for blocked review results", async () => {
+  test("records blockers without publishing or checkpointing unfinished review work", async () => {
     const tempDir = await createTempDir("foreman-review-applier-blocked-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
@@ -237,30 +237,119 @@ describe("WorkerResultApplier review result mutations", () => {
         repo,
         worktreePath: tempDir,
         workerResult: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           action: "review",
           outcome: "blocked",
           summary: "Checks are still pending.",
           taskMutations: [],
-          reviewMutations: [{ type: "resolve_threads", threadIds: ["thread-1"] }],
+          reviewResult: null,
           learningMutations: [],
           blockers: ["Checks are still pending."],
           signals: [],
         },
       });
 
-      expect(reviewService.resolvedThreads).toEqual([{ pullRequestUrl: pullRequest.pullRequestUrl, threadIds: ["thread-1"] }]);
+      expect(reviewService.resolvedThreads).toEqual([]);
       expect(taskSystem.comments).toEqual([{ taskId: reviewTask.id, body: "[agent] Checks are still pending." }]);
-      expect(db.reviewCheckpoints.getReviewCheckpoint(target!.id)).toMatchObject({
-        taskId: reviewTask.id,
-        taskTargetId: target!.id,
-        prUrl: pullRequest.pullRequestUrl,
-        headSha: reviewContext.headSha,
-        sourceAttemptId: attempt.id,
-      });
+      expect(db.reviewCheckpoints.getReviewCheckpoint(target!.id)).toBeNull();
     } finally {
       db.close();
     }
+  });
+});
+
+describe("agent-owned GitHub results", () => {
+  const setUp = async (action: "execution" | "reviewer" = "execution") => {
+    const tempDir = await createTempDir("foreman-github-result-");
+    cleanupDirs.push(tempDir);
+    const dbPath = path.join(tempDir, "foreman.db");
+    const db = await createMigratedDb(dbPath, projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const selectedTask: Task = { ...task(), state: action === "execution" ? "ready" : "in_review", providerState: action === "execution" ? "ready" : "in_review" };
+    const repo: RepoRef = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
+    const pr: ResolvedPullRequest = { pullRequestUrl: "https://github.com/acme/repo-a/pull/17", pullRequestNumber: 17, state: "open", isDraft: true, headBranch: "task-deploy-apply", baseBranch: "main" };
+    const context: ReviewContext = {
+      ...pr, provider: "github", headSha: "a".repeat(40), headIntroducedAt: "2026-03-14T12:00:00Z", mergeState: "clean",
+      reviewSummaries: [{ id: "PRR_1", body: "One finding", authorName: "agent", authoredByAgent: true, createdAt: "2026-03-14T13:00:00Z", commitId: "a".repeat(40), isCurrentHead: true }],
+      conversationComments: [], reviewThreads: [], failingChecks: [], pendingChecks: [],
+    };
+    db.workers.ensureWorkerSlots(1);
+    db.taskMirror.saveTasks([selectedTask]);
+    const target = db.taskMirror.getTaskTarget(selectedTask.id, repo.key)!;
+    const job = db.jobs.createJob({ taskId: selectedTask.id, taskTargetId: target.id, taskProvider: "file", action, priorityRank: 2, repoKey: repo.key, baseBranch: "main", dedupeKey: `${selectedTask.id}:${repo.key}:${action}`, selectionReason: "test" });
+    const attempt = db.attempts.createAttempt({ jobId: job.id, workerId: db.workers.listWorkers()[0]!.id, runnerName: "opencode", runnerModel: "test", runnerVariant: "high" });
+    const taskSystem = new FakeTaskSystem([selectedTask]);
+    const reviewService = new FakeReviewService(pr, context);
+    const applier = new WorkerResultApplier({ config, foremanRepos: db, taskSystem, reviewService, repos: [repo], embedder: new FakeEmbedder(), logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }), scheduleScout: () => undefined });
+    const result: WorkerResult = {
+      schemaVersion: 2, action, outcome: "completed", summary: "Published GitHub work", taskMutations: [], learningMutations: [], blockers: [], signals: [],
+      reviewResult: { pullRequestUrl: pr.pullRequestUrl, ...(action === "reviewer" ? { reviewedHeadSha: context.headSha, submittedReviewIds: ["PRR_1"] } : {}) },
+    };
+    const apply = () => applier.apply({ attempt, job, task: selectedTask, target, repo, worktreePath: tempDir, reviewContext: { ...context }, workerResult: result });
+    return { db, dbPath, config, selectedTask, repo, pr, context, target, job, attempt, taskSystem, reviewService, result, apply };
+  };
+
+  test("links an existing PR after finishing missing attachments without another code change", async () => {
+    const subject = await setUp();
+    try {
+      await expect(subject.apply()).resolves.toBe(subject.pr.pullRequestUrl);
+      expect(subject.taskSystem.transitions).toEqual([{ taskId: subject.selectedTask.id, toState: "in_review" }]);
+      expect(subject.db.taskMirror.getTask(subject.selectedTask.id)?.pullRequests).toMatchObject([{ url: subject.pr.pullRequestUrl }]);
+    } finally { subject.db.close(); }
+  });
+
+  test.each(["url", "head", "base"] as const)("rejects a mismatched PR %s before advancing the task", async (mismatch) => {
+    const subject = await setUp();
+    try {
+      if (mismatch === "url") subject.result.reviewResult!.pullRequestUrl = "https://github.com/other/repo/pull/17";
+      if (mismatch === "head") subject.pr.headBranch = "another-task";
+      if (mismatch === "base") subject.pr.baseBranch = "another-base";
+      await expect(subject.apply()).rejects.toMatchObject({ code: "invalid_pull_request" });
+      expect(subject.taskSystem.transitions).toEqual([]);
+    } finally { subject.db.close(); }
+  });
+
+  test.each(["failed", "blocked"] as const)("retains a PR reference after %s without claiming completion", async (outcome) => {
+    const subject = await setUp();
+    try {
+      subject.result.outcome = outcome;
+      await subject.apply();
+      expect(subject.db.taskMirror.getTask(subject.selectedTask.id)?.pullRequests).toMatchObject([{ url: subject.pr.pullRequestUrl }]);
+      expect(subject.taskSystem.transitions).toEqual([]);
+    } finally { subject.db.close(); }
+  });
+
+  test.each(["verified", "missing", "wrong-commit", "human", "new-head"] as const)("verifies submitted review evidence: %s", async (scenario) => {
+    const subject = await setUp("reviewer");
+    try {
+      if (scenario === "missing") subject.context.reviewSummaries = [];
+      if (scenario === "wrong-commit") subject.context.reviewSummaries[0]!.commitId = "b".repeat(40);
+      if (scenario === "human") subject.context.reviewSummaries[0]!.authoredByAgent = false;
+      if (scenario === "new-head") subject.context.headSha = "b".repeat(40);
+      if (["missing", "wrong-commit", "human"].includes(scenario)) {
+        await expect(subject.apply()).rejects.toMatchObject({ code: "unverified_review" });
+      } else {
+        await subject.apply();
+      }
+      const checkpoint = subject.db.reviewerCheckpoints.getReviewerCheckpoint(subject.target.id);
+      if (scenario === "verified") expect(checkpoint?.headSha).toBe("a".repeat(40));
+      else expect(checkpoint).toBeNull();
+    } finally { subject.db.close(); }
+  });
+
+  test("rediscovers an early PR and resumes execution after a failed result and daemon restart", async () => {
+    const subject = await setUp();
+    let db = subject.db;
+    try {
+      db.attempts.finalizeAttempt(subject.attempt.id, "failed", { finishedAt: "2026-03-14T14:00:00Z", summary: "Result parsing failed after upload" });
+      db.jobs.updateJobStatus(subject.job.id, "failed");
+      db.close();
+      db = await createMigratedDb(subject.dbPath, projectRoot);
+      const selection = await runScoutSelection({ config: subject.config, foremanRepos: db, taskSystem: subject.taskSystem, reviewService: subject.reviewService, repos: [subject.repo], triggerType: "poll" });
+      expect(selection.jobs.map((job) => job.action)).toEqual(["execution"]);
+      expect(db.taskMirror.getTask(subject.selectedTask.id)?.pullRequests).toMatchObject([{ url: subject.pr.pullRequestUrl }]);
+      expect(subject.taskSystem.transitions).toEqual([]);
+    } finally { db.close(); }
   });
 });
 
@@ -336,12 +425,12 @@ describe("WorkerResultApplier blocked ordinary work", () => {
         repo,
         worktreePath: tempDir,
         workerResult: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           action,
           outcome: "blocked",
           summary: "Waiting on dependency.",
           taskMutations: [],
-          reviewMutations: [],
+          reviewResult: null,
           learningMutations: [],
           blockers: ["Dependency has not landed."],
           signals: [],
@@ -430,12 +519,12 @@ describe("WorkerResultApplier blocked ordinary work", () => {
         repo,
         worktreePath: tempDir,
         workerResult: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           action: "execution",
           outcome: "blocked",
           summary: "Waiting on dependency.",
           taskMutations: [],
-          reviewMutations: [],
+          reviewResult: null,
           learningMutations: [],
           blockers: ["Dependency has not landed."],
           signals: [],
@@ -543,12 +632,12 @@ describe("WorkerResultApplier deployment tracking", () => {
         repo,
         worktreePath: tempDir,
         workerResult: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           action: "deployment",
           outcome: "succeeded",
           summary: "Deployment verified.",
           taskMutations: [],
-          reviewMutations: [],
+          reviewResult: null,
           learningMutations: [],
           blockers: [],
           signals: [],
@@ -640,12 +729,12 @@ describe("WorkerResultApplier deployment tracking", () => {
         repo,
         worktreePath: tempDir,
         workerResult: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           action: "deployment",
           outcome: "in_progress",
           summary: "Still rolling out.",
           taskMutations: [],
-          reviewMutations: [],
+          reviewResult: null,
           learningMutations: [],
           blockers: [],
           signals: [],
@@ -740,12 +829,12 @@ describe("WorkerResultApplier deployment tracking", () => {
         repo,
         worktreePath: tempDir,
         workerResult: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           action: "deployment",
           outcome: "failed",
           summary: "CI failure already captured in a follow-up.",
           taskMutations: [],
-          reviewMutations: [],
+          reviewResult: null,
           learningMutations: [],
           blockers: [],
           signals: [],
@@ -875,12 +964,12 @@ describe("WorkerResultApplier deployment tracking", () => {
           repo,
           worktreePath: tempDir,
           workerResult: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             action: "deployment",
             outcome: "follow_up_created",
             summary: "Follow-up needed.",
             taskMutations: [],
-            reviewMutations: [],
+            reviewResult: null,
             learningMutations: [],
             blockers: [],
             signals: [],
@@ -962,7 +1051,7 @@ describe("WorkerResultApplier deployment tracking", () => {
         repo,
         worktreePath: tempDir,
         workerResult: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           action: "deployment",
           outcome: "follow_up_created",
           summary: "Follow-up created.",
@@ -974,7 +1063,7 @@ describe("WorkerResultApplier deployment tracking", () => {
               repos: ["repo-a"],
             },
           ],
-          reviewMutations: [],
+          reviewResult: null,
           learningMutations: [],
           blockers: [],
           signals: [],
@@ -1084,12 +1173,12 @@ describe("WorkerResultApplier deployment tracking", () => {
         repo,
         worktreePath: tempDir,
         workerResult: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           action: "deployment",
           outcome: "blocked",
           summary: "Deployment provider unavailable.",
           taskMutations: [],
-          reviewMutations: [],
+          reviewResult: null,
           learningMutations: [],
           blockers: ["Deployment provider unavailable."],
           signals: [],
@@ -1198,12 +1287,12 @@ describe("WorkerResultApplier deployment tracking", () => {
           repo,
           worktreePath: tempDir,
           workerResult: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             action: "deployment",
             outcome: "succeeded",
             summary: `Deployment verified for ${repo.key}.`,
             taskMutations: [],
-            reviewMutations: [],
+            reviewResult: null,
             learningMutations: [],
             blockers: [],
             signals: [],
@@ -1273,6 +1362,7 @@ describe("WorkerResultApplier learning embeddings", () => {
       runnerModel: "openai/gpt-5.4",
       runnerVariant: "high",
     });
+    const logger = LoggerService.create({ stdout, minLevel });
     const applier = new WorkerResultApplier({
       config: createDefaultWorkspaceConfig("foo", "file"),
       foremanRepos: db,
@@ -1280,7 +1370,7 @@ describe("WorkerResultApplier learning embeddings", () => {
       reviewService: new FakeReviewService(pullRequest),
       repos: [repo],
       embedder,
-      logger: LoggerService.create({ stdout, minLevel }),
+      logger,
       scheduleScout: () => undefined,
     });
 
@@ -1292,17 +1382,18 @@ describe("WorkerResultApplier learning embeddings", () => {
       repo,
       worktreePath: tempDir,
       workerResult: {
-        schemaVersion: 1,
+        schemaVersion: 2,
         action: "execution",
         outcome: "no_action_needed",
         summary: "Applied learnings.",
         taskMutations: [],
-        reviewMutations: [],
+        reviewResult: null,
         learningMutations,
         blockers: [],
         signals: [],
       },
     });
+    await logger.flush();
   };
 
   const setUp = async (prefix: string) => {

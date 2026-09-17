@@ -332,6 +332,7 @@ export const renderWorkerPrompt = async (input: {
     previousSessionHeadSha: string | null;
   };
   continuation?: boolean;
+  commentHeader?: string;
 }): Promise<string> => {
   const selectedTarget = resolveSelectedTarget(input.task, input.repo, input.taskTarget);
   const template = selectWorkerPromptTemplate(input);
@@ -364,6 +365,9 @@ export const renderWorkerPrompt = async (input: {
       "workspace-plan": await renderWorkspacePlan(input.paths),
       "deployment-instructions": await renderDeploymentInstructions(input.paths, input.deploymentInstructionBody),
       "result-schema": renderAgentResultSchemaHelp(resultSchemaAction).trim(),
+      "comment-attribution": input.commentHeader
+        ? textSection("GitHub Comment Attribution", `Prefix every review summary, inline comment, and reply with this exact first line (Foreman will not add it):\n\n${input.commentHeader}`)
+        : "",
       // Absent, not empty-but-present: the template token then takes its own
       // separator with it, leaving the prompt as it was before the section existed.
       ...(relevantLearnings ? { "relevant-learnings": relevantLearnings } : {}),

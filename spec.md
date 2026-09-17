@@ -820,12 +820,12 @@ Parser behavior:
 
 ```ts
 type WorkerResult = {
-  schemaVersion: 1
-  action: "execution" | "review" | "retry" | "consolidation"
-  outcome: "completed" | "no_action_needed" | "blocked" | "failed"
+  schemaVersion: 2
+  action: "execution" | "review" | "reviewer" | "retry" | "deployment" | "consolidation"
+  outcome: "completed" | "no_action_needed" | "blocked" | "failed" | "succeeded" | "in_progress" | "follow_up_created"
   summary: string
   taskMutations: TaskMutation[]
-  reviewMutations: ReviewMutation[]
+  reviewResult: ReviewResult | null
   learningMutations: LearningMutation[]
   blockers: Blocker[]
   signals: Signal[]
@@ -847,33 +847,25 @@ type TaskMutation =
   | { type: "add_comment"; body: string }
 ```
 
-### Review Mutations
+### GitHub Results
 
 ```ts
-type ReviewMutation =
-  | {
-      type: "create_pull_request"
-      title: string
-      body: string
-      draft: boolean
-      baseBranch: string
-      headBranch: string
-    }
-  | {
-      type: "reopen_pull_request"
-      pullRequestUrl?: string
-      pullRequestNumber?: number
-      draft: boolean
-      title?: string
-      body?: string
-    }
-  | { type: "reply_to_review_summary"; reviewId: string; body: string }
-  | { type: "reply_to_thread_comment"; threadId: string; body: string }
-  | { type: "reply_to_pr_comment"; commentId: string; body: string }
-  | { type: "resolve_threads"; threadIds: string[] }
+type ReviewResult = {
+  pullRequestUrl: string
+  reviewedHeadSha?: string
+  submittedReviewIds?: string[]
+}
 ```
 
-Foreman prepends a Shields.io static badge on its own line to outbound GitHub review replies and reviewer comments. The left side is a short model family (`fable`, `opus`, `sonnet`, `haiku`, `sol`, `terra`, or `luna`) when recognized, otherwise the provider-stripped model identifier. The right side is the normalized configured prefix. Claude and OpenCode runners use their corresponding Simple Icons logo; Codex has no logo because Shields does not provide an accurate one. Badge alt text contains the configured label, runner, and full model identifier. Existing badges and legacy text prefixes are normalized without duplication.
+Workers create and edit task PRs, attach assets, submit `COMMENT` reviews, reply, and resolve threads directly using authenticated GitHub tools. They must never merge or close PRs or enable auto-merge. Merging the base branch into the task branch to resolve conflicts remains permitted. Task-system and learning mutations stay Foreman-owned.
+
+`reviewResult` records confirmed work, not commands to execute. Reviewer completion requires the full reviewed commit SHA and submitted GraphQL review node IDs (`node_id` in REST responses). A no-action reviewer result identifies the reviewed head without claiming a submission. Foreman verifies the PR's repository/head/base and review references, then records linkage and checkpoints. A head changed during the pass remains eligible for review.
+
+Foreman renders an exact Shields.io attribution header into worker context using the configured role label and resolved runner/model. Workers prefix review summaries, inline comments, and replies with that header. Resolver and reviewer labels remain distinct so reviewer findings trigger resolver work while resolver replies do not trigger themselves. Existing badges and legacy prefixes remain readable.
+
+Writes may succeed before a runner or attachment upload fails. Workers inspect remote state before retrying; result recovery is read-only. Scout discovers existing PRs and resumes unfinished ordinary work on the same branch instead of treating PR existence as completion. A retry after an externally closed PR still uses the fresh-implementation workflow.
+
+Before upgrading from schema version 1, pause new scheduling and drain active attempts, then restart with the new code and prompts. New/resumed workers use version 2; old mutation-bearing results are rejected and sent through read-only result recovery. Historical v1 artifacts remain readable through eval harvesting and are never replayed.
 
 ### Learning Mutations
 

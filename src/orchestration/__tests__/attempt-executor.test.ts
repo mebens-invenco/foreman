@@ -85,12 +85,12 @@ const createGitRepo = async (root: string): Promise<void> => {
 };
 
 const createWorkerResult = (overrides: Partial<WorkerResult> = {}): WorkerResult => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   action: "execution",
   outcome: "completed",
   summary: "Recovered structured result.",
   taskMutations: [],
-  reviewMutations: [],
+  reviewResult: null,
   learningMutations: [],
   blockers: [],
   signals: [],
@@ -204,12 +204,12 @@ describe("AttemptExecutor", () => {
       db.jobs.claimQueuedJobForWorker(job.id, db.workers.listWorkers()[0]!.id);
       const claimedJob = db.jobs.getJob(job.id);
       const recoveredResult: WorkerResult = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         action: "execution",
         outcome: "completed",
         summary: "Recovered structured result.",
         taskMutations: [],
-        reviewMutations: [],
+        reviewResult: null,
         learningMutations: [],
         blockers: [],
         signals: [],
@@ -274,10 +274,12 @@ describe("AttemptExecutor", () => {
       await logger.flush();
 
       expect(runnerMocks.invoke).toHaveBeenCalledTimes(2);
+      expect(runnerMocks.invoke.mock.calls[0]![0].prompt).toContain("## GitHub Comment Attribution");
+      expect(runnerMocks.invoke.mock.calls[0]![0].prompt).toContain("![agent | ");
       expect(runnerMocks.invoke.mock.calls[1]![0]).toMatchObject({
         nativeSessionId: "native-session-1",
       });
-      expect(runnerMocks.invoke.mock.calls[1]![0].prompt).toContain("could not parse a valid `<agent-result>` block");
+      expect(runnerMocks.invoke.mock.calls[1]![0].prompt).toContain("could not parse a valid current-version `<agent-result>` block");
 
       const attempt = db.attempts.latestAttemptForJob(job.id)!;
       // Both invokes — the primary and the recovery — carry the attempt seam's

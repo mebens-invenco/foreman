@@ -26,7 +26,7 @@ import type { WorkspaceConfig } from "../workspace/config.js";
 import { resolveDeploymentInstructions, type DeploymentInstructions } from "../workspace/deployment.js";
 import { branchExistsOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
-import { evaluateBlockedOrdinaryWork, isBlockedOrdinaryWorkPendingUnblock, type TargetProgressState } from "./blocked-ordinary-work.js";
+import { evaluateBlockedOrdinaryWork, hasUnfinishedOrdinaryWork, isBlockedOrdinaryWorkPendingUnblock, type TargetProgressState } from "./blocked-ordinary-work.js";
 import { runStateTransitions } from "./state-transition.js";
 
 type Selection = {
@@ -355,6 +355,12 @@ const resolveTargetProgress = async (input: {
     return { latestJob, latestAttempt, pullRequest, state: "active" };
   }
   if (pullRequest?.state === "open") {
+    if (isBlockedOrdinaryWorkPendingUnblock(input.task, latestJob, latestAttempt)) {
+      return { latestJob, latestAttempt, pullRequest, state: "blocked" };
+    }
+    if (hasUnfinishedOrdinaryWork(latestJob)) {
+      return { latestJob, latestAttempt, pullRequest, state: "pending" };
+    }
     return { latestJob, latestAttempt, pullRequest, state: "in_review" };
   }
   if (pullRequest?.state === "merged") {
@@ -823,6 +829,10 @@ export const runScoutSelection = async (input: {
   });
 
   const canSchedule = (task: Task, target: TaskTarget, action: ActionType): boolean => {
+    if ((action === "review" || action === "reviewer") &&
+        hasUnfinishedOrdinaryWork(input.foremanRepos.jobs.latestJobForTaskTarget(target.id))) {
+      return false;
+    }
     if (jobs.some((job) => job.task.id === task.id && job.target.repoKey === target.repoKey)) {
       return false;
     }

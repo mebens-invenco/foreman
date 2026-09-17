@@ -48,8 +48,7 @@ Reattempt the task cleanly from fresh branch state while reusing only the prior 
 - If retry creates a PR, prefer draft mode.
 - PR titles should normally follow `<TASK-ID>: <short description>` and should not use conventional-commit prefixes like `feat:`, `fix:`, or `chore:`.
 - Follow repository PR templates and any repo-root instruction-file requirements when writing the PR body.
-- If retry completes with code changes, emit a full `create_pull_request` object with `title`, `body`, `draft`, `baseBranch`, and `headBranch`.
-- Copy `baseBranch` from the provided Repository Context and `headBranch` from `Repository Context.selectedTarget.branchName`.
-- Do not omit `baseBranch` or `headBranch` even if they seem obvious from the current git state.
+- If retry completes with code changes, create the PR directly, verify it, and return its URL in `reviewResult`.
+- Use the base branch from Repository Context and head branch from `Repository Context.selectedTarget.branchName` explicitly.
 
 {{fragment:output-validator}}

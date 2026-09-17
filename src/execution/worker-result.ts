@@ -1,17 +1,17 @@
 import { z } from "zod";
 
-import type { WorkerResult } from "../domain/index.js";
+import type { LegacyWorkerResult, WorkerResult } from "../domain/index.js";
 
 export const workerResultActionValues = ["execution", "review", "reviewer", "retry", "deployment", "consolidation"] as const satisfies readonly WorkerResult["action"][];
 export type WorkerResultAction = (typeof workerResultActionValues)[number];
 
 export const workerResultExample = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   action: "execution",
   outcome: "completed",
   summary: "Validated output.",
   taskMutations: [],
-  reviewMutations: [],
+  reviewResult: null,
   learningMutations: [],
   blockers: [],
   signals: [],
@@ -116,7 +116,7 @@ const workerResultBaseSchema = z.object({
 
 const deploymentOutcomes = ["succeeded", "in_progress", "follow_up_created", "blocked", "failed"] as const;
 
-export const workerResultSchema = workerResultBaseSchema.superRefine((result, ctx) => {
+const legacyWorkerResultSchema = workerResultBaseSchema.superRefine((result, ctx) => {
   if (result.action !== "deployment") {
     if ((deploymentOutcomes as readonly string[]).includes(result.outcome) && result.outcome !== "blocked" && result.outcome !== "failed") {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["outcome"], message: "Deployment-only outcome is only valid for deployment action" });
@@ -139,6 +139,33 @@ export const workerResultSchema = workerResultBaseSchema.superRefine((result, ct
     });
   }
 });
+
+export const workerResultSchema = workerResultBaseSchema.omit({ reviewMutations: true }).extend({
+  schemaVersion: z.literal(2),
+  reviewResult: z.object({
+    pullRequestUrl: z.string().regex(/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9]\d*$/),
+    reviewedHeadSha: z.string().regex(/^[a-f0-9]{40}$/).optional(),
+    submittedReviewIds: z.array(z.string().min(1)).optional(),
+  }).nullable(),
+}).strict().superRefine((result, ctx) => {
+  const deploymentOnly = ["succeeded", "in_progress", "follow_up_created"].includes(result.outcome);
+  if ((result.action === "deployment" && !deploymentOutcomes.includes(result.outcome as typeof deploymentOutcomes[number])) ||
+      (result.action !== "deployment" && deploymentOnly)) {
+    ctx.addIssue({ code: "custom", path: ["outcome"], message: "Outcome does not belong to this action" });
+  }
+  if (result.action === "reviewer" && ["completed", "no_action_needed"].includes(result.outcome)) {
+    if (!result.reviewResult?.reviewedHeadSha) {
+      ctx.addIssue({ code: "custom", path: ["reviewResult"], message: "Reviewer results must identify the PR and reviewed head SHA" });
+    }
+    const submitted = result.reviewResult?.submittedReviewIds?.length ?? 0;
+    if ((result.outcome === "completed" && submitted === 0) || (result.outcome === "no_action_needed" && submitted > 0)) {
+      ctx.addIssue({ code: "custom", path: ["reviewResult", "submittedReviewIds"], message: "Completed reviews require submitted review node IDs; no-action results must not claim a submission" });
+    }
+  }
+});
+
+export const validateHistoricalWorkerResult = (value: unknown): WorkerResult | LegacyWorkerResult =>
+  z.union([workerResultSchema, legacyWorkerResultSchema]).parse(value) as WorkerResult | LegacyWorkerResult;
 
 export const formatWorkerResultValidationError = (error: z.ZodError): string =>
   error.issues
@@ -215,51 +242,10 @@ export const validateWorkerResult = (value: unknown): WorkerResult => workerResu
 export const validateWorkerResultForAction = (value: unknown, action: WorkerResultAction): WorkerResult =>
   workerResultSchema.safeExtend({ action: z.literal(action) }).parse(value) as WorkerResult;
 
-// Review-mutation variants the DISPLAYED schema advertises per action. The
-// validator is unchanged — this prunes only what the help/prompt shows, so an
-// action stops advertising mutation types its template then has to forbid in
-// prose (the reviewer is prose-forbidden from everything but submitting one
-// review, and all observed reviewer traces use exactly that one type). Actions
-// without an entry display every variant.
-const displayedReviewMutationTypes: Partial<Record<WorkerResultAction, ReadonlySet<string>>> = {
-  reviewer: new Set(["submit_pull_request_review"]),
-};
-
 type JsonSchemaObject = Record<string, unknown>;
-
-const asRecord = (value: unknown): JsonSchemaObject | null => (typeof value === "object" && value !== null && !Array.isArray(value) ? (value as JsonSchemaObject) : null);
-
-/**
- * The JSON Schema the help/prompt displays for an action: the validator's
- * schema with the `reviewMutations` union filtered to the action's allowlist.
- * Derived by filtering — never hand-written — so the displayed subset cannot
- * drift from the validator's variant shapes. Throws when the serialized shape
- * no longer matches expectations, rather than silently displaying an unpruned
- * (or over-pruned) schema.
- */
 export const displayedAgentResultJsonSchema = (action?: WorkerResultAction): JsonSchemaObject => {
   const schema = action ? workerResultSchema.safeExtend({ action: z.literal(action) }) : workerResultSchema;
-  const jsonSchema = z.toJSONSchema(schema) as JsonSchemaObject;
-  const allowed = action ? displayedReviewMutationTypes[action] : undefined;
-  if (!allowed) {
-    return jsonSchema;
-  }
-
-  const properties = asRecord(jsonSchema.properties);
-  const reviewMutations = asRecord(properties?.reviewMutations);
-  const items = asRecord(reviewMutations?.items);
-  const variants = Array.isArray(items?.oneOf) ? items.oneOf : null;
-  if (!properties || !reviewMutations || !items || !variants) {
-    throw new Error("worker result JSON schema no longer matches the expected reviewMutations union shape; update displayedAgentResultJsonSchema");
-  }
-  const kept = variants.filter((variant) => {
-    const constType = asRecord(asRecord(asRecord(variant)?.properties)?.type)?.const;
-    return typeof constType === "string" && allowed.has(constType);
-  });
-  if (kept.length !== allowed.size) {
-    throw new Error(`displayed review-mutation allowlist for "${action}" kept ${kept.length} of ${allowed.size} expected variants; allowlist and schema have drifted`);
-  }
-  return { ...jsonSchema, properties: { ...properties, reviewMutations: { ...reviewMutations, items: { ...items, oneOf: kept } } } };
+  return z.toJSONSchema(schema) as JsonSchemaObject;
 };
 
 // Serialises the worker result schema for a given action to the human-readable
@@ -276,14 +262,15 @@ export const renderAgentResultSchemaHelp = (action?: WorkerResultAction, schemaF
     ...workerResultExample,
     action: actionLiteral,
     ...((action === "review" || action === "reviewer") ? { outcome: "no_action_needed" } : {}),
+    ...(action === "reviewer" ? { reviewResult: {
+      pullRequestUrl: "https://github.com/owner/repo/pull/1",
+      reviewedHeadSha: "0123456789abcdef0123456789abcdef01234567",
+      submittedReviewIds: [],
+    } } : {}),
   });
   const reviewGuidance =
     action === "review" || action === "reviewer"
-      ? "\n- For no-op review results, use outcome `no_action_needed`; `completed` requires mutations or code changes."
-      : "";
-  const pruneNote =
-    action && displayedReviewMutationTypes[action]
-      ? "\n- The schema shows only the review mutation types permitted for this action."
+      ? "\n- Use `completed` after confirmed GitHub actions; use `no_action_needed` when nothing remains. Reviewer results identify the reviewed head and any submitted review node IDs."
       : "";
 
   return `
@@ -293,7 +280,7 @@ Action-specific accepted output shape
 - Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block containing JSON.
 - The final answer returned to Foreman must contain exactly one <agent-result> block and no prose after it.
 - The worker result JSON schema below is generated from Foreman's Zod worker result schema.
-${reviewGuidance}${pruneNote}
+${reviewGuidance}
 
 Worker result JSON schema:
 

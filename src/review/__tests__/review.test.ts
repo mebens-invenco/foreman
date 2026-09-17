@@ -15,18 +15,6 @@ const fakeLogger = {
   error() {},
 };
 
-const implementationAttribution = {
-  label: "[agent] ",
-  runnerName: "opencode" as const,
-  runnerModel: "openai/gpt-5.6-sol",
-};
-
-const reviewerAttribution = {
-  label: "[review agent] ",
-  runnerName: "claude" as const,
-  runnerModel: "claude-opus-4-8",
-};
-
 const implementationBadge = "![agent | opencode | openai/gpt-5.6-sol](https://img.shields.io/badge/sol-agent-555?logo=opencode&logoColor=white&labelColor=1A1A1A)";
 const reviewerBadge = "![review agent | claude | claude-opus-4-8](https://img.shields.io/badge/opus-review_agent-555?logo=claude&logoColor=white&labelColor=D97757)";
 
@@ -1282,12 +1270,12 @@ describe("GitHubReviewService rate-limit handling", () => {
     ) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
+    await expect(service.getContext(sampleTask(), "[agent]")).rejects.toMatchObject({
       code: "provider_rate_limited",
       provider: "github",
       statusCode: 429,
     });
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
+    await expect(service.getContext(sampleTask(), "[agent]")).rejects.toMatchObject({
       code: "provider_rate_limited",
       provider: "github",
       statusCode: 429,
@@ -1296,25 +1284,25 @@ describe("GitHubReviewService rate-limit handling", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
-  test("retries GraphQL mutations with transient bad credentials", async () => {
+  test("retries GraphQL queries with transient bad credentials", async () => {
     global.fetch = vi
       .fn()
       .mockResolvedValueOnce(jsonResponse({ message: "Bad credentials" }, 401))
-      .mockResolvedValueOnce(jsonResponse({ data: { addPullRequestReviewThreadReply: { comment: { id: "comment-1" } } } })) as typeof fetch;
+      .mockResolvedValueOnce(jsonResponse({ data: { repository: { pullRequest: null } } })) as typeof fetch;
 
     const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).resolves.toBeUndefined();
+    await expect(service.getContext(sampleTask(), "[agent]")).resolves.toBeNull();
 
     expect(global.fetch).toHaveBeenCalledTimes(2);
   });
 
-  test("surfaces persistent GraphQL mutation bad credentials after retries", async () => {
+  test("surfaces persistent GraphQL query bad credentials after retries", async () => {
     vi.useFakeTimers();
     try {
       global.fetch = vi.fn().mockResolvedValue(jsonResponse({ message: "Bad credentials" }, 401)) as typeof fetch;
 
       const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-      const result = expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toThrow(
+      const result = expect(service.getContext(sampleTask(), "[agent]")).rejects.toThrow(
         "GitHub GraphQL request failed: 401",
       );
       await vi.runAllTimersAsync();
@@ -1409,403 +1397,16 @@ describe("GitHubReviewService rate-limit handling", () => {
       ) as typeof fetch;
 
       const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-      await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks", implementationAttribution)).rejects.toThrow(
-        "GitHub REST rate limit exceeded until 2026-05-07T04:01:00.000Z",
+      await expect(service.getContext(sampleTask(), "[agent]")).rejects.toThrow(
+        "GitHub GraphQL rate limit exceeded until 2026-05-07T04:01:00.000Z",
       );
-      await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks", implementationAttribution)).rejects.toThrow(
-        "GitHub REST rate limit is active until 2026-05-07T04:01:00.000Z",
+      await expect(service.getContext(sampleTask(), "[agent]")).rejects.toThrow(
+        "GitHub GraphQL rate limit is active until 2026-05-07T04:01:00.000Z",
       );
 
       expect(global.fetch).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }
-  });
-});
-
-describe("GitHubReviewService.createPullRequest", () => {
-  test("recovers an existing open pull request after GitHub rejects the duplicate head", async () => {
-    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
-    global.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse(
-          { message: "Validation Failed", errors: [{ message: "A pull request already exists for acme:eng-5994." }] },
-          422,
-        ),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse([
-          {
-            html_url: "https://github.com/acme/repo/pull/999",
-            number: 999,
-            state: "open",
-            draft: true,
-            merged_at: null,
-            head: { ref: "eng-5994" },
-            base: { ref: "master" },
-          },
-        ]),
-      ) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(
-      service.createPullRequest({
-        cwd: "/repos/repo-a",
-        title: "ENG-5994: Recover pull requests",
-        body: "Existing implementation.",
-        draft: true,
-        baseBranch: "master",
-        headBranch: "eng-5994",
-      }),
-    ).resolves.toEqual({ url: "https://github.com/acme/repo/pull/999", number: 999 });
-
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toBe(
-      "https://api.github.com/repos/acme/repo/pulls?state=open&head=acme%3Aeng-5994&per_page=20",
-    );
-  });
-
-  test("keeps unrelated 422 responses fatal", async () => {
-    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
-    global.fetch = vi.fn().mockResolvedValueOnce(
-      jsonResponse({ message: "Validation Failed", errors: [{ message: "No commits between master and eng-5994" }] }, 422),
-    ) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(
-      service.createPullRequest({
-        cwd: "/repos/repo-a",
-        title: "ENG-5994: Recover pull requests",
-        body: "Existing implementation.",
-        draft: true,
-        baseBranch: "master",
-        headBranch: "eng-5994",
-      }),
-    ).rejects.toMatchObject({ code: "github_request_failed" });
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  test("keeps the duplicate-head error fatal when no open pull request resolves", async () => {
-    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
-    global.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse(
-          { message: "Validation Failed", errors: [{ message: "A pull request already exists for acme:eng-5994." }] },
-          422,
-        ),
-      )
-      .mockResolvedValueOnce(jsonResponse([])) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(
-      service.createPullRequest({
-        cwd: "/repos/repo-a",
-        title: "ENG-5994: Recover pull requests",
-        body: "Existing implementation.",
-        draft: true,
-        baseBranch: "master",
-        headBranch: "eng-5994",
-      }),
-    ).rejects.toThrow("A pull request already exists for acme:eng-5994.");
-
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe("GitHubReviewService reply mutations", () => {
-  test("does not retry or defer REST mutation timeouts", async () => {
-    global.fetch = vi.fn().mockRejectedValueOnce(timeoutError()) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
-      code: "github_request_timeout",
-    });
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  test("does not retry or defer transient REST mutation failures", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(textResponse("Service Unavailable", 503)) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToPrComment("https://github.com/acme/repo/pull/946", "comment-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
-      code: "github_request_failed",
-    });
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  test("does not retry or defer transient GraphQL mutation failures", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(textResponse("Service Unavailable", 503)) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
-      code: "github_request_failed",
-    });
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  test("submits comment reviews with inline comments via GitHub REST", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 1 }, 200)) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await service.submitPullRequestReview("https://github.com/acme/repo/pull/946", {
-      body: `${reviewerBadge}\n\nPlease tighten this validation.`,
-      event: "COMMENT",
-      comments: [
-        {
-          path: "src/example.ts",
-          line: 42,
-          body: `${reviewerBadge}\n\nThis branch is missing a null check.`,
-        },
-      ],
-    }, reviewerAttribution);
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews");
-    const init = vi.mocked(global.fetch).mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({
-      body: `${reviewerBadge}\n\nPlease tighten this validation.`,
-      event: "COMMENT",
-      comments: [
-        {
-          path: "src/example.ts",
-          line: 42,
-          side: "RIGHT",
-          body: `${reviewerBadge}\n\nThis branch is missing a null check.`,
-        },
-      ],
-    });
-  });
-
-  test("deletes a stale pending review and retries when GitHub reports an existing pending review", async () => {
-    global.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({ message: "Validation Failed", errors: ["User can only have one pending review per pull request"] }, 422))
-      .mockResolvedValueOnce(jsonResponse([{ id: 123, state: "PENDING" }]))
-      .mockResolvedValueOnce(jsonResponse({ id: 123, state: "DISMISSED" }))
-      .mockResolvedValueOnce(jsonResponse({ id: 124 }, 200)) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await service.submitPullRequestReview("https://github.com/acme/repo/pull/946", {
-      body: "[review agent] Please tighten this validation.",
-      event: "COMMENT",
-      comments: [
-        {
-          path: "src/example.ts",
-          line: 42,
-          body: "[review agent] This branch is missing a null check.",
-        },
-      ],
-    }, reviewerAttribution);
-
-    expect(global.fetch).toHaveBeenCalledTimes(4);
-    expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews?per_page=100&page=1");
-    expect(vi.mocked(global.fetch).mock.calls[2]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews/123");
-    expect((vi.mocked(global.fetch).mock.calls[2]?.[1] as RequestInit).method).toBe("DELETE");
-
-    const retryInit = vi.mocked(global.fetch).mock.calls[3]?.[1] as RequestInit;
-    expect(JSON.parse(String(retryInit.body))).toEqual({
-      body: `${reviewerBadge}\n\nPlease tighten this validation.`,
-      event: "COMMENT",
-      comments: [
-        {
-          path: "src/example.ts",
-          line: 42,
-          side: "RIGHT",
-          body: `${reviewerBadge}\n\nThis branch is missing a null check.`,
-        },
-      ],
-    });
-  });
-
-  test("does not retry unrelated GitHub review validation failures", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ message: "Validation Failed", errors: ["Some other 422"] }, 422)) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(
-      service.submitPullRequestReview("https://github.com/acme/repo/pull/946", {
-        body: "[review agent] Please tighten this validation.",
-        event: "COMMENT",
-        comments: [
-          {
-            path: "src/example.ts",
-            line: 42,
-            body: "[review agent] This branch is missing a null check.",
-          },
-        ],
-      }, reviewerAttribution),
-    ).rejects.toThrow("GitHub request failed: 422");
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  test.each(["Line could not be resolved", "Path could not be resolved"])(
-    "falls back to a body-only review when GitHub cannot resolve an inline comment location: %s",
-    async (errorMessage) => {
-      global.fetch = vi
-        .fn()
-        .mockResolvedValueOnce(jsonResponse({ message: "Validation Failed", errors: [errorMessage] }, 422))
-        .mockResolvedValueOnce(jsonResponse({ id: 1 }, 200)) as typeof fetch;
-
-      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-      await service.submitPullRequestReview("https://github.com/acme/repo/pull/946", {
-        body: "[review agent] Please tighten this validation.",
-        event: "COMMENT",
-        comments: [
-          {
-            path: "src/example.ts",
-            line: 42,
-            body: "[review agent] This branch is missing a null check.",
-          },
-        ],
-      }, reviewerAttribution);
-
-      expect(global.fetch).toHaveBeenCalledTimes(2);
-      expect(vi.mocked(global.fetch).mock.calls[1]?.[0]).toBe("https://api.github.com/repos/acme/repo/pulls/946/reviews");
-      const retryInit = vi.mocked(global.fetch).mock.calls[1]?.[1] as RequestInit;
-      const retryBody = JSON.parse(String(retryInit.body));
-      expect(retryBody).toEqual({
-        body: expect.stringContaining("GitHub rejected one or more inline review comment locations as unresolvable"),
-        event: "COMMENT",
-      });
-      expect(retryBody.body).toContain("Location: `src/example.ts:42` (RIGHT)");
-      expect(retryBody.body).toContain(`${reviewerBadge}\n\nThis branch is missing a null check.`);
-    },
-  );
-
-  test("posts review-summary replies as badged top-level comments", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ id: 1 }, 201)) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await service.replyToReviewSummary("https://github.com/acme/repo/pull/946", "review-1", "[agent] Thanks", implementationAttribution);
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe("https://api.github.com/repos/acme/repo/issues/946/comments");
-    const init = vi.mocked(global.fetch).mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({ body: `${implementationBadge}\n\nThanks\n\nIn reply to review review-1.` });
-  });
-
-  test("replies to review threads via GitHub GraphQL", async () => {
-    global.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: {
-            addPullRequestReviewThreadReply: {
-              comment: { id: "reply-1" },
-            },
-          },
-        }),
-      ) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution);
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(global.fetch).mock.calls[0]?.[0]).toBe("https://api.github.com/graphql");
-    const init = vi.mocked(global.fetch).mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toMatchObject({
-      variables: { threadId: "thread-1", body: `${implementationBadge}\n\nThanks` },
-    });
-  });
-
-  test("skips a stale review thread reply", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(
-      jsonResponse({
-        errors: [
-          {
-            type: "NOT_FOUND",
-            message: "Could not resolve to a node with the global id of 'thread-stale'.",
-          },
-        ],
-      }),
-    ) as typeof fetch;
-    const logger = spyLogger();
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, logger as any);
-    await service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-stale", "[agent] Thanks", implementationAttribution);
-
-    expect(logger.warn).toHaveBeenCalledWith("skipping stale GitHub review thread reply", {
-      owner: "acme",
-      repo: "repo",
-      pullRequestNumber: 946,
-      threadId: "thread-stale",
-    });
-  });
-
-  test("continues resolving review threads after a stale thread", async () => {
-    global.fetch = vi
-      .fn()
-      .mockResolvedValueOnce(
-        jsonResponse({
-          errors: [
-            {
-              type: "NOT_FOUND",
-              message: "Could not resolve to a node with the global id of 'thread-stale'.",
-            },
-          ],
-        }),
-      )
-      .mockResolvedValueOnce(
-        jsonResponse({
-          data: {
-            resolveReviewThread: {
-              thread: { id: "thread-valid", isResolved: true },
-            },
-          },
-        }),
-      ) as typeof fetch;
-    const logger = spyLogger();
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, logger as any);
-    await service.resolveThreads("https://github.com/acme/repo/pull/946", ["thread-stale", "thread-valid"]);
-
-    expect(global.fetch).toHaveBeenCalledTimes(2);
-    const validInit = vi.mocked(global.fetch).mock.calls[1]?.[1] as RequestInit;
-    expect(JSON.parse(String(validInit.body))).toMatchObject({ variables: { threadId: "thread-valid" } });
-    expect(logger.warn).toHaveBeenCalledWith("skipping stale GitHub review thread resolution", {
-      owner: "acme",
-      repo: "repo",
-      pullRequestNumber: 946,
-      threadId: "thread-stale",
-    });
-  });
-
-  test("does not retry GraphQL mutation timeouts", async () => {
-    global.fetch = vi.fn().mockRejectedValueOnce(timeoutError()) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toMatchObject({
-      code: "github_request_timeout",
-    });
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  test("surfaces transient GraphQL mutation failures without retrying", async () => {
-    global.fetch = vi.fn().mockResolvedValue(jsonResponse({ message: "Service Unavailable" }, 503)) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toThrow(
-      "GitHub GraphQL request failed: 503",
-    );
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
-  });
-
-  test("does not retry GraphQL semantic errors", async () => {
-    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ errors: [{ type: "NOT_FOUND", message: "Could not resolve to a node" }] })) as typeof fetch;
-
-    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
-    await expect(service.replyToThreadComment("https://github.com/acme/repo/pull/946", "thread-1", "[agent] Thanks", implementationAttribution)).rejects.toThrow(
-      "GitHub GraphQL request failed: Could not resolve to a node",
-    );
-
-    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 });

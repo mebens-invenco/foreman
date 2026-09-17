@@ -144,23 +144,15 @@ class FakeReviewService implements ReviewService {
   async getContext(): Promise<null> {
     return null;
   }
-  async createPullRequest(): Promise<{ url: string; number: number }> {
-    throw new Error("unused");
-  }
-  async replyToReviewSummary(): Promise<void> {}
-  async replyToThreadComment(): Promise<void> {}
-  async replyToPrComment(): Promise<void> {}
-  async submitPullRequestReview(): Promise<void> {}
-  async resolveThreads(): Promise<void> {}
 }
 
 const workerResult = (learningId: string): WorkerResult => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   action: "execution",
   outcome: "completed",
   summary: "Done.",
   taskMutations: [],
-  reviewMutations: [],
+  reviewResult: null,
   learningMutations: [{ type: "update", id: learningId, markApplied: true }],
   blockers: [],
   signals: [],

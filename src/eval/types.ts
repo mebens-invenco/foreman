@@ -1,4 +1,4 @@
-import type { Task, TokenUsage, WorkerResult } from "../domain/index.js";
+import type { ReviewMutation, Task, TokenUsage, WorkerResult } from "../domain/index.js";
 import type { WorkerPromptPullRequestReference } from "../execution/render-worker-prompt.js";
 import type { WorkerResultAction } from "../execution/worker-result.js";
 
@@ -44,9 +44,8 @@ export type PrReviewFixture = {
  * `headSha` (a checkout that cannot land on the sha fails the run loudly —
  * frozen fixture PRs must never drift silently), renders the real reviewer
  * prompt against that worktree, and runs the sample with live `gh` discovery.
- * No synthetic block is appended: the reviewer performs its own PR discovery.
- * The worker result is captured and graded WITHOUT applying any mutations, so
- * the fixture PRs stay byte-frozen across runs.
+ * The reviewer performs its own PR discovery. An eval transport directive routes
+ * submissions to the local capture CLI, preserving the frozen fixture PRs.
  */
 export type LivePrFixture = {
   type: "live-pr";
@@ -116,6 +115,7 @@ export type GradeContext<Expect = unknown> = {
   evalCase: EvalCase<Expect>;
   /** Parsed + action-validated worker result, or null if parse/validation failed. */
   result: WorkerResult | null;
+  reviewWrites?: ReviewMutation[];
   rawStdout: string;
   parseError?: string;
   /**
@@ -151,6 +151,7 @@ export type SampleResult = {
    * grader detail strings. Absent when parsing failed.
    */
   result?: WorkerResult;
+  reviewWrites?: ReviewMutation[];
   /** Runner-reported usage for this sample, when the runner surfaces it. */
   tokensUsed?: TokenUsage;
   elapsedSeconds?: number;
