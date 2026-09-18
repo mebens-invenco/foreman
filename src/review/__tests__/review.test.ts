@@ -1478,6 +1478,20 @@ describe("GitHubReviewService rate-limit handling", () => {
     }
   });
 
+  test("does not retry GraphQL semantic errors", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ errors: [{ message: "Could not resolve to a node" }] })) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const error = await service.resolvePullRequest(sampleTask()).catch((caught: unknown) => caught);
+
+    expect(isProviderUnavailableError(error)).toBe(false);
+    expect(error).toMatchObject({
+      code: "github_request_failed",
+      message: "GitHub GraphQL request failed: Could not resolve to a node",
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
   test("retries GraphQL query transport failures", async () => {
     vi.useFakeTimers();
     try {
