@@ -1,8 +1,8 @@
 import { promises as fs } from "node:fs";
 
-import type { WorkerResult } from "../domain/index.js";
+import type { LegacyWorkerResult, WorkerResult } from "../domain/index.js";
 import type { WorkerResultAction } from "../execution/worker-result.js";
-import { validateWorkerResult, workerResultActionValues } from "../execution/worker-result.js";
+import { validateHistoricalWorkerResult, workerResultActionValues } from "../execution/worker-result.js";
 import { resolveArtifactContentPath } from "../lib/artifact-path.js";
 import type { ArtifactRecord, ArtifactRepo } from "../repos/artifact-repo.js";
 import type { AttemptRecord, AttemptRepo } from "../repos/attempt-repo.js";
@@ -34,7 +34,7 @@ export type HarvestedTrace = {
    */
   prompt: string;
   /** The validated `parsed_result` artifact. */
-  result: WorkerResult;
+  result: WorkerResult | LegacyWorkerResult;
 };
 
 export type HarvestSkipReason =
@@ -156,9 +156,9 @@ export const harvestTraces = async (deps: HarvestDeps): Promise<{ traces: Harves
       continue;
     }
 
-    let result: WorkerResult;
+    let result: WorkerResult | LegacyWorkerResult;
     try {
-      result = validateWorkerResult(JSON.parse(await readArtifact(resultArtifact.relativePath)));
+      result = validateHistoricalWorkerResult(JSON.parse(await readArtifact(resultArtifact.relativePath)));
     } catch (error) {
       skip(attempt.id, "unparseable_result", error instanceof Error ? error.message : String(error));
       continue;

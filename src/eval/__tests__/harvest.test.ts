@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorkerResult } from "../../domain/index.js";
+import type { LegacyWorkerResult as WorkerResult } from "../../domain/index.js";
 import type { ArtifactRecord } from "../../repos/artifact-repo.js";
 import type { AttemptRecord } from "../../repos/attempt-repo.js";
 import { harvestTraces } from "../harvest.js";

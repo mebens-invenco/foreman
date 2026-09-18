@@ -58,13 +58,13 @@ describe("estimateCost", () => {
       );
 
       // Per-1M token rates for Opus 4.7 — fresh in, output, cache read, cache write.
-      expect(result.breakdown.input).toBeCloseTo(15);
-      expect(result.breakdown.output).toBeCloseTo(75);
-      expect(result.breakdown.cacheRead).toBeCloseTo(1.5);
-      expect(result.breakdown.cacheCreate).toBeCloseTo(18.75);
+      expect(result.breakdown.input).toBeCloseTo(5);
+      expect(result.breakdown.output).toBeCloseTo(25);
+      expect(result.breakdown.cacheRead).toBeCloseTo(0.5);
+      expect(result.breakdown.cacheCreate).toBeCloseTo(6.25);
       // Reasoning tokens bill at the output rate.
-      expect(result.breakdown.reasoning).toBeCloseTo(75);
-      expect(result.totalUsd).toBeCloseTo(15 + 75 + 1.5 + 18.75 + 75);
+      expect(result.breakdown.reasoning).toBeCloseTo(25);
+      expect(result.totalUsd).toBeCloseTo(5 + 25 + 0.5 + 6.25 + 25);
     });
 
     test("computes per-bucket USD using the rate table for Claude Opus 4.8", () => {
@@ -96,7 +96,7 @@ describe("estimateCost", () => {
       expect(result.totalUsd).toBeCloseTo(5 + 25 + 0.5 + 6.25 + 25);
     });
 
-    test("matches the 2026-05-26 audit ballpark for a foreman day on Opus 4.7", () => {
+    test("matches current Opus 4.7 pricing at production-scale usage", () => {
       const result = estimateCost(
         {
           inputTokens: 1_200,
@@ -108,11 +108,8 @@ describe("estimateCost", () => {
         "claude-opus-4-7",
       );
 
-      // Sanity range — at Opus 4.7 rates and these token counts the day
-      // should land within roughly +/- $100 of the audit number. Anchor
-      // the rate-table to the audit so a future bad rate edit fails here.
-      expect(result.totalUsd).toBeGreaterThan(300);
-      expect(result.totalUsd).toBeLessThan(500);
+      expect(result.totalUsd).toBeGreaterThan(100);
+      expect(result.totalUsd).toBeLessThan(200);
     });
 
     test("matches a Claude attempt regardless of persisted runnerVariant (effort)", () => {
@@ -121,7 +118,7 @@ describe("estimateCost", () => {
       // the lookup must succeed for the real default-config row.
       const tokens = { inputTokens: 1_000_000, outputTokens: 0 };
       const withHigh = estimateCost(tokens, "claude", "claude-opus-4-7");
-      expect(withHigh.totalUsd).toBeCloseTo(15);
+      expect(withHigh.totalUsd).toBeCloseTo(5);
     });
 
     test("matches the OpenCode default-config model (openai/gpt-5.5)", () => {
@@ -132,6 +129,49 @@ describe("estimateCost", () => {
       );
       expect(result.totalUsd).toBeGreaterThan(0);
     });
+
+    test.each`
+      runnerName    | runnerModel                     | input   | output | cacheRead | cacheCreate
+      ${"claude"}  | ${"claude-fable-5-1"}          | ${10}   | ${50}  | ${0.25}   | ${12.5}
+      ${"claude"}  | ${"claude-opus-5"}             | ${5}    | ${25}  | ${0.5}    | ${6.25}
+      ${"codex"}   | ${"gpt-5.5"}                   | ${5}    | ${30}  | ${0.5}    | ${0}
+      ${"codex"}   | ${"gpt-5.6-sol"}               | ${4}    | ${20}  | ${0.4}    | ${5}
+      ${"codex"}   | ${"gpt-5.6-terra"}             | ${2}    | ${12}  | ${0.2}    | ${2.5}
+      ${"codex"}   | ${"gpt-5.6-luna"}              | ${0.2}  | ${1.2} | ${0.02}   | ${0.25}
+      ${"opencode"} | ${"openai/gpt-5.5"}           | ${5}    | ${30}  | ${0.5}    | ${0}
+      ${"opencode"} | ${"openai/gpt-5.3-codex"}     | ${1.75} | ${14}  | ${0.175}  | ${0}
+      ${"opencode"} | ${"openai/gpt-5.4"}           | ${2.5}  | ${15}  | ${0.25}   | ${0}
+      ${"opencode"} | ${"openai/gpt-5.6-sol"}       | ${4}    | ${20}  | ${0.4}    | ${5}
+      ${"opencode"} | ${"openai/gpt-5.6-sol-fast"}  | ${8}    | ${40}  | ${0.8}    | ${10}
+      ${"opencode"} | ${"openai/gpt-6-astra"}       | ${10}   | ${50}  | ${1}      | ${12.5}
+      ${"opencode"} | ${"openai/gpt-6-astra-fast"}  | ${20}   | ${100} | ${2}      | ${25}
+    `(
+      "computes all token buckets for $runnerName/$runnerModel",
+      ({ runnerName, runnerModel, input, output, cacheRead, cacheCreate }) => {
+        const result = estimateCost(
+          {
+            inputTokens: 1_000_000,
+            outputTokens: 1_000_000,
+            cacheReadInputTokens: 1_000_000,
+            cacheCreationInputTokens: 1_000_000,
+            reasoningOutputTokens: 1_000_000,
+          },
+          runnerName,
+          runnerModel,
+        );
+
+        expect(result.breakdown).toEqual({
+          input,
+          output,
+          cacheRead,
+          cacheCreate,
+          reasoning: output,
+        });
+        expect(result.totalUsd).toBeCloseTo(
+          input + output + cacheRead + cacheCreate + output,
+        );
+      },
+    );
   });
 
   describe("unknown model", () => {
@@ -168,7 +208,7 @@ describe("estimateCost", () => {
       expect(result.breakdown.cacheRead).toBe(0);
       expect(result.breakdown.cacheCreate).toBe(0);
       expect(result.breakdown.reasoning).toBe(0);
-      expect(result.totalUsd).toBeCloseTo(15 + 75);
+      expect(result.totalUsd).toBeCloseTo(5 + 25);
     });
   });
 
@@ -212,11 +252,11 @@ describe("estimateCost", () => {
       const result = estimateCost(tokens, "claude", "claude-opus-4-7");
 
       // Each bucket = 1000 * per-MTok rate.
-      expect(result.breakdown.input).toBeCloseTo(15_000);
-      expect(result.breakdown.output).toBeCloseTo(75_000);
-      expect(result.breakdown.cacheRead).toBeCloseTo(1_500);
-      expect(result.breakdown.cacheCreate).toBeCloseTo(18_750);
-      expect(result.totalUsd).toBeCloseTo(15_000 + 75_000 + 1_500 + 18_750);
+      expect(result.breakdown.input).toBeCloseTo(5_000);
+      expect(result.breakdown.output).toBeCloseTo(25_000);
+      expect(result.breakdown.cacheRead).toBeCloseTo(500);
+      expect(result.breakdown.cacheCreate).toBeCloseTo(6_250);
+      expect(result.totalUsd).toBeCloseTo(5_000 + 25_000 + 500 + 6_250);
     });
   });
 

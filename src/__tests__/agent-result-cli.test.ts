@@ -91,17 +91,17 @@ describe("agent-result cli", () => {
     expect(() => validateWorkerResultForAction({ ...deploymentResult, action: "execution" }, "execution")).toThrow();
   });
 
-  test("rejects no-op completed review results", async () => {
+  test("accepts completed review results after direct GitHub replies", async () => {
     const result = {
       ...validExecutionResult,
       action: "review",
       outcome: "completed",
+      reviewResult: { pullRequestUrl: "https://github.com/acme/repo/pull/1" },
     };
 
     const cliResult = await runCli(["agent-result", "validate", "--action", "review"], JSON.stringify(result));
 
-    expect(cliResult.code).toBe(1);
-    expect(cliResult.stderr).toContain("must use no_action_needed");
+    expect(cliResult.code).toBe(0);
   });
 
   test("accepts completed review results with code changes", () => {
@@ -140,10 +140,12 @@ describe("agent-result cli", () => {
     expect(result.stdout).toContain("Stdin may be either raw JSON or one complete <agent-result>...</agent-result> block");
     expect(result.stdout).toContain("generated from Foreman's Zod worker result schema");
     expect(result.stdout).toContain('"const": "reviewer"');
-    expect(result.stdout).toContain('"const": "create_pull_request"');
+    expect(result.stdout).toContain('"reviewResult"');
+    expect(result.stdout).not.toContain('"const": "create_pull_request"');
+    expect(result.stdout).not.toContain('"reviewMutations"');
     expect(result.stdout).toContain('"required"');
     expect(result.stdout).toContain("Minimal raw JSON example");
-    expect(result.stdout).toContain("For no-op review results, use outcome `no_action_needed`");
-    expect(result.stdout).toContain('{"schemaVersion":1,"action":"reviewer","outcome":"no_action_needed"');
+    expect(result.stdout).toContain("use `no_action_needed` when nothing remains");
+    expect(result.stdout).toContain('{"schemaVersion":2,"action":"reviewer","outcome":"no_action_needed"');
   });
 });

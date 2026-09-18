@@ -49,6 +49,12 @@ const compactJson = (value: unknown): string => {
   }
 };
 
+const hasCompleteAgentResultBlock = (text: string): boolean => {
+  const openTag = "<agent-result>";
+  const openIndex = text.indexOf(openTag);
+  return openIndex !== -1 && text.indexOf("</agent-result>", openIndex + openTag.length) !== -1;
+};
+
 const openCodeErrorSummary = (record: JsonRecord): string | null => {
   const errorRecord = record.type === "error" ? record : isRecord(record.part) && record.part.type === "error" ? record.part : null;
   if (!errorRecord) {
@@ -113,12 +119,13 @@ export const normalizeOpenCodeJsonOutput = (stdout: string): NormalizedJsonOutpu
   }
   const records = values.filter(isRecord);
   const nativeSessionId = records.map((record) => stringField(record, ["sessionID", "sessionId", "session_id"])).find(Boolean) ?? undefined;
-  const finalAnswerText = [...records]
+  const finalAnswerTexts = [...records]
     .reverse()
     .map((record) =>
       openCodePhase(record) === "final_answer" ? stringField(record, ["text", "content", "result", "output"]) : null,
     )
-    .find(Boolean);
+    .filter((text): text is string => Boolean(text));
+  const finalAnswerText = finalAnswerTexts.find(hasCompleteAgentResultBlock) ?? finalAnswerTexts[0];
   const finalText = records
     .filter((record) => record.type === "final" || record.type === "result" || record.type === "message")
     .map((record) => stringField(record, ["text", "content", "result", "output"]))

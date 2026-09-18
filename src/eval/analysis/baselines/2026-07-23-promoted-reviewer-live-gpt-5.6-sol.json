@@ -1,0 +1,434 @@
+{
+  "prompt": "reviewer-live",
+  "runner": "codex",
+  "model": "gpt-5.6-sol",
+  "note": "Promotion baseline: first runs through foreman eval reviewer-live (clone + pinned-sha checkout in the harness). The clean-feature case failed three times across smokes with three CORRECT reviewer findings on the fixture rounding test (exact-product, then round-vs-ceil, then exact-half) — each fixed by strengthening the fixture (d4977e5 -> c868b5b -> 94572c7, now pinning every rounding mode), never by loosening graders. Final clean-case result is 2/2 stand-downs on the fully-pinned head. Superseded failing samples kept as discrimination evidence. Zero direct GitHub writes throughout.",
+  "cases": [
+    {
+      "caseId": "live-planted-silent-failure",
+      "description": "PR #1 (bench/live-carrier-rates @ 2e22aac) → completed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got completed, want completed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "sprs=1 others=none"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "comment paths: src/modules/quotes/gateways/CarrierRateGateway.ts"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "1 threads (max 3)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 76c vs largest comment 373c"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "n/a (no summary ceiling)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Found one silent-failure bug: carrier rejection returns a successful gateway fallback, bypassing the promised bracket fallback.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "The scope is focused, but one correctness issue remains in an inline thread.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/modules/quotes/gateways/CarrierRateGateway.ts",
+                    "line": 21,
+                    "side": "RIGHT",
+                    "body": "`currentRateCents` converts every client rejection into `ok(fallbackCents)`, so `GetQuoteUseCase` never reaches its `!rate.ok` branch and prices from the gateway value instead of the bracket base promised by this PR. Return `fail({ code: \"carrier_rate_unavailable\", ... })`, remove the gateway fallback value, and add a rejecting-client test that asserts the bracket price."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [
+              {
+                "type": "add",
+                "title": "Keep gateway Result discriminants truthful when callers own fallback policy",
+                "repo": "shared",
+                "confidence": "emerging",
+                "content": "**Rule:** Return gateway failures through the sad Result branch when the caller owns fallback policy; never encode an error-derived default as ok.\n**When to apply:** Reviewing Result-returning gateways or adapters that catch external client errors while a caller branches on success versus failure.\n**Anti-pattern:** Returning ok(fallbackValue) makes the caller failure branch unreachable, mislabels outages as valid data, and can apply a fallback from the wrong layer.\n**Example:** CarrierRateGateway caught a rejection and returned ok(999), so GetQuoteUseCase never selected its 1000-cent bracket fallback.",
+                "tags": [
+                  "reviewer",
+                  "review-blocker",
+                  "error-handling",
+                  "result-type",
+                  "skill-candidate"
+                ]
+              }
+            ],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 379,
+          "tokensUsed": {
+            "inputTokens": 112117,
+            "outputTokens": 12542,
+            "cacheReadInputTokens": 2234368,
+            "reasoningOutputTokens": 5168
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "live-overthread-temptation",
+      "description": "PR #3 (bench/volumetric-weight @ a141dc2) → completed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got completed, want completed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "sprs=1 others=none"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "comment paths: src/modules/quotes/domain/VolumetricWeight.ts"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "1 threads (max 3)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 79c vs largest comment 386c"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "n/a (no summary ceiling)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Found a 1,000× volumetric-weight unit error and prepared one inline review thread with the calculation fix and regression test.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "One pricing correctness issue remains; details are in the single inline thread.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/modules/quotes/domain/VolumetricWeight.ts",
+                    "line": 13,
+                    "side": "RIGHT",
+                    "body": "`ParcelDimensionsMm` is measured in millimetres, but the `5000` divisor applies to cubic centimetres. This makes a 500×400×300 mm parcel 12,000 kg instead of 12 kg, so valid parcels select the wrong bracket or fail with `no_bracket_for_weight`. Convert to centimetres first (or divide mm³ by 5,000,000), and add a test where volumetric weight dominates and changes the selected bracket."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [
+              {
+                "type": "add",
+                "title": "Match dimensional formula divisors to encoded units",
+                "repo": "shared",
+                "confidence": "emerging",
+                "content": "**Rule:** Verify every dimensional formula divisor against the units encoded in its input type, and require an exact-value test where the calculation changes downstream behavior.\n**When to apply:** Reviewing or implementing formulas that convert lengths, areas, or volumes into pricing weights, thresholds, or rates.\n**Anti-pattern:** Testing only a branch where an existing value dominates, which lets a wrong conversion pass without affecting the asserted outcome.\n**Example:** Millimetre dimensions divided by a cubic-centimetre divisor inflated volumetric weight 1,000× while the actual-weight-dominates test stayed green.",
+                "tags": [
+                  "reviewer",
+                  "review-blocker",
+                  "skill-candidate"
+                ]
+              }
+            ],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 468,
+          "tokensUsed": {
+            "inputTokens": 106386,
+            "outputTokens": 11948,
+            "cacheReadInputTokens": 2356736,
+            "reasoningOutputTokens": 4597
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "live-clean-feature",
+      "description": "PR #2 (bench/saver-service-level @ 94572c7) → no_action_needed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got no_action_needed, want no_action_needed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "review=0 task=0"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "n/a (no planted paths)"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "n/a (no thread budget)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "121c (max 450)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "Reviewed the current saver pricing change; no reportable correctness, regression, type-design, or test-coverage findings.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 370,
+          "tokensUsed": {
+            "inputTokens": 61305,
+            "outputTokens": 8114,
+            "cacheReadInputTokens": 1011712,
+            "reasoningOutputTokens": 2323
+          }
+        },
+        {
+          "sampleIndex": 1,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got no_action_needed, want no_action_needed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "review=0 task=0"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "n/a (no planted paths)"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "n/a (no thread budget)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "106c (max 450)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "Saver pricing and rounding are correctly implemented and covered; no actionable reviewer feedback remains.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 363,
+          "tokensUsed": {
+            "inputTokens": 77371,
+            "outputTokens": 8702,
+            "cacheReadInputTokens": 1927936,
+            "reasoningOutputTokens": 2700
+          }
+        }
+      ],
+      "passRate": 1
+    }
+  ],
+  "supersededCleanFeatureSamples": [
+    {
+      "against": "d4977e5",
+      "graderResults": [
+        {
+          "dimension": "outcome",
+          "pass": false,
+          "detail": "got completed, want no_action_needed"
+        },
+        {
+          "dimension": "mutation-shape",
+          "pass": false,
+          "detail": "review=1 task=0"
+        },
+        {
+          "dimension": "planted-paths",
+          "pass": true,
+          "detail": "n/a (no planted paths)"
+        },
+        {
+          "dimension": "thread-count",
+          "pass": true,
+          "detail": "n/a (no thread budget)"
+        },
+        {
+          "dimension": "body-discipline",
+          "pass": true,
+          "detail": "n/a (not a completed review)"
+        },
+        {
+          "dimension": "summary-length",
+          "pass": true,
+          "detail": "112c (max 450)"
+        }
+      ]
+    },
+    {
+      "against": "d4977e5",
+      "result": {
+        "schemaVersion": 1,
+        "action": "reviewer",
+        "outcome": "completed",
+        "summary": "Found one test-contract gap: the saver example does not distinguish nearest rounding from always rounding up.",
+        "taskMutations": [],
+        "reviewMutations": [
+          {
+            "type": "submit_pull_request_review",
+            "body": "Scope looks right; one actionable test-contract finding is in the inline thread.",
+            "event": "COMMENT",
+            "comments": [
+              {
+                "path": "src/modules/quotes/useCases/getQuote/GetQuoteUseCase.test.ts",
+                "line": 37,
+                "side": "RIGHT",
+                "body": "**[P3 · 96%]** This test does not pin nearest rounding: changing `Math.round` to `Math.ceil` leaves all four tests green because `1001 × 0.85 = 850.85`. Add a lower-half saver case, such as `1004 × 0.85 = 853.4`, asserting `853`; together the cases distinguish nearest rounding from both floor and ceil."
+              }
+            ]
+          }
+        ],
+        "learningMutations": [
+          {
+            "type": "update",
+            "id": "01KXCK3HER5D7KV65VZEK8G6F9",
+            "markApplied": true
+          }
+        ],
+        "blockers": [],
+        "signals": [
+          "reviewer_checkpoint_eligible"
+        ]
+      },
+      "tokensUsed": {
+        "inputTokens": 108176,
+        "outputTokens": 10923,
+        "cacheReadInputTokens": 1835776,
+        "reasoningOutputTokens": 4159
+      },
+      "elapsedSeconds": 320
+    },
+    {
+      "against": "c868b5b",
+      "result": {
+        "schemaVersion": 1,
+        "action": "reviewer",
+        "outcome": "completed",
+        "summary": "Found one missing exact-half rounding test worth raising before merge.",
+        "taskMutations": [],
+        "reviewMutations": [
+          {
+            "type": "submit_pull_request_review",
+            "body": "Scope is focused; one missing rounding-boundary test is called out inline.",
+            "event": "COMMENT",
+            "comments": [
+              {
+                "path": "src/modules/quotes/useCases/getQuote/GetQuoteUseCase.ts",
+                "line": 18,
+                "side": "RIGHT",
+                "body": "Add a saver case with `baseCents: 1010` (yielding exactly `858.5`) and assert `859`. The current `.85` and `.4` cases prove above/below-half behavior but do not pin tie-breaking, so round-half-down or banker’s rounding could replace `Math.round` without failing these tests."
+              }
+            ]
+          }
+        ],
+        "learningMutations": [
+          {
+            "type": "add",
+            "title": "Pin exact-half monetary rounding semantics",
+            "repo": "shared",
+            "confidence": "emerging",
+            "content": "**Rule:** Test below-half, above-half, and exact-half outputs whenever monetary multipliers round to integer currency units.\n**When to apply:** A change introduces or modifies a fractional pricing multiplier and uses nearest-integer rounding.\n**Anti-pattern:** Tests covering only non-tie fractions allow banker’s or half-down tie behavior to change silently.\n**Example:** A 0.85 multiplier needs a `1010 → 859` case in addition to values producing fractions below and above one-half.",
+            "tags": [
+              "reviewer",
+              "testing",
+              "rounding"
+            ]
+          }
+        ],
+        "blockers": [],
+        "signals": []
+      },
+      "tokensUsed": {
+        "inputTokens": 94905,
+        "outputTokens": 11220,
+        "cacheReadInputTokens": 1837568,
+        "reasoningOutputTokens": 4299
+      },
+      "elapsedSeconds": 474
+    }
+  ],
+  "overallPassRate": 1
+}

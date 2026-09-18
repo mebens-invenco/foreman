@@ -9,6 +9,7 @@ The task and PR have already been selected. Do not scout, reprioritize, or choos
 {{fragment:task-system-worker}}
 
 {{fragment:review-github}}
+{{fragment:review-github-resolution}}
 
 {{fragment:comment-brevity}}
 
@@ -58,7 +59,7 @@ Priority order inside this action:
   unless there is newer non-agent feedback or you made a code change that newly addresses it.
 - Do not ignore older history when it explains prior decisions that still apply.
 - If the PR has merge conflicts, resolve them by merging the latest base branch into the task branch; do not rebase or cherry-pick. Reconcile both branches' intent instead of defaulting to either side.
-- A review pass may complete with reply mutations only; make code changes only when the feedback or PR
+- A review pass may complete with direct replies only; make code changes only when the feedback or PR
   state actually requires them.
 - If you make code changes, run the relevant automated checks for the affected scope, then commit and push the task branch before returning `completed`.
 - If nothing needs to be changed or replied to for the current PR state, return `no_action_needed`; Foreman records the review checkpoint automatically.

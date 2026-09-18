@@ -2,7 +2,7 @@
 
 The review system is GitHub.
 
-- `GH_TOKEN` is available in the environment for GitHub reads.
+- `GH_TOKEN` is available in the environment for task-scoped GitHub reads and writes permitted by the selected action.
 - Prefer `gh pr view`, `gh pr diff`, `gh api`, and `gh api graphql` for pull request, review, thread, check, commit, and status context.
 - Let `gh` read `GH_TOKEN` from the environment; do not expand or print the token.
 - Discover PR review history, review threads, conversation comments, checks, merge state, and relevant commits yourself before acting.
@@ -10,26 +10,14 @@ The review system is GitHub.
 - When GitHub PR comments, review summaries, or review threads include image links or uploaded assets, fetch and inspect those images before deciding whether code, replies, or thread resolution are needed. Ensure you authenticate the request using `GH_TOKEN`.
 - Before reading a downloaded GitHub comment asset as an image, verify the response is an actual image file, not JSON, HTML, or text. If the download returns an error payload, inspect the error and retry with the correct URL or authorization instead of passing it to image-reading tools.
 
-## GitHub Review Rules
+## GitHub Operations
 
-- For `review` and `retry`, determine current-head review summaries, unresolved review threads, post-head PR comments, failing checks, and merge conflicts from GitHub directly.
-- Only current-head review summaries are actionable.
-- Only submitted review thread comments are actionable; unsubmitted or pending review comments are drafts and must not be addressed or resolved.
-- Only PR conversation comments created after the current head became current are actionable; use `Pull Request Reference.headIntroducedAt` as the cutoff when filtering post-head conversation comments.
-- Failing checks and merge conflicts may require code changes or operational responses.
-- Check remote CI/check status once per pass; do not poll, sleep, wait, or loop for pending checks to finish. If checks are still pending and there is no other actionable work, return `no_action_needed`.
-- If the PR has merge conflicts, first inspect the relevant commit messages and diffs on both the task branch and the base branch so you understand the intent of each side before editing.
-- Do not default to keeping the task branch version of conflicted code. Preserve the selected task's objective while also preserving valid incoming changes from the base branch unless they are truly incompatible.
-- For each conflicted file, identify what the task branch changed, what the base branch changed, and adapt the merged code so both intents are carried forward where possible.
-- Treat disappearing incoming behavior, APIs, tests, and bug fixes as regressions unless you can explicitly justify removing them as incompatible with the selected task's objective.
-- Use the discovered review history and task context to distinguish required task changes from incidental implementation details; prefer adapting your implementation to upstream structure over restoring stale code verbatim.
-- After resolving conflicts, verify that the merged result still satisfies the selected task and has not silently dropped important incoming changes.
-- Use historical GitHub context to avoid undoing prior decisions or flip-flopping on already-settled feedback.
-- When actionable review state conflicts with later maintainer-authored comments in the PR history, treat the later maintainer decision as authoritative for that behavior, even if an older or stale current-head summary still requests a change.
-- If that kind of conflict exists, prefer a review reply explaining that the older feedback was superseded instead of changing code.
-- Do not treat existing uncommitted worktree changes as evidence that a requested change should still be completed; they are non-authoritative unless they match the maintainer-approved direction.
-- If you create or reopen a PR, provide the full title and full body.
-- If you reply to feedback, target the specific review summary, review thread, or PR comment id discovered from GitHub.
-- Use `reply_to_thread_comment` for unresolved review threads and `reply_to_pr_comment` only for top-level PR conversation comments.
-- Resolve threads only when they are actually addressed.
-- Return all GitHub writes as Foreman review mutations instead of calling write APIs directly.
+- Use `gh pr create`, `gh pr edit`, `gh api`, or `gh api graphql` to complete the assigned workflow. Follow repository templates and attachment instructions, including native `--attach` where required. Keep local images outside the repository.
+- Use the selected repository, head branch, and base branch explicitly. Discover an existing open PR for the task branch before creating one. Preserve human edits when updating its body.
+- Inspect remote state before retrying an ambiguous or failed write. `gh pr create --attach` can create a PR and print its URL even when an upload fails and the command exits non-zero. Inspect that PR and complete only missing uploads using `gh pr edit`.
+- Keep retries bounded. Recover only from the specific error observed: re-read the diff for invalid inline locations, inspect your own pending review before submitting it, and check whether a missing thread was deleted. Preserve findings if an inline location cannot be repaired. Report authentication, permissions, and unresolved publication errors honestly.
+- A successful write followed by a local failure is still published. Inspect existing PRs, reviews, and replies before continuing so recovery does not duplicate them.
+- Return `reviewResult` with the confirmed PR URL. For reviewer actions also return the full `reviewedHeadSha` and submitted review GraphQL node IDs (`node_id` from REST), not numeric REST IDs. A completed reviewer pass requires a confirmed submitted review; a no-action reviewer pass includes the reviewed SHA and no submitted IDs.
+- If work is incomplete, return `blocked` or `failed` with confirmed references and the remaining work in the summary/blockers. Finding an existing PR alone does not mean the assignment is complete.
+
+{{context:comment-attribution}}

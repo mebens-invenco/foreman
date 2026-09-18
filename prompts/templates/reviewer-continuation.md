@@ -34,6 +34,11 @@ Restrict this pass to what is new since the prior reviewer pass:
 
 Do not re-review code that was already covered in the prior pass unless newer activity explicitly revisits it. A continuation pass should be narrower and cheaper than the initial review — fewer agents, smaller diff window, no re-litigation of settled findings.
 
+- Check remote CI/check status once per pass; do not poll, sleep, wait, or loop for pending checks to finish.
+- Use historical GitHub context to avoid undoing prior decisions or flip-flopping on already-settled feedback.
+- Submit new feedback directly as one `COMMENT` review pinned to the reviewed `commit_id`. Do not approve, request changes, reply to existing threads, or resolve threads from this action.
+- Verify submission and return the PR URL, full reviewed head SHA, and submitted review node IDs in `reviewResult`. A no-action pass includes the reviewed SHA and no submitted IDs.
+
 ## How To Review
 
 If you invoke the `review-changes` skill, scope its fan-out to the new diff only.

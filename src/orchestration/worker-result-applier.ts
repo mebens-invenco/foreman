@@ -3,12 +3,12 @@ import type {
   LearningMutation,
   RepoRef,
   ReviewContext,
-  ReviewMutation,
   Task,
   TaskPullRequest,
   TaskTarget,
   WorkerResult,
 } from "../domain/index.js";
+import { resolveTaskBranchName } from "../domain/index.js";
 import { type Confidence } from "../curation/confidence-lifecycle.js";
 import type { Embedder } from "../embeddings/embedder.js";
 import { learningEmbeddingText } from "../embeddings/learning-embedding-text.js";
@@ -35,12 +35,6 @@ const consolidationLabels = (config: WorkspaceConfig): { remove: string[]; add: 
     add: ["Agent Consolidated"],
   };
 };
-
-const ensureAgentPrefix = (body: string, agentPrefix: string): string =>
-  body.startsWith(agentPrefix) ? body : `${agentPrefix}${body}`;
-
-const ensureReviewCommentPrefix = (body: string, prefix: string): string =>
-  body.startsWith(prefix) ? body : `${prefix}${body}`;
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 const blockedTaskReloadAttempts = 3;
@@ -142,7 +136,8 @@ export class WorkerResultApplier {
 
   async apply(input: ApplyWorkerResultInput): Promise<string | null> {
     const { workerResult } = input;
-    let pullRequestUrl = await this.resolveCurrentPullRequestUrl(input.task, input.repo, input.target);
+    const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(input.task, input.repo, input.target);
+    const pullRequestUrl = resolvedPullRequest?.pullRequestUrl ?? null;
     const logger = this.logger.child({
       attemptId: input.attempt.id,
       jobId: input.job.id,
@@ -150,10 +145,27 @@ export class WorkerResultApplier {
       action: input.job.action,
       outcome: workerResult.outcome,
     });
-    logger.info("applying worker result mutations");
+    logger.info("applying worker result");
 
     if (input.job.action === "deployment") {
       return this.applyDeploymentResult(input, pullRequestUrl, logger);
+    }
+
+    const ordinaryWork = input.job.action === "execution" || input.job.action === "retry";
+    const successfulOrdinaryWork = ordinaryWork && (workerResult.outcome === "completed" || workerResult.outcome === "no_action_needed");
+    if (workerResult.reviewResult && workerResult.reviewResult.pullRequestUrl !== pullRequestUrl) {
+      throw new ForemanError("invalid_pull_request", "Reported pull request does not match the selected repository and task branch");
+    }
+    if (resolvedPullRequest && (workerResult.reviewResult || successfulOrdinaryWork)) {
+      if (resolvedPullRequest.headBranch !== resolveTaskBranchName(input.task, input.target) ||
+          resolvedPullRequest.baseBranch !== (input.job.baseBranch ?? input.repo.defaultBranch)) {
+        throw new ForemanError("invalid_pull_request", "Reported pull request does not match the selected head and base branches");
+      }
+      await this.recordPullRequest(input.task.id, {
+        repoKey: input.target.repoKey,
+        url: resolvedPullRequest.pullRequestUrl,
+        source: "branch_inferred",
+      }, logger);
     }
 
     if (workerResult.outcome === "blocked") {
@@ -164,7 +176,7 @@ export class WorkerResultApplier {
         });
         logger.warn("posted blocker comment", { blocker });
       }
-      if (input.job.action === "execution" || input.job.action === "retry") {
+      if (ordinaryWork) {
         let blockedTaskUpdatedAt = input.task.updatedAt;
         for (let attempt = 1; attempt <= blockedTaskReloadAttempts; attempt += 1) {
           try {
@@ -192,10 +204,6 @@ export class WorkerResultApplier {
         });
         logger.info("saved blocked ordinary work checkpoint", { blockedTaskUpdatedAt });
       }
-      if (input.job.action === "review" && pullRequestUrl) {
-        await this.applyReviewMutations(workerResult.reviewMutations, pullRequestUrl, logger);
-        await this.saveReviewCheckpoint(input, pullRequestUrl, logger);
-      }
       return pullRequestUrl;
     }
 
@@ -204,59 +212,22 @@ export class WorkerResultApplier {
       return pullRequestUrl;
     }
 
-    const createPullRequests = workerResult.reviewMutations.filter((mutation) => mutation.type === "create_pull_request");
     const requiresPullRequest =
-      (input.job.action === "execution" || input.job.action === "retry") &&
+      ordinaryWork &&
       workerResult.outcome === "completed" &&
       workerResult.signals.includes("code_changed");
 
-    for (const mutation of createPullRequests) {
-      const created = await this.deps.reviewService.createPullRequest({
-        cwd: input.worktreePath,
-        title: mutation.title,
-        body: mutation.body,
-        draft: mutation.draft,
-        baseBranch: mutation.baseBranch,
-        headBranch: mutation.headBranch,
-      });
-      pullRequestUrl = created.url;
-      await this.recordPullRequest(input.task.id, {
-        repoKey: input.target.repoKey,
-        url: created.url,
-        title: mutation.title,
-        source: "local",
-      }, logger);
+    if (requiresPullRequest && (!workerResult.reviewResult || resolvedPullRequest?.state !== "open")) {
+      throw new ForemanError(
+        "missing_pull_request",
+        "Completed execution with code changes must identify an existing open pull request",
+      );
+    }
+
+    if (successfulOrdinaryWork && resolvedPullRequest?.state === "open") {
       await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
-      logger.info("created pull request", { pullRequestUrl: created.url, pullRequestNumber: created.number });
+      logger.info("transitioned task to in_review using verified pull request", { pullRequestUrl });
     }
-
-    if (requiresPullRequest && createPullRequests.length === 0) {
-      if (!pullRequestUrl) {
-        throw new ForemanError(
-          "missing_pull_request",
-          "Execution results with code changes must include a create_pull_request mutation",
-        );
-      }
-
-      await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
-      logger.info("transitioned task to in_review using existing pull request artifact", { pullRequestUrl });
-    }
-
-    if (input.job.action === "execution" && workerResult.outcome === "no_action_needed") {
-      const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(input.task, input.repo, input.target);
-      if (resolvedPullRequest?.state === "open") {
-        pullRequestUrl = resolvedPullRequest.pullRequestUrl;
-        await this.recordPullRequest(input.task.id, {
-          repoKey: input.target.repoKey,
-          url: resolvedPullRequest.pullRequestUrl,
-          source: "branch_inferred",
-        }, logger);
-        await this.deps.taskSystem.transition({ taskId: input.task.id, toState: "in_review" });
-        logger.info("transitioned task to in_review after execution no-op on open pull request", { pullRequestUrl });
-      }
-    }
-
-    await this.applyReviewMutations(workerResult.reviewMutations, pullRequestUrl, logger);
 
     for (const mutation of workerResult.taskMutations) {
       if (mutation.type === "add_comment") {
@@ -305,18 +276,30 @@ export class WorkerResultApplier {
 
     if (
       input.job.action === "reviewer" &&
-      workerResult.outcome === "no_action_needed" &&
+      (workerResult.outcome === "completed" || workerResult.outcome === "no_action_needed") &&
       pullRequestUrl
     ) {
-      const reviewContext =
-        input.reviewContext ??
-        (await this.deps.reviewService.getContext(
-          input.task,
-          this.deps.config.workspace.agentPrefix,
-          input.repo,
-          input.target,
-        ));
-      if (reviewContext) {
+      const reviewContext = await this.deps.reviewService.getContext(
+        input.task,
+        this.deps.config.reviewer.agentPrefix,
+        input.repo,
+        input.target,
+      );
+      const reviewedHeadSha = workerResult.reviewResult?.reviewedHeadSha;
+      const reviewIds = workerResult.reviewResult?.submittedReviewIds ?? [];
+      const submittedReviews = reviewIds.length > 0
+        ? await this.deps.reviewService.getSubmittedReviews(pullRequestUrl, reviewIds)
+        : [];
+      if (!reviewContext || reviewContext.pullRequestUrl !== pullRequestUrl || !reviewedHeadSha ||
+          (workerResult.outcome === "completed" && reviewIds.length === 0) ||
+          reviewIds.some((id) => !submittedReviews.some((review) =>
+            review.id === id && review.commitId === reviewedHeadSha))) {
+        throw new ForemanError("unverified_review", "Could not verify the reported submitted reviews and reviewed head");
+      }
+      if (reviewIds.some((id) => !reviewContext.reviewSummaries.some((review) => review.id === id && review.authoredByAgent))) {
+        logger.warn("published review is missing its attributed summary", { pullRequestUrl, reviewIds: reviewIds.join(",") });
+      }
+      if (reviewContext.headSha === reviewedHeadSha) {
         try {
           this.deps.foremanRepos.reviewerCheckpoints.upsertReviewerCheckpoint({
             taskId: input.task.id,
@@ -340,11 +323,6 @@ export class WorkerResultApplier {
     this.deps.scheduleScout();
     logger.info("scheduled follow-up scout after task mutations", { pullRequestUrl });
     return pullRequestUrl;
-  }
-
-  private async resolveCurrentPullRequestUrl(task: Task, repo: RepoRef, target: TaskTarget): Promise<string | null> {
-    const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(task, repo, target);
-    return resolvedPullRequest?.pullRequestUrl ?? null;
   }
 
   private async applyLearningMutations(
@@ -605,58 +583,6 @@ export class WorkerResultApplier {
         learningIds: pending.map((target) => target.learningId).join(","),
         error: errorMessage(error),
       });
-    }
-  }
-
-  private async applyReviewMutations(mutations: ReviewMutation[], pullRequestUrl: string | null, logger: LoggerService): Promise<void> {
-    for (const mutation of mutations) {
-      if (mutation.type === "create_pull_request") {
-        continue;
-      }
-
-      if (!pullRequestUrl) {
-        throw new ForemanError("missing_pull_request", `Review mutation ${mutation.type} requires a pull request URL`);
-      }
-
-      if (mutation.type === "reply_to_review_summary") {
-        await this.deps.reviewService.replyToReviewSummary(
-          pullRequestUrl,
-          mutation.reviewId,
-          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
-        );
-        logger.info("replied to review summary", { reviewId: mutation.reviewId });
-      }
-      if (mutation.type === "reply_to_thread_comment") {
-        await this.deps.reviewService.replyToThreadComment(
-          pullRequestUrl,
-          mutation.threadId,
-          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
-        );
-        logger.info("replied to review thread", { threadId: mutation.threadId });
-      }
-      if (mutation.type === "reply_to_pr_comment") {
-        await this.deps.reviewService.replyToPrComment(
-          pullRequestUrl,
-          mutation.commentId,
-          ensureAgentPrefix(mutation.body, this.deps.config.workspace.agentPrefix),
-        );
-        logger.info("replied to pull request comment", { commentId: mutation.commentId });
-      }
-      if (mutation.type === "submit_pull_request_review") {
-        await this.deps.reviewService.submitPullRequestReview(pullRequestUrl, {
-          body: ensureReviewCommentPrefix(mutation.body, this.deps.config.reviewer.agentPrefix),
-          event: mutation.event,
-          comments: mutation.comments.map((comment) => ({
-            ...comment,
-            body: ensureReviewCommentPrefix(comment.body, this.deps.config.reviewer.agentPrefix),
-          })),
-        });
-        logger.info("submitted pull request review", { commentCount: mutation.comments.length, event: mutation.event });
-      }
-      if (mutation.type === "resolve_threads") {
-        await this.deps.reviewService.resolveThreads(pullRequestUrl, mutation.threadIds);
-        logger.info("resolved review threads", { threadCount: mutation.threadIds.length });
-      }
     }
   }
 
