@@ -127,6 +127,14 @@ const emptyReviewThreadsResponse = jsonResponse({
 const timeoutError = (): Error => Object.assign(new Error("Timed out"), { name: "TimeoutError" });
 const transportError = (code = "ECONNRESET"): TypeError =>
   new TypeError("fetch failed", { cause: Object.assign(new Error("socket closed with secret request context"), { code }) });
+const githubGraphqlInternalError = jsonResponse({
+  errors: [
+    {
+      message:
+        "Something went wrong while executing your query on 2026-08-14T08:01:08Z. Please include `9E0E:3D0598:488D0C:539292:6A7ECB43` when reporting this issue.",
+    },
+  ],
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -1435,6 +1443,53 @@ describe("GitHubReviewService rate-limit handling", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("retries GitHub GraphQL internal errors for queries", async () => {
+    vi.useFakeTimers();
+    try {
+      global.fetch = vi.fn().mockResolvedValueOnce(githubGraphqlInternalError).mockResolvedValueOnce(pullRequestSummaryResponse) as typeof fetch;
+
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      const result = service.resolvePullRequest(sampleTask());
+      await vi.advanceTimersByTimeAsync(250);
+
+      await expect(result).resolves.toMatchObject({ pullRequestNumber: 946 });
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("classifies exhausted GitHub GraphQL internal errors as provider unavailable", async () => {
+    vi.useFakeTimers();
+    try {
+      global.fetch = vi.fn().mockResolvedValue(githubGraphqlInternalError) as typeof fetch;
+
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      const result = service.resolvePullRequest(sampleTask()).catch((error: unknown) => error);
+      await vi.runAllTimersAsync();
+      const error = await result;
+
+      expect(error).toMatchObject({ code: "provider_unavailable", provider: "github", statusCode: 503 });
+      expect(global.fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("does not retry GraphQL semantic errors", async () => {
+    global.fetch = vi.fn().mockResolvedValueOnce(jsonResponse({ errors: [{ message: "Could not resolve to a node" }] })) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const error = await service.resolvePullRequest(sampleTask()).catch((caught: unknown) => caught);
+
+    expect(isProviderUnavailableError(error)).toBe(false);
+    expect(error).toMatchObject({
+      code: "github_request_failed",
+      message: "GitHub GraphQL request failed: Could not resolve to a node",
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   test("retries GraphQL query transport failures", async () => {
