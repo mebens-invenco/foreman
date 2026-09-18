@@ -62,6 +62,7 @@ export class CronAttemptExecutor {
   async execute(worker: WorkerRecord, job: JobRecord, controller: AbortController): Promise<void> {
     const workerId = worker.id;
     let attempt: AttemptRecord | null = null;
+    let requestedSlackDeliveryAttempted = false;
     const jobLogger = this.logger.child({ workerId, workerSlot: worker.slot, jobId: job.id, cronJobId: job.cronJobId });
 
     try {
@@ -175,7 +176,6 @@ export class CronAttemptExecutor {
           aborted: controller.signal.aborted,
         });
         let summary = summarizeOutput(runResult.stdout, attemptStatus);
-        let requestedSlackDeliveryAttempted = false;
         if (attemptStatus === "completed") {
           try {
             const cronResult = parseCronResult(runResult.stdout);
@@ -264,7 +264,7 @@ export class CronAttemptExecutor {
         finishedAt: isoNow(),
         errorMessage: message,
       });
-      if (attempt) {
+      if (attempt && !requestedSlackDeliveryAttempted) {
         await this.notifyProblem({
           attemptId: attempt.id,
           subjectKey: job.cronJobId ?? job.id,

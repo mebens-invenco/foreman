@@ -3,11 +3,18 @@ import { z } from "zod";
 import { ForemanError } from "../lib/errors.js";
 import { createTimeoutSignal } from "../lib/fetch-timeout.js";
 
-const slackResponseSchema = z.object({
+const slackApiResponseSchema = z.object({
   ok: z.boolean(),
   error: z.string().optional(),
-  channel: z.object({ id: z.string().min(1) }).optional(),
-  ts: z.string().min(1).optional(),
+});
+
+const conversationsOpenResponseSchema = z.object({
+  channel: z.object({ id: z.string().min(1) }),
+});
+
+const chatPostMessageResponseSchema = z.object({
+  channel: z.string().min(1),
+  ts: z.string().min(1),
 });
 
 export type SlackDmReceipt = {
@@ -35,12 +42,13 @@ const callSlack = async (token: string, method: string, body: Record<string, unk
     throw new ForemanError("slack_request_failed", `Slack ${method} request failed with HTTP ${response.status}.`, 502);
   }
 
-  const parsed = slackResponseSchema.safeParse(await response.json());
+  const responseBody = await response.json();
+  const parsed = slackApiResponseSchema.safeParse(responseBody);
   if (!parsed.success || !parsed.data.ok) {
     throw new ForemanError("slack_api_error", `Slack ${method} failed: ${parsed.success ? parsed.data.error ?? "unknown_error" : "invalid_response"}`, 502);
   }
 
-  return parsed.data;
+  return responseBody;
 };
 
 export const postSlackDm = async (input: {
@@ -54,25 +62,29 @@ export const postSlackDm = async (input: {
   }
 
   const timeoutMs = input.timeoutMs ?? 10_000;
-  const opened = await callSlack(input.token, "conversations.open", { users: input.targetUserId }, timeoutMs);
-  if (!opened.channel?.id) {
+  const opened = conversationsOpenResponseSchema.safeParse(
+    await callSlack(input.token, "conversations.open", { users: input.targetUserId }, timeoutMs),
+  );
+  if (!opened.success) {
     throw new ForemanError("slack_api_error", "Slack conversations.open returned no channel ID.", 502);
   }
 
-  const posted = await callSlack(
-    input.token,
-    "chat.postMessage",
-    {
-      channel: opened.channel.id,
-      text: input.text,
-      unfurl_links: false,
-      unfurl_media: false,
-    },
-    timeoutMs,
+  const posted = chatPostMessageResponseSchema.safeParse(
+    await callSlack(
+      input.token,
+      "chat.postMessage",
+      {
+        channel: opened.data.channel.id,
+        text: input.text,
+        unfurl_links: false,
+        unfurl_media: false,
+      },
+      timeoutMs,
+    ),
   );
-  if (!posted.ts) {
-    throw new ForemanError("slack_api_error", "Slack chat.postMessage returned no message timestamp.", 502);
+  if (!posted.success) {
+    throw new ForemanError("slack_api_error", "Slack chat.postMessage returned no channel ID or message timestamp.", 502);
   }
 
-  return { channelId: opened.channel.id, messageTs: posted.ts };
+  return { channelId: posted.data.channel, messageTs: posted.data.ts };
 };

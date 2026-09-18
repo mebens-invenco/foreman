@@ -13,7 +13,7 @@ describe("postSlackDm", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, channel: { id: "D123" } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, ts: "123.456" }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, channel: "D123", ts: "123.456" }), { status: 200 }));
     global.fetch = fetchMock as typeof fetch;
 
     await expect(
