@@ -75,6 +75,8 @@ class FakeTaskSystem implements TaskSystem {
 }
 
 class FakeReviewService implements ReviewService {
+  async getSubmittedReviews() { return []; }
+
   async resolvePullRequest(): Promise<ResolvedPullRequest | null> {
     return null;
   }
@@ -84,24 +86,16 @@ class FakeReviewService implements ReviewService {
   async getContext(): Promise<null> {
     return null;
   }
-  async createPullRequest(): Promise<{ url: string; number: number }> {
-    throw new Error("unused");
-  }
-  async replyToReviewSummary(): Promise<void> {}
-  async replyToThreadComment(): Promise<void> {}
-  async replyToPrComment(): Promise<void> {}
-  async submitPullRequestReview(): Promise<void> {}
-  async resolveThreads(): Promise<void> {}
 }
 
 const markAppliedResult = (action: ActionType, learningId: string): WorkerResult =>
   ({
-    schemaVersion: 1,
+    schemaVersion: 2,
     action,
     outcome: "completed",
     summary: "Done.",
     taskMutations: [],
-    reviewMutations: [],
+    reviewResult: null,
     learningMutations: [{ type: "update", id: learningId, markApplied: true }],
     blockers: [],
     signals: [],

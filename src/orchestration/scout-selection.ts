@@ -26,7 +26,7 @@ import type { WorkspaceConfig } from "../workspace/config.js";
 import { resolveDeploymentInstructions, type DeploymentInstructions } from "../workspace/deployment.js";
 import { branchExistsOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
-import { evaluateBlockedOrdinaryWork, isBlockedOrdinaryWorkPendingUnblock, type TargetProgressState } from "./blocked-ordinary-work.js";
+import { evaluateBlockedOrdinaryWork, hasUnfinishedOrdinaryWork, isBlockedOrdinaryWorkPendingUnblock, type TargetProgressState } from "./blocked-ordinary-work.js";
 import { runStateTransitions } from "./state-transition.js";
 
 type Selection = {
@@ -58,7 +58,8 @@ type ReviewCheckpointState = {
 
 const activeJobStatuses = new Set<JobRecord["status"]>(["queued", "leased", "running"]);
 const stopIntentPhrases = ["abandon", "do not continue", "do not retry"];
-const failedReviewerRetryCooldownMs = 5 * 60 * 1000;
+const workerRetryCooldownMs = 5 * 60 * 1000;
+const maxPullRequestRecoveryAttempts = 3;
 
 const latestRetryWasManuallyStopped = (input: { foremanRepos: ForemanRepos; target: TaskTarget }): boolean => {
   const latestJob = input.foremanRepos.jobs.latestJobForTaskTarget(input.target.id);
@@ -106,8 +107,37 @@ const failedReviewerRetryCooldown = (input: {
     return null;
   }
 
-  const retryAt = finishedAt + failedReviewerRetryCooldownMs;
+  const retryAt = finishedAt + workerRetryCooldownMs;
   return retryAt > Date.now() ? { failedAttemptId: latestAttempt.id, retryAt: new Date(retryAt).toISOString() } : null;
+};
+
+const resolverRetryFingerprint = (context: ReviewContext): string => stableStringify({
+  url: context.pullRequestUrl,
+  headSha: context.headSha,
+  baseBranch: context.baseBranch,
+  reviewSummaryId: latestActionableReviewSummaryId(context),
+  conversationCommentId: latestActionableConversationCommentId(context),
+  threads: actionableReviewThreadFingerprint(context),
+  checks: [...context.failingChecks, ...context.pendingChecks].map(stableStringify).sort(),
+  conflicting: context.mergeState === "conflicting",
+});
+
+const unfinishedResolverRetryCooldown = (input: {
+  foremanRepos: ForemanRepos;
+  target: TaskTarget;
+  reviewContext: ReviewContext;
+}): string | null => {
+  const job = input.foremanRepos.jobs.latestJobForDedupeKey(dedupeKeyForAction(input.target.taskId, input.target.repoKey, "review"));
+  if (!job || job.action !== "review" || !["blocked", "failed"].includes(job.status)) {
+    return null;
+  }
+  const previous = job.selectionContext.reviewContext as ReviewContext | undefined;
+  if (!previous || resolverRetryFingerprint(previous) !== resolverRetryFingerprint(input.reviewContext)) {
+    return null;
+  }
+  const attempt = input.foremanRepos.attempts.latestAttemptForJob(job.id);
+  const retryAt = Date.parse(attempt?.finishedAt ?? "") + workerRetryCooldownMs;
+  return retryAt > Date.now() ? new Date(retryAt).toISOString() : null;
 };
 
 const logBlockedOrdinaryWorkSkip = (logger: LoggerService | undefined, task: Task, target: TaskTarget, progress: TargetProgress): void => {
@@ -355,6 +385,12 @@ const resolveTargetProgress = async (input: {
     return { latestJob, latestAttempt, pullRequest, state: "active" };
   }
   if (pullRequest?.state === "open") {
+    if (isBlockedOrdinaryWorkPendingUnblock(input.task, latestJob, latestAttempt)) {
+      return { latestJob, latestAttempt, pullRequest, state: "blocked" };
+    }
+    if (hasUnfinishedOrdinaryWork(latestJob)) {
+      return { latestJob, latestAttempt, pullRequest, state: "pending" };
+    }
     return { latestJob, latestAttempt, pullRequest, state: "in_review" };
   }
   if (pullRequest?.state === "merged") {
@@ -823,6 +859,10 @@ export const runScoutSelection = async (input: {
   });
 
   const canSchedule = (task: Task, target: TaskTarget, action: ActionType): boolean => {
+    if ((action === "review" || action === "reviewer") &&
+        hasUnfinishedOrdinaryWork(input.foremanRepos.jobs.latestJobForTaskTarget(target.id))) {
+      return false;
+    }
     if (jobs.some((job) => job.task.id === task.id && job.target.repoKey === target.repoKey)) {
       return false;
     }
@@ -904,6 +944,14 @@ export const runScoutSelection = async (input: {
         const context = await getReviewContext(task, target, repo);
         if (!context || context.state !== "open") {
           continue;
+        }
+
+        if (input.triggerType !== "manual") {
+          const retryAt = unfinishedResolverRetryCooldown({ foremanRepos: input.foremanRepos, target, reviewContext: context });
+          if (retryAt) {
+            logger?.info("skipping unchanged unfinished resolver during retry cooldown", { taskId: task.id, repoKey: target.repoKey, retryAt });
+            continue;
+          }
         }
 
         const checkpoint = input.foremanRepos.reviewCheckpoints.getReviewCheckpoint(target.id);
@@ -1176,6 +1224,34 @@ export const runScoutSelection = async (input: {
             continue;
           }
 
+          let selectionContext: Record<string, unknown> = {};
+          if (progress.pullRequest?.state === "open" && hasUnfinishedOrdinaryWork(progress.latestJob)) {
+            const context = await getReviewContext(task, target, repo);
+            if (!context || context.state !== "open") {
+              continue;
+            }
+            const fingerprint = stableStringify({ url: context.pullRequestUrl, headSha: context.headSha, headBranch: context.headBranch, baseBranch: context.baseBranch });
+            const previous = progress.latestJob!.selectionContext.pullRequestRecovery as { fingerprint?: string; attempts?: number } | undefined;
+            const attempts = input.triggerType !== "manual" && previous?.fingerprint === fingerprint && Number.isSafeInteger(previous.attempts)
+              ? Math.max(0, previous.attempts!)
+              : 0;
+            const changed = previous?.fingerprint !== undefined && previous.fingerprint !== fingerprint;
+            const finishedAt = Date.parse(progress.latestAttempt?.finishedAt ?? "");
+            const retryAt = finishedAt + workerRetryCooldownMs * 2 ** Math.min(attempts, maxPullRequestRecoveryAttempts);
+            if (input.triggerType !== "manual" && !changed && (attempts >= maxPullRequestRecoveryAttempts || !Number.isFinite(retryAt) || retryAt > Date.now())) {
+              logger?.info("deferring unfinished open-PR execution recovery", {
+                taskId: task.id, repoKey: target.repoKey, attempts,
+                exhausted: attempts >= maxPullRequestRecoveryAttempts,
+                retryAt: Number.isFinite(retryAt) ? new Date(retryAt).toISOString() : null,
+              });
+              continue;
+            }
+            selectionContext = {
+              ...reviewSelectionContext(context),
+              pullRequestRecovery: { fingerprint, attempts: attempts + 1 },
+            };
+          }
+
           const base = await resolveBaseBranch({
             task,
             target,
@@ -1207,7 +1283,7 @@ export const runScoutSelection = async (input: {
                 : task.state === "in_progress"
                   ? "resumable in-progress repo target"
                   : "remaining repo target on in-review task",
-            selectionContext: {},
+            selectionContext,
           };
           break;
         }

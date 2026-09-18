@@ -11,6 +11,7 @@ import { parseWorkerResult, validateWorkerResultForAction } from "../execution/w
 import { createDefaultWorkspaceConfig, runnerProviderSchema, type WorkspaceConfig } from "../workspace/config.js";
 import { findProjectRoot, type WorkspacePaths } from "../workspace/workspace-paths.js";
 import { EVAL_REGISTRY } from "./registry.js";
+import { readReviewCapture, reviewCaptureDirective } from "./review-capture.js";
 import type { CaseResult, EvalCase, EvalReport, GradeContext, Grader, LivePrFixture, PrReviewFixture, SampleResult } from "./types.js";
 
 export type RunEvalOptions = {
@@ -217,8 +218,14 @@ const runCase = async (evalCase: EvalCase, graders: Grader[], config: WorkspaceC
 
   for (let sampleIndex = 0; sampleIndex < deps.samplesPerCase; sampleIndex += 1) {
     const runner = createAgentRunner({ config, action: evalCase.action });
+    const fixture = evalCase.fixture;
+    const reviewHeadSha = fixture.type === "live-pr" ? fixture.headSha : fixture.type === "pr-review" ? fixture.pullRequestReference.headSha : null;
+    const capturePath = path.join(paths.workspaceRoot, `review-${randomUUID()}.json`);
+    await fs.writeFile(capturePath, "[]");
+    const captureCommand = `node ${JSON.stringify(path.join(paths.projectRoot, "dist/eval/review-capture.js"))} ${JSON.stringify(capturePath)} ${JSON.stringify(reviewHeadSha)}`;
+    const samplePrompt = reviewHeadSha ? `${prompt}\n${reviewCaptureDirective(captureCommand)}` : prompt;
     const startedAt = Date.now();
-    const captured = await runner.invoke({ attemptId: randomUUID(), cwd, env: {}, prompt, timeoutMs: deps.timeoutMs, action: evalCase.action });
+    const captured = await runner.invoke({ attemptId: randomUUID(), cwd, env: {}, prompt: samplePrompt, timeoutMs: deps.timeoutMs, action: evalCase.action });
     const elapsedSeconds = Math.round((Date.now() - startedAt) / 1000);
 
     if (deps.showOutput) {
@@ -226,16 +233,25 @@ const runCase = async (evalCase: EvalCase, graders: Grader[], config: WorkspaceC
     }
 
     let result = null;
+    let reviewWrites: Awaited<ReturnType<typeof readReviewCapture>> = [];
     let parseError: string | undefined;
     try {
       result = validateWorkerResultForAction(parseWorkerResult(captured.stdout), evalCase.action);
+      reviewWrites = await readReviewCapture(capturePath);
+      const ids = result.reviewResult?.submittedReviewIds ?? [];
+      if (reviewHeadSha && (result.reviewResult?.reviewedHeadSha !== reviewHeadSha ||
+          ids.length !== reviewWrites.length || ids.some((id, index) => id !== `EVAL_REVIEW_${index + 1}`))) {
+        throw new Error("Worker review receipts do not match captured submissions and fixture head");
+      }
     } catch (error) {
+      result = null;
       parseError = error instanceof Error ? error.message : String(error);
     }
 
     const ctx: GradeContext = {
       evalCase,
       result,
+      reviewWrites,
       rawStdout: captured.stdout,
       ...(parseError ? { parseError } : {}),
       ...(deps.invokeModel ? { invokeModel: deps.invokeModel } : {}),
@@ -252,6 +268,7 @@ const runCase = async (evalCase: EvalCase, graders: Grader[], config: WorkspaceC
       graderResults,
       pass,
       ...(result ? { result } : {}),
+      reviewWrites,
       elapsedSeconds,
       ...(captured.tokensUsed ? { tokensUsed: captured.tokensUsed } : {}),
     });

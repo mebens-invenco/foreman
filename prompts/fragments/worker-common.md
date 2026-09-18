@@ -10,8 +10,9 @@
 - Do not print, inspect, log, or include credential values in commands, output, commits, comments, or returned JSON.
 - Do not pass credential values as shell arguments; rely on environment variables or tool-native auth.
 - Do not mutate the task system directly; use task mutations.
-- Do not mutate the review system directly; use review mutations.
+- Perform permitted GitHub operations directly during the session and verify their remote outcome before reporting completion.
+- Never merge or close a pull request, or enable auto-merge. This does not prohibit merging the base branch into the task branch to resolve conflicts.
 - If you want to leave a task-local note, use `add_comment`.
-- Foreman manages pull request linkage from review mutations; do not report commits, docs, or links as task artifacts.
+- Foreman manages pull request linkage from verified `reviewResult` references. Use schema version 2; never return `reviewMutations`, even if an earlier session used them.
 - If you are blocked, return `blocked` with explicit blockers.
 - If nothing remains to do, return `no_action_needed`.

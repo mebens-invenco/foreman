@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test } from "vitest";
-import { z } from "zod";
 
 import { createDefaultWorkspaceConfig } from "../workspace/config.js";
 import { priorityToRank, type ReviewContext, type Task } from "../domain/index.js";
@@ -10,7 +9,6 @@ import {
   displayedAgentResultJsonSchema,
   renderAgentResultSchemaHelp,
   workerResultActionValues,
-  workerResultSchema,
   type WorkerResultAction,
 } from "../execution/worker-result.js";
 import { LEARNINGS_INDEX_CAP, renderLearningsIndexSection, stripLearningsIndex } from "../planning/learnings-index.js";
@@ -23,11 +21,6 @@ const cleanupDirs: string[] = [];
 const cleanupDbs: Array<{ close(): void }> = [];
 const projectRoot = testProjectRoot;
 
-// The exact JSON schema the prompt displays for an action, in the compact form
-// prompts inline: the validator's schema with the reviewMutations union filtered
-// to the action's display allowlist (identity for every action without one).
-// Asserting the rendered prompt contains this proves the inline schema is derived
-// from the same validator, so the two cannot silently drift apart.
 const validatorJsonSchema = (action: WorkerResultAction): string => JSON.stringify(displayedAgentResultJsonSchema(action));
 
 afterEach(async () => {
@@ -411,7 +404,7 @@ describe("prompt rendering", () => {
     expect(result).toContain("at least one action-type tag");
     expect(result).toContain("foreman learnings search foo --repo shared");
     expect(result).toContain("including fetching and inspecting any images attached to the initial task");
-    expect(result).toContain("If execution completes with code changes, return a PR review mutation");
+    expect(result).toContain("If execution completes with code changes, verify the open PR");
     expect(result).not.toContain("Task Comments");
     expect(result).not.toContain("please keep this minimal");
     expect(result).not.toContain("upsert_artifact");
@@ -466,6 +459,8 @@ describe("prompt rendering", () => {
         baseBranch: "main",
       });
 
+      expect(result).toContain("Never merge or close a pull request, or enable auto-merge");
+      expect(result).not.toContain("Return all GitHub writes as Foreman review mutations");
       // Inline schema is present and is exactly what the shared validator helper emits...
       expect(result).toContain(renderAgentResultSchemaHelp(action).trim());
       // ...with the embedded JSON schema bound to the validator's own schema for the action.
@@ -486,9 +481,14 @@ describe("prompt rendering", () => {
         worktreePath: workspaceRoot,
         baseBranch: "main",
         continuation: true,
+        commentHeader: "![review agent | test-runner | test-model](https://img.shields.io/badge/test)",
       });
 
       expect(result).toContain(renderAgentResultSchemaHelp(action).trim());
+      expect(result).toContain("Prefix every review summary, inline comment, and reply with this exact first line");
+      expect(result).toContain("![review agent | test-runner | test-model](https://img.shields.io/badge/test)");
+      expect(result).toContain("Never merge or close a pull request, or enable auto-merge");
+      expect(result).not.toContain("Return all GitHub writes as Foreman review mutations");
       expect(result).toContain(`node ${projectRoot}/dist/cli.js agent-result validate --action ${action}`);
       expect(result).toContain("Return exactly one final result block:");
       expect(result).not.toContain("--help");
@@ -512,38 +512,18 @@ describe("prompt rendering", () => {
       // Two renders of the same action produce the identical inline schema (deterministic).
       expect(first).toContain(schemaText);
       expect(second).toContain(schemaText);
-      // The inline schema embeds exactly the displayed JSON schema (validator-derived,
-      // reviewMutations filtered by the action's display allowlist), so any change to
-      // workerResultSchema moves this fixture in lockstep and keeps the inline text honest.
       expect(schemaText).toContain(validatorJsonSchema(action));
     }
   });
 
-  test("prunes the displayed review-mutation variants to the reviewer's allowlist", () => {
-    const variantTypes = (schema: Record<string, unknown>): string[] => {
-      const properties = schema.properties as Record<string, { items?: { oneOf?: { properties?: { type?: { const?: string } } }[] } }>;
-      return (properties.reviewMutations?.items?.oneOf ?? []).map((variant) => variant.properties?.type?.const ?? "?");
-    };
-
-    // Reviewer display: only the one mutation type its template permits; the
-    // validator itself is untouched and still accepts every variant.
-    expect(variantTypes(displayedAgentResultJsonSchema("reviewer"))).toEqual(["submit_pull_request_review"]);
-    const validatorVariants = variantTypes(z.toJSONSchema(workerResultSchema) as Record<string, unknown>);
-    expect(validatorVariants).toContain("reply_to_thread_comment");
-    expect(validatorVariants.length).toBeGreaterThan(1);
-
-    // Every other action (and the generic shape) displays the full validator union.
-    for (const action of workerResultActionValues.filter((value) => value !== "reviewer")) {
-      expect(variantTypes(displayedAgentResultJsonSchema(action))).toEqual(validatorVariants);
+  test("advertises result references instead of deferred GitHub operations", () => {
+    for (const action of workerResultActionValues) {
+      const help = renderAgentResultSchemaHelp(action);
+      expect(help).toContain('"reviewResult"');
+      expect(help).not.toContain('"reviewMutations"');
+      expect(help).not.toContain("reply_to_thread_comment");
+      expect(help).not.toContain("create_pull_request");
     }
-    expect(variantTypes(displayedAgentResultJsonSchema(undefined))).toEqual(validatorVariants);
-
-    // The reviewer prompt stops advertising the forbidden variants entirely.
-    const reviewerHelp = renderAgentResultSchemaHelp("reviewer");
-    expect(reviewerHelp).not.toContain("reply_to_thread_comment");
-    expect(reviewerHelp).not.toContain("resolve_threads");
-    expect(reviewerHelp).toContain("only the review mutation types permitted");
-    expect(renderAgentResultSchemaHelp("review")).toContain("reply_to_thread_comment");
   });
 
   test("renders Linear provider access for Linear worker prompts", async () => {
@@ -627,7 +607,7 @@ describe("prompt rendering", () => {
     expect(reviewPrompt).toContain("include image links or uploaded assets");
     expect(reviewPrompt).toContain("verify the response is an actual image file");
     expect(reviewPrompt).toContain("Do not assume every actionable review item requires a code change.");
-    expect(reviewPrompt).toContain("A review pass may complete with reply mutations only");
+    expect(reviewPrompt).toContain("A review pass may complete with direct replies only");
     expect(reviewPrompt).toContain("Do not reply again to an unresolved review thread when its latest comment was authored by the agent");
     expect(reviewPrompt).toContain("inspect the relevant commit messages and diffs on both the task branch and the base branch");
     expect(reviewPrompt).toContain("Reconcile both branches' intent instead of defaulting to either side.");
@@ -645,7 +625,7 @@ describe("prompt rendering", () => {
     expect(reviewerPrompt).toContain("# Reviewer Prompt");
     expect(reviewerPrompt).toContain("## Learning Review (required end-of-run step)");
     expect(reviewerPrompt).toContain("foreman learnings search foo --repo shared");
-    expect(reviewerPrompt).toContain("submit_pull_request_review");
+    expect(reviewerPrompt).toContain('submit one review directly with `event: "COMMENT"`');
     expect(reviewerPrompt).toContain("ignore comments whose review metadata is missing");
     expect(reviewerPrompt).toContain("include image links or uploaded assets");
     expect(reviewerPrompt).toContain("## Comment Brevity");
@@ -655,7 +635,8 @@ describe("prompt rendering", () => {
     expect(reviewerPrompt).not.toContain("## GitHub Review Rules");
     expect(reviewerPrompt).toContain("Check remote CI/check status once per pass");
     expect(reviewerPrompt).toContain("flip-flopping on already-settled feedback");
-    expect(reviewerPrompt).toContain("Return all GitHub writes as Foreman review mutations");
+    expect(reviewerPrompt).toContain("Verify submission and return the PR URL");
+    expect(reviewerPrompt).not.toContain("Return all GitHub writes as Foreman review mutations");
     expect(reviewerPrompt).not.toContain("### Actionable Now");
 
     const continuationPrompt = await renderWorkerPrompt({
@@ -743,7 +724,8 @@ describe("prompt rendering", () => {
     expect(reviewerContinuationPrompt).not.toContain("## GitHub Review Rules");
     expect(reviewerContinuationPrompt).toContain("Check remote CI/check status once per pass");
     expect(reviewerContinuationPrompt).toContain("flip-flopping on already-settled feedback");
-    expect(reviewerContinuationPrompt).toContain("Return all GitHub writes as Foreman review mutations");
+    expect(reviewerContinuationPrompt).toContain("Verify submission and return the PR URL");
+    expect(reviewerContinuationPrompt).not.toContain("Return all GitHub writes as Foreman review mutations");
     expect(reviewerContinuationPrompt).toContain("## Consumer Context");
     expect(reviewerContinuationPrompt).toContain("## Comment Brevity");
     expect(reviewerContinuationPrompt).toContain("include image links or uploaded assets");
@@ -779,7 +761,7 @@ describe("prompt rendering", () => {
       continuation: true,
     });
     expect(retryPrompt).toContain("# Retry Prompt");
-    expect(retryPrompt).toContain("create_pull_request");
+    expect(retryPrompt).toContain("create the PR directly, verify it, and return its URL");
     expect(retryPrompt).not.toContain("# Review Continuation");
   });
 
