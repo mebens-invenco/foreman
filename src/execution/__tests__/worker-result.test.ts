@@ -1,6 +1,37 @@
 import { describe, expect, test } from "vitest";
 
-import { parseWorkerResult, workerResultExample } from "../worker-result.js";
+import { parseWorkerResult, validateHistoricalWorkerResult, validateWorkerResult, workerResultExample } from "../worker-result.js";
+
+describe("worker result v2", () => {
+  const reviewResult = { pullRequestUrl: "https://github.com/acme/repo/pull/1", reviewedHeadSha: "a".repeat(40), submittedReviewIds: ["PRR_1"] };
+
+  test("accepts verified references for comments-only completed work", () => {
+    expect(validateWorkerResult({ ...workerResultExample, action: "review", reviewResult }).outcome).toBe("completed");
+  });
+
+  test("reads historical commands without accepting them as current results", () => {
+    const { reviewResult: _, ...base } = workerResultExample;
+    const legacy = { ...base, schemaVersion: 1, reviewMutations: [{ type: "create_pull_request", title: "PR", body: "Body", draft: true, headBranch: "task", baseBranch: "main" }] };
+    expect(validateHistoricalWorkerResult(legacy)).toEqual(legacy);
+    expect(() => validateWorkerResult(legacy)).toThrow();
+    expect(() => validateWorkerResult({ ...workerResultExample, reviewMutations: [] })).toThrow();
+  });
+
+  test.each([
+    { ...reviewResult, pullRequestUrl: "https://example.com/acme/repo/pull/1" },
+    { ...reviewResult, reviewedHeadSha: "short-sha" },
+    { ...reviewResult, submittedReviewIds: [] },
+    null,
+  ])("rejects an invalid or incomplete completed reviewer receipt: %j", (receipt) => {
+    expect(() => validateWorkerResult({ ...workerResultExample, action: "reviewer", reviewResult: receipt })).toThrow();
+  });
+
+  test("requires an examined head but no submission for a reviewer no-op", () => {
+    const result = { ...workerResultExample, action: "reviewer", outcome: "no_action_needed", reviewResult: { ...reviewResult, submittedReviewIds: [] } };
+    expect(validateWorkerResult(result).reviewResult).toEqual(result.reviewResult);
+    expect(() => validateWorkerResult({ ...result, reviewResult })).toThrow();
+  });
+});
 
 describe("parseWorkerResult", () => {
   test("accepts valid raw JSON output", () => {

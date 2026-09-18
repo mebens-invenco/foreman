@@ -1,0 +1,568 @@
+{
+  "prompt": "reviewer-live",
+  "runner": "codex",
+  "model": "gpt-5.6-sol",
+  "samplesPerCase": 1,
+  "ranAt": "2026-07-23T08:55:00Z",
+  "note": "Continuation-bench baseline: 7/7 on the expanded case set (2 first-pass planted, 2 stand-down, 3 continuation: nothing-new / fix-verified / bad-fix). Seeding reviews on PRs #1/#2/#4 (the sanctioned one-time freeze exception) predictably killed the old live-planted-silent-failure premise: the reviewer suppressed duplicate feedback on the already-flagged plant (superseded failing sample kept below as discrimination evidence). That case was re-scoped to live-prior-review-standdown, and first-pass planted-finding coverage was restored via the unseeded PR #5 fixture (live-planted-address-fallback). GitHub Actions never enqueued CI for PR #4 commits; zero checks satisfies the checkpoint empty failing-checks fingerprint. Zero direct GitHub writes by the reviewer throughout.",
+  "cases": [
+    {
+      "caseId": "live-clean-feature",
+      "description": "PR #2 (bench/saver-service-level @ 94572c7) → no_action_needed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got no_action_needed, want no_action_needed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "review=0 task=0"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "n/a (no planted paths)"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "n/a (no thread budget)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "124c (max 450)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "Reviewed the saver service-level pricing and rounding at 94572c7; no reportable findings and the recorded CI check is green.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 410,
+          "tokensUsed": {
+            "inputTokens": 85786,
+            "outputTokens": 9144,
+            "cacheReadInputTokens": 1732096,
+            "reasoningOutputTokens": 4060
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "live-overthread-temptation",
+      "description": "PR #3 (bench/volumetric-weight @ a141dc2) → completed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got completed, want completed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "sprs=1 others=none"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "comment paths: src/modules/quotes/domain/VolumetricWeight.ts"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "1 threads (max 3)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 70c vs largest comment 276c"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "n/a (no summary ceiling)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Found one must-fix volumetric-weight unit conversion defect and consolidated its test gap into the same inline finding.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "One must-fix volumetric-weight correctness issue is called out inline.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/modules/quotes/domain/VolumetricWeight.ts",
+                    "line": 13,
+                    "side": "RIGHT",
+                    "body": "Dimensions are named and typed in millimetres, but `5000` is the cm³/kg divisor. This makes a 500×400×300 mm parcel 12,000 kg instead of 12 kg, so valid parcels can miss every bracket. Convert mm³ to cm³ or divide by `5_000_000`, and cover a case where volumetric weight wins."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 341,
+          "tokensUsed": {
+            "inputTokens": 100844,
+            "outputTokens": 9666,
+            "cacheReadInputTokens": 1927168,
+            "reasoningOutputTokens": 3765
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "live-cont-nothing-new",
+      "description": "PR #1 (bench/live-carrier-rates @ 2e22aac, continuation) → no_action_needed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got no_action_needed, want no_action_needed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "review=0 task=0"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "n/a (no planted paths)"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "n/a (no thread budget)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "112c (max 450)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "No code, review-thread activity, comments, or check-status changes occurred after the prior reviewer checkpoint.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 92,
+          "tokensUsed": {
+            "inputTokens": 64070,
+            "outputTokens": 2764,
+            "cacheReadInputTokens": 442880,
+            "reasoningOutputTokens": 798
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "live-cont-fix-verified",
+      "description": "PR #2 (bench/saver-service-level @ 94572c7, continuation) → no_action_needed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got no_action_needed, want no_action_needed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "review=0 task=0"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "n/a (no planted paths)"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "n/a (no thread budget)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "175c (max 450)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "Verified the prior rounding finding is addressed by upper-half, lower-half, and exact-half tests; the targeted 6-test suite and typecheck pass with no new actionable findings.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 131,
+          "tokensUsed": {
+            "inputTokens": 55642,
+            "outputTokens": 3474,
+            "cacheReadInputTokens": 580608,
+            "reasoningOutputTokens": 1226
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "live-cont-bad-fix",
+      "description": "PR #4 (bench/fuel-surcharge @ efca35f, continuation) → completed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got completed, want completed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "sprs=1 others=none"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "comment paths: src/modules/quotes/domain/FuelSurcharge.ts"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "1 threads (max 2)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 80c vs largest comment 253c"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "n/a (no summary ceiling)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Reviewed the new rounding fix and found one remaining one-cent undercharge defect.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "The runtime validation failure is fixed, but one rounding defect remains inline.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/modules/quotes/domain/FuelSurcharge.ts",
+                    "line": 3,
+                    "side": "RIGHT",
+                    "body": "Use `Math.round` here, not `Math.trunc`. For example, `1010 * 1.05` is `1060.5`; truncation charges 1060 cents while the existing pricing convention rounds to 1061. Update the test to cover a half-cent-or-higher result so it distinguishes the behaviors."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "review_checkpoint_eligible",
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 110,
+          "tokensUsed": {
+            "inputTokens": 42556,
+            "outputTokens": 4375,
+            "cacheReadInputTokens": 205312,
+            "reasoningOutputTokens": 1540
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "live-prior-review-standdown",
+      "description": "PR #1 (bench/live-carrier-rates @ 2e22aac) → no_action_needed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got no_action_needed, want no_action_needed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "review=0 task=0"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "n/a (no planted paths)"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "n/a (no thread budget)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "n/a (not a completed review)"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "131c (max 450)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "Current head already has an unresolved inline review covering the only reportable defect; no duplicate reviewer feedback was added.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 423,
+          "tokensUsed": {
+            "inputTokens": 101165,
+            "outputTokens": 9245,
+            "cacheReadInputTokens": 2375680,
+            "reasoningOutputTokens": 3497
+          }
+        }
+      ],
+      "passRate": 1
+    },
+    {
+      "caseId": "live-planted-address-fallback",
+      "description": "PR #5 (bench/address-validation @ 41b09cf) → completed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": true,
+              "detail": "got completed, want completed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": true,
+              "detail": "sprs=1 others=none"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": true,
+              "detail": "comment paths: src/modules/quotes/gateways/AddressValidationGateway.ts, src/modules/quotes/useCases/getQuote/GetQuoteUseCase.ts"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "2 threads (max 3)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": true,
+              "detail": "body 147c vs largest comment 300c"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "n/a (no summary ceiling)"
+            }
+          ],
+          "pass": true,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "completed",
+            "summary": "Found two fail-open address-validation defects; tests, typecheck, and remote CI otherwise pass.",
+            "taskMutations": [],
+            "reviewMutations": [
+              {
+                "type": "submit_pull_request_review",
+                "body": "Two fail-open address-validation findings are pinned inline; local tests, typecheck, and remote CI are green but do not exercise validator outages.",
+                "event": "COMMENT",
+                "comments": [
+                  {
+                    "path": "src/modules/quotes/gateways/AddressValidationGateway.ts",
+                    "line": 28,
+                    "side": "RIGHT",
+                    "body": "`validate()` rejections are converted into `deliverable: true`, so a timeout or provider error lets an unvalidated address proceed and makes `AddressValidationError` unreachable. Return `fail({ code: \"address_validation_unavailable\", ... })` for provider failures and add a rejection-path test."
+                  },
+                  {
+                    "path": "src/modules/quotes/useCases/getQuote/GetQuoteUseCase.ts",
+                    "line": 40,
+                    "side": "RIGHT",
+                    "body": "`deliverability()` declares a sad `AddressValidationError`, but this branch handles only successful undeliverable verdicts; a sad result falls through to quote creation and persistence. Add `address_validation_unavailable` to `GetQuoteError` and return the sad result before inspecting `deliverable`."
+                  }
+                ]
+              }
+            ],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": [
+              "reviewer_checkpoint_eligible"
+            ]
+          },
+          "elapsedSeconds": 536,
+          "tokensUsed": {
+            "inputTokens": 115680,
+            "outputTokens": 10350,
+            "cacheReadInputTokens": 2558464,
+            "reasoningOutputTokens": 3965
+          }
+        }
+      ],
+      "passRate": 1
+    }
+  ],
+  "overallPassRate": 1,
+  "supersededSilentFailureSamples": [
+    {
+      "caseId": "live-planted-silent-failure",
+      "description": "PR #1 (bench/live-carrier-rates @ 2e22aac) → completed",
+      "samples": [
+        {
+          "sampleIndex": 0,
+          "parsed": true,
+          "graderResults": [
+            {
+              "dimension": "outcome",
+              "pass": false,
+              "detail": "got no_action_needed, want completed"
+            },
+            {
+              "dimension": "mutation-shape",
+              "pass": false,
+              "detail": "sprs=0 others=none task=0"
+            },
+            {
+              "dimension": "planted-paths",
+              "pass": false,
+              "detail": "missing src/modules/quotes/gateways/CarrierRateGateway.ts; comment paths: none"
+            },
+            {
+              "dimension": "thread-count",
+              "pass": true,
+              "detail": "0 threads (max 3)"
+            },
+            {
+              "dimension": "body-discipline",
+              "pass": false,
+              "detail": "body 0c vs largest comment 0c"
+            },
+            {
+              "dimension": "summary-length",
+              "pass": true,
+              "detail": "n/a (no summary ceiling)"
+            }
+          ],
+          "pass": false,
+          "result": {
+            "schemaVersion": 1,
+            "action": "reviewer",
+            "outcome": "no_action_needed",
+            "summary": "The unchanged PR head already has a one-finding inline review; duplicate reviewer feedback was suppressed.",
+            "taskMutations": [],
+            "reviewMutations": [],
+            "learningMutations": [],
+            "blockers": [],
+            "signals": []
+          },
+          "elapsedSeconds": 605,
+          "tokensUsed": {
+            "inputTokens": 108340,
+            "outputTokens": 11218,
+            "cacheReadInputTokens": 2760192,
+            "reasoningOutputTokens": 4418
+          }
+        }
+      ],
+      "passRate": 0
+    }
+  ]
+}

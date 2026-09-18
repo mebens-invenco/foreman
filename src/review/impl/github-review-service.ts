@@ -18,21 +18,15 @@ import {
   type Task,
   type TaskTargetRef,
 } from "../../domain/index.js";
-import type { ReviewService } from "../review-service.js";
+import type { ReviewService, SubmittedReview } from "../review-service.js";
+import { isGitHubAgentComment } from "./github-comment-badge.js";
 
 type RepoDescriptor = { owner: string; repo: string };
 
-type PullRequestReviewInlineComment = {
-  path: string;
-  line: number;
-  side?: "LEFT" | "RIGHT";
-  body: string;
-};
-
 const parseGitHubUrl = (url: string): RepoDescriptor & { number: number } => {
   const parsed = new URL(url);
-  const match = parsed.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/(\d+)/);
-  if (!match) {
+  const match = parsed.pathname.match(/^\/([^/]+)\/([^/]+)\/pull\/([1-9]\d*)$/);
+  if (!match || parsed.protocol !== "https:" || parsed.hostname !== "github.com" || parsed.search || parsed.hash) {
     throw new ForemanError("invalid_pr_url", `Invalid GitHub pull request URL: ${url}`);
   }
 
@@ -49,34 +43,14 @@ const parseGitRemote = (remoteUrl: string): RepoDescriptor => {
   throw new ForemanError("unsupported_git_remote", `Unsupported GitHub remote URL: ${remoteUrl}`);
 };
 
-const isUnresolvableReviewCommentError = (error: unknown): boolean =>
-  error instanceof ForemanError &&
-  error.message.includes("GitHub request failed: 422") &&
-  (error.message.includes("Line could not be resolved") || error.message.includes("Path could not be resolved"));
+type GitHubGraphqlError = { type?: string; message: string };
+type GitHubGraphqlResponse<T> = { data?: T; errors?: GitHubGraphqlError[] };
 
-const isExistingPendingReviewError = (error: unknown): boolean =>
-  error instanceof ForemanError &&
-  error.message.includes("GitHub request failed: 422") &&
-  error.message.includes("User can only have one pending review per pull request");
-
-const fallbackReviewBodyForUnresolvableComments = (body: string, comments: PullRequestReviewInlineComment[]): string => {
-  const inlineFeedback = comments
-    .map((comment, index) => {
-      const side = comment.side ?? "RIGHT";
-      return [`### Inline comment ${index + 1}`, `Location: \`${comment.path}:${comment.line}\` (${side})`, "", comment.body].join("\n");
-    })
-    .join("\n\n");
-
-  return [
-    body,
-    "GitHub rejected one or more inline review comment locations as unresolvable, so Foreman is preserving the inline feedback here instead.",
-    inlineFeedback,
-  ]
-    .filter((section) => section.length > 0)
-    .join("\n\n");
-};
-
-type GitHubGraphqlResponse<T> = { data?: T; errors?: Array<{ message: string }> };
+class GitHubGraphqlRequestError extends ForemanError {
+  constructor(readonly errors: GitHubGraphqlError[]) {
+    super("github_request_failed", `GitHub GraphQL request failed: ${errors.map((error) => error.message).join("; ")}`, 502);
+  }
+}
 
 const GITHUB_REQUEST_MAX_ATTEMPTS = 3;
 const GITHUB_REQUEST_RETRY_BACKOFF_MS = [250, 1_000];
@@ -238,11 +212,6 @@ type GitHubRestPullRequest = {
   base: {
     ref: string;
   };
-};
-
-type GitHubRestPullRequestReview = {
-  id: number;
-  state: string;
 };
 
 type GitHubPullRequestMergeable = "MERGEABLE" | "CONFLICTING" | "UNKNOWN" | null;
@@ -740,11 +709,7 @@ export class GitHubReviewService implements ReviewService {
           attempt,
           durationMs: Date.now() - startedAt,
         });
-        throw new ForemanError(
-          "github_request_failed",
-          `GitHub GraphQL request failed: ${json.errors.map((error) => error.message).join("; ")}`,
-          502,
-        );
+        throw new GitHubGraphqlRequestError(json.errors);
       }
 
       if (!json.data) {
@@ -783,13 +748,13 @@ export class GitHubReviewService implements ReviewService {
       return true;
     }
 
-    if (body.startsWith(agentPrefix)) {
+    if (body.startsWith(agentPrefix) || isGitHubAgentComment(body, agentPrefix)) {
       return true;
     }
 
     const reviewReplyPrefix = /^In reply to review [^:]+:\n\n/;
     const nestedAgentBody = body.replace(reviewReplyPrefix, "");
-    return nestedAgentBody.startsWith(agentPrefix);
+    return nestedAgentBody.startsWith(agentPrefix) || isGitHubAgentComment(nestedAgentBody, agentPrefix);
   }
 
   private isSubmittedReview(review: GitHubPullRequestReviewRef): boolean {
@@ -1140,29 +1105,15 @@ export class GitHubReviewService implements ReviewService {
     return promise;
   }
 
-  private async resolvePullRequestByBranch(task: Task, repo: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null> {
-    const effectiveTarget = target ?? resolveTaskTargetRef(task, repo.key);
-    if (!effectiveTarget) {
-      this.logger.debug("skipping branch-based GitHub pull request lookup because task has no target for repo", {
-        taskId: task.id,
-        repoKey: repo.key,
-      });
-      return null;
-    }
-    const branchName = resolveTaskBranchName(task, effectiveTarget);
-
-    const descriptor = await this.repoDescriptorFromRepo(repo);
+  private async resolvePullRequestByHead(
+    descriptor: RepoDescriptor,
+    branchName: string,
+    state: "all" | "open" = "all",
+  ): Promise<ResolvedPullRequest | null> {
     const query = new URLSearchParams({
-      state: "all",
+      state,
       head: `${descriptor.owner}:${branchName}`,
       per_page: "20",
-    });
-    this.logger.debug("resolving GitHub pull request by task branch", {
-      taskId: task.id,
-      repoKey: repo.key,
-      owner: descriptor.owner,
-      repo: descriptor.repo,
-      branchName,
     });
     const pullRequests = await this.rest<GitHubRestPullRequest[]>(`/repos/${descriptor.owner}/${descriptor.repo}/pulls?${query.toString()}`);
     const bestMatch = pullRequests
@@ -1177,11 +1128,6 @@ export class GitHubReviewService implements ReviewService {
       })[0];
 
     if (!bestMatch) {
-      this.logger.debug("no GitHub pull request matched task branch", {
-        taskId: task.id,
-        repoKey: repo.key,
-        branchName,
-      });
       return null;
     }
 
@@ -1196,6 +1142,36 @@ export class GitHubReviewService implements ReviewService {
     });
   }
 
+  private async resolvePullRequestByBranch(task: Task, repo: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null> {
+    const effectiveTarget = target ?? resolveTaskTargetRef(task, repo.key);
+    if (!effectiveTarget) {
+      this.logger.debug("skipping branch-based GitHub pull request lookup because task has no target for repo", {
+        taskId: task.id,
+        repoKey: repo.key,
+      });
+      return null;
+    }
+    const branchName = resolveTaskBranchName(task, effectiveTarget);
+
+    const descriptor = await this.repoDescriptorFromRepo(repo);
+    this.logger.debug("resolving GitHub pull request by task branch", {
+      taskId: task.id,
+      repoKey: repo.key,
+      owner: descriptor.owner,
+      repo: descriptor.repo,
+      branchName,
+    });
+    const pullRequest = await this.resolvePullRequestByHead(descriptor, branchName);
+    if (!pullRequest) {
+      this.logger.debug("no GitHub pull request matched task branch", {
+        taskId: task.id,
+        repoKey: repo.key,
+        branchName,
+      });
+    }
+    return pullRequest;
+  }
+
   async resolvePullRequest(task: Task, repo?: RepoRef, target?: TaskTargetRef): Promise<ResolvedPullRequest | null> {
     if (repo) {
       const branchPullRequest = await this.resolvePullRequestByBranch(task, repo, target);
@@ -1206,6 +1182,13 @@ export class GitHubReviewService implements ReviewService {
 
     const prUrl = this.pullRequestUrl(task, repo, target);
     if (prUrl) {
+      if (repo) {
+        const descriptor = await this.repoDescriptorFromRepo(repo);
+        const reference = parseGitHubUrl(prUrl);
+        if (reference.owner !== descriptor.owner || reference.repo !== descriptor.repo) {
+          throw new ForemanError("invalid_pr_url", "Linked pull request belongs to a different repository");
+        }
+      }
       return this.resolvePullRequestFromUrl(prUrl, task.id);
     }
 
@@ -1347,6 +1330,45 @@ export class GitHubReviewService implements ReviewService {
     }
   }
 
+  async getSubmittedReviews(prUrl: string, reviewIds: string[]): Promise<SubmittedReview[]> {
+    parseGitHubUrl(prUrl);
+    if (reviewIds.length === 0) {
+      return [];
+    }
+    const data = await this.graphql<{
+      nodes: Array<{
+        __typename: string;
+        id: string;
+        viewerDidAuthor: boolean;
+        state: string;
+        submittedAt: string | null;
+        commit: { oid: string } | null;
+        pullRequest: { url: string };
+      } | null>;
+    }>(
+      `query ForemanSubmittedReviews($ids: [ID!]!) {
+        nodes(ids: $ids) {
+          __typename
+          ... on PullRequestReview {
+            id
+            viewerDidAuthor
+            state
+            submittedAt
+            commit { oid }
+            pullRequest { url }
+          }
+        }
+      }`,
+      { ids: reviewIds },
+    );
+    return data.nodes.flatMap((review) =>
+      review?.__typename === "PullRequestReview" && review.viewerDidAuthor &&
+      review.pullRequest.url === prUrl && review.commit && this.isSubmittedReview(review)
+        ? [{ id: review.id, commitId: review.commit.oid }]
+        : [],
+    );
+  }
+
   async findLatestOpenPullRequestBranch(task: Task, repo?: RepoRef, target?: TaskTargetRef): Promise<string | null> {
     const pullRequest = await this.resolvePullRequest(task, repo, target);
     const branch = pullRequest?.state === "open" ? pullRequest.headBranch : null;
@@ -1362,219 +1384,4 @@ export class GitHubReviewService implements ReviewService {
     return repo;
   }
 
-  async createPullRequest(input: {
-    cwd: string;
-    title: string;
-    body: string;
-    draft: boolean;
-    baseBranch: string;
-    headBranch: string;
-  }): Promise<{ url: string; number: number }> {
-    const repo = await this.repoDescriptorFromCwd(input.cwd);
-    this.logger.info("creating GitHub pull request", {
-      cwd: input.cwd,
-      owner: repo.owner,
-      repo: repo.repo,
-      baseBranch: input.baseBranch,
-      headBranch: input.headBranch,
-      draft: input.draft,
-      titleLength: input.title.length,
-      bodyLength: input.body.length,
-    });
-    const result = await this.rest<{ html_url: string; number: number }>(`/repos/${repo.owner}/${repo.repo}/pulls`, {
-      method: "POST",
-      body: JSON.stringify({
-        title: input.title,
-        body: input.body,
-        draft: input.draft,
-        base: input.baseBranch,
-        head: input.headBranch,
-      }),
-      headers: {
-        "content-type": "application/json",
-      },
-    });
-    this.logger.info("created GitHub pull request", { owner: repo.owner, repo: repo.repo, pullRequestUrl: result.html_url, pullRequestNumber: result.number });
-    return { url: result.html_url, number: result.number };
-  }
-
-  private async findPendingPullRequestReview(owner: string, repo: string, number: number): Promise<GitHubRestPullRequestReview | null> {
-    for (let page = 1; ; page += 1) {
-      const reviews = await this.rest<GitHubRestPullRequestReview[]>(`/repos/${owner}/${repo}/pulls/${number}/reviews?per_page=100&page=${page}`);
-      const pendingReview = reviews.find((review) => review.state === "PENDING");
-      if (pendingReview) {
-        return pendingReview;
-      }
-
-      if (reviews.length < 100) {
-        return null;
-      }
-    }
-  }
-
-  private async createPullRequestReviewWithPendingRecovery(input: {
-    owner: string;
-    repo: string;
-    number: number;
-    body: Record<string, unknown>;
-    commentCount: number;
-  }): Promise<void> {
-    const path = `/repos/${input.owner}/${input.repo}/pulls/${input.number}/reviews`;
-    const init = {
-      method: "POST",
-      body: JSON.stringify(input.body),
-      headers: { "content-type": "application/json" },
-    };
-
-    try {
-      await this.rest(path, init);
-      return;
-    } catch (error) {
-      if (!isExistingPendingReviewError(error)) {
-        throw error;
-      }
-
-      const pendingReview = await this.findPendingPullRequestReview(input.owner, input.repo, input.number);
-      if (!pendingReview) {
-        throw error;
-      }
-
-      this.logger.warn("deleting stale GitHub pending pull request review before retrying submission", {
-        owner: input.owner,
-        repo: input.repo,
-        pullRequestNumber: input.number,
-        reviewId: pendingReview.id,
-        commentCount: input.commentCount,
-      });
-      await this.rest(`/repos/${input.owner}/${input.repo}/pulls/${input.number}/reviews/${pendingReview.id}`, { method: "DELETE" });
-      await this.rest(path, init);
-    }
-  }
-
-  async submitPullRequestReview(
-    prUrl: string,
-    input: {
-      body: string;
-      event: "COMMENT";
-      comments: PullRequestReviewInlineComment[];
-    },
-  ): Promise<void> {
-    const { owner, repo, number } = parseGitHubUrl(prUrl);
-    this.logger.info("submitting GitHub pull request review", {
-      owner,
-      repo,
-      pullRequestNumber: number,
-      event: input.event,
-      bodyLength: input.body.length,
-      commentCount: input.comments.length,
-    });
-    try {
-      await this.createPullRequestReviewWithPendingRecovery({
-        owner,
-        repo,
-        number,
-        commentCount: input.comments.length,
-        body: {
-          body: input.body,
-          event: input.event,
-          comments: input.comments.map((comment) => ({
-            path: comment.path,
-            line: comment.line,
-            side: comment.side ?? "RIGHT",
-            body: comment.body,
-          })),
-        },
-      });
-    } catch (error) {
-      if (!isUnresolvableReviewCommentError(error) || input.comments.length === 0) {
-        throw error;
-      }
-
-      this.logger.warn("retrying GitHub pull request review without inline comments after unresolvable location rejection", {
-        owner,
-        repo,
-        pullRequestNumber: number,
-        commentCount: input.comments.length,
-      });
-      await this.createPullRequestReviewWithPendingRecovery({
-        owner,
-        repo,
-        number,
-        commentCount: 0,
-        body: {
-          body: fallbackReviewBodyForUnresolvableComments(input.body, input.comments),
-          event: input.event,
-        },
-      });
-    }
-    this.logger.info("submitted GitHub pull request review", { owner, repo, pullRequestNumber: number, commentCount: input.comments.length });
-  }
-
-  async replyToReviewSummary(prUrl: string, reviewId: string, body: string): Promise<void> {
-    const { owner, repo, number } = parseGitHubUrl(prUrl);
-    this.logger.info("replying to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl, bodyLength: body.length });
-    await this.rest(`/repos/${owner}/${repo}/issues/${number}/comments`, {
-      method: "POST",
-      body: JSON.stringify({ body: `${body}\n\nIn reply to review ${reviewId}.` }),
-      headers: { "content-type": "application/json" },
-    });
-    this.logger.info("replied to GitHub review summary", { owner, repo, reviewId, pullRequestUrl: prUrl });
-  }
-
-  async replyToThreadComment(prUrl: string, threadId: string, body: string): Promise<void> {
-    const { owner, repo, number } = parseGitHubUrl(prUrl);
-    this.logger.info("replying to GitHub review thread", {
-      owner,
-      repo,
-      pullRequestNumber: number,
-      threadId,
-      bodyLength: body.length,
-    });
-    await this.graphql(
-      `mutation AddPullRequestReviewThreadReply($threadId: ID!, $body: String!) {
-        addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $threadId, body: $body }) {
-          comment { id }
-        }
-      }`,
-      { threadId, body },
-    );
-    this.logger.info("replied to GitHub review thread", { owner, repo, pullRequestNumber: number, threadId });
-  }
-
-  async replyToPrComment(prUrl: string, commentId: string, body: string): Promise<void> {
-    const { owner, repo, number } = parseGitHubUrl(prUrl);
-    this.logger.info("replying to GitHub pull request comment", {
-      owner,
-      repo,
-      pullRequestNumber: number,
-      commentId,
-      bodyLength: body.length,
-    });
-    await this.rest(`/repos/${owner}/${repo}/issues/${number}/comments`, {
-      method: "POST",
-      body: JSON.stringify({ body }),
-      headers: { "content-type": "application/json" },
-    });
-    this.logger.info("replied to GitHub pull request comment", { owner, repo, pullRequestNumber: number, commentId });
-  }
-
-  async resolveThreads(prUrl: string, threadIds: string[]): Promise<void> {
-    const { owner, repo, number } = parseGitHubUrl(prUrl);
-    this.logger.info("resolving GitHub review threads", {
-      owner,
-      repo,
-      pullRequestNumber: number,
-      threadCount: threadIds.length,
-    });
-    for (const threadId of threadIds) {
-      this.logger.debug("resolving GitHub review thread", { owner, repo, pullRequestNumber: number, threadId });
-      await this.graphql(
-        `mutation ResolveReviewThread($threadId: ID!) {
-          resolveReviewThread(input: { threadId: $threadId }) { thread { id isResolved } }
-        }`,
-        { threadId },
-      );
-    }
-    this.logger.info("resolved GitHub review threads", { owner, repo, pullRequestNumber: number, threadCount: threadIds.length });
-  }
 }

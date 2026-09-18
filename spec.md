@@ -249,6 +249,9 @@ runner:
     effort: high
     timeoutMs: 3600000
 
+reviewer:
+  agentPrefix: "[review agent] "
+
 scheduler:
   workerConcurrency: 4
   scoutPollIntervalSeconds: 60
@@ -273,7 +276,10 @@ http:
 - `repos.explicit` entries must resolve to git repos
 - `repos.roots` entries must exist
 - `workspace.agentPrefix` must be non-empty
+- `reviewer.agentPrefix` must be non-empty
 - all configured Linear states and labels must exist exactly or scheduler startup fails
+
+For GitHub comments and reviews, these prefix values provide the user-controlled right-hand label of a Shields.io static badge. Foreman trims whitespace and one surrounding bracket pair, so the defaults render as `agent` and `review agent`. Linear and file task comments continue to use the configured text prefixes unchanged.
 
 ## Auth
 
@@ -673,8 +679,8 @@ type CheckState = {
 
 Review filtering rules:
 
-- actionable review summaries are top-level review summaries whose `commitId` equals the current PR `headSha`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
-- actionable conversation comments are top-level PR conversation comments created after `headIntroducedAt`, excluding empty bodies and bodies prefixed with `workspace.agentPrefix`
+- actionable review summaries are top-level review summaries whose `commitId` equals the current PR `headSha`, excluding empty bodies and bodies carrying either the legacy `workspace.agentPrefix` or its implementation-agent badge
+- actionable conversation comments are top-level PR conversation comments created after `headIntroducedAt`, excluding empty bodies and bodies carrying either the legacy `workspace.agentPrefix` or its implementation-agent badge
 - actionable unresolved threads are file/line review threads where `isResolved == false` and the latest nested thread comment is not agent-authored, enriched with their nested thread comments
 - review checkpoint check fingerprinting only considers failing checks; pending checks remain available in live review context but do not invalidate a review checkpoint
 
@@ -814,12 +820,12 @@ Parser behavior:
 
 ```ts
 type WorkerResult = {
-  schemaVersion: 1
-  action: "execution" | "review" | "retry" | "consolidation"
-  outcome: "completed" | "no_action_needed" | "blocked" | "failed"
+  schemaVersion: 2
+  action: "execution" | "review" | "reviewer" | "retry" | "deployment" | "consolidation"
+  outcome: "completed" | "no_action_needed" | "blocked" | "failed" | "succeeded" | "in_progress" | "follow_up_created"
   summary: string
   taskMutations: TaskMutation[]
-  reviewMutations: ReviewMutation[]
+  reviewResult: ReviewResult | null
   learningMutations: LearningMutation[]
   blockers: Blocker[]
   signals: Signal[]
@@ -841,33 +847,31 @@ type TaskMutation =
   | { type: "add_comment"; body: string }
 ```
 
-### Review Mutations
+### GitHub Results
 
 ```ts
-type ReviewMutation =
-  | {
-      type: "create_pull_request"
-      title: string
-      body: string
-      draft: boolean
-      baseBranch: string
-      headBranch: string
-    }
-  | {
-      type: "reopen_pull_request"
-      pullRequestUrl?: string
-      pullRequestNumber?: number
-      draft: boolean
-      title?: string
-      body?: string
-    }
-  | { type: "reply_to_review_summary"; reviewId: string; body: string }
-  | { type: "reply_to_thread_comment"; threadId: string; body: string }
-  | { type: "reply_to_pr_comment"; commentId: string; body: string }
-  | { type: "resolve_threads"; threadIds: string[] }
+type ReviewResult = {
+  pullRequestUrl: string
+  reviewedHeadSha?: string
+  submittedReviewIds?: string[]
+}
 ```
 
-Foreman prepends `workspace.agentPrefix` to outbound review replies if the worker body does not already include it.
+Workers create and edit task PRs, attach assets, submit `COMMENT` reviews, reply, and resolve threads directly using authenticated GitHub tools. They must never merge or close PRs or enable auto-merge. Merging the base branch into the task branch to resolve conflicts remains permitted. Task-system and learning mutations stay Foreman-owned.
+
+`reviewResult` records confirmed work, not commands to execute. Reviewer completion requires the full reviewed commit SHA and submitted GraphQL review node IDs (`node_id` in REST responses). A no-action reviewer result identifies the reviewed head without claiming a submission. Foreman verifies the PR's repository/head/base and review references, then records linkage and checkpoints. A head changed during the pass remains eligible for review.
+
+Foreman renders an exact Shields.io attribution header into worker context using the configured role label and resolved runner/model. Workers prefix review summaries, inline comments, and replies with that header. Resolver and reviewer labels remain distinct so reviewer findings trigger resolver work while resolver replies do not trigger themselves. Existing badges and legacy prefixes remain readable.
+
+Writes may succeed before a runner or attachment upload fails. Workers inspect remote state before retrying; result recovery is read-only. Scout discovers existing PRs and resumes unfinished ordinary work on the same branch instead of treating PR existence as completion. A retry after an externally closed PR still uses the fresh-implementation workflow.
+
+Unchanged blocked/failed resolver work waits five minutes before automatic reselection. New feedback, a changed head/base, changed failing or pending checks, or a manual scout can resume it sooner. This delay does not record unfinished work as a completed review checkpoint.
+
+Failed or canceled execution with an open PR gets at most three automatic recovery attempts for the same PR/head/branch/base, delayed by five, ten, and twenty minutes. Recovery counts live in job selection context and survive restart. A manual scout or changed PR state starts a new recovery allowance; exhausted work does not repeatedly spawn workers.
+
+Submitted-review verification reads the supplied GitHub review node IDs directly and checks publication, PR ownership, authenticated authorship, and commit identity. Missing badge formatting or an empty summary produces an attribution warning, not another publication attempt. A new head after submission remains eligible for a new review.
+
+Before upgrading from schema version 1, pause new scheduling and drain active attempts, then restart with the new code and prompts. New/resumed workers use version 2; old mutation-bearing results are rejected and sent through read-only result recovery. Historical v1 artifacts remain readable through eval harvesting and are never replayed.
 
 ### Learning Mutations
 
@@ -1003,6 +1007,7 @@ Scout ignores comments that are:
 
 - empty
 - prefixed with `workspace.agentPrefix`
+- marked with the corresponding implementation-agent badge on GitHub
 
 Everything else is treated as potentially actionable.
 

@@ -9,6 +9,7 @@ The task and target have already been selected. Do not scout, reprioritize, or c
 {{fragment:task-system-worker}}
 
 {{fragment:review-github}}
+{{fragment:review-github-resolution}}
 
 {{fragment:learning-policy}}
 

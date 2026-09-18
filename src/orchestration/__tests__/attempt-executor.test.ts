@@ -13,7 +13,7 @@ import type { ReviewService } from "../../review/index.js";
 import type { TaskSystem } from "../../tasking/index.js";
 import { FakeEmbedder } from "../../test-support/fake-embedder.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
-import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
+import { createDefaultWorkspaceConfig, runnerTuningValue } from "../../workspace/config.js";
 import { AttemptExecutor } from "../attempt-executor.js";
 
 const runnerMocks = vi.hoisted(() => {
@@ -85,12 +85,12 @@ const createGitRepo = async (root: string): Promise<void> => {
 };
 
 const createWorkerResult = (overrides: Partial<WorkerResult> = {}): WorkerResult => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   action: "execution",
   outcome: "completed",
   summary: "Recovered structured result.",
   taskMutations: [],
-  reviewMutations: [],
+  reviewResult: null,
   learningMutations: [],
   blockers: [],
   signals: [],
@@ -204,12 +204,12 @@ describe("AttemptExecutor", () => {
       db.jobs.claimQueuedJobForWorker(job.id, db.workers.listWorkers()[0]!.id);
       const claimedJob = db.jobs.getJob(job.id);
       const recoveredResult: WorkerResult = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         action: "execution",
         outcome: "completed",
         summary: "Recovered structured result.",
         taskMutations: [],
-        reviewMutations: [],
+        reviewResult: null,
         learningMutations: [],
         blockers: [],
         signals: [],
@@ -274,10 +274,12 @@ describe("AttemptExecutor", () => {
       await logger.flush();
 
       expect(runnerMocks.invoke).toHaveBeenCalledTimes(2);
+      expect(runnerMocks.invoke.mock.calls[0]![0].prompt).toContain("## GitHub Comment Attribution");
+      expect(runnerMocks.invoke.mock.calls[0]![0].prompt).toContain("![agent | ");
       expect(runnerMocks.invoke.mock.calls[1]![0]).toMatchObject({
         nativeSessionId: "native-session-1",
       });
-      expect(runnerMocks.invoke.mock.calls[1]![0].prompt).toContain("could not parse a valid `<agent-result>` block");
+      expect(runnerMocks.invoke.mock.calls[1]![0].prompt).toContain("could not parse a valid current-version `<agent-result>` block");
 
       const attempt = db.attempts.latestAttemptForJob(job.id)!;
       // Both invokes — the primary and the recovery — carry the attempt seam's
@@ -726,6 +728,75 @@ describe("AttemptExecutor", () => {
       await logger.flush();
 
       expect(runnerMocks.createAgentRunner).toHaveBeenCalledWith(expect.objectContaining({ continuation: true }));
+    } finally {
+      db.close();
+    }
+  });
+
+  test("starts a fresh session after a resumed session is invalidated", async () => {
+    const { db, claimedJob, executor, logger, target, config } = await createExecutorContext({ action: "execution" });
+    const runnerSelector = {
+      taskTargetId: target.id,
+      role: "implementation" as const,
+      runnerName: config.runner.execution.type,
+      runnerModel: config.runner.execution.model,
+      runnerVariant: runnerTuningValue(config.runner.execution),
+    };
+    db.runnerSessions.createSession({
+      ...runnerSelector,
+      isActive: true,
+      nativeSessionId: "missing-native-session",
+    });
+
+    try {
+      const workerResult = createWorkerResult({ summary: "Fresh session completed." });
+      runnerMocks.invoke
+        .mockResolvedValueOnce({
+          exitCode: 1,
+          signal: null,
+          startedAt: "2026-05-06T00:00:00.000Z",
+          finishedAt: "2026-05-06T00:01:00.000Z",
+          stdoutBytes: 0,
+          stderrBytes: 76,
+          stdout: "",
+          stderr: "No conversation found with session ID: missing-native-session",
+        })
+        .mockResolvedValueOnce({
+          exitCode: 0,
+          signal: null,
+          startedAt: "2026-05-06T00:02:00.000Z",
+          finishedAt: "2026-05-06T00:03:00.000Z",
+          stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+          stderrBytes: 0,
+          stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+          stderr: "",
+          nativeSessionId: "fresh-native-session",
+        });
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      expect(db.runnerSessions.getActiveSession(runnerSelector)).toBeNull();
+
+      const nextJob = db.jobs.createJob({
+        taskId: task.id,
+        taskTargetId: target.id,
+        taskProvider: "file",
+        action: "execution",
+        priorityRank: priorityToRank(task.priority),
+        repoKey: "foreman",
+        baseBranch: "master",
+        dedupeKey: `${task.id}:execution:next`,
+        selectionReason: "test next attempt",
+      });
+      db.jobs.claimQueuedJobForWorker(nextJob.id, db.workers.listWorkers()[0]!.id);
+      await executor.execute(db.workers.listWorkers()[0]!, db.jobs.getJob(nextJob.id), new AbortController());
+      await logger.flush();
+
+      expect(runnerMocks.invoke).toHaveBeenCalledTimes(2);
+      expect(runnerMocks.invoke.mock.calls[0]![0]).toMatchObject({ nativeSessionId: "missing-native-session" });
+      expect(runnerMocks.invoke.mock.calls[1]![0]).not.toHaveProperty("nativeSessionId");
+      expect(runnerMocks.createAgentRunner).toHaveBeenNthCalledWith(1, expect.objectContaining({ continuation: true }));
+      expect(runnerMocks.createAgentRunner).toHaveBeenNthCalledWith(2, expect.objectContaining({ continuation: false }));
+      expect(db.runnerSessions.getActiveSession(runnerSelector)?.nativeSessionId).toBe("fresh-native-session");
     } finally {
       db.close();
     }

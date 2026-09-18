@@ -5,6 +5,10 @@ export type TargetProgressState = "pending" | "active" | "in_review" | "merged" 
 
 export const blockedTaskUpdatedAtContextKey = "blockedTaskUpdatedAt";
 
+export const hasUnfinishedOrdinaryWork = (job: JobRecord | null): boolean =>
+  Boolean(job && (job.action === "execution" || job.action === "retry") &&
+    ["failed", "blocked", "canceled"].includes(job.status));
+
 export type BlockedOrdinaryWorkEvaluation = {
   pendingUnblock: boolean;
   reason: "not_blocked" | "non_blocked_attempt" | "missing_marker" | "invalid_timestamp" | "matching_marker" | "task_updated";

@@ -42,12 +42,12 @@ afterEach(async () => {
 });
 
 const baseWorkerResult = (overrides: Partial<WorkerResult> = {}): WorkerResult => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   action: "review",
   outcome: "completed",
   summary: "done",
   taskMutations: [],
-  reviewMutations: [],
+  reviewResult: overrides.action === "reviewer" ? { pullRequestUrl: reviewContext.pullRequestUrl, reviewedHeadSha: reviewContext.headSha } : null,
   learningMutations: [],
   blockers: [],
   signals: [],
@@ -992,7 +992,7 @@ describe("SchedulerService applyWorkerResult", () => {
         workerResult: baseWorkerResult({
           outcome: "blocked",
           blockers: ["Check logs are unavailable."],
-          reviewMutations: [{ type: "resolve_threads", threadIds: ["thread-1"] }],
+          reviewResult: { pullRequestUrl: reviewContext.pullRequestUrl },
         }),
       }),
     ).resolves.toBe(reviewContext.pullRequestUrl);
@@ -1001,17 +1001,11 @@ describe("SchedulerService applyWorkerResult", () => {
       taskId: "TASK-0001",
       body: "[agent] Check logs are unavailable.",
     });
-    expect(upsertReviewCheckpoint).toHaveBeenCalledWith({
-      taskId: "TASK-0001",
-      taskTargetId: sampleTarget.id,
-      prUrl: reviewContext.pullRequestUrl,
-      reviewContext,
-      sourceAttemptId: "attempt-2c",
-    });
-    expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
+    expect(upsertReviewCheckpoint).not.toHaveBeenCalled();
+    expect(resolveThreads).not.toHaveBeenCalled();
   });
 
-  test("submits reviewer comment reviews with the reviewer prefix", async () => {
+  test("verifies a published reviewer result without submitting it again", async () => {
     const submitPullRequestReview = vi.fn(async () => undefined);
     const scheduler = new SchedulerService({
       embedder: new FakeEmbedder(),
@@ -1039,6 +1033,10 @@ describe("SchedulerService applyWorkerResult", () => {
       reviewService: {
         resolvePullRequest: vi.fn(resolvePullRequestFromTask),
         submitPullRequestReview,
+        getSubmittedReviews: vi.fn(async () => [{ id: "review-1", commitId: reviewContext.headSha }]),
+        getContext: vi.fn(async () => ({ ...reviewContext, reviewSummaries: [{
+          id: "review-1", commitId: reviewContext.headSha, authoredByAgent: true,
+        }] })),
       } as any,
       repos: [],
       env: {},
@@ -1049,7 +1047,7 @@ describe("SchedulerService applyWorkerResult", () => {
 
     await expect(
       applyWorkerResult({
-        attempt: { id: "attempt-2c" },
+        attempt: { id: "attempt-2c", runnerName: "claude", runnerModel: "claude-opus-4-8" },
         job: { action: "reviewer", taskTargetId: sampleTarget.id },
         task: sampleTask({ pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }] }),
         target: sampleTarget,
@@ -1057,26 +1055,15 @@ describe("SchedulerService applyWorkerResult", () => {
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
         workerResult: baseWorkerResult({
           action: "reviewer",
-          reviewMutations: [
-            {
-              type: "submit_pull_request_review",
-              body: "Please add coverage for this branch.",
-              event: "COMMENT",
-              comments: [{ path: "src/example.ts", line: 12, body: "Guard this branch." }],
-            },
-          ],
+          reviewResult: { pullRequestUrl: reviewContext.pullRequestUrl, reviewedHeadSha: reviewContext.headSha, submittedReviewIds: ["review-1"] },
         }),
       }),
     ).resolves.toBe(reviewContext.pullRequestUrl);
 
-    expect(submitPullRequestReview).toHaveBeenCalledWith(reviewContext.pullRequestUrl, {
-      body: "[review agent] Please add coverage for this branch.",
-      event: "COMMENT",
-      comments: [{ path: "src/example.ts", line: 12, body: "[review agent] Guard this branch." }],
-    });
+    expect(submitPullRequestReview).not.toHaveBeenCalled();
   });
 
-  test("uses the worker review snapshot when saving a reviewer checkpoint", async () => {
+  test("does not checkpoint a new head the worker did not review", async () => {
     const upsertReviewerCheckpoint = vi.fn();
     const getContext = vi.fn(async () => ({
       ...reviewContext,
@@ -1134,14 +1121,8 @@ describe("SchedulerService applyWorkerResult", () => {
       }),
     ).resolves.toBe(reviewContext.pullRequestUrl);
 
-    expect(getContext).not.toHaveBeenCalled();
-    expect(upsertReviewerCheckpoint).toHaveBeenCalledWith({
-      taskId: "TASK-0001",
-      taskTargetId: sampleTarget.id,
-      prUrl: reviewContext.pullRequestUrl,
-      reviewContext,
-      sourceAttemptId: "attempt-2d",
-    });
+    expect(getContext).toHaveBeenCalled();
+    expect(upsertReviewerCheckpoint).not.toHaveBeenCalled();
   });
 
   test("rejects execution results with code changes when no pull request mutation or artifact is present", async () => {
@@ -1193,10 +1174,10 @@ describe("SchedulerService applyWorkerResult", () => {
           signals: ["code_changed"],
         }),
       }),
-    ).rejects.toThrow("Execution results with code changes must include a create_pull_request mutation");
+    ).rejects.toThrow("Completed execution with code changes must identify an existing open pull request");
   });
 
-  test("records created pull requests through the task system and task mirror", async () => {
+  test("records agent-created pull requests through the task system and task mirror", async () => {
     const upsertPullRequest = vi.fn(async () => undefined);
     const upsertTaskPullRequest = vi.fn();
     const createPullRequest = vi.fn(async () => ({ url: "https://github.com/acme/repo-a/pull/2", number: 2 }));
@@ -1226,7 +1207,7 @@ describe("SchedulerService applyWorkerResult", () => {
       } as any,
       reviewService: {
         createPullRequest,
-        resolvePullRequest: vi.fn(async () => null),
+        resolvePullRequest: vi.fn(async () => ({ ...resolvedPullRequest, pullRequestUrl: "https://github.com/acme/repo-a/pull/2" })),
       } as any,
       repos: [],
       env: {},
@@ -1247,16 +1228,7 @@ describe("SchedulerService applyWorkerResult", () => {
           action: "execution",
           outcome: "completed",
           signals: ["code_changed"],
-          reviewMutations: [
-            {
-              type: "create_pull_request",
-              title: "TASK-0001: Sample task",
-              body: "## Summary\n- Adds the implementation.",
-              draft: true,
-              baseBranch: "main",
-              headBranch: "task-0001",
-            },
-          ],
+          reviewResult: { pullRequestUrl: "https://github.com/acme/repo-a/pull/2" },
         }),
       }),
     ).resolves.toBe("https://github.com/acme/repo-a/pull/2");
@@ -1264,11 +1236,11 @@ describe("SchedulerService applyWorkerResult", () => {
     const pullRequest = {
       repoKey: "repo-a",
       url: "https://github.com/acme/repo-a/pull/2",
-      title: "TASK-0001: Sample task",
-      source: "local",
+      source: "branch_inferred",
     };
     expect(upsertPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
     expect(upsertTaskPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
+    expect(createPullRequest).not.toHaveBeenCalled();
     expect(transition).toHaveBeenCalledWith({ taskId: "TASK-0001", toState: "in_review" });
   });
 
@@ -1375,7 +1347,7 @@ describe("SchedulerService applyWorkerResult", () => {
       } as any,
       reviewService: {
         createPullRequest,
-        resolvePullRequest: vi.fn(async () => null),
+        resolvePullRequest: vi.fn(async () => ({ ...resolvedPullRequest, pullRequestUrl: "https://github.com/acme/repo-a/pull/2" })),
       } as any,
       repos: [],
       env: {},
@@ -1402,16 +1374,7 @@ describe("SchedulerService applyWorkerResult", () => {
           action: "execution",
           outcome: "completed",
           signals: ["code_changed"],
-          reviewMutations: [
-            {
-              type: "create_pull_request",
-              title: "TASK-0001: Sample task",
-              body: "## Summary\n- Adds the implementation.",
-              draft: true,
-              baseBranch: "main",
-              headBranch: "task-0001",
-            },
-          ],
+          reviewResult: { pullRequestUrl: "https://github.com/acme/repo-a/pull/2" },
         }),
       }),
     ).resolves.toBe("https://github.com/acme/repo-a/pull/2");
@@ -1419,8 +1382,7 @@ describe("SchedulerService applyWorkerResult", () => {
     const pullRequest = {
       repoKey: "repo-a",
       url: "https://github.com/acme/repo-a/pull/2",
-      title: "TASK-0001: Sample task",
-      source: "local",
+      source: "branch_inferred",
     };
     expect(upsertTaskPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
     expect(upsertPullRequest).toHaveBeenCalledWith({ taskId: "TASK-0001", pullRequest });
@@ -1429,7 +1391,7 @@ describe("SchedulerService applyWorkerResult", () => {
       taskId: "TASK-0001",
       repoKey: "repo-a",
       pullRequestUrl: "https://github.com/acme/repo-a/pull/2",
-      source: "local",
+      source: "branch_inferred",
       error: "Linear request failed: 502 Bad Gateway",
     });
   });
@@ -1503,7 +1465,7 @@ describe("SchedulerService applyWorkerResult", () => {
     expect(transition).toHaveBeenCalledWith({ taskId: "TASK-0001", toState: "in_review" });
   });
 
-  test("prefixes review replies and routes thread replies explicitly", async () => {
+  test("does not replay replies and resolutions completed by the worker", async () => {
     const replyToReviewSummary = vi.fn(async () => undefined);
     const replyToThreadComment = vi.fn(async () => undefined);
     const replyToPrComment = vi.fn(async () => undefined);
@@ -1548,31 +1510,26 @@ describe("SchedulerService applyWorkerResult", () => {
 
     await expect(
       applyWorkerResult({
-        attempt: { id: "attempt-3b" },
+        attempt: { id: "attempt-3b", runnerName: "opencode", runnerModel: "openai/gpt-5.6-sol" },
         job: { action: "review", taskTargetId: sampleTarget.id },
         task: sampleTask({ pullRequests: [{ repoKey: "repo-a", url: reviewContext.pullRequestUrl, source: "provider" }] }),
         target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
         workerResult: baseWorkerResult({
-          reviewMutations: [
-            { type: "reply_to_review_summary", reviewId: "review-1", body: "Looks good now" },
-            { type: "reply_to_thread_comment", threadId: "thread-1", body: "[agent] Addressed in latest head" },
-            { type: "reply_to_pr_comment", commentId: "comment-1", body: "Please take another look" },
-            { type: "resolve_threads", threadIds: ["thread-1"] },
-          ],
+          reviewResult: { pullRequestUrl: reviewContext.pullRequestUrl },
         }),
       }),
     ).resolves.toBe(reviewContext.pullRequestUrl);
 
-    expect(replyToReviewSummary).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "review-1", "[agent] Looks good now");
-    expect(replyToThreadComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "thread-1", "[agent] Addressed in latest head");
-    expect(replyToPrComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "comment-1", "[agent] Please take another look");
-    expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
+    expect(replyToReviewSummary).not.toHaveBeenCalled();
+    expect(replyToThreadComment).not.toHaveBeenCalled();
+    expect(replyToPrComment).not.toHaveBeenCalled();
+    expect(resolveThreads).not.toHaveBeenCalled();
     expect(resolvePullRequest).toHaveBeenCalled();
   });
 
-  test("uses centralized PR resolution for review mutations when the task has no PR artifact", async () => {
+  test("discovers the worker's PR when the task has no PR artifact", async () => {
     const replyToThreadComment = vi.fn(async () => undefined);
     const resolveThreads = vi.fn(async () => undefined);
     const resolvePullRequest = vi.fn(async () => resolvedPullRequest);
@@ -1613,17 +1570,14 @@ describe("SchedulerService applyWorkerResult", () => {
 
     await expect(
       applyWorkerResult({
-        attempt: { id: "attempt-3c" },
+        attempt: { id: "attempt-3c", runnerName: "opencode", runnerModel: "openai/gpt-5.6-sol" },
         job: { action: "review", taskTargetId: sampleTarget.id },
         task: sampleTask({ pullRequests: [] }),
         target: sampleTarget,
         repo: { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" },
         worktreePath: "/tmp/workspace/worktrees/repo-a/TASK-0001",
         workerResult: baseWorkerResult({
-          reviewMutations: [
-            { type: "reply_to_thread_comment", threadId: "thread-1", body: "Addressed in latest head" },
-            { type: "resolve_threads", threadIds: ["thread-1"] },
-          ],
+          reviewResult: { pullRequestUrl: reviewContext.pullRequestUrl },
         }),
       }),
     ).resolves.toBe(reviewContext.pullRequestUrl);
@@ -1633,8 +1587,8 @@ describe("SchedulerService applyWorkerResult", () => {
       rootPath: "/repos/repo-a",
       defaultBranch: "main",
     }, sampleTarget);
-    expect(replyToThreadComment).toHaveBeenCalledWith(reviewContext.pullRequestUrl, "thread-1", "[agent] Addressed in latest head");
-    expect(resolveThreads).toHaveBeenCalledWith(reviewContext.pullRequestUrl, ["thread-1"]);
+    expect(replyToThreadComment).not.toHaveBeenCalled();
+    expect(resolveThreads).not.toHaveBeenCalled();
   });
 
   test("drains active worker runs during stop", async () => {
@@ -2233,7 +2187,8 @@ describe("SchedulerService applyWorkerResult", () => {
           "  const action = prompt.includes('# Retry Prompt') ? 'retry' : prompt.includes('# Reviewer Prompt') || prompt.includes('continuing a reviewer session') ? 'reviewer' : 'review';",
           "  const sessionFlag = argv.indexOf('--session');",
           "  const sessionID = sessionFlag >= 0 ? argv[sessionFlag + 1] : action + '-fresh-session';",
-          "  const result = '<agent-result>' + JSON.stringify({ schemaVersion: 1, action, outcome: 'no_action_needed', summary: 'done', taskMutations: [], reviewMutations: [], learningMutations: [], blockers: [], signals: [] }) + '</agent-result>';",
+          "  const reviewResult = action === 'reviewer' ? { pullRequestUrl: 'https://github.com/acme/repo-a/pull/1', reviewedHeadSha: '0123456789abcdef0123456789abcdef01234567' } : null;",
+          "  const result = '<agent-result>' + JSON.stringify({ schemaVersion: 2, action, outcome: 'no_action_needed', summary: 'done', taskMutations: [], reviewResult, learningMutations: [], blockers: [], signals: [] }) + '</agent-result>';",
           "  process.stdout.write(JSON.stringify({ type: 'text', sessionID, part: { type: 'text', text: result } }));",
           "});",
         ].join("\n"),

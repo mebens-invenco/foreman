@@ -829,7 +829,7 @@ agentResult
   .command("validate")
   .description("Validate raw JSON or a complete <agent-result> block from stdin")
   .requiredOption("--action <action>", "Expected worker action", parseWorkerResultAction)
-  .addHelpText("after", () => renderAgentResultSchemaHelp(resolveHelpAction()))
+  .addHelpText("after", () => renderAgentResultSchemaHelp(resolveHelpAction(), "pretty"))
   .action(async (options: { action: WorkerResultAction }) => {
     try {
       const value = parseWorkerResult(await readStdin());

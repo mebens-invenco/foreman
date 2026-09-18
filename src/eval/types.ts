@@ -1,4 +1,4 @@
-import type { Task, WorkerResult } from "../domain/index.js";
+import type { ReviewMutation, Task, TokenUsage, WorkerResult } from "../domain/index.js";
 import type { WorkerPromptPullRequestReference } from "../execution/render-worker-prompt.js";
 import type { WorkerResultAction } from "../execution/worker-result.js";
 
@@ -38,8 +38,39 @@ export type PrReviewFixture = {
   discovery: string;
 };
 
+/**
+ * Live-PR fixture: the layer-2 counterpart of `PrReviewFixture`. The harness
+ * clones `repo` into the eval workspace, force-checkouts `branch` at the pinned
+ * `headSha` (a checkout that cannot land on the sha fails the run loudly —
+ * frozen fixture PRs must never drift silently), renders the real reviewer
+ * prompt against that worktree, and runs the sample with live `gh` discovery.
+ * The reviewer performs its own PR discovery. An eval transport directive routes
+ * submissions to the local capture CLI, preserving the frozen fixture PRs.
+ */
+export type LivePrFixture = {
+  type: "live-pr";
+  /** GitHub `owner/name` of the fixture repo (e.g. "invenco/foreman-bench"). */
+  repo: string;
+  pullRequest: number;
+  branch: string;
+  /** Pinned head commit; the checkout is verified against this before every case. */
+  headSha: string;
+  /** Rendered as `headIntroducedAt` in the PR reference (post-head comment cutoff). */
+  headIntroducedAt: string;
+  /** Selects the reviewer-continuation template when true. */
+  continuation?: boolean;
+  /**
+   * Pre-resolved checkpoint for continuation cases, rendered into
+   * `{{context:prior-checkpoint}}`. The seeded prior-review threads live on the
+   * real fixture PR; this carries the driver-side record of that prior pass
+   * (its head, review id, and thread fingerprint), mirroring
+   * `resolvePriorCheckpointContext` in render-worker-prompt.
+   */
+  priorCheckpoint?: Record<string, unknown>;
+};
+
 /** The scenario a case feeds into the rendered prompt — see `assembleCasePrompt`. */
-export type EvalFixture = CompletedSessionFixture | PrReviewFixture;
+export type EvalFixture = CompletedSessionFixture | PrReviewFixture | LivePrFixture;
 
 /**
  * A single behavioral eval case: a scenario engineered to elicit (or to
@@ -84,6 +115,7 @@ export type GradeContext<Expect = unknown> = {
   evalCase: EvalCase<Expect>;
   /** Parsed + action-validated worker result, or null if parse/validation failed. */
   result: WorkerResult | null;
+  reviewWrites?: ReviewMutation[];
   rawStdout: string;
   parseError?: string;
   /**
@@ -113,6 +145,16 @@ export type SampleResult = {
   graderResults: GraderResult[];
   /** A sample passes only when every non-advisory grader passes. */
   pass: boolean;
+  /**
+   * The parsed worker result, kept so a failing sample is diagnosable from the
+   * report alone (what did the reviewer actually flag?) instead of only via
+   * grader detail strings. Absent when parsing failed.
+   */
+  result?: WorkerResult;
+  reviewWrites?: ReviewMutation[];
+  /** Runner-reported usage for this sample, when the runner surfaces it. */
+  tokensUsed?: TokenUsage;
+  elapsedSeconds?: number;
 };
 
 export type CaseResult = {

@@ -1,8 +1,15 @@
 /**
  * Hardcoded per-runner USD cost table for the {@link estimateCost} helper.
  *
- * Last verified against vendor pricing pages on 2026-06-10. Updating is a
- * tiny PR — bump the rate, bump the comment, ship.
+ * Last verified against vendor pricing and runner catalogs on 2026-09-08:
+ * - https://developers.openai.com/api/docs/pricing
+ * - https://models.dev/api.json (`opencode models openai --verbose --refresh`)
+ * - https://www.anthropic.com/pricing#api
+ * - https://platform.claude.com/docs/en/about-claude/models/overview
+ *
+ * OpenAI entries use short-context API pricing because persisted aggregate
+ * usage cannot identify which individual requests crossed the long-context
+ * threshold. OpenCode `-fast` models map to OpenAI's Fast service tier.
  *
  * Cache-write TTL assumption (Anthropic):
  * Claude Code does not expose a TTL flag and uses Anthropic's default 5-minute
@@ -37,7 +44,7 @@ export type RunnerRate = {
   outputPerMtok: number;
   /** Cost of one million cache-read input tokens, USD. */
   cacheReadPerMtok: number;
-  /** Cost of one million cache-write input tokens at the 5-minute TTL, USD. */
+  /** Cost of one million cache-write input tokens (Anthropic: 5-minute TTL). */
   cacheWriteFiveMinPerMtok: number;
 };
 
@@ -63,6 +70,22 @@ const rateEntries: ReadonlyArray<RunnerRateKey & RunnerRate> = [
   },
   {
     runnerName: "claude",
+    runnerModel: "claude-fable-5-1",
+    inputPerMtok: 10,
+    outputPerMtok: 50,
+    cacheReadPerMtok: 0.25,
+    cacheWriteFiveMinPerMtok: 12.5,
+  },
+  {
+    runnerName: "claude",
+    runnerModel: "claude-opus-5",
+    inputPerMtok: 5,
+    outputPerMtok: 25,
+    cacheReadPerMtok: 0.5,
+    cacheWriteFiveMinPerMtok: 6.25,
+  },
+  {
+    runnerName: "claude",
     runnerModel: "claude-opus-4-8",
     inputPerMtok: 5,
     outputPerMtok: 25,
@@ -72,10 +95,10 @@ const rateEntries: ReadonlyArray<RunnerRateKey & RunnerRate> = [
   {
     runnerName: "claude",
     runnerModel: "claude-opus-4-7",
-    inputPerMtok: 15,
-    outputPerMtok: 75,
-    cacheReadPerMtok: 1.5,
-    cacheWriteFiveMinPerMtok: 18.75,
+    inputPerMtok: 5,
+    outputPerMtok: 25,
+    cacheReadPerMtok: 0.5,
+    cacheWriteFiveMinPerMtok: 6.25,
   },
   {
     runnerName: "claude",
@@ -96,20 +119,96 @@ const rateEntries: ReadonlyArray<RunnerRateKey & RunnerRate> = [
   {
     runnerName: "codex",
     runnerModel: "gpt-5.5",
-    inputPerMtok: 1.25,
-    outputPerMtok: 10,
-    cacheReadPerMtok: 0.125,
-    cacheWriteFiveMinPerMtok: 1.25,
+    inputPerMtok: 5,
+    outputPerMtok: 30,
+    cacheReadPerMtok: 0.5,
+    cacheWriteFiveMinPerMtok: 0,
+  },
+  {
+    runnerName: "codex",
+    runnerModel: "gpt-5.6-sol",
+    inputPerMtok: 4,
+    outputPerMtok: 20,
+    cacheReadPerMtok: 0.4,
+    cacheWriteFiveMinPerMtok: 5,
+  },
+  {
+    runnerName: "codex",
+    runnerModel: "gpt-5.6-terra",
+    inputPerMtok: 2,
+    outputPerMtok: 12,
+    cacheReadPerMtok: 0.2,
+    cacheWriteFiveMinPerMtok: 2.5,
+  },
+  {
+    runnerName: "codex",
+    runnerModel: "gpt-5.6-luna",
+    inputPerMtok: 0.2,
+    outputPerMtok: 1.2,
+    cacheReadPerMtok: 0.02,
+    cacheWriteFiveMinPerMtok: 0.25,
   },
   {
     runnerName: "opencode",
     runnerModel: "openai/gpt-5.5",
-    inputPerMtok: 1.25,
-    outputPerMtok: 10,
-    cacheReadPerMtok: 0.125,
-    cacheWriteFiveMinPerMtok: 1.25,
+    inputPerMtok: 5,
+    outputPerMtok: 30,
+    cacheReadPerMtok: 0.5,
+    cacheWriteFiveMinPerMtok: 0,
+  },
+  {
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-5.3-codex",
+    inputPerMtok: 1.75,
+    outputPerMtok: 14,
+    cacheReadPerMtok: 0.175,
+    cacheWriteFiveMinPerMtok: 0,
+  },
+  {
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-5.4",
+    inputPerMtok: 2.5,
+    outputPerMtok: 15,
+    cacheReadPerMtok: 0.25,
+    cacheWriteFiveMinPerMtok: 0,
+  },
+  {
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-5.6-sol",
+    inputPerMtok: 4,
+    outputPerMtok: 20,
+    cacheReadPerMtok: 0.4,
+    cacheWriteFiveMinPerMtok: 5,
+  },
+  {
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-5.6-sol-fast",
+    inputPerMtok: 8,
+    outputPerMtok: 40,
+    cacheReadPerMtok: 0.8,
+    cacheWriteFiveMinPerMtok: 10,
+  },
+  {
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-6-astra",
+    inputPerMtok: 10,
+    outputPerMtok: 50,
+    cacheReadPerMtok: 1,
+    cacheWriteFiveMinPerMtok: 12.5,
+  },
+  {
+    runnerName: "opencode",
+    runnerModel: "openai/gpt-6-astra-fast",
+    inputPerMtok: 20,
+    outputPerMtok: 100,
+    cacheReadPerMtok: 2,
+    cacheWriteFiveMinPerMtok: 25,
   },
 ];
+
+// Intentionally unresolved historical keys from the 2026-09-08 Lynk audit:
+// `claude|opus` is a moving alias whose exact historical model was not persisted;
+// `claude|claude-opus-4.7` and `opencode|gpt-5.3-codex` are malformed runner IDs.
 
 const rateLookup: ReadonlyMap<string, RunnerRate> = new Map(
   rateEntries.map((entry) => {

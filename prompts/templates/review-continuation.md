@@ -3,8 +3,11 @@ You are continuing a review session on the same selected PR. A prior review acti
 {{fragment:worker-common}}
 
 {{fragment:review-github}}
+{{fragment:review-github-resolution}}
 
 {{fragment:comment-brevity}}
+
+{{fragment:summary-policy}}
 
 ## Context
 

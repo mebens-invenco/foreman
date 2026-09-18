@@ -1,17 +1,17 @@
 import { z } from "zod";
 
-import type { WorkerResult } from "../domain/index.js";
+import type { LegacyWorkerResult, WorkerResult } from "../domain/index.js";
 
 export const workerResultActionValues = ["execution", "review", "reviewer", "retry", "deployment", "consolidation"] as const satisfies readonly WorkerResult["action"][];
 export type WorkerResultAction = (typeof workerResultActionValues)[number];
 
 export const workerResultExample = {
-  schemaVersion: 1,
+  schemaVersion: 2,
   action: "execution",
   outcome: "completed",
   summary: "Validated output.",
   taskMutations: [],
-  reviewMutations: [],
+  reviewResult: null,
   learningMutations: [],
   blockers: [],
   signals: [],
@@ -116,7 +116,7 @@ const workerResultBaseSchema = z.object({
 
 const deploymentOutcomes = ["succeeded", "in_progress", "follow_up_created", "blocked", "failed"] as const;
 
-export const workerResultSchema = workerResultBaseSchema.superRefine((result, ctx) => {
+const legacyWorkerResultSchema = workerResultBaseSchema.superRefine((result, ctx) => {
   if (result.action !== "deployment") {
     if ((deploymentOutcomes as readonly string[]).includes(result.outcome) && result.outcome !== "blocked" && result.outcome !== "failed") {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["outcome"], message: "Deployment-only outcome is only valid for deployment action" });
@@ -139,6 +139,33 @@ export const workerResultSchema = workerResultBaseSchema.superRefine((result, ct
     });
   }
 });
+
+export const workerResultSchema = workerResultBaseSchema.omit({ reviewMutations: true }).extend({
+  schemaVersion: z.literal(2),
+  reviewResult: z.object({
+    pullRequestUrl: z.string().regex(/^https:\/\/github\.com\/[^/]+\/[^/]+\/pull\/[1-9]\d*$/),
+    reviewedHeadSha: z.string().regex(/^[a-f0-9]{40}$/).optional(),
+    submittedReviewIds: z.array(z.string().min(1)).optional(),
+  }).nullable(),
+}).strict().superRefine((result, ctx) => {
+  const deploymentOnly = ["succeeded", "in_progress", "follow_up_created"].includes(result.outcome);
+  if ((result.action === "deployment" && !deploymentOutcomes.includes(result.outcome as typeof deploymentOutcomes[number])) ||
+      (result.action !== "deployment" && deploymentOnly)) {
+    ctx.addIssue({ code: "custom", path: ["outcome"], message: "Outcome does not belong to this action" });
+  }
+  if (result.action === "reviewer" && ["completed", "no_action_needed"].includes(result.outcome)) {
+    if (!result.reviewResult?.reviewedHeadSha) {
+      ctx.addIssue({ code: "custom", path: ["reviewResult"], message: "Reviewer results must identify the PR and reviewed head SHA" });
+    }
+    const submitted = result.reviewResult?.submittedReviewIds?.length ?? 0;
+    if ((result.outcome === "completed" && submitted === 0) || (result.outcome === "no_action_needed" && submitted > 0)) {
+      ctx.addIssue({ code: "custom", path: ["reviewResult", "submittedReviewIds"], message: "Completed reviews require submitted review node IDs; no-action results must not claim a submission" });
+    }
+  }
+});
+
+export const validateHistoricalWorkerResult = (value: unknown): WorkerResult | LegacyWorkerResult =>
+  z.union([workerResultSchema, legacyWorkerResultSchema]).parse(value) as WorkerResult | LegacyWorkerResult;
 
 export const formatWorkerResultValidationError = (error: z.ZodError): string =>
   error.issues
@@ -215,23 +242,35 @@ export const validateWorkerResult = (value: unknown): WorkerResult => workerResu
 export const validateWorkerResultForAction = (value: unknown, action: WorkerResultAction): WorkerResult =>
   workerResultSchema.safeExtend({ action: z.literal(action) }).parse(value) as WorkerResult;
 
+type JsonSchemaObject = Record<string, unknown>;
+export const displayedAgentResultJsonSchema = (action?: WorkerResultAction): JsonSchemaObject => {
+  const schema = action ? workerResultSchema.safeExtend({ action: z.literal(action) }) : workerResultSchema;
+  return z.toJSONSchema(schema) as JsonSchemaObject;
+};
+
 // Serialises the worker result schema for a given action to the human-readable
 // help text that both the `agent-result validate --help` command and the
 // rendered worker prompts inline. Sourcing both from this single helper keeps
 // the inline prompt schema honest against the validator as the schema evolves.
 // Pass `undefined` for the generic, action-agnostic shape.
-export const renderAgentResultSchemaHelp = (action?: WorkerResultAction): string => {
+// Prompts inline the compact form (models don't need indentation); `--help`
+// keeps the pretty form for humans. Same Zod derivation either way.
+export const renderAgentResultSchemaHelp = (action?: WorkerResultAction, schemaFormat: "compact" | "pretty" = "compact"): string => {
   const actionLiteral = action ?? `<${workerResultActionValues.join("|")}>`;
-  const schema = action ? workerResultSchema.safeExtend({ action: z.literal(action) }) : workerResultSchema;
-  const jsonSchema = JSON.stringify(z.toJSONSchema(schema), null, 2);
+  const jsonSchema = JSON.stringify(displayedAgentResultJsonSchema(action), null, schemaFormat === "pretty" ? 2 : undefined);
   const exampleJson = JSON.stringify({
     ...workerResultExample,
     action: actionLiteral,
     ...((action === "review" || action === "reviewer") ? { outcome: "no_action_needed" } : {}),
+    ...(action === "reviewer" ? { reviewResult: {
+      pullRequestUrl: "https://github.com/owner/repo/pull/1",
+      reviewedHeadSha: "0123456789abcdef0123456789abcdef01234567",
+      submittedReviewIds: [],
+    } } : {}),
   });
   const reviewGuidance =
     action === "review" || action === "reviewer"
-      ? "\n- For no-op review results, use outcome `no_action_needed`; `completed` requires mutations or code changes."
+      ? "\n- Use `completed` after confirmed GitHub actions; use `no_action_needed` when nothing remains. Reviewer results identify the reviewed head and any submitted review node IDs."
       : "";
 
   return `

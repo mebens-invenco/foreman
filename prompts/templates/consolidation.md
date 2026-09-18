@@ -9,6 +9,7 @@ The task is already terminal and its linked PRs are already closed.
 {{fragment:task-system-worker}}
 
 {{fragment:review-github}}
+{{fragment:review-github-resolution}}
 
 {{fragment:learning-policy}}
 

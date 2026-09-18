@@ -115,7 +115,7 @@ export const claudeRunnerSchema = z.object({
 
 export const codexRunnerSchema = z.object({
   type: z.literal("codex"),
-  model: z.string().min(1).default("gpt-5.5"),
+  model: z.string().min(1).default("gpt-5.6-sol"),
   effort: z.preprocess(coerceToKnown(CODEX_EFFORT_VALUES), z.enum(CODEX_EFFORT_VALUES).default("high")),
   // Optional effort for continuation dispatches; omit to reuse `effort`.
   continuationEffort: z.enum(CODEX_EFFORT_VALUES).optional(),

@@ -16,6 +16,8 @@ const echoArgvScript = [
   "  const argv = process.argv.slice(2);",
   "  const sessionIdIdx = Math.max(argv.indexOf('--session-id'), argv.indexOf('--resume'));",
   "  const sessionId = sessionIdIdx >= 0 ? argv[sessionIdIdx + 1] : '';",
+  "  if (stdin === 'missing session prompt') { process.stderr.write('No conversation found with session ID: ' + sessionId); process.exit(1); }",
+  "  if (stdin === 'unrelated failure prompt') { process.stderr.write('Provider unavailable'); process.exit(1); }",
   "  process.stdout.write(JSON.stringify({",
   "    type: 'result',",
   "    result: JSON.stringify({ argv, stdin }),",
@@ -103,6 +105,42 @@ describe("ClaudeRunner", () => {
     ]);
     expect(invocation.stdin).toBe("resume prompt");
     expect(result.nativeSessionId).toBe(resumedSessionId);
+  });
+
+  test("invalidates a resumed session that Claude reports as missing", async () => {
+    const tempDir = await setUpFakeClaude();
+
+    const result = await new ClaudeRunner("opus-4.7", "high").invoke({
+      attemptId: "attempt-claude-missing-session",
+      action: "reviewer",
+      cwd: tempDir,
+      env: {},
+      prompt: "missing session prompt",
+      timeoutMs: 5_000,
+      nativeSessionId: "missing-session",
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("No conversation found with session ID: missing-session");
+    expect(result.nativeSessionId).toBeUndefined();
+  });
+
+  test("retains a resumed session for unrelated Claude failures", async () => {
+    const tempDir = await setUpFakeClaude();
+
+    const result = await new ClaudeRunner("opus-4.7", "high").invoke({
+      attemptId: "attempt-claude-unrelated-failure",
+      action: "reviewer",
+      cwd: tempDir,
+      env: {},
+      prompt: "unrelated failure prompt",
+      timeoutMs: 5_000,
+      nativeSessionId: "resumable-session",
+    });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toBe("Provider unavailable");
+    expect(result.nativeSessionId).toBe("resumable-session");
   });
 
   test("passes --max-budget-usd when maxBudgetUsd is configured", async () => {
