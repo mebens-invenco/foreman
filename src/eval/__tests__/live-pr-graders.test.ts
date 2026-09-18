@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorkerResult } from "../../domain/index.js";
+import type { ReviewMutation, WorkerResult as AgentResult } from "../../domain/index.js";
 import type { LiveBenchExpect } from "../cases/foreman-bench.js";
 import { foremanBenchCases } from "../cases/foreman-bench.js";
 import {
@@ -21,15 +21,16 @@ const plantedCase = foremanBenchCases.find((c) => c.expect.outcome === "complete
 const cleanCase = foremanBenchCases.find((c) => c.expect.outcome === "no_action_needed")!;
 const plantedPath = plantedCase.expect.mustFlagPaths![0]!;
 
-type ReviewMutation = WorkerResult["reviewMutations"][number];
+type CapturedResult = AgentResult & { reviewWrites: ReviewMutation[] };
 
-const makeResult = (over: Partial<WorkerResult>): WorkerResult => ({
-  schemaVersion: 1,
+const makeResult = (over: Partial<CapturedResult>): CapturedResult => ({
+  schemaVersion: 2,
+  reviewResult: null,
   action: "reviewer",
   outcome: "no_action_needed",
   summary: "Reviewed the current diff; no reportable findings.",
   taskMutations: [],
-  reviewMutations: [],
+  reviewWrites: [],
   learningMutations: [],
   blockers: [],
   signals: [],
@@ -44,12 +45,13 @@ const submitReview = (over: { event?: string; body?: string; comments?: { path: 
     comments: over.comments ?? [{ path: plantedPath, line: 21, body: "x".repeat(400) }],
   }) as ReviewMutation;
 
-const completedResult = (over: { event?: string; body?: string; comments?: { path: string; line: number; body: string }[] } = {}): WorkerResult =>
-  makeResult({ outcome: "completed", reviewMutations: [submitReview(over)] });
+const completedResult = (over: { event?: string; body?: string; comments?: { path: string; line: number; body: string }[] } = {}): CapturedResult =>
+  makeResult({ outcome: "completed", reviewWrites: [submitReview(over)] });
 
-const ctxFor = (evalCase: EvalCase<LiveBenchExpect>, result: WorkerResult | null): GradeContext<LiveBenchExpect> => ({
+const ctxFor = (evalCase: EvalCase<LiveBenchExpect>, result: CapturedResult | null): GradeContext<LiveBenchExpect> => ({
   evalCase,
   result,
+  reviewWrites: result?.reviewWrites ?? [],
   rawStdout: "",
   ...(result ? {} : { parseError: "parse failed" }),
 });
@@ -98,7 +100,7 @@ describe("liveMutationShapeGrader", () => {
 
   describe("when a stand-down still proposes a review mutation", () => {
     it("fails", async () => {
-      const result = makeResult({ reviewMutations: [submitReview({})] });
+      const result = makeResult({ reviewWrites: [submitReview({})] });
       expect(await passOf(liveMutationShapeGrader, ctxFor(cleanCase, result))).toBe(false);
     });
   });

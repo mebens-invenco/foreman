@@ -36,7 +36,8 @@ Do not re-review code that was already covered in the prior pass unless newer ac
 
 - Check remote CI/check status once per pass; do not poll, sleep, wait, or loop for pending checks to finish.
 - Use historical GitHub context to avoid undoing prior decisions or flip-flopping on already-settled feedback.
-- Return all GitHub writes as Foreman review mutations instead of calling write APIs directly.
+- Submit new feedback directly as one `COMMENT` review pinned to the reviewed `commit_id`. Do not approve, request changes, reply to existing threads, or resolve threads from this action.
+- Verify submission and return the PR URL, full reviewed head SHA, and submitted review node IDs in `reviewResult`. A no-action pass includes the reviewed SHA and no submitted IDs.
 
 ## How To Review
 

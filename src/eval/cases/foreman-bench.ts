@@ -60,7 +60,7 @@ const benchTask = (entry: ManifestCase): Task => ({
  * (see the manifest's `note` for the freeze contract). Unlike the synthetic
  * `reviewer` eval — which bypasses the discovery loop by handing the reviewer a
  * pre-baked discovery block — these run the full live path: real worktree at
- * the pinned head, real `gh` discovery, captured (never applied) mutations.
+ * the pinned head, real `gh` discovery, and locally captured review submissions.
  *
  * Live runs need GitHub access (`gh` authenticated for the fixture repo) and
  * take ~5-11 min per sample: run with `--samples 1 --timeout 1500000`.

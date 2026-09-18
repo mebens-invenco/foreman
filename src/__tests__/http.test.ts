@@ -995,10 +995,10 @@ describe("HTTP rates", () => {
         (rate: any) => rate.runnerName === "claude" && rate.runnerModel === "claude-opus-4-7",
       );
       expect(opus).toMatchObject({
-        inputPerMtok: 15,
-        outputPerMtok: 75,
-        cacheReadPerMtok: 1.5,
-        cacheWriteFiveMinPerMtok: 18.75,
+        inputPerMtok: 5,
+        outputPerMtok: 25,
+        cacheReadPerMtok: 0.5,
+        cacheWriteFiveMinPerMtok: 6.25,
       });
       // Lookup key intentionally has no runnerVariant — attempts persist the
       // configured effort/variant, but pricing is model-level today.
@@ -1109,11 +1109,11 @@ describe("HTTP usage rollup", () => {
       expect(payload.toDate).toBe("2026-05-21");
       expect(payload.buckets).toHaveLength(2);
       expect(payload.buckets[0]).toMatchObject({ groupKey: "2026-05-20", attemptsCount: 2 });
-      expect(payload.buckets[0].cost.totalUsd).toBeCloseTo(15 + 75);
+      expect(payload.buckets[0].cost.totalUsd).toBeCloseTo(5 + 25);
       expect(payload.buckets[1]).toMatchObject({ groupKey: "2026-05-21", attemptsCount: 1 });
-      expect(payload.buckets[1].cost.totalUsd).toBeCloseTo(1.5);
+      expect(payload.buckets[1].cost.totalUsd).toBeCloseTo(0.5);
       expect(payload.totals.attemptsCount).toBe(3);
-      expect(payload.totals.cost.totalUsd).toBeCloseTo(15 + 75 + 1.5);
+      expect(payload.totals.cost.totalUsd).toBeCloseTo(5 + 25 + 0.5);
       expect(Array.isArray(payload.rates)).toBe(true);
 
       const rejected = await server.inject({ method: "GET", url: "/api/usage?from=2026-5-1" });
@@ -1614,7 +1614,7 @@ describe("HTTP task rollups", () => {
         attemptsCount: 2,
         effectiveStatus: "completed",
       });
-      expect(payload.buckets[0].cost.totalUsd).toBeCloseTo(15 + 75);
+      expect(payload.buckets[0].cost.totalUsd).toBeCloseTo(5 + 25);
       expect(payload.buckets[0].firstSeenInWindow).toBe("2026-05-20T10:00:00.000Z");
       expect(payload.totals.attemptsCount).toBe(2);
       expect(Array.isArray(payload.rates)).toBe(true);

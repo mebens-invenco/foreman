@@ -14,12 +14,12 @@ const baseCase = learningPolicyCases[0]!;
 const makeCase = (over: Partial<EvalCase<LearningExpect>>): EvalCase<LearningExpect> => ({ ...baseCase, ...over });
 
 const makeResult = (learningMutations: WorkerResult["learningMutations"]): WorkerResult => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   action: "execution",
   outcome: "completed",
   summary: "did the thing",
   taskMutations: [],
-  reviewMutations: [],
+  reviewResult: null,
   learningMutations,
   blockers: [],
   signals: [],

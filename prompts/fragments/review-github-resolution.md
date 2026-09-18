@@ -16,8 +16,8 @@
 - When actionable review state conflicts with later maintainer-authored comments in the PR history, treat the later maintainer decision as authoritative for that behavior, even if an older or stale current-head summary still requests a change.
 - If that kind of conflict exists, prefer a review reply explaining that the older feedback was superseded instead of changing code.
 - Do not treat existing uncommitted worktree changes as evidence that a requested change should still be completed; they are non-authoritative unless they match the maintainer-approved direction.
-- If you create or reopen a PR, provide the full title and full body.
+- When creating or updating a PR, publish its title, body, and required attachments directly.
 - If you reply to feedback, target the specific review summary, review thread, or PR comment id discovered from GitHub.
-- Use `reply_to_thread_comment` for unresolved review threads and `reply_to_pr_comment` only for top-level PR conversation comments.
+- Reply within the specific review thread for inline feedback; use a top-level PR comment for conversation feedback or review summaries.
 - Resolve threads only when they are actually addressed.
-- Return all GitHub writes as Foreman review mutations instead of calling write APIs directly.
+- Verify GitHub writes during the session and return confirmed PR references in `reviewResult`.

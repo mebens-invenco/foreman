@@ -16,7 +16,7 @@ Initialization creates `workspaces/<workspace>/` with `foreman.workspace.yml`, `
 
 Before serving:
 
-- Fill in `workspaces/<workspace>/.env`: `GH_TOKEN` is used for GitHub review/PR context, `LINEAR_API_KEY` is required for Linear workspaces, `GH_CONFIG_DIR` is optional, and `SLACK_BOT_TOKEN` enables Slack direct messages when a target user is configured.
+- Fill in `workspaces/<workspace>/.env`: `GH_TOKEN` is used for GitHub context and worker-owned PR/review operations, `LINEAR_API_KEY` is required for Linear workspaces, `GH_CONFIG_DIR` is optional, and `SLACK_BOT_TOKEN` enables Slack direct messages when a target user is configured.
 - Edit `workspaces/<workspace>/foreman.workspace.yml`: configure `repos.explicit` or `repos.roots`, task states/labels, runners, scheduler concurrency, and the HTTP port if needed.
 - Repos are discovered by basename, so ticket repo keys must match the discovered repo directory name.
 
@@ -95,6 +95,12 @@ Tickets become Foreman candidates when they satisfy the task-system filter and m
 - Tracks GitHub pull requests, review comments, checks, merge state, and deployment follow-up work.
 - Supports file and Linear task systems, GitHub review context, and `opencode`, `claude`, or `codex` runners.
 - Exposes an HTTP UI/API while `foreman serve <workspace>` is running.
+
+## GitHub Workflows
+
+Workers create/edit PRs, upload attachments, submit reviews, reply, and resolve threads directly. Foreman verifies their result references and manages task linkage and scheduling. Workers must never merge or close PRs or enable auto-merge.
+
+Worker results use schema version 2 with `reviewResult` references instead of `reviewMutations`. When upgrading from v1, pause scheduling and let active attempts finish before restarting with the new code and prompts. Historical v1 results remain readable, but are never replayed. See [GitHub results](spec.md#github-results) for the contract and recovery behavior.
 
 ## Capping Claude Spend Per Attempt
 
