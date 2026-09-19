@@ -84,7 +84,7 @@ const createCronExecutorContext = async () => {
     onWorkerFinished: vi.fn(),
   });
 
-  return { db, worker, job, executor };
+  return { config, db, worker, job, executor };
 };
 
 const interruptedCronRunResult = () => ({
@@ -140,6 +140,67 @@ describe("CronAttemptExecutor", () => {
       expect(runnerMocks.invoke.mock.calls[1]![0]).toMatchObject({ nativeSessionId: "cron-native-session" });
       expect(db.attempts.listAttempts({ jobId: job.id }).map((attempt) => attempt.attemptNumber).sort()).toEqual([1, 2]);
       expect(db.jobs.getJob(job.id)).toMatchObject({ status: "completed", errorMessage: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("starts a fresh session when the configured runner changes during backoff", async () => {
+    const { config, db, worker, job, executor } = await createCronExecutorContext();
+    runnerMocks.invoke.mockReset();
+    runnerMocks.invoke.mockImplementation(async (request: { onStdoutLine?: (line: string) => void }) => {
+      request.onStdoutLine?.('{"type":"error"}');
+      return interruptedCronRunResult();
+    });
+
+    try {
+      await executor.execute(worker, db.jobs.getJob(job.id), new AbortController());
+      expect(db.jobs.getJob(job.id).status).toBe("queued");
+      expect(db.jobs.getJob(job.id).selectionContext).toMatchObject({
+        runnerInterruption: { runnerName: "opencode", nativeSessionId: "cron-native-session" },
+      });
+
+      runnerMocks.invoke.mockReset();
+      runnerMocks.invoke.mockImplementation(async (request: { onStdoutLine?: (line: string) => void }) => {
+        request.onStdoutLine?.("Cron recovered.");
+        return {
+          exitCode: 0,
+          signal: null,
+          startedAt: "2026-03-14T12:01:30.000Z",
+          finishedAt: "2026-03-14T12:02:00.000Z",
+          stdoutBytes: 15,
+          stderrBytes: 0,
+          stdout: "Cron recovered.",
+          stderr: "",
+          nativeSessionId: "019b5bf0-0eb8-7a21-9c61-e4dffc778307",
+        };
+      });
+      config.runner.execution = { type: "codex", model: "gpt-5.5", effort: "high", timeoutMs: 3_600_000 };
+      expect(db.jobs.claimQueuedJobForWorker(job.id, worker.id)).toBe(true);
+      await executor.execute(worker, db.jobs.getJob(job.id), new AbortController());
+
+      expect(runnerMocks.invoke.mock.calls[0]![0]).not.toHaveProperty("nativeSessionId");
+      expect(db.jobs.getJob(job.id)).toMatchObject({ status: "completed" });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("cancels instead of requeueing when a stop is accepted as an interrupted run returns", async () => {
+    const { db, worker, job, executor } = await createCronExecutorContext();
+    const controller = new AbortController();
+    runnerMocks.invoke.mockImplementationOnce(async (request: { onStdoutLine?: (line: string) => void }) => {
+      request.onStdoutLine?.('{"type":"error"}');
+      controller.abort();
+      return interruptedCronRunResult();
+    });
+
+    try {
+      await executor.execute(worker, db.jobs.getJob(job.id), controller);
+
+      expect(db.attempts.latestAttemptForJob(job.id)).toMatchObject({ status: "canceled" });
+      expect(db.jobs.getJob(job.id)).toMatchObject({ status: "canceled", nextEligibleAt: null });
+      expect(db.jobs.hasActiveDedupeKey(job.dedupeKey)).toBe(false);
     } finally {
       db.close();
     }

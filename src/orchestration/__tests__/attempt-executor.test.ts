@@ -285,6 +285,26 @@ describe("AttemptExecutor", () => {
     }
   });
 
+  test("cancels instead of requeueing when a stop is accepted as an interrupted run returns", async () => {
+    const { db, job, claimedJob, executor, logger } = await createExecutorContext();
+    const controller = new AbortController();
+    runnerMocks.invoke.mockImplementationOnce(async () => {
+      controller.abort();
+      return createInterruptedRunResult();
+    });
+
+    try {
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, controller);
+      await logger.flush();
+
+      expect(db.attempts.latestAttemptForJob(job.id)).toMatchObject({ status: "canceled" });
+      expect(db.jobs.getJob(job.id)).toMatchObject({ status: "canceled", nextEligibleAt: null });
+      expect(db.jobs.hasActiveDedupeKey(job.dedupeKey)).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
   test("retains an existing native session when an interrupted continuation omits its session id", async () => {
     const { db, job, claimedJob, executor, logger, target, config } = await createExecutorContext();
     const worker = db.workers.listWorkers()[0]!;

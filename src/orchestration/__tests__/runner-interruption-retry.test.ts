@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { planRunnerInterruptionRetry } from "../runner-interruption-retry.js";
+import { planRunnerInterruptionRetry, runnerInterruptionWorkFingerprint } from "../runner-interruption-retry.js";
 
 describe("planRunnerInterruptionRetry", () => {
   const interruption = { summary: "Runner provider returned retryable HTTP 503." };
@@ -22,5 +22,26 @@ describe("planRunnerInterruptionRetry", () => {
       summary: "Runner provider returned retryable HTTP 503. Automatic retry limit reached after 3 attempts.",
       nextEligibleAt: null,
     });
+  });
+});
+
+describe("runnerInterruptionWorkFingerprint", () => {
+  test("ignores interruption state and pull request recovery attempt counts", () => {
+    const context = {
+      reviewContext: { headSha: "head-a" },
+      pullRequestRecovery: { fingerprint: "pr-a", attempts: 1 },
+      runnerInterruption: { taskStateBeforeExecution: "ready" },
+    };
+
+    expect(runnerInterruptionWorkFingerprint(context)).toBe(
+      runnerInterruptionWorkFingerprint({
+        ...context,
+        pullRequestRecovery: { fingerprint: "pr-a", attempts: 3 },
+        runnerInterruption: { retriesExhausted: true },
+      }),
+    );
+    expect(runnerInterruptionWorkFingerprint(context)).not.toBe(
+      runnerInterruptionWorkFingerprint({ ...context, reviewContext: { headSha: "head-b" } }),
+    );
   });
 });

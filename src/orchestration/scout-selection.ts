@@ -27,6 +27,7 @@ import { resolveDeploymentInstructions, type DeploymentInstructions } from "../w
 import { branchExistsOnOrigin, resolveTaskBranchName } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { evaluateBlockedOrdinaryWork, hasUnfinishedOrdinaryWork, isBlockedOrdinaryWorkPendingUnblock, type TargetProgressState } from "./blocked-ordinary-work.js";
+import { runnerInterruptionWorkFingerprint } from "./runner-interruption-retry.js";
 import { runStateTransitions } from "./state-transition.js";
 
 type Selection = {
@@ -79,16 +80,25 @@ const latestRetryWasManuallyStopped = (input: { foremanRepos: ForemanRepos; targ
 
 const runnerInterruptionRetriesExhausted = (input: {
   foremanRepos: ForemanRepos;
+  task: Task;
   target: TaskTarget;
   action: ActionType;
+  selectionContext: Record<string, unknown>;
 }): boolean => {
-  const latestJob = input.foremanRepos.jobs.latestJobForTaskTarget(input.target.id);
+  const latestJob = input.foremanRepos.jobs.latestJobForDedupeKey(
+    dedupeKeyForAction(input.task.id, input.target.repoKey, input.action),
+  );
   if (!latestJob || latestJob.action !== input.action || latestJob.status !== "failed") {
     return false;
   }
 
   const interruption = latestJob.selectionContext.runnerInterruption;
-  if (typeof interruption !== "object" || interruption === null || !("retriesExhausted" in interruption) || interruption.retriesExhausted !== true) {
+  if (
+    typeof interruption !== "object" || interruption === null ||
+    !("retriesExhausted" in interruption) || interruption.retriesExhausted !== true ||
+    !("workFingerprint" in interruption) ||
+    interruption.workFingerprint !== runnerInterruptionWorkFingerprint(input.selectionContext)
+  ) {
     return false;
   }
 
@@ -893,15 +903,30 @@ export const runScoutSelection = async (input: {
     if (actionConsumesBranchLease(action) && (activeJobsByTarget.get(target.id) ?? []).some((job) => actionConsumesBranchLease(job.action))) {
       return false;
     }
-    if (input.triggerType !== "manual" && runnerInterruptionRetriesExhausted({ foremanRepos: input.foremanRepos, target, action })) {
-      logger?.info("skipping automatically reselected action after runner interruption retries exhausted", {
-        taskId: task.id,
-        repoKey: target.repoKey,
-        action,
-      });
+    return !input.foremanRepos.jobs.hasActiveDedupeKey(dedupeKey);
+  };
+
+  const retriesExhaustedForSelection = (
+    task: Task,
+    target: TaskTarget,
+    action: ActionType,
+    selectionContext: Record<string, unknown>,
+  ): boolean => {
+    if (input.triggerType === "manual" || !runnerInterruptionRetriesExhausted({
+      foremanRepos: input.foremanRepos,
+      task,
+      target,
+      action,
+      selectionContext,
+    })) {
       return false;
     }
-    return !input.foremanRepos.jobs.hasActiveDedupeKey(dedupeKey);
+    logger?.info("skipping automatically reselected unchanged action after runner interruption retries exhausted", {
+      taskId: task.id,
+      repoKey: target.repoKey,
+      action,
+    });
+    return true;
   };
 
   const recordBlocker = async (taskId: string, body: string, options?: { postComment?: boolean }): Promise<void> => {
@@ -972,6 +997,10 @@ export const runScoutSelection = async (input: {
         if (!context || context.state !== "open") {
           continue;
         }
+        const selectionContext = reviewSelectionContext(context);
+        if (retriesExhaustedForSelection(task, target, "review", selectionContext)) {
+          continue;
+        }
 
         if (input.triggerType !== "manual") {
           const retryAt = unfinishedResolverRetryCooldown({ foremanRepos: input.foremanRepos, target, reviewContext: context });
@@ -1005,7 +1034,7 @@ export const runScoutSelection = async (input: {
           baseBranch: context.baseBranch,
           priorityRank: priorityToRank(task.priority),
           selectionReason: reason,
-          selectionContext: reviewSelectionContext(context),
+          selectionContext,
         };
         break;
       }
@@ -1030,6 +1059,10 @@ export const runScoutSelection = async (input: {
 
           const reviewContext = await getReviewContext(task, target, repo);
           if (!reviewContext || reviewContext.state !== "closed") {
+            continue;
+          }
+          const selectionContext = reviewSelectionContext(reviewContext);
+          if (retriesExhaustedForSelection(task, target, "retry", selectionContext)) {
             continue;
           }
 
@@ -1088,7 +1121,7 @@ export const runScoutSelection = async (input: {
             baseBranch: base.baseBranch,
             priorityRank: priorityToRank(task.priority),
             selectionReason: "closed unmerged pull request eligible for retry",
-            selectionContext: {},
+            selectionContext,
           };
           break;
         }
@@ -1114,6 +1147,10 @@ export const runScoutSelection = async (input: {
 
           const reviewContext = await getReviewContext(task, target, repo);
           if (!reviewContext || reviewContext.state !== "open" || reviewContext.failingChecks.length > 0) {
+            continue;
+          }
+          const selectionContext = reviewSelectionContext(reviewContext);
+          if (retriesExhaustedForSelection(task, target, "reviewer", selectionContext)) {
             continue;
           }
 
@@ -1149,7 +1186,7 @@ export const runScoutSelection = async (input: {
             baseBranch: reviewContext.baseBranch,
             priorityRank: priorityToRank(task.priority),
             selectionReason: reviewContext.isDraft ? "draft pull request eligible for reviewer pass" : "open pull request eligible for reviewer pass",
-            selectionContext: reviewSelectionContext(reviewContext),
+            selectionContext,
           };
           break;
         }
@@ -1195,6 +1232,10 @@ export const runScoutSelection = async (input: {
             if (record?.nextEligibleAt && Date.parse(record.nextEligibleAt) > Date.now()) {
               continue;
             }
+            const selectionContext = deploymentSelectionContext({ instructions: deploymentInstructions, pullRequest });
+            if (retriesExhaustedForSelection(task, target, "deployment", selectionContext)) {
+              continue;
+            }
 
             chosen = {
               task,
@@ -1204,7 +1245,7 @@ export const runScoutSelection = async (input: {
               baseBranch: pullRequest.baseBranch,
               priorityRank: priorityToRank(task.priority),
               selectionReason: "merged pull request eligible for deployment tracking",
-              selectionContext: deploymentSelectionContext({ instructions: deploymentInstructions, pullRequest }),
+              selectionContext,
             };
             break;
           }
@@ -1277,6 +1318,9 @@ export const runScoutSelection = async (input: {
               ...reviewSelectionContext(context),
               pullRequestRecovery: { fingerprint, attempts: attempts + 1 },
             };
+          }
+          if (retriesExhaustedForSelection(task, target, "execution", selectionContext)) {
+            continue;
           }
 
           const base = await resolveBaseBranch({

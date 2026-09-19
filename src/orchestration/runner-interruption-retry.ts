@@ -1,10 +1,24 @@
 import type { RetryableRunnerInterruption } from "../execution/index.js";
+import { stableStringify } from "../lib/json.js";
 
 const retryDelaysMs = [30_000, 60_000] as const;
 
 export type RunnerInterruptionRetry = {
   summary: string;
   nextEligibleAt: string | null;
+};
+
+export const runnerInterruptionWorkFingerprint = (selectionContext: Record<string, unknown>): string => {
+  const { runnerInterruption: _runnerInterruption, pullRequestRecovery, ...workContext } = selectionContext;
+  const recoveryFingerprint =
+    typeof pullRequestRecovery === "object" && pullRequestRecovery !== null && "fingerprint" in pullRequestRecovery
+      ? pullRequestRecovery.fingerprint
+      : undefined;
+
+  return stableStringify({
+    ...workContext,
+    ...(recoveryFingerprint === undefined ? {} : { pullRequestRecovery: { fingerprint: recoveryFingerprint } }),
+  });
 };
 
 export const planRunnerInterruptionRetry = (input: {

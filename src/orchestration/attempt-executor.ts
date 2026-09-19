@@ -18,7 +18,7 @@ import { runnerSessionRoleForAction, runnerTuningValue, type WorkspaceConfig, ty
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { nextLeaseConflictEligibleAt } from "./lease-conflict.js";
-import { planRunnerInterruptionRetry } from "./runner-interruption-retry.js";
+import { planRunnerInterruptionRetry, runnerInterruptionWorkFingerprint } from "./runner-interruption-retry.js";
 import { assertTaskActionableTarget, leaseResourceKeysForAction } from "./scout-selection.js";
 
 const runnerOutputLimit = 4_000;
@@ -393,6 +393,10 @@ export class AttemptExecutor {
         });
         attemptLogger.info("recorded attempt log artifact", { logPath: logAbsolutePath, sizeBytes: logStat.size });
 
+        if (controller.signal.aborted && runResult.retryableInterruption) {
+          throw new ForemanError("attempt_stopped", "Attempt stopped after runner invocation.");
+        }
+
         if (runResult.retryableInterruption) {
           const retry = planRunnerInterruptionRetry({
             interruption: runResult.retryableInterruption,
@@ -436,7 +440,11 @@ export class AttemptExecutor {
           const originalTaskState = readRunnerInterruptionTaskState(job.selectionContext) ?? taskStateBeforeExecution;
           this.deps.foremanRepos.jobs.updateJobSelectionContext(job.id, {
             ...job.selectionContext,
-            runnerInterruption: { taskStateBeforeExecution: originalTaskState, retriesExhausted: true },
+            runnerInterruption: {
+              taskStateBeforeExecution: originalTaskState,
+              retriesExhausted: true,
+              workFingerprint: runnerInterruptionWorkFingerprint(job.selectionContext),
+            },
           });
           if (task && transitionedTaskToInProgress && originalTaskState && originalTaskState !== "in_progress") {
             try {

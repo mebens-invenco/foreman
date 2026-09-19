@@ -23,6 +23,7 @@ import { ForemanError } from "../../lib/errors.js";
 import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import * as worktrees from "../../workspace/git-worktrees.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
+import { runnerInterruptionWorkFingerprint } from "../runner-interruption-retry.js";
 
 const cleanupDirs: string[] = [];
 const projectRoot = testProjectRoot;
@@ -192,6 +193,22 @@ const reviewContext = (input: Partial<ReviewContext> & Pick<ReviewContext, "pull
   ...input,
 });
 
+const reviewWorkSelectionContext = (context: ReviewContext): Record<string, unknown> => ({
+  reviewContext: context,
+  pullRequestReference: {
+    provider: context.provider,
+    url: context.pullRequestUrl,
+    number: context.pullRequestNumber,
+    state: context.state,
+    isDraft: context.isDraft,
+    headSha: context.headSha,
+    headBranch: context.headBranch,
+    baseBranch: context.baseBranch,
+    headIntroducedAt: context.headIntroducedAt,
+    mergeState: context.mergeState,
+  },
+});
+
 const seedCompletedExecution = (
   db: Awaited<ReturnType<typeof createMigratedDb>>,
   completedTask: Task,
@@ -271,6 +288,7 @@ const seedExhaustedRunnerInterruption = (
   db: Awaited<ReturnType<typeof createMigratedDb>>,
   interruptedTask: Task,
   action: ActionType,
+  selectionContext: Record<string, unknown> = {},
 ): void => {
   db.workers.ensureWorkerSlots(1);
   const worker = db.workers.listWorkers()[0];
@@ -289,7 +307,13 @@ const seedExhaustedRunnerInterruption = (
     baseBranch: "main",
     dedupeKey: `${interruptedTask.id}:${target!.repoKey}:${action}`,
     selectionReason: "test exhausted runner interruption",
-    selectionContext: { runnerInterruption: { retriesExhausted: true } },
+    selectionContext: {
+      ...selectionContext,
+      runnerInterruption: {
+        retriesExhausted: true,
+        workFingerprint: runnerInterruptionWorkFingerprint(selectionContext),
+      },
+    },
   });
   const attempt = db.attempts.createAttemptWithLeases({
     jobId: job.id,
@@ -574,6 +598,91 @@ describe("runScoutSelection", () => {
 
       expect(result.jobs).toHaveLength(1);
       expect(result.jobs[0]?.action).toBe("execution");
+    } finally {
+      db.close();
+    }
+  });
+
+  test("keeps a review exhaustion barrier when a newer reviewer job exists", async () => {
+    const tempDir = await createTempDir("foreman-scout-action-exhaustion-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const reviewTask = task({
+      id: "TASK-ACTION-EXHAUSTION",
+      title: "Action-scoped exhaustion",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/160", source: "provider" }],
+    });
+    const context = reviewContext({
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/160",
+      pullRequestNumber: 160,
+      state: "open",
+      headSha: "same-head",
+      headBranch: "task-action-exhaustion",
+      baseBranch: "main",
+    });
+    const selectionContext = reviewWorkSelectionContext(context);
+    seedExhaustedRunnerInterruption(db, reviewTask, "review", selectionContext);
+    seedExhaustedRunnerInterruption(db, reviewTask, "reviewer", selectionContext);
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({ [reviewTask.id]: context }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "poll",
+      });
+
+      expect(result.jobs).toHaveLength(0);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("allows new pull request work after retries exhausted on an older head", async () => {
+    const tempDir = await createTempDir("foreman-scout-changed-exhaustion-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const reviewTask = task({
+      id: "TASK-CHANGED-EXHAUSTION",
+      title: "Changed work after exhaustion",
+      state: "in_review",
+      providerState: "in_review",
+      priority: "normal",
+      updatedAt: "2026-03-14T12:00:00Z",
+      pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/161", source: "provider" }],
+    });
+    const oldContext = reviewContext({
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/161",
+      pullRequestNumber: 161,
+      state: "open",
+      headSha: "old-head",
+      headBranch: "task-changed-exhaustion",
+      baseBranch: "main",
+    });
+    const currentContext = { ...oldContext, headSha: "new-head", headIntroducedAt: "2026-03-14T12:05:00Z" };
+    seedReviewCheckpoint(db, reviewTask, currentContext);
+    seedExhaustedRunnerInterruption(db, reviewTask, "reviewer", reviewWorkSelectionContext(oldContext));
+
+    try {
+      const result = await runScoutSelection({
+        config,
+        foremanRepos: db,
+        taskSystem: new FakeTaskSystem([reviewTask]),
+        reviewService: new FakeReviewService({ [reviewTask.id]: currentContext }),
+        repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+        triggerType: "poll",
+      });
+
+      expect(result.jobs).toHaveLength(1);
+      expect(result.jobs[0]?.action).toBe("reviewer");
     } finally {
       db.close();
     }

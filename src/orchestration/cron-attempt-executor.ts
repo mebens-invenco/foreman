@@ -50,9 +50,10 @@ const summarizeOutput = (stdout: string, status: AttemptStatus): string => {
   return status === "completed" ? "Cron job completed without stdout." : "Cron job did not produce stdout.";
 };
 
-const runnerRetryNativeSessionId = (job: JobRecord): string | undefined => {
+const runnerRetryNativeSessionId = (job: JobRecord, runnerName: string): string | undefined => {
   const retry = job.selectionContext.runnerInterruption;
-  return typeof retry === "object" && retry !== null && "nativeSessionId" in retry && typeof retry.nativeSessionId === "string"
+  return typeof retry === "object" && retry !== null && "runnerName" in retry && retry.runnerName === runnerName &&
+    "nativeSessionId" in retry && typeof retry.nativeSessionId === "string"
     ? retry.nativeSessionId
     : undefined;
 };
@@ -126,7 +127,7 @@ export class CronAttemptExecutor {
         });
 
         const runner = createAgentRunner({ config: this.deps.config, action: "cron" });
-        const nativeSessionId = runnerRetryNativeSessionId(job);
+        const nativeSessionId = runnerRetryNativeSessionId(job, runnerConfig.type);
         const runResult = await runner.invoke({
           attemptId: attempt.id,
           action: "cron",
@@ -175,6 +176,10 @@ export class CronAttemptExecutor {
           sha256: await sha256File(logAbsolutePath),
         });
 
+        if (controller.signal.aborted && runResult.retryableInterruption) {
+          throw new ForemanError("attempt_stopped", "Attempt stopped after runner invocation.");
+        }
+
         if (runResult.retryableInterruption) {
           const retry = planRunnerInterruptionRetry({
             interruption: runResult.retryableInterruption,
@@ -197,7 +202,10 @@ export class CronAttemptExecutor {
           if (retry.nextEligibleAt) {
             this.deps.foremanRepos.jobs.updateJobSelectionContext(job.id, {
               ...job.selectionContext,
-              runnerInterruption: { nativeSessionId: runResult.nativeSessionId ?? runnerRetryNativeSessionId(job) },
+              runnerInterruption: {
+                runnerName: runnerConfig.type,
+                nativeSessionId: runResult.nativeSessionId ?? runnerRetryNativeSessionId(job, runnerConfig.type),
+              },
             });
             this.deps.foremanRepos.jobs.returnJobToQueue(job.id, { nextEligibleAt: retry.nextEligibleAt });
             attemptLogger.warn("queued cron job after retryable runner interruption", { nextEligibleAt: retry.nextEligibleAt });
