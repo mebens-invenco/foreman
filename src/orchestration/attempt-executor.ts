@@ -17,6 +17,7 @@ import type { TaskSystem } from "../tasking/index.js";
 import { runnerSessionRoleForAction, runnerTuningValue, type WorkspaceConfig, type WorkspaceRunnerConfig } from "../workspace/config.js";
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
+import { nextDeploymentRetryEligibleAt, readDeploymentSelectionContext } from "./deployment-tracking-state.js";
 import { nextLeaseConflictEligibleAt } from "./lease-conflict.js";
 import { assertTaskActionableTarget, leaseResourceKeysForAction } from "./scout-selection.js";
 
@@ -139,6 +140,7 @@ export class AttemptExecutor {
 
     let attempt: AttemptRecord | null = null;
     let task: Task | null = null;
+    let taskTarget: TaskTarget | null = null;
     let repo: RepoRef | null = null;
     let worktreePath: string | null = null;
     let beforeSha: string | null = null;
@@ -168,6 +170,7 @@ export class AttemptExecutor {
 
       const actionableTarget = assertTaskActionableTarget(task, this.deps.repos, persistedTarget);
       const target: TaskTarget = actionableTarget.target;
+      taskTarget = target;
       repo = actionableTarget.repo;
       const runnerConfig = resolveRunnerConfigForAction(this.deps.config, job.action, task);
       const runnerSessionSelector = {
@@ -522,6 +525,38 @@ export class AttemptExecutor {
               restoreState: taskStateBeforeExecution,
               error: restoreError instanceof Error ? restoreError.message : String(restoreError),
             });
+          }
+        }
+        if (job.action === "deployment" && task && taskTarget && worktreePath === null) {
+          const context = readDeploymentSelectionContext(job.selectionContext);
+          if (context) {
+            const prior = this.deps.foremanRepos.deploymentTracking.getDeploymentRecord({
+              taskTargetId: taskTarget.id,
+              prUrl: context.pullRequest.url,
+              instructionHash: context.instructionHash,
+            });
+            const retryCount = (prior?.retryCount ?? 0) + 1;
+            const nextEligibleAt = nextDeploymentRetryEligibleAt(this.deps.config.deployment, retryCount);
+            this.deps.foremanRepos.deploymentTracking.upsertDeploymentRecord({
+              taskId: task.id,
+              taskTargetId: taskTarget.id,
+              repoKey: taskTarget.repoKey,
+              prUrl: context.pullRequest.url,
+              prNumber: context.pullRequest.number,
+              prHeadBranch: context.pullRequest.headBranch,
+              prBaseBranch: context.pullRequest.baseBranch,
+              instructionHash: context.instructionHash,
+              instructionBody: context.instructionBody,
+              latestStatus: "failed",
+              latestSummary: message,
+              nextEligibleAt,
+              retryCount,
+              blockedRetryCount: prior?.blockedRetryCount ?? 0,
+              createdFollowUpTaskIds: prior?.createdFollowUpTaskIds ?? [],
+              successful: false,
+              sourceAttemptId: attempt.id,
+            });
+            attemptLogger.info("persisted deployment setup failure", { nextEligibleAt });
           }
         }
         this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, interruptedByProviderRateLimit ? "attempt_blocked" : "attempt_failed", message);
