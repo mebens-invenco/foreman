@@ -101,10 +101,12 @@ const createWorkerResult = (overrides: Partial<WorkerResult> = {}): WorkerResult
 const createExecutorContext = async (options: {
   action?: ActionType;
   selectedTask?: Task;
+  providerTask?: Task;
   selectionContext?: Record<string, unknown>;
   notifyProblem?: (input: ProblemNotification) => Promise<void>;
 } = {}) => {
   const selectedTask = options.selectedTask ?? task;
+  const providerTask = options.providerTask ?? selectedTask;
   const action = options.action ?? "execution";
   const workspaceRoot = await createTempDir("foreman-attempt-executor-test-");
   cleanupDirs.push(workspaceRoot);
@@ -136,7 +138,7 @@ const createExecutorContext = async (options: {
     getProvider: () => "file",
     listCandidates: vi.fn(async () => []),
     listAssignedIssues: vi.fn(async () => []),
-    getTask: vi.fn(async () => selectedTask),
+    getTask: vi.fn(async () => providerTask),
     createTask: vi.fn(async () => ({ id: "TASK-NEW", providerId: "TASK-NEW", url: null })),
     listComments: vi.fn(async () => []),
     addComment: vi.fn(async () => undefined),
@@ -168,7 +170,7 @@ const createExecutorContext = async (options: {
     onWorkerFinished: vi.fn(),
   });
 
-  return { workspaceRoot, db, job, claimedJob, executor, logger, applyWorkerResult, target, config };
+  return { workspaceRoot, db, job, claimedJob, executor, logger, applyWorkerResult, target, config, taskSystem };
 };
 
 afterEach(async () => {
@@ -182,6 +184,66 @@ afterEach(async () => {
 });
 
 describe("AttemptExecutor", () => {
+  test.each(
+    [
+      ["execution", "done"],
+      ["execution", "canceled"],
+      ["retry", "done"],
+      ["retry", "canceled"],
+      ["review", "done"],
+      ["review", "canceled"],
+      ["reviewer", "done"],
+      ["reviewer", "canceled"],
+      ["deployment", "done"],
+      ["deployment", "canceled"],
+    ] satisfies Array<[ActionType, Task["state"]]>,
+  )("cancels stale %s jobs when the provider task is %s", async (action, state) => {
+    const providerTask = { ...task, state, providerState: state };
+    const { db, claimedJob, executor, logger, taskSystem } = await createExecutorContext({ action, providerTask });
+
+    try {
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      expect(db.jobs.getJob(claimedJob.id)).toMatchObject({ status: "canceled" });
+      expect(db.attempts.latestAttemptForJob(claimedJob.id)).toBeNull();
+      expect(worktreeMocks.ensureTaskWorktree).not.toHaveBeenCalled();
+      expect(taskSystem.transition).not.toHaveBeenCalled();
+      expect(runnerMocks.createAgentRunner).not.toHaveBeenCalled();
+      expect(runnerMocks.invoke).not.toHaveBeenCalled();
+      expect(db.workers.listWorkers()[0]).toMatchObject({ status: "idle", currentAttemptId: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("executes consolidation for a terminal task", async () => {
+    const terminalTask: Task = { ...task, state: "done", providerState: "done" };
+    const { db, claimedJob, executor, logger } = await createExecutorContext({ action: "consolidation", selectedTask: terminalTask });
+    const workerResult = createWorkerResult({ action: "consolidation", summary: "Consolidated terminal task." });
+    runnerMocks.invoke.mockResolvedValueOnce({
+      exitCode: 0,
+      signal: null,
+      startedAt: "2026-05-06T00:00:00.000Z",
+      finishedAt: "2026-05-06T00:01:00.000Z",
+      stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+      stderrBytes: 0,
+      stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+      stderr: "",
+    });
+
+    try {
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      expect(db.jobs.getJob(claimedJob.id)).toMatchObject({ status: "completed" });
+      expect(db.attempts.latestAttemptForJob(claimedJob.id)).toMatchObject({ status: "completed" });
+      expect(runnerMocks.invoke).toHaveBeenCalledOnce();
+    } finally {
+      db.close();
+    }
+  });
+
   test("preserves a failed task outcome when automatic notification rejects", async () => {
     const notifyProblem = vi.fn(async () => {
       throw new Error("Slack unavailable");
