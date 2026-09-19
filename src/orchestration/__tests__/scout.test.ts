@@ -103,6 +103,8 @@ class FakeTaskSystem implements TaskSystem {
 }
 
 class FakeReviewService implements ReviewService {
+  async getSubmittedReviews() { return []; }
+
   constructor(private readonly contexts: Record<string, ReviewContext | null>) {}
 
   private contextFor(task: Task, target?: { repoKey: string }): ReviewContext | null {

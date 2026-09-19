@@ -153,7 +153,7 @@ export type Blocker = string;
 
 export type Signal = "code_changed" | "review_checkpoint_eligible" | "reviewer_checkpoint_eligible";
 
-export type WorkerResult = {
+export type LegacyWorkerResult = {
   schemaVersion: 1;
   action: ActionType;
   outcome: "completed" | "no_action_needed" | "succeeded" | "in_progress" | "follow_up_created" | "blocked" | "failed";
@@ -163,4 +163,13 @@ export type WorkerResult = {
   learningMutations: LearningMutation[];
   blockers: Blocker[];
   signals: Signal[];
+};
+
+export type WorkerResult = Omit<LegacyWorkerResult, "schemaVersion" | "reviewMutations"> & {
+  schemaVersion: 2;
+  reviewResult: {
+    pullRequestUrl: string;
+    reviewedHeadSha?: string;
+    submittedReviewIds?: string[];
+  } | null;
 };

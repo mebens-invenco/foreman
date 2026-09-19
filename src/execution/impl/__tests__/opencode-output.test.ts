@@ -53,12 +53,12 @@ describe("normalizeOpenCodeJsonOutput", () => {
 
   test("preserves a result block when compaction emits later final prose", () => {
     const workerResult = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       action: "execution",
       outcome: "completed",
       summary: "Implemented the change.",
       taskMutations: [],
-      reviewMutations: [],
+      reviewResult: null,
       learningMutations: [],
       blockers: [],
       signals: ["code_changed"],

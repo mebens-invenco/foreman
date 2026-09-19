@@ -1,4 +1,4 @@
-import type { WorkerResult } from "../domain/index.js";
+import type { ReviewMutation } from "../domain/index.js";
 import type { ReviewerExpect } from "./cases/reviewer.js";
 import { countSentences, makeSchemaGrader, normalizeForMention, SUMMARY_LENGTH_BARS } from "./graders.js";
 import type { Grader, GraderResult } from "./types.js";
@@ -21,10 +21,10 @@ import type { Grader, GraderResult } from "./types.js";
 const pass = (dimension: string, detail: string): GraderResult => ({ dimension, pass: true, detail });
 const fail = (dimension: string, detail: string): GraderResult => ({ dimension, pass: false, detail });
 
-type SubmitReview = Extract<WorkerResult["reviewMutations"][number], { type: "submit_pull_request_review" }>;
+type SubmitReview = Extract<ReviewMutation, { type: "submit_pull_request_review" }>;
 
-const submitReviews = (result: WorkerResult): SubmitReview[] =>
-  result.reviewMutations.filter((mutation): mutation is SubmitReview => mutation.type === "submit_pull_request_review");
+const submitReviews = (writes: ReviewMutation[]): SubmitReview[] =>
+  writes.filter((mutation): mutation is SubmitReview => mutation.type === "submit_pull_request_review");
 
 /** The emitted outcome matches what the PR state warrants. */
 export const reviewerOutcomeGrader: Grader<ReviewerExpect> = {
@@ -51,7 +51,7 @@ export const reviewerOutcomeGrader: Grader<ReviewerExpect> = {
  */
 export const reviewMutationConformanceGrader: Grader<ReviewerExpect> = {
   name: "review-mutation",
-  grade: ({ evalCase, result }) => {
+  grade: ({ evalCase, result, reviewWrites = [] }) => {
     if (!result) {
       return fail("review-mutation", "no parseable result to inspect");
     }
@@ -60,18 +60,18 @@ export const reviewMutationConformanceGrader: Grader<ReviewerExpect> = {
     }
 
     if (evalCase.expect.outcome === "no_action_needed") {
-      return result.reviewMutations.length === 0
+      return reviewWrites.length === 0
         ? pass("review-mutation", "no_action_needed with zero review mutations, as required")
-        : fail("review-mutation", `no_action_needed must carry zero review mutations, found ${result.reviewMutations.length}`);
+        : fail("review-mutation", `no_action_needed must carry zero review writes, found ${reviewWrites.length}`);
     }
 
     // completed: exactly one submit_pull_request_review and nothing else.
-    if (result.reviewMutations.length !== 1) {
-      return fail("review-mutation", `completed review must carry exactly one review mutation, found ${result.reviewMutations.length}`);
+    if (reviewWrites.length !== 1) {
+      return fail("review-mutation", `completed review must publish exactly one review, found ${reviewWrites.length}`);
     }
-    const submits = submitReviews(result);
+    const submits = submitReviews(reviewWrites);
     if (submits.length !== 1) {
-      const types = result.reviewMutations.map((mutation) => mutation.type).join(", ");
+      const types = reviewWrites.map((mutation) => mutation.type).join(", ");
       return fail("review-mutation", `the single review mutation must be submit_pull_request_review (no reply/resolve), found [${types}]`);
     }
     const submit = submits[0]!;
@@ -139,14 +139,14 @@ const BODY_MAX_CHARS = 900;
  */
 export const reviewerBodyDisciplineGrader: Grader<ReviewerExpect> = {
   name: "body-discipline",
-  grade: ({ evalCase, result }) => {
+  grade: ({ evalCase, result, reviewWrites = [] }) => {
     if (!result) {
       return fail("body-discipline", "no parseable result to inspect");
     }
     if (evalCase.expect.outcome !== "completed") {
       return pass("body-discipline", "n/a (not a completed review)");
     }
-    const submits = submitReviews(result);
+    const submits = submitReviews(reviewWrites);
     const submit = submits[0];
     if (!submit) {
       // The conformance grader owns this failure; here it is simply n/a.
@@ -183,14 +183,14 @@ export const reviewerBodyDisciplineGrader: Grader<ReviewerExpect> = {
  */
 export const reviewerMentionGrader: Grader<ReviewerExpect> = {
   name: "mentions",
-  grade: ({ evalCase, result }) => {
+  grade: ({ evalCase, result, reviewWrites = [] }) => {
     if (!result) {
       return fail("mentions", "no parseable result to inspect");
     }
 
     const pinned = evalCase.expect.mustPinPath ?? [];
     if (pinned.length > 0) {
-      const paths = submitReviews(result).flatMap((submit) => submit.comments.map((comment) => normalizeForMention(comment.path)));
+      const paths = submitReviews(reviewWrites).flatMap((submit) => submit.comments.map((comment) => normalizeForMention(comment.path)));
       for (const needle of pinned) {
         const wanted = normalizeForMention(needle);
         if (!paths.some((p) => p.includes(wanted))) {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { WorkerResult } from "../../domain/index.js";
+import type { ReviewMutation, WorkerResult as AgentResult } from "../../domain/index.js";
 import type { ReviewerExpect } from "../cases/reviewer.js";
 import { reviewerCases } from "../cases/reviewer.js";
 import {
@@ -23,16 +23,17 @@ const completedCase = reviewerCases.find((c) => c.expect.outcome === "completed"
 
 const makeCase = (over: Partial<EvalCase<ReviewerExpect>>): EvalCase<ReviewerExpect> => ({ ...standDownCase, ...over });
 
-type ReviewMutation = WorkerResult["reviewMutations"][number];
-type TaskMutation = WorkerResult["taskMutations"][number];
+type CapturedResult = AgentResult & { reviewWrites: ReviewMutation[] };
+type TaskMutation = AgentResult["taskMutations"][number];
 
-const makeResult = (over: Partial<WorkerResult>): WorkerResult => ({
-  schemaVersion: 1,
+const makeResult = (over: Partial<CapturedResult>): CapturedResult => ({
+  schemaVersion: 2,
+  reviewResult: null,
   action: "reviewer",
   outcome: "no_action_needed",
   summary: "Nothing new since the checkpoint; checks green.",
   taskMutations: [],
-  reviewMutations: [],
+  reviewWrites: [],
   learningMutations: [],
   blockers: [],
   signals: [],
@@ -47,9 +48,10 @@ const submitReview = (over: { event?: string; body?: string; comments?: { path: 
     comments: over.comments ?? [{ path: "src/modules/carrierRate/appServices/persistCacheEntry.ts", line: 7, body: "x".repeat(950) }],
   }) as ReviewMutation;
 
-const ctxFor = (evalCase: EvalCase<ReviewerExpect>, result: WorkerResult | null): GradeContext<ReviewerExpect> => ({
+const ctxFor = (evalCase: EvalCase<ReviewerExpect>, result: CapturedResult | null): GradeContext<ReviewerExpect> => ({
   evalCase,
   result,
+  reviewWrites: result?.reviewWrites ?? [],
   rawStdout: "",
   ...(result ? {} : { parseError: "parse failed" }),
 });
@@ -85,7 +87,7 @@ describe("reviewMutationConformanceGrader", () => {
 
   describe("when a stand-down carries a review mutation", () => {
     it("fails", async () => {
-      const result = makeResult({ reviewMutations: [submitReview({})] });
+      const result = makeResult({ reviewWrites: [submitReview({})] });
       expect(await passOf(reviewMutationConformanceGrader, ctxFor(standDownCase, result))).toBe(false);
     });
   });
@@ -102,7 +104,7 @@ describe("reviewMutationConformanceGrader", () => {
 
   describe("when a completed review is exactly one COMMENT submit with pinned comments", () => {
     it("passes", async () => {
-      const result = makeResult({ outcome: "completed", reviewMutations: [submitReview({})] });
+      const result = makeResult({ outcome: "completed", reviewWrites: [submitReview({})] });
       expect(await passOf(reviewMutationConformanceGrader, ctxFor(completedCase, result))).toBe(true);
     });
   });
@@ -116,7 +118,7 @@ describe("reviewMutationConformanceGrader", () => {
 
   describe("when a completed review uses a non-COMMENT event", () => {
     it("fails", async () => {
-      const result = makeResult({ outcome: "completed", reviewMutations: [submitReview({ event: "REQUEST_CHANGES" })] });
+      const result = makeResult({ outcome: "completed", reviewWrites: [submitReview({ event: "REQUEST_CHANGES" })] });
       expect(await passOf(reviewMutationConformanceGrader, ctxFor(completedCase, result))).toBe(false);
     });
   });
@@ -125,7 +127,7 @@ describe("reviewMutationConformanceGrader", () => {
     // Actionable findings live in inline threads (reviewer.md); a body-only
     // review is the finding-in-body anti-pattern's structural twin.
     it("fails", async () => {
-      const result = makeResult({ outcome: "completed", reviewMutations: [submitReview({ comments: [] })] });
+      const result = makeResult({ outcome: "completed", reviewWrites: [submitReview({ comments: [] })] });
       expect(await passOf(reviewMutationConformanceGrader, ctxFor(completedCase, result))).toBe(false);
     });
   });
@@ -134,7 +136,7 @@ describe("reviewMutationConformanceGrader", () => {
     it("fails", async () => {
       const result = makeResult({
         outcome: "completed",
-        reviewMutations: [submitReview({ comments: [{ path: "src/a.ts", line: 0, body: "unpinned" }] })],
+        reviewWrites: [submitReview({ comments: [{ path: "src/a.ts", line: 0, body: "unpinned" }] })],
       });
       expect(await passOf(reviewMutationConformanceGrader, ctxFor(completedCase, result))).toBe(false);
     });
@@ -175,7 +177,7 @@ describe("reviewerSummaryConcisenessGrader", () => {
 describe("reviewerBodyDisciplineGrader", () => {
   describe("when the body is short and lighter than its largest thread", () => {
     it("passes (good shape: body median 449c < thread median 962c)", async () => {
-      const result = makeResult({ outcome: "completed", reviewMutations: [submitReview({})] });
+      const result = makeResult({ outcome: "completed", reviewWrites: [submitReview({})] });
       expect(await passOf(reviewerBodyDisciplineGrader, ctxFor(completedCase, result))).toBe(true);
     });
   });
@@ -183,7 +185,7 @@ describe("reviewerBodyDisciplineGrader", () => {
   describe("when the body crosses the finding-in-body tripwire", () => {
     // The 3 real bads were 1038-1387c; good bodies max 682c.
     it("fails above 900 chars", async () => {
-      const result = makeResult({ outcome: "completed", reviewMutations: [submitReview({ body: "y".repeat(1038) })] });
+      const result = makeResult({ outcome: "completed", reviewWrites: [submitReview({ body: "y".repeat(1038) })] });
       expect(await passOf(reviewerBodyDisciplineGrader, ctxFor(completedCase, result))).toBe(false);
     });
   });
@@ -192,7 +194,7 @@ describe("reviewerBodyDisciplineGrader", () => {
     it("fails on the body ≥ thread inversion", async () => {
       const result = makeResult({
         outcome: "completed",
-        reviewMutations: [submitReview({ body: "z".repeat(700), comments: [{ path: "src/a.ts", line: 3, body: "short thread" }] })],
+        reviewWrites: [submitReview({ body: "z".repeat(700), comments: [{ path: "src/a.ts", line: 3, body: "short thread" }] })],
       });
       expect(await passOf(reviewerBodyDisciplineGrader, ctxFor(completedCase, result))).toBe(false);
     });
@@ -208,7 +210,7 @@ describe("reviewerBodyDisciplineGrader", () => {
 describe("reviewerMentionGrader", () => {
   describe("when every expected path is pinned by an inline comment", () => {
     it("passes", async () => {
-      const result = makeResult({ outcome: "completed", reviewMutations: [submitReview({})] });
+      const result = makeResult({ outcome: "completed", reviewWrites: [submitReview({})] });
       const evalCase = makeCase({ expect: { outcome: "completed", mustPinPath: ["persistCacheEntry.ts"] } });
       expect(await passOf(reviewerMentionGrader, ctxFor(evalCase, result))).toBe(true);
     });
@@ -216,7 +218,7 @@ describe("reviewerMentionGrader", () => {
 
   describe("when an expected path is not pinned", () => {
     it("fails", async () => {
-      const result = makeResult({ outcome: "completed", reviewMutations: [submitReview({})] });
+      const result = makeResult({ outcome: "completed", reviewWrites: [submitReview({})] });
       const evalCase = makeCase({ expect: { outcome: "completed", mustPinPath: ["some/other/file.ts"] } });
       expect(await passOf(reviewerMentionGrader, ctxFor(evalCase, result))).toBe(false);
     });

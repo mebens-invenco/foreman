@@ -1,4 +1,4 @@
-import type { WorkerResult } from "../domain/index.js";
+import type { ReviewMutation } from "../domain/index.js";
 import type { LiveBenchExpect } from "./cases/foreman-bench.js";
 import type { Grader, GraderResult } from "./types.js";
 
@@ -19,10 +19,10 @@ const pass = (dimension: string, detail: string): GraderResult => ({ dimension, 
 const fail = (dimension: string, detail: string): GraderResult => ({ dimension, pass: false, detail });
 const na = (dimension: string, detail: string): GraderResult => ({ dimension, pass: true, detail });
 
-type SubmitReview = Extract<WorkerResult["reviewMutations"][number], { type: "submit_pull_request_review" }>;
+type SubmitReview = Extract<ReviewMutation, { type: "submit_pull_request_review" }>;
 
-const submitReviews = (result: WorkerResult): SubmitReview[] =>
-  result.reviewMutations.filter((mutation): mutation is SubmitReview => mutation.type === "submit_pull_request_review");
+const submitReviews = (writes: ReviewMutation[]): SubmitReview[] =>
+  writes.filter((mutation): mutation is SubmitReview => mutation.type === "submit_pull_request_review");
 
 export const liveOutcomeGrader: Grader<LiveBenchExpect> = {
   name: "outcome",
@@ -44,18 +44,18 @@ export const liveOutcomeGrader: Grader<LiveBenchExpect> = {
  */
 export const liveMutationShapeGrader: Grader<LiveBenchExpect> = {
   name: "mutation-shape",
-  grade: ({ evalCase, result }) => {
+  grade: ({ evalCase, result, reviewWrites = [] }) => {
     if (!result) {
       return fail("mutation-shape", "no parseable result to inspect");
     }
     if (evalCase.expect.outcome === "no_action_needed") {
-      const total = result.reviewMutations.length + result.taskMutations.length;
+      const total = reviewWrites.length + result.taskMutations.length;
       return total === 0
-        ? pass("mutation-shape", `review=${result.reviewMutations.length} task=${result.taskMutations.length}`)
-        : fail("mutation-shape", `review=${result.reviewMutations.length} task=${result.taskMutations.length}`);
+        ? pass("mutation-shape", `review=${reviewWrites.length} task=${result.taskMutations.length}`)
+        : fail("mutation-shape", `review=${reviewWrites.length} task=${result.taskMutations.length}`);
     }
-    const sprs = submitReviews(result);
-    const others = result.reviewMutations.filter((mutation) => mutation.type !== "submit_pull_request_review");
+    const sprs = submitReviews(reviewWrites);
+    const others = reviewWrites.filter((mutation) => mutation.type !== "submit_pull_request_review");
     const ok = sprs.length === 1 && sprs[0]?.event === "COMMENT" && others.length === 0 && result.taskMutations.length === 0;
     return ok
       ? pass("mutation-shape", `sprs=${sprs.length} others=none`)
@@ -66,7 +66,7 @@ export const liveMutationShapeGrader: Grader<LiveBenchExpect> = {
 /** Every planted file path must be pinned by at least one inline comment. */
 export const livePlantedPathsGrader: Grader<LiveBenchExpect> = {
   name: "planted-paths",
-  grade: ({ evalCase, result }) => {
+  grade: ({ evalCase, result, reviewWrites = [] }) => {
     const mustFlag = evalCase.expect.mustFlagPaths ?? [];
     if (mustFlag.length === 0) {
       return na("planted-paths", "n/a (no planted paths)");
@@ -74,7 +74,7 @@ export const livePlantedPathsGrader: Grader<LiveBenchExpect> = {
     if (!result) {
       return fail("planted-paths", "no parseable result to inspect");
     }
-    const comments = submitReviews(result).flatMap((review) => review.comments ?? []);
+    const comments = submitReviews(reviewWrites).flatMap((review) => review.comments ?? []);
     const missing = mustFlag.filter((path) => !comments.some((comment) => comment.path === path));
     const seen = `comment paths: ${comments.map((comment) => comment.path).join(", ") || "none"}`;
     return missing.length === 0 ? pass("planted-paths", seen) : fail("planted-paths", `missing ${missing.join(", ")}; ${seen}`);
@@ -83,7 +83,7 @@ export const livePlantedPathsGrader: Grader<LiveBenchExpect> = {
 
 export const liveThreadCountGrader: Grader<LiveBenchExpect> = {
   name: "thread-count",
-  grade: ({ evalCase, result }) => {
+  grade: ({ evalCase, result, reviewWrites = [] }) => {
     const maxThreads = evalCase.expect.maxThreads;
     if (maxThreads === undefined) {
       return na("thread-count", "n/a (no thread budget)");
@@ -91,7 +91,7 @@ export const liveThreadCountGrader: Grader<LiveBenchExpect> = {
     if (!result) {
       return fail("thread-count", "no parseable result to inspect");
     }
-    const count = submitReviews(result).flatMap((review) => review.comments ?? []).length;
+    const count = submitReviews(reviewWrites).flatMap((review) => review.comments ?? []).length;
     const detail = `${count} threads (max ${maxThreads})`;
     return count <= maxThreads ? pass("thread-count", detail) : fail("thread-count", detail);
   },
@@ -100,14 +100,14 @@ export const liveThreadCountGrader: Grader<LiveBenchExpect> = {
 /** Findings live in threads: the body stays shorter than the largest inline comment. */
 export const liveBodyDisciplineGrader: Grader<LiveBenchExpect> = {
   name: "body-discipline",
-  grade: ({ evalCase, result }) => {
+  grade: ({ evalCase, result, reviewWrites = [] }) => {
     if (evalCase.expect.outcome !== "completed") {
       return na("body-discipline", "n/a (not a completed review)");
     }
     if (!result) {
       return fail("body-discipline", "no parseable result to inspect");
     }
-    const review = submitReviews(result)[0];
+    const review = submitReviews(reviewWrites)[0];
     const bodyLength = review?.body?.length ?? 0;
     const largestComment = Math.max(0, ...(review?.comments ?? []).map((comment) => comment.body.length));
     const detail = `body ${bodyLength}c vs largest comment ${largestComment}c`;
