@@ -1,3 +1,10 @@
+import {
+  actionableReviewThreadFingerprint,
+  latestActionableConversationCommentId,
+  latestActionableReviewSummaryId,
+  type ActionType,
+  type ReviewContext,
+} from "../domain/index.js";
 import type { RetryableRunnerInterruption } from "../execution/index.js";
 import { stableStringify } from "../lib/json.js";
 
@@ -8,8 +15,42 @@ export type RunnerInterruptionRetry = {
   nextEligibleAt: string | null;
 };
 
-export const runnerInterruptionWorkFingerprint = (selectionContext: Record<string, unknown>): string => {
+const reviewWorkFingerprint = (context: ReviewContext): string => stableStringify({
+  url: context.pullRequestUrl,
+  headSha: context.headSha,
+  baseBranch: context.baseBranch,
+  reviewSummaryId: latestActionableReviewSummaryId(context),
+  conversationCommentId: latestActionableConversationCommentId(context),
+  threads: actionableReviewThreadFingerprint(context),
+  failingChecks: context.failingChecks.map(stableStringify).sort(),
+  conflicting: context.mergeState === "conflicting",
+});
+
+export const runnerInterruptionWorkFingerprint = (
+  action: ActionType,
+  selectionContext: Record<string, unknown>,
+): string => {
   const { runnerInterruption: _runnerInterruption, pullRequestRecovery, ...workContext } = selectionContext;
+  const reviewContext = selectionContext.reviewContext as ReviewContext | undefined;
+  if (reviewContext) {
+    if (action === "review") {
+      return reviewWorkFingerprint(reviewContext);
+    }
+    if (action === "reviewer") {
+      return stableStringify({
+        url: reviewContext.pullRequestUrl,
+        headSha: reviewContext.headSha,
+        baseBranch: reviewContext.baseBranch,
+      });
+    }
+    if (action === "retry") {
+      return stableStringify({
+        url: reviewContext.pullRequestUrl,
+        headSha: reviewContext.headSha,
+        state: reviewContext.state,
+      });
+    }
+  }
   const recoveryFingerprint =
     typeof pullRequestRecovery === "object" && pullRequestRecovery !== null && "fingerprint" in pullRequestRecovery
       ? pullRequestRecovery.fingerprint

@@ -311,7 +311,7 @@ const seedExhaustedRunnerInterruption = (
       ...selectionContext,
       runnerInterruption: {
         retriesExhausted: true,
-        workFingerprint: runnerInterruptionWorkFingerprint(selectionContext),
+        workFingerprint: runnerInterruptionWorkFingerprint(action, selectionContext),
       },
     },
   });
@@ -687,6 +687,63 @@ describe("runScoutSelection", () => {
       db.close();
     }
   });
+
+  test.each(["transient mergeability", "agent status comment"] as const)(
+    "keeps reviewer retries exhausted when only %s changes",
+    async (change) => {
+      const tempDir = await createTempDir("foreman-scout-stable-exhaustion-");
+      cleanupDirs.push(tempDir);
+      const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+      const config = createDefaultWorkspaceConfig("foo", "file");
+      const reviewTask = task({
+        id: `TASK-STABLE-EXHAUSTION-${change.replaceAll(" ", "-").toUpperCase()}`,
+        title: "Stable work after exhaustion",
+        state: "in_review",
+        providerState: "in_review",
+        priority: "normal",
+        updatedAt: "2026-03-14T12:00:00Z",
+        pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/162", source: "provider" }],
+      });
+      const exhaustedContext = reviewContext({
+        pullRequestUrl: "https://github.com/acme/repo-a/pull/162",
+        pullRequestNumber: 162,
+        state: "open",
+        headSha: "unchanged-head",
+        headBranch: "task-stable-exhaustion",
+        baseBranch: "main",
+      });
+      const currentContext: ReviewContext = change === "transient mergeability"
+        ? { ...exhaustedContext, mergeState: "unknown" }
+        : {
+            ...exhaustedContext,
+            conversationComments: [{
+              id: "agent-status",
+              body: "Checks are still running.",
+              authorName: "foreman-agent",
+              authoredByAgent: true,
+              createdAt: "2026-03-14T12:05:00Z",
+              isAfterCurrentHead: true,
+            }],
+          };
+      seedReviewCheckpoint(db, reviewTask, currentContext);
+      seedExhaustedRunnerInterruption(db, reviewTask, "reviewer", reviewWorkSelectionContext(exhaustedContext));
+
+      try {
+        const result = await runScoutSelection({
+          config,
+          foremanRepos: db,
+          taskSystem: new FakeTaskSystem([reviewTask]),
+          reviewService: new FakeReviewService({ [reviewTask.id]: currentContext }),
+          repos: [{ key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" }],
+          triggerType: "poll",
+        });
+
+        expect(result.jobs).toHaveLength(0);
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   test("does not immediately reselect a manually stopped retry on worker-finished scout", async () => {
     const tempDir = await createTempDir("foreman-scout-test-");

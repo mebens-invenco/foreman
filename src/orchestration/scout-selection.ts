@@ -97,7 +97,7 @@ const runnerInterruptionRetriesExhausted = (input: {
     typeof interruption !== "object" || interruption === null ||
     !("retriesExhausted" in interruption) || interruption.retriesExhausted !== true ||
     !("workFingerprint" in interruption) ||
-    interruption.workFingerprint !== runnerInterruptionWorkFingerprint(input.selectionContext)
+    interruption.workFingerprint !== runnerInterruptionWorkFingerprint(input.action, input.selectionContext)
   ) {
     return false;
   }

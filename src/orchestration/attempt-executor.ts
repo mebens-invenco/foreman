@@ -443,7 +443,7 @@ export class AttemptExecutor {
             runnerInterruption: {
               taskStateBeforeExecution: originalTaskState,
               retriesExhausted: true,
-              workFingerprint: runnerInterruptionWorkFingerprint(job.selectionContext),
+              workFingerprint: runnerInterruptionWorkFingerprint(job.action, job.selectionContext),
             },
           });
           if (task && transitionedTaskToInProgress && originalTaskState && originalTaskState !== "in_progress") {

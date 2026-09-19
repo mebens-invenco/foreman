@@ -33,15 +33,15 @@ describe("runnerInterruptionWorkFingerprint", () => {
       runnerInterruption: { taskStateBeforeExecution: "ready" },
     };
 
-    expect(runnerInterruptionWorkFingerprint(context)).toBe(
-      runnerInterruptionWorkFingerprint({
+    expect(runnerInterruptionWorkFingerprint("execution", context)).toBe(
+      runnerInterruptionWorkFingerprint("execution", {
         ...context,
         pullRequestRecovery: { fingerprint: "pr-a", attempts: 3 },
         runnerInterruption: { retriesExhausted: true },
       }),
     );
-    expect(runnerInterruptionWorkFingerprint(context)).not.toBe(
-      runnerInterruptionWorkFingerprint({ ...context, reviewContext: { headSha: "head-b" } }),
+    expect(runnerInterruptionWorkFingerprint("execution", context)).not.toBe(
+      runnerInterruptionWorkFingerprint("execution", { ...context, reviewContext: { headSha: "head-b" } }),
     );
   });
 });
