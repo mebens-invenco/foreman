@@ -136,8 +136,8 @@ PR metadata, not the diff).
 
 Graders (`reviewer-graders.ts`, all deterministic — no judge, no signals; both
 de-scoped by the analysis): `schema` (reused), `outcome`, `review-mutation`
-(structural conformance: zero mutations on a stand-down; exactly one
-`submit_pull_request_review` with `event: "COMMENT"`, ≥1 path+line-pinned inline
+(structural conformance: zero captured writes on a stand-down; exactly one
+captured review with `event: "COMMENT"`, ≥1 path+line-pinned inline
 comment, no task mutations — 100% clean across the 23 real completed traces, so
 this is a regression guard), `summary-conciseness` (stand-downs only; the
 summary-policy standard ceiling — reviewer first_pass good summaries max at
@@ -155,9 +155,13 @@ bench repo into the eval workspace, force-checkouts the case branch at its
 **manifest-pinned head sha** (an unreachable sha fails the run loudly — frozen
 fixtures must never drift silently), renders the real reviewer prompt against
 that worktree, and lets the reviewer run its own live `gh` discovery. The
-worker result is captured and graded, **never applied** — zero GitHub writes,
-so the fixture PRs stay byte-frozen across runs. Do not merge, close, or
-comment on the fixture PRs.
+worker uses the eval-only `review-capture` CLI instead of GitHub's write API.
+The CLI validates the reviewed head, records the review body and inline comments
+in a per-sample local file, and returns a simulated review node ID. The harness
+checks the v2 result references against that capture and grades the captured
+contents. Each sample starts with an empty capture. Both synthetic and live
+reviewer evals explicitly instruct workers to keep GitHub read-only. Do not merge,
+close, edit, or comment on the frozen fixture PRs.
 
 Continuation cases (`continuation: true` in the manifest) select the
 reviewer-continuation template and carry a driver-side `priorCheckpoint`

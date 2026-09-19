@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { deriveAttemptStatus, type RepoRef, type ReviewContext, type Task, type TaskState, type TaskTarget, type TokenUsage, type WorkerResult } from "../domain/index.js";
 import { sumTokenUsage } from "../execution/impl/token-usage.js";
-import { attemptProvenanceEnv, createAgentRunner, parseWorkerResult, resolveRunnerConfigForAction, validateWorkerResult, type AgentRunner, type CapturedAgentRunResult, type WorkerResultAction } from "../execution/index.js";
+import { attemptProvenanceEnv, createAgentRunner, parseWorkerResult, resolveRunnerConfigForAction, validateWorkerResultForAction, type AgentRunner, type CapturedAgentRunResult, type WorkerResultAction } from "../execution/index.js";
 import { parseWorkerPromptPullRequestReference, renderWorkerPrompt, renderWorkerResultRecoveryPrompt } from "../execution/render-worker-prompt.js";
 import { ForemanError, isForemanError, isProviderRateLimitError } from "../lib/errors.js";
 import { atomicWriteFile, ensureDir, pathExists, sha256File } from "../lib/fs.js";
@@ -12,6 +12,7 @@ import type { LoggerService } from "../logger.js";
 import type { Embedder } from "../embeddings/embedder.js";
 import type { AttemptRecord, ForemanRepos, JobRecord, RunnerSessionRecord, WorkerRecord } from "../repos/index.js";
 import type { ReviewService } from "../review/index.js";
+import { formatGitHubAgentComment } from "../review/impl/github-comment-badge.js";
 import type { TaskSystem } from "../tasking/index.js";
 import { runnerSessionRoleForAction, runnerTuningValue, type WorkspaceConfig, type WorkspaceRunnerConfig } from "../workspace/config.js";
 import { ensureTaskWorktree, removeCleanWorktree } from "../workspace/git-worktrees.js";
@@ -153,6 +154,11 @@ export class AttemptExecutor {
       const taskTargetId = job.taskTargetId;
 
       task = await this.deps.taskSystem.getTask(job.taskId);
+      if (job.action !== "consolidation" && (task.state === "done" || task.state === "canceled")) {
+        this.deps.foremanRepos.jobs.updateJobStatus(job.id, "canceled", { finishedAt: isoNow() });
+        jobLogger.info("canceled stale job for terminal task", { taskState: task.state });
+        return;
+      }
       const mirroredTask = this.deps.foremanRepos.taskMirror.getTask(job.taskId);
       if (mirroredTask && mirroredTask.pullRequests.length > 0) {
         task = { ...task, pullRequests: mirroredTask.pullRequests };
@@ -303,6 +309,11 @@ export class AttemptExecutor {
             previousSessionHeadSha: activeRunnerSession?.lastWorktreeHeadSha ?? null,
           },
           continuation: isContinuation,
+          commentHeader: formatGitHubAgentComment("", {
+            label: job.action === "reviewer" ? this.deps.config.reviewer.agentPrefix : this.deps.config.workspace.agentPrefix,
+            runnerName: runnerConfig.type,
+            runnerModel: runnerConfig.model,
+          }).trim(),
           ...(pullRequestReference ? { pullRequestReference } : {}),
           ...(deploymentInstructionBody !== undefined ? { deploymentInstructionBody } : {}),
         });
@@ -606,7 +617,7 @@ export class AttemptExecutor {
   }): Promise<{ workerResult: WorkerResult; finalRunResult: CapturedAgentRunResult; tokensUsed: TokenUsage | undefined }> {
     try {
       return {
-        workerResult: validateWorkerResult(parseWorkerResult(input.runResult.stdout)),
+        workerResult: validateWorkerResultForAction(parseWorkerResult(input.runResult.stdout), input.job.action as WorkerResultAction),
         finalRunResult: input.runResult,
         tokensUsed: input.runResult.tokensUsed,
       };
@@ -704,7 +715,7 @@ export class AttemptExecutor {
         throw new Error(formatRunnerFailure(recoveryResult));
       }
 
-      const workerResult = validateWorkerResult(parseWorkerResult(recoveryResult.stdout));
+      const workerResult = validateWorkerResultForAction(parseWorkerResult(recoveryResult.stdout), input.job.action as WorkerResultAction);
       this.deps.foremanRepos.attempts.addAttemptEvent(input.attempt.id, "worker_result_recovered", workerResult.summary, {
         recoveryOutputPath: recoveryOutputRelativePath,
       });

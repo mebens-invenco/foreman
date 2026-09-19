@@ -99,9 +99,9 @@ describe("rollupTasks", () => {
     expect(result.buckets[0]!.attemptsCount).toBe(2);
     expect(result.buckets[0]!.tokens.inputTokens).toBe(1_000_000);
     expect(result.buckets[0]!.tokens.outputTokens).toBe(1_000_000);
-    expect(result.buckets[0]!.cost.totalUsd).toBeCloseTo(15 + 75);
+    expect(result.buckets[0]!.cost.totalUsd).toBeCloseTo(5 + 25);
     expect(result.totals.attemptsCount).toBe(2);
-    expect(result.totals.cost.totalUsd).toBeCloseTo(15 + 75);
+    expect(result.totals.cost.totalUsd).toBeCloseTo(5 + 25);
   });
 
   test("buckets are sorted by taskId ascending", () => {
@@ -210,12 +210,12 @@ describe("rollupTasks", () => {
     const result = rollupTasks({ rows, fromInclusive, toExclusive });
 
     expect(result.buckets).toHaveLength(1);
-    // 1M opus input @ $15/Mtok + 1M sonnet input @ $3/Mtok = $18.
-    // A sum-then-estimate refactor would either bill all 2M at $15 ($30) or
+    // 1M opus input @ $5/Mtok + 1M sonnet input @ $3/Mtok = $8.
+    // A sum-then-estimate refactor would either bill all 2M at $5 ($10) or
     // at $3 ($6) depending on which row's rate it sampled — the assert below
     // catches either.
-    expect(result.buckets[0]!.cost.totalUsd).toBeCloseTo(15 + 3);
-    expect(result.buckets[0]!.cost.breakdown.input).toBeCloseTo(15 + 3);
-    expect(result.totals.cost.totalUsd).toBeCloseTo(15 + 3);
+    expect(result.buckets[0]!.cost.totalUsd).toBeCloseTo(5 + 3);
+    expect(result.buckets[0]!.cost.breakdown.input).toBeCloseTo(5 + 3);
+    expect(result.totals.cost.totalUsd).toBeCloseTo(5 + 3);
   });
 });

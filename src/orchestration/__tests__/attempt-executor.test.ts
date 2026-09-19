@@ -86,20 +86,23 @@ const createGitRepo = async (root: string): Promise<void> => {
 };
 
 const createWorkerResult = (overrides: Partial<WorkerResult> = {}): WorkerResult => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   action: "execution",
   outcome: "completed",
   summary: "Recovered structured result.",
   taskMutations: [],
-  reviewMutations: [],
+  reviewResult: null,
   learningMutations: [],
   blockers: [],
   signals: [],
   ...overrides,
 });
 
-const createExecutorContext = async (options: { action?: ActionType; selectedTask?: Task; selectionContext?: Record<string, unknown> } = {}) => {
+const createExecutorContext = async (
+  options: { action?: ActionType; selectedTask?: Task; providerTask?: Task; selectionContext?: Record<string, unknown> } = {},
+) => {
   const selectedTask = options.selectedTask ?? task;
+  const providerTask = options.providerTask ?? selectedTask;
   const action = options.action ?? "execution";
   const workspaceRoot = await createTempDir("foreman-attempt-executor-test-");
   cleanupDirs.push(workspaceRoot);
@@ -132,7 +135,7 @@ const createExecutorContext = async (options: { action?: ActionType; selectedTas
     getProvider: () => "file",
     listCandidates,
     listAssignedIssues: vi.fn(async () => []),
-    getTask: vi.fn(async () => selectedTask),
+    getTask: vi.fn(async () => providerTask),
     createTask: vi.fn(async () => ({ id: "TASK-NEW", providerId: "TASK-NEW", url: null })),
     listComments: vi.fn(async () => []),
     addComment: vi.fn(async () => undefined),
@@ -194,6 +197,66 @@ afterEach(async () => {
 });
 
 describe("AttemptExecutor", () => {
+  test.each(
+    [
+      ["execution", "done"],
+      ["execution", "canceled"],
+      ["retry", "done"],
+      ["retry", "canceled"],
+      ["review", "done"],
+      ["review", "canceled"],
+      ["reviewer", "done"],
+      ["reviewer", "canceled"],
+      ["deployment", "done"],
+      ["deployment", "canceled"],
+    ] satisfies Array<[ActionType, Task["state"]]>,
+  )("cancels stale %s jobs when the provider task is %s", async (action, state) => {
+    const providerTask = { ...task, state, providerState: state };
+    const { db, claimedJob, executor, logger, taskSystem } = await createExecutorContext({ action, providerTask });
+
+    try {
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      expect(db.jobs.getJob(claimedJob.id)).toMatchObject({ status: "canceled" });
+      expect(db.attempts.latestAttemptForJob(claimedJob.id)).toBeNull();
+      expect(worktreeMocks.ensureTaskWorktree).not.toHaveBeenCalled();
+      expect(taskSystem.transition).not.toHaveBeenCalled();
+      expect(runnerMocks.createAgentRunner).not.toHaveBeenCalled();
+      expect(runnerMocks.invoke).not.toHaveBeenCalled();
+      expect(db.workers.listWorkers()[0]).toMatchObject({ status: "idle", currentAttemptId: null });
+    } finally {
+      db.close();
+    }
+  });
+
+  test("executes consolidation for a terminal task", async () => {
+    const terminalTask: Task = { ...task, state: "done", providerState: "done" };
+    const { db, claimedJob, executor, logger } = await createExecutorContext({ action: "consolidation", selectedTask: terminalTask });
+    const workerResult = createWorkerResult({ action: "consolidation", summary: "Consolidated terminal task." });
+    runnerMocks.invoke.mockResolvedValueOnce({
+      exitCode: 0,
+      signal: null,
+      startedAt: "2026-05-06T00:00:00.000Z",
+      finishedAt: "2026-05-06T00:01:00.000Z",
+      stdoutBytes: Buffer.byteLength(JSON.stringify(workerResult)),
+      stderrBytes: 0,
+      stdout: `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`,
+      stderr: "",
+    });
+
+    try {
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      expect(db.jobs.getJob(claimedJob.id)).toMatchObject({ status: "completed" });
+      expect(db.attempts.latestAttemptForJob(claimedJob.id)).toMatchObject({ status: "completed" });
+      expect(runnerMocks.invoke).toHaveBeenCalledOnce();
+    } finally {
+      db.close();
+    }
+  });
+
   test("recovers a valid worker result when a successful runner emits natural final text", async () => {
     const workspaceRoot = await createTempDir("foreman-attempt-executor-test-");
     cleanupDirs.push(workspaceRoot);
@@ -223,12 +286,12 @@ describe("AttemptExecutor", () => {
       db.jobs.claimQueuedJobForWorker(job.id, db.workers.listWorkers()[0]!.id);
       const claimedJob = db.jobs.getJob(job.id);
       const recoveredResult: WorkerResult = {
-        schemaVersion: 1,
+        schemaVersion: 2,
         action: "execution",
         outcome: "completed",
         summary: "Recovered structured result.",
         taskMutations: [],
-        reviewMutations: [],
+        reviewResult: null,
         learningMutations: [],
         blockers: [],
         signals: [],
@@ -293,10 +356,12 @@ describe("AttemptExecutor", () => {
       await logger.flush();
 
       expect(runnerMocks.invoke).toHaveBeenCalledTimes(2);
+      expect(runnerMocks.invoke.mock.calls[0]![0].prompt).toContain("## GitHub Comment Attribution");
+      expect(runnerMocks.invoke.mock.calls[0]![0].prompt).toContain("![agent | ");
       expect(runnerMocks.invoke.mock.calls[1]![0]).toMatchObject({
         nativeSessionId: "native-session-1",
       });
-      expect(runnerMocks.invoke.mock.calls[1]![0].prompt).toContain("could not parse a valid `<agent-result>` block");
+      expect(runnerMocks.invoke.mock.calls[1]![0].prompt).toContain("could not parse a valid current-version `<agent-result>` block");
 
       const attempt = db.attempts.latestAttemptForJob(job.id)!;
       // Both invokes — the primary and the recovery — carry the attempt seam's
