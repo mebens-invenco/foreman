@@ -26,6 +26,7 @@ afterEach(async () => {
 class FakeTaskSystem implements TaskSystem {
   transitions: Array<{ taskId: string; toState: Task["state"] }> = [];
   comments: Array<{ taskId: string; body: string }> = [];
+  labelUpdates: Array<{ taskId: string; add: string[]; remove: string[] }> = [];
   commentUpdatedAt: string | null = null;
   getTaskError: Error | null = null;
   getTaskFailuresRemaining = 0;
@@ -80,7 +81,9 @@ class FakeTaskSystem implements TaskSystem {
   }
 
   async upsertPullRequest(): Promise<void> {}
-  async updateLabels(): Promise<void> {}
+  async updateLabels(input: { taskId: string; add: string[]; remove: string[] }): Promise<void> {
+    this.labelUpdates.push(input);
+  }
 }
 
 class FakeReviewService implements ReviewService {
@@ -94,6 +97,7 @@ class FakeReviewService implements ReviewService {
   constructor(
     private readonly pullRequest: ResolvedPullRequest | Record<string, ResolvedPullRequest>,
     private readonly reviewContext: ReviewContext | null = null,
+    private readonly pullRequestReferences: Record<string, ResolvedPullRequest> = {},
   ) {}
 
   async resolvePullRequest(_task?: Task, _repo?: RepoRef, target?: { repoKey: string }): Promise<ResolvedPullRequest> {
@@ -103,6 +107,10 @@ class FakeReviewService implements ReviewService {
     }
 
     return (pullRequest as Record<string, ResolvedPullRequest>)[target?.repoKey ?? "repo-a"]!;
+  }
+
+  async resolvePullRequestReference(prUrl: string): Promise<ResolvedPullRequest | null> {
+    return this.pullRequestReferences[prUrl] ?? null;
   }
 
   async getContext(): Promise<ReviewContext | null> {
@@ -439,6 +447,122 @@ describe("agent-owned GitHub results", () => {
       expect((await select()).jobs[0]?.selectionContext.pullRequestRecovery).toMatchObject({ attempts: 1 });
       clock.mockRestore();
     } finally { db.close(); }
+  });
+});
+
+describe("consolidation pull request evidence", () => {
+  const setUp = async (pullRequest: ResolvedPullRequest) => {
+    const tempDir = await createTempDir("foreman-consolidation-applier-");
+    cleanupDirs.push(tempDir);
+    const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    const selectedTask: Task = { ...task(), state: "done", providerState: "done" };
+    const repo: RepoRef = { key: "repo-a", rootPath: "/repos/repo-a", defaultBranch: "main" };
+    db.workers.ensureWorkerSlots(1);
+    db.taskMirror.saveTasks([selectedTask]);
+    const target = db.taskMirror.getTaskTarget(selectedTask.id, repo.key)!;
+    const job = db.jobs.createJob({
+      taskId: selectedTask.id,
+      taskTargetId: target.id,
+      taskProvider: selectedTask.provider,
+      action: "consolidation",
+      priorityRank: priorityToRank(selectedTask.priority),
+      repoKey: repo.key,
+      baseBranch: repo.defaultBranch,
+      dedupeKey: `${selectedTask.id}:${repo.key}:consolidation`,
+      selectionReason: "test historical pull request evidence",
+    });
+    const attempt = db.attempts.createAttempt({
+      jobId: job.id,
+      workerId: db.workers.listWorkers()[0]!.id,
+      runnerName: "opencode",
+      runnerModel: "test",
+      runnerVariant: "high",
+    });
+    const taskSystem = new FakeTaskSystem([selectedTask]);
+    const reviewService = new FakeReviewService(pullRequest, null, { [pullRequest.pullRequestUrl]: pullRequest });
+    const applier = new WorkerResultApplier({
+      config,
+      foremanRepos: db,
+      taskSystem,
+      reviewService,
+      repos: [repo],
+      embedder: new FakeEmbedder(),
+      logger: LoggerService.create({ stdout: new PassThrough(), minLevel: "error" }),
+      scheduleScout: () => undefined,
+    });
+    const result: WorkerResult = {
+      schemaVersion: 2,
+      action: "consolidation",
+      outcome: "completed",
+      summary: "Captured the landed work.",
+      taskMutations: [{ type: "add_comment", body: "Landed in historical pull request." }],
+      reviewResult: { pullRequestUrl: pullRequest.pullRequestUrl },
+      learningMutations: [{
+        type: "add",
+        title: "Historical PR evidence",
+        repo: repo.key,
+        confidence: "emerging",
+        content: "Historical consolidation evidence can differ from active task topology.",
+        tags: ["consolidation"],
+      }],
+      blockers: [],
+      signals: [],
+    };
+    const apply = () => applier.apply({ attempt, job, task: selectedTask, target, repo, worktreePath: tempDir, workerResult: result });
+    return { db, selectedTask, taskSystem, result, apply };
+  };
+
+  test.each`
+    scenario                         | headBranch             | baseBranch
+    ${"deleted stacked base"}       | ${"task-deploy-apply"} | ${"eng-dependency"}
+    ${"work under another task"}    | ${"eng-other-task"}    | ${"main"}
+  `("applies completed mutations for $scenario", async ({ headBranch, baseBranch }) => {
+    const pullRequest: ResolvedPullRequest = {
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/17",
+      pullRequestNumber: 17,
+      state: "merged",
+      isDraft: false,
+      headBranch,
+      baseBranch,
+    };
+    const subject = await setUp(pullRequest);
+    try {
+      await expect(subject.apply()).resolves.toBe(pullRequest.pullRequestUrl);
+      expect(subject.taskSystem.comments).toEqual([{ taskId: subject.selectedTask.id, body: "Landed in historical pull request." }]);
+      expect(subject.taskSystem.labelUpdates).toEqual([{
+        taskId: subject.selectedTask.id,
+        add: ["Agent Consolidated"],
+        remove: ["Agent"],
+      }]);
+      expect(subject.db.learnings.listLearnings()).toMatchObject([{ title: "Historical PR evidence", sourceTaskId: subject.selectedTask.id }]);
+      expect(subject.db.taskMirror.getTask(subject.selectedTask.id)?.pullRequests).toEqual([]);
+      expect(subject.taskSystem.transitions).toEqual([]);
+    } finally {
+      subject.db.close();
+    }
+  });
+
+  test("rejects a pull request that cannot be verified in the selected repository", async () => {
+    const pullRequest: ResolvedPullRequest = {
+      pullRequestUrl: "https://github.com/acme/repo-a/pull/17",
+      pullRequestNumber: 17,
+      state: "merged",
+      isDraft: false,
+      headBranch: "eng-other-task",
+      baseBranch: "main",
+    };
+    const subject = await setUp(pullRequest);
+    subject.result.reviewResult!.pullRequestUrl = "https://github.com/acme/other-repo/pull/17";
+    try {
+      await expect(subject.apply()).rejects.toMatchObject({ code: "invalid_pull_request" });
+      expect(subject.taskSystem.comments).toEqual([]);
+      expect(subject.taskSystem.labelUpdates).toEqual([]);
+      expect(subject.db.learnings.listLearnings()).toEqual([]);
+      expect(subject.db.taskMirror.getTask(subject.selectedTask.id)?.pullRequests).toEqual([]);
+    } finally {
+      subject.db.close();
+    }
   });
 });
 

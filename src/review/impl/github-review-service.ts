@@ -1124,6 +1124,15 @@ export class GitHubReviewService implements ReviewService {
     return null;
   }
 
+  async resolvePullRequestReference(prUrl: string, repo: RepoRef): Promise<ResolvedPullRequest | null> {
+    const descriptor = await this.repoDescriptorFromRepo(repo);
+    const reference = parseGitHubUrl(prUrl);
+    if (reference.owner !== descriptor.owner || reference.repo !== descriptor.repo) {
+      throw new ForemanError("invalid_pr_url", "Reported pull request belongs to a different repository");
+    }
+    return this.resolvePullRequestFromUrl(prUrl, repo.key);
+  }
+
   async getContext(task: Task, agentPrefix: string, repo?: RepoRef, target?: TaskTargetRef): Promise<ReviewContext | null> {
     const resolvedPullRequest = await this.resolvePullRequest(task, repo, target);
     const effectivePrUrl = resolvedPullRequest?.pullRequestUrl ?? null;
