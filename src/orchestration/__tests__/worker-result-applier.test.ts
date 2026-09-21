@@ -451,7 +451,10 @@ describe("agent-owned GitHub results", () => {
 });
 
 describe("consolidation pull request evidence", () => {
-  const setUp = async (pullRequest: ResolvedPullRequest) => {
+  const setUp = async (
+    pullRequest: ResolvedPullRequest,
+    taskBranchPullRequest: ResolvedPullRequest = pullRequest,
+  ) => {
     const tempDir = await createTempDir("foreman-consolidation-applier-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
@@ -480,7 +483,7 @@ describe("consolidation pull request evidence", () => {
       runnerVariant: "high",
     });
     const taskSystem = new FakeTaskSystem([selectedTask]);
-    const reviewService = new FakeReviewService(pullRequest, null, { [pullRequest.pullRequestUrl]: pullRequest });
+    const reviewService = new FakeReviewService(taskBranchPullRequest, null, { [pullRequest.pullRequestUrl]: pullRequest });
     const applier = new WorkerResultApplier({
       config,
       foremanRepos: db,
@@ -526,7 +529,15 @@ describe("consolidation pull request evidence", () => {
       headBranch,
       baseBranch,
     };
-    const subject = await setUp(pullRequest);
+    const taskBranchPullRequest = headBranch === "eng-other-task"
+      ? {
+          ...pullRequest,
+          pullRequestUrl: "https://github.com/acme/repo-a/pull/18",
+          pullRequestNumber: 18,
+          headBranch: "task-deploy-apply",
+        }
+      : pullRequest;
+    const subject = await setUp(pullRequest, taskBranchPullRequest);
     try {
       await expect(subject.apply()).resolves.toBe(pullRequest.pullRequestUrl);
       expect(subject.taskSystem.comments).toEqual([{ taskId: subject.selectedTask.id, body: "Landed in historical pull request." }]);
