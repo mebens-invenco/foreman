@@ -18,6 +18,9 @@ const cleanupDirs: string[] = [];
 const originalOpencodeBin = process.env.FOREMAN_OPENCODE_BIN;
 const originalClaudeBin = process.env.FOREMAN_CLAUDE_BIN;
 const originalCodexBin = process.env.FOREMAN_CODEX_BIN;
+const originalSlackBotToken = process.env.SLACK_BOT_TOKEN;
+const originalSlackAppToken = process.env.SLACK_APP_TOKEN;
+const originalOrdinaryEnv = process.env.ORDINARY_ENV;
 
 const writeExecutableScript = async (filePath: string, contents: string): Promise<void> => {
   await fs.writeFile(filePath, contents, { mode: 0o755 });
@@ -40,6 +43,22 @@ afterEach(async () => {
     delete process.env.FOREMAN_CODEX_BIN;
   } else {
     process.env.FOREMAN_CODEX_BIN = originalCodexBin;
+  }
+
+  if (originalSlackBotToken === undefined) {
+    delete process.env.SLACK_BOT_TOKEN;
+  } else {
+    process.env.SLACK_BOT_TOKEN = originalSlackBotToken;
+  }
+  if (originalSlackAppToken === undefined) {
+    delete process.env.SLACK_APP_TOKEN;
+  } else {
+    process.env.SLACK_APP_TOKEN = originalSlackAppToken;
+  }
+  if (originalOrdinaryEnv === undefined) {
+    delete process.env.ORDINARY_ENV;
+  } else {
+    process.env.ORDINARY_ENV = originalOrdinaryEnv;
   }
 
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
@@ -167,6 +186,44 @@ describe("provider runners", () => {
     });
 
     expect(JSON.parse(result.stdout)).toEqual({ cwd: tempDir, pwd: tempDir });
+  });
+
+  test("removes ambient and requested Slack credentials from runner environments", async () => {
+    const tempDir = await createTempDir("foreman-runner-test-");
+    cleanupDirs.push(tempDir);
+    const scriptPath = path.join(tempDir, "fake-runner.js");
+    await writeExecutableScript(
+      scriptPath,
+      [
+        "#!/usr/bin/env node",
+        "process.stdin.resume();",
+        "process.stdin.on('end', () => process.stdout.write(JSON.stringify({",
+        "  bot: Object.hasOwn(process.env, 'SLACK_BOT_TOKEN'),",
+        "  app: Object.hasOwn(process.env, 'SLACK_APP_TOKEN'),",
+        "  ordinary: process.env.ORDINARY_ENV",
+        "})));",
+      ].join("\n"),
+    );
+    process.env.SLACK_BOT_TOKEN = "ambient-test-token";
+    process.env.ORDINARY_ENV = "preserved";
+    const requestEnv = { SLACK_APP_TOKEN: "requested-test-token" };
+
+    const result = await runAgentProcess({
+      command: scriptPath,
+      args: [],
+      request: {
+        attemptId: "attempt-env",
+        action: "execution",
+        cwd: tempDir,
+        env: requestEnv,
+        prompt: "test prompt",
+        timeoutMs: 5_000,
+      },
+    });
+
+    expect(JSON.parse(result.stdout)).toEqual({ bot: false, app: false, ordinary: "preserved" });
+    expect(process.env.SLACK_BOT_TOKEN).toBe("ambient-test-token");
+    expect(requestEnv.SLACK_APP_TOKEN).toBe("requested-test-token");
   });
 
   test.each([
