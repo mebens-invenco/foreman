@@ -27,8 +27,8 @@ importers:
         specifier: ^2.1.0
         version: 2.1.0
       fastify:
-        specifier: ^5.12.4
-        version: 5.12.4
+        specifier: ^5.12.5
+        version: 5.12.5
       gray-matter:
         specifier: ^4.0.3
         version: 4.0.3
@@ -39,8 +39,8 @@ importers:
         specifier: ^2.9.1
         version: 2.9.1
       zod:
-        specifier: ^4.6.4
-        version: 4.6.4
+        specifier: ^4.6.5
+        version: 4.6.5
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -73,8 +73,8 @@ importers:
         specifier: 4.3.3
         version: 4.3.3(vite@8.3.0(@types/node@24.13.4)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1))
       '@tanstack/react-query':
-        specifier: 5.102.8
-        version: 5.102.8(react@19.3.0)
+        specifier: 5.103.1
+        version: 5.103.1(react@19.3.0)
       '@tanstack/react-table':
         specifier: ^8.21.3
         version: 8.21.3(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
@@ -88,8 +88,8 @@ importers:
         specifier: ^2.1.1
         version: 2.1.1
       lucide-react:
-        specifier: ^1.45.0
-        version: 1.45.0(react@19.3.0)
+        specifier: ^1.47.0
+        version: 1.47.0(react@19.3.0)
       nuqs:
         specifier: ^2.10.1
         version: 2.10.1(react-router@7.18.3(react-dom@19.3.0(react@19.3.0))(react@19.3.0))(react@19.3.0)
@@ -149,17 +149,17 @@ importers:
         specifier: ^7.1.1
         version: 7.1.1(eslint@9.39.5(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)
       eslint-plugin-react-refresh:
-        specifier: ^0.5.6
-        version: 0.5.6(eslint@9.39.5(jiti@2.7.0)(supports-color@7.2.0))
+        specifier: ^0.5.7
+        version: 0.5.7(eslint@9.39.5(jiti@2.7.0)(supports-color@7.2.0))
       globals:
         specifier: ^16.5.0
         version: 16.5.0
       prettier:
-        specifier: ^3.9.6
-        version: 3.9.6
+        specifier: ^3.9.8
+        version: 3.9.8
       prettier-plugin-tailwindcss:
         specifier: ^0.8.1
-        version: 0.8.1(prettier@3.9.6)
+        version: 0.8.1(prettier@3.9.8)
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -1592,11 +1592,11 @@ packages:
     peerDependencies:
       vite: ^5.2.0 || ^6 || ^7 || ^8
 
-  '@tanstack/query-core@5.102.8':
-    resolution: {integrity: sha512-ZNjkJ33CqvPNec/6lZBnHqLc3EVGPZ9ySLhYahU9TcuRFdmwXewuj0c4hwSWcGHqEUwcSrKeZ+oGcvPBqXcQcg==}
+  '@tanstack/query-core@5.103.1':
+    resolution: {integrity: sha512-rms8HqTGp6zA00dM+cUQ2eBcgzNJefuu5CAMB37i/6MiGT1zulPOytCFu2a0qjLqVR2n1jENPj9woqFQNuCzWA==}
 
-  '@tanstack/react-query@5.102.8':
-    resolution: {integrity: sha512-TYBea4OuXWD7MhaSHq069TWbFe7rcwWN6kzT7JF0OKi1K6c1gTv2IzD6A6ExJsCMozdkqBWeuIUZmu4KQg0O5A==}
+  '@tanstack/react-query@5.103.1':
+    resolution: {integrity: sha512-rmAPPApNEK17VXRJhtE1rja53n23VV5w30C0saCgJhhX+EpdUnVqMGV/s5nnzV43X75KTHKzuoiuxSzGTBIkag==}
     peerDependencies:
       react: ^18 || ^19
 
@@ -2241,8 +2241,8 @@ packages:
     peerDependencies:
       eslint: ^3.0.0 || ^4.0.0 || ^5.0.0 || ^6.0.0 || ^7.0.0 || ^8.0.0-0 || ^9.0.0 || ^10.0.0
 
-  eslint-plugin-react-refresh@0.5.6:
-    resolution: {integrity: sha512-uZnh24On2bk478AkaDAKcpRiYhS3qFSaSNvpXxV6/Ek/BBDICkWGG7MnBSfjnIlCVBei5vsLlIeQYxbF22+Udg==}
+  eslint-plugin-react-refresh@0.5.7:
+    resolution: {integrity: sha512-XhJSzLljuYD4UjNuFGJu2v7aD3sqNVK12w5/DCUfrNfHWegZo2+TsavNx8MuxMwEquuFAzNbNfXKU0WoZ+YUIg==}
     peerDependencies:
       eslint: ^9 || ^10
 
@@ -2383,8 +2383,8 @@ packages:
   fastify-plugin@5.1.0:
     resolution: {integrity: sha512-FAIDA8eovSt5qcDgcBvDuX/v0Cjz0ohGhENZ/wpc3y+oZCY2afZ9Baqql3g/lC+OHRnciQol4ww7tuthOb9idw==}
 
-  fastify@5.12.4:
-    resolution: {integrity: sha512-zATD676fP6tBMsn+jQ7Q5/cO/Qo+149TXH0dUqUKel+1/hcZxwIbnflqtPa9EjlrvpY8eCZcL3M1UYrMc31Y7g==}
+  fastify@5.12.5:
+    resolution: {integrity: sha512-OB2k1dlxs5/NAABqeKV2FUHkSD2BbENsCak8yULVcymn3fHIPDVa9TI3SDnJSWYSllZmSYuZXy2gTnsT+Sut1A==}
 
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
@@ -2983,8 +2983,8 @@ packages:
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
 
-  lucide-react@1.45.0:
-    resolution: {integrity: sha512-yH1ubCAduho9UR7oJhRXIQXogksRILBiTuZC4/bQIGeB9JOkxMlSuEHyyZpo1Z3S0yWJO2KTSUZbjiNvVxeOUw==}
+  lucide-react@1.47.0:
+    resolution: {integrity: sha512-o8C23aXpNQypRY73W7fW02EyvWJinEMXgKeGjFoKym0zj3Q73hD97A1IQps1g8C14HTGsOpZL0Am+xjfgFZAbg==}
     peerDependencies:
       react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
@@ -3495,8 +3495,8 @@ packages:
       prettier-plugin-svelte:
         optional: true
 
-  prettier@3.9.6:
-    resolution: {integrity: sha512-OpN0zzVdiaiAhxpuuj5efpIS4sY9j7bY6uR5mnj5yPzGkdkjNKSJeUThPb60Jw29QuAZgA4o+/iB49kFiaBX6g==}
+  prettier@3.9.8:
+    resolution: {integrity: sha512-WRFq3Wn3WId7LLROfMLdH7xaFr2jR62wU8nLO6rQUOLOxNZUviyJQs1M0iIhLexSFy+L+w0ch66wtoO2jRjG0A==}
     engines: {node: '>=14'}
     hasBin: true
 
@@ -4269,11 +4269,11 @@ packages:
   zod@3.25.76:
     resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
 
-  zod@4.5.4:
-    resolution: {integrity: sha512-sC95tT5iHHH9gtpj6A81kh+NEaRAUFN+qlUPDUbRfOMvNf5QCBqsb3WgvnpVtK5Y+4UfA6KqufotuTvMGiTlsA==}
-
   zod@4.6.4:
     resolution: {integrity: sha512-AXSD6hvGdvRjajG/l1cC+d6IrhH+sjmPKtYeQdJIK8MFJl3LyClzS+o/YsVC+zQZPupAaeH5skwwm8YqYH7BqA==}
+
+  zod@4.6.5:
+    resolution: {integrity: sha512-v5l/aFXZQeai4awLbOpSoHecE9UiMrnfx75tEXLjNonXVARxQ5mOeipTjROUchszUNCqnE+hqAMujRsRHsut2Q==}
 
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
@@ -5675,11 +5675,11 @@ snapshots:
       tailwindcss: 4.3.3
       vite: 8.3.0(@types/node@24.13.4)(esbuild@0.28.0)(jiti@2.7.0)(tsx@4.23.13)(yaml@2.9.1)
 
-  '@tanstack/query-core@5.102.8': {}
+  '@tanstack/query-core@5.103.1': {}
 
-  '@tanstack/react-query@5.102.8(react@19.3.0)':
+  '@tanstack/react-query@5.103.1(react@19.3.0)':
     dependencies:
-      '@tanstack/query-core': 5.102.8
+      '@tanstack/query-core': 5.103.1
       react: 19.3.0
 
   '@tanstack/react-table@8.21.3(react-dom@19.3.0(react@19.3.0))(react@19.3.0)':
@@ -6333,12 +6333,12 @@ snapshots:
       '@babel/parser': 7.29.7
       eslint: 9.39.5(jiti@2.7.0)(supports-color@7.2.0)
       hermes-parser: 0.25.1
-      zod: 4.5.4
-      zod-validation-error: 4.0.2(zod@4.5.4)
+      zod: 4.6.4
+      zod-validation-error: 4.0.2(zod@4.6.4)
     transitivePeerDependencies:
       - supports-color
 
-  eslint-plugin-react-refresh@0.5.6(eslint@9.39.5(jiti@2.7.0)(supports-color@7.2.0)):
+  eslint-plugin-react-refresh@0.5.7(eslint@9.39.5(jiti@2.7.0)(supports-color@7.2.0)):
     dependencies:
       eslint: 9.39.5(jiti@2.7.0)(supports-color@7.2.0)
 
@@ -6556,7 +6556,7 @@ snapshots:
 
   fastify-plugin@5.1.0: {}
 
-  fastify@5.12.4:
+  fastify@5.12.5:
     dependencies:
       '@fastify/ajv-compiler': 4.0.5
       '@fastify/error': 4.2.0
@@ -7070,7 +7070,7 @@ snapshots:
     dependencies:
       yallist: 3.1.1
 
-  lucide-react@1.45.0(react@19.3.0):
+  lucide-react@1.47.0(react@19.3.0):
     dependencies:
       react: 19.3.0
 
@@ -7706,11 +7706,11 @@ snapshots:
 
   prelude-ls@1.2.1: {}
 
-  prettier-plugin-tailwindcss@0.8.1(prettier@3.9.6):
+  prettier-plugin-tailwindcss@0.8.1(prettier@3.9.8):
     dependencies:
-      prettier: 3.9.6
+      prettier: 3.9.8
 
-  prettier@3.9.6: {}
+  prettier@3.9.8: {}
 
   pretty-ms@9.3.0:
     dependencies:
@@ -8541,14 +8541,14 @@ snapshots:
     dependencies:
       zod: 3.25.76
 
-  zod-validation-error@4.0.2(zod@4.5.4):
+  zod-validation-error@4.0.2(zod@4.6.4):
     dependencies:
-      zod: 4.5.4
+      zod: 4.6.4
 
   zod@3.25.76: {}
 
-  zod@4.5.4: {}
-
   zod@4.6.4: {}
+
+  zod@4.6.5: {}
 
   zwitch@2.0.4: {}
