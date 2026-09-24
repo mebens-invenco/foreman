@@ -13,7 +13,6 @@ import { type Confidence } from "../curation/confidence-lifecycle.js";
 import type { Embedder } from "../embeddings/embedder.js";
 import { learningEmbeddingText } from "../embeddings/learning-embedding-text.js";
 import { ForemanError } from "../lib/errors.js";
-import { addSeconds } from "../lib/time.js";
 import type { LoggerService } from "../logger.js";
 import type { DeploymentStatus } from "../repos/deployment-tracking-repo.js";
 import type { AttemptRecord, ForemanRepos, JobRecord } from "../repos/index.js";
@@ -21,6 +20,7 @@ import type { ReviewService } from "../review/index.js";
 import type { TaskSystem } from "../tasking/index.js";
 import type { WorkspaceConfig } from "../workspace/config.js";
 import { blockedTaskUpdatedAtContextKey } from "./blocked-ordinary-work.js";
+import { nextDeploymentRetryEligibleAt, readDeploymentSelectionContext } from "./deployment-tracking-state.js";
 
 const consolidationLabels = (config: WorkspaceConfig): { remove: string[]; add: string[] } => {
   if (config.taskSystem.type === "linear") {
@@ -89,15 +89,6 @@ const resolveDeclaredConfidence = (
 export const NEAR_DUPLICATE_SIMILARITY_THRESHOLD = 0.91;
 
 const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
-
-const deploymentRetryIntervalMinutes = (input: {
-  retryCount: number;
-  minRetryIntervalMinutes: number;
-  maxRetryIntervalMinutes: number;
-}): number => {
-  const multiplier = 2 ** Math.max(0, input.retryCount - 1);
-  return Math.min(input.maxRetryIntervalMinutes, input.minRetryIntervalMinutes * multiplier);
-};
 
 type WorkerResultApplierDeps = {
   config: WorkspaceConfig;
@@ -588,7 +579,7 @@ export class WorkerResultApplier {
 
   private async applyDeploymentResult(input: ApplyWorkerResultInput, pullRequestUrl: string | null, logger: LoggerService): Promise<string | null> {
     const { workerResult } = input;
-    const context = this.readDeploymentSelectionContext(input.job.selectionContext);
+    const context = readDeploymentSelectionContext(input.job.selectionContext);
     if (!context) {
       throw new ForemanError("missing_deployment_context", `Deployment job ${input.job.id} is missing deployment selection context.`);
     }
@@ -642,16 +633,7 @@ export class WorkerResultApplier {
 
     const shouldRetry = workerResult.outcome === "in_progress" || workerResult.outcome === "blocked" || workerResult.outcome === "failed";
     const retryCount = shouldRetry ? (prior?.retryCount ?? 0) + 1 : 0;
-    const nextEligibleAt = shouldRetry
-      ? addSeconds(
-          new Date(),
-          deploymentRetryIntervalMinutes({
-            retryCount,
-            minRetryIntervalMinutes: this.deps.config.deployment.minRetryIntervalMinutes,
-            maxRetryIntervalMinutes: this.deps.config.deployment.maxRetryIntervalMinutes,
-          }) * 60,
-        )
-      : null;
+    const nextEligibleAt = shouldRetry ? nextDeploymentRetryEligibleAt(this.deps.config.deployment, retryCount) : null;
     const latestStatus = workerResult.outcome as DeploymentStatus;
     this.deps.foremanRepos.deploymentTracking.upsertDeploymentRecord({
       taskId: input.task.id,
@@ -688,42 +670,6 @@ export class WorkerResultApplier {
 
     this.deps.scheduleScout();
     return pullRequestUrl;
-  }
-
-  private readDeploymentSelectionContext(selectionContext: Record<string, unknown>): {
-    instructionHash: string;
-    instructionBody: string;
-    pullRequest: { url: string; number: number; headBranch: string; baseBranch: string };
-  } | null {
-    const deployment = selectionContext.deployment;
-    const pullRequest = selectionContext.pullRequestReference;
-    if (!deployment || typeof deployment !== "object" || !pullRequest || typeof pullRequest !== "object") {
-      return null;
-    }
-
-    const deploymentRecord = deployment as Record<string, unknown>;
-    const pullRequestRecord = pullRequest as Record<string, unknown>;
-    if (
-      typeof deploymentRecord.instructionHash !== "string" ||
-      typeof deploymentRecord.instructionBody !== "string" ||
-      typeof pullRequestRecord.url !== "string" ||
-      typeof pullRequestRecord.number !== "number" ||
-      typeof pullRequestRecord.headBranch !== "string" ||
-      typeof pullRequestRecord.baseBranch !== "string"
-    ) {
-      return null;
-    }
-
-    return {
-      instructionHash: deploymentRecord.instructionHash,
-      instructionBody: deploymentRecord.instructionBody,
-      pullRequest: {
-        url: pullRequestRecord.url,
-        number: pullRequestRecord.number,
-        headBranch: pullRequestRecord.headBranch,
-        baseBranch: pullRequestRecord.baseBranch,
-      },
-    };
   }
 
   private async allRelevantDeploymentsSucceeded(input: ApplyWorkerResultInput, instructionHash: string): Promise<boolean> {
