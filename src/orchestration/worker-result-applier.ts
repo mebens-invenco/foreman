@@ -136,7 +136,15 @@ export class WorkerResultApplier {
 
   async apply(input: ApplyWorkerResultInput): Promise<string | null> {
     const { workerResult } = input;
-    const resolvedPullRequest = await this.deps.reviewService.resolvePullRequest(input.task, input.repo, input.target);
+    const historicalPullRequestUrl =
+      input.job.action === "consolidation" &&
+      workerResult.outcome === "completed" &&
+      workerResult.reviewResult
+        ? workerResult.reviewResult.pullRequestUrl
+        : null;
+    const resolvedPullRequest = historicalPullRequestUrl
+      ? await this.deps.reviewService.resolvePullRequestReference(historicalPullRequestUrl, input.repo)
+      : await this.deps.reviewService.resolvePullRequest(input.task, input.repo, input.target);
     const pullRequestUrl = resolvedPullRequest?.pullRequestUrl ?? null;
     const logger = this.logger.child({
       attemptId: input.attempt.id,
@@ -153,10 +161,10 @@ export class WorkerResultApplier {
 
     const ordinaryWork = input.job.action === "execution" || input.job.action === "retry";
     const successfulOrdinaryWork = ordinaryWork && (workerResult.outcome === "completed" || workerResult.outcome === "no_action_needed");
-    if (workerResult.reviewResult && workerResult.reviewResult.pullRequestUrl !== pullRequestUrl) {
+    if (workerResult.reviewResult && (!resolvedPullRequest || workerResult.reviewResult.pullRequestUrl !== pullRequestUrl)) {
       throw new ForemanError("invalid_pull_request", "Reported pull request does not match the selected repository and task branch");
     }
-    if (resolvedPullRequest && (workerResult.reviewResult || successfulOrdinaryWork)) {
+    if (!historicalPullRequestUrl && resolvedPullRequest && (workerResult.reviewResult || successfulOrdinaryWork)) {
       if (resolvedPullRequest.headBranch !== resolveTaskBranchName(input.task, input.target) ||
           resolvedPullRequest.baseBranch !== (input.job.baseBranch ?? input.repo.defaultBranch)) {
         throw new ForemanError("invalid_pull_request", "Reported pull request does not match the selected head and base branches");

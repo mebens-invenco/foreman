@@ -126,6 +126,10 @@ class FakeReviewService implements ReviewService {
     };
   }
 
+  async resolvePullRequestReference(): Promise<ResolvedPullRequest | null> {
+    return null;
+  }
+
   async getContext(task: Task, _agentPrefix: string, _repo?: RepoRef, _target?: { repoKey: string; branchName: string }): Promise<ReviewContext | null> {
     return this.contextFor(task, _target);
   }
