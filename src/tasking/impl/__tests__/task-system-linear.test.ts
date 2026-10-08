@@ -32,6 +32,8 @@ const createSpyingLogger = () => ({
 });
 
 const timeoutError = (): Error => Object.assign(new Error("Timed out"), { name: "TimeoutError" });
+const transportError = (code = "ECONNRESET"): TypeError =>
+  new TypeError("fetch failed", { cause: Object.assign(new Error("socket closed with secret request context"), { code }) });
 
 afterEach(() => {
   global.fetch = originalFetch;
@@ -212,6 +214,72 @@ describe("LinearTaskSystem.listCandidates", () => {
     );
   });
 
+  test("retries a candidate query transport failure with safe cause context", async () => {
+    vi.useFakeTimers();
+    const logger = createSpyingLogger();
+    global.fetch = vi
+      .fn()
+      .mockRejectedValueOnce(transportError())
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: linearIssue([], "Jane Doe") }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      ) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], logger as any);
+
+    const tasksPromise = taskSystem.listCandidates();
+    await vi.advanceTimersByTimeAsync(250);
+    const tasks = await tasksPromise;
+
+    expect(tasks.map((task) => task.id)).toEqual(["ENG-123"]);
+    expect(global.fetch).toHaveBeenCalledTimes(2);
+    expect(logger.warn).toHaveBeenCalledWith(
+      "Linear GraphQL request failed at transport; retrying",
+      expect.objectContaining({
+        provider: "linear",
+        operationKind: "query",
+        operationName: "ForemanAssignedIssues",
+        attempt: 1,
+        maxAttempts: 3,
+        transportCauseName: "Error",
+        transportCauseCode: "ECONNRESET",
+      }),
+    );
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("secret request context");
+  });
+
+  test("surfaces an opted-in query transport failure after bounded retries", async () => {
+    vi.useFakeTimers();
+    const logger = createSpyingLogger();
+    global.fetch = vi.fn().mockRejectedValue(transportError("UND_ERR_SOCKET")) as typeof fetch;
+
+    const config = createDefaultWorkspaceConfig("foo", "linear");
+    config.taskSystem.linear!.assignee = "Jane Doe";
+    const taskSystem = new LinearTaskSystem(config, { LINEAR_API_KEY: "test-key" }, [], logger as any);
+
+    const tasksPromise = taskSystem.listCandidates();
+    const expectation = expect(tasksPromise).rejects.toMatchObject({ code: "linear_request_failed", statusCode: 502 });
+    await vi.advanceTimersByTimeAsync(250);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expectation;
+
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+    expect(logger.error).toHaveBeenCalledWith(
+      "Linear GraphQL request failed at transport",
+      expect.objectContaining({
+        provider: "linear",
+        operationName: "ForemanAssignedIssues",
+        attempt: 3,
+        maxAttempts: 3,
+        transportCauseCode: "UND_ERR_SOCKET",
+      }),
+    );
+  });
+
   test("does not retry non-transient candidate query statuses", async () => {
     const logger = createSpyingLogger();
     global.fetch = vi.fn(async () => new Response("Internal Server Error", { status: 500, statusText: "Internal Server Error" })) as typeof fetch;
@@ -325,6 +393,25 @@ describe("LinearTaskSystem.listCandidates", () => {
         { retryTransient: true },
       ),
     ).rejects.toMatchObject({ code: "linear_request_timeout" });
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  test("does not retry mutation transport failures when transient retries are requested", async () => {
+    const logger = createSpyingLogger();
+    global.fetch = vi.fn().mockRejectedValue(transportError()) as typeof fetch;
+    const client = new LinearClient("test-key", logger as any);
+
+    await expect(
+      client.request(
+        `mutation ForemanMutation {
+          issueUpdate(id: "issue-1", input: { title: "Task" }) { success }
+        }`,
+        {},
+        { retryTransient: true },
+      ),
+    ).rejects.toMatchObject({ code: "linear_request_failed" });
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     expect(logger.warn).not.toHaveBeenCalled();
