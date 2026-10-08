@@ -4,7 +4,7 @@ import { promises as fs } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { ActionType, RepoRef, Task, WorkerResult } from "../../domain/index.js";
+import type { ActionType, RepoRef, ResolvedPullRequest, Task, WorkerResult } from "../../domain/index.js";
 import { priorityToRank } from "../../domain/index.js";
 import { ProviderRateLimitError } from "../../lib/errors.js";
 import { exec } from "../../lib/process.js";
@@ -15,6 +15,7 @@ import { FakeEmbedder } from "../../test-support/fake-embedder.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
 import { createDefaultWorkspaceConfig, runnerTuningValue } from "../../workspace/config.js";
 import { AttemptExecutor } from "../attempt-executor.js";
+import { runScoutSelection } from "../scout-selection.js";
 
 const runnerMocks = vi.hoisted(() => {
   const invoke = vi.fn();
@@ -129,9 +130,10 @@ const createExecutorContext = async (
   });
   db.jobs.claimQueuedJobForWorker(job.id, db.workers.listWorkers()[0]!.id);
   const claimedJob = db.jobs.getJob(job.id);
+  const listCandidates = vi.fn(async () => [] as Task[]);
   const taskSystem: TaskSystem = {
     getProvider: () => "file",
-    listCandidates: vi.fn(async () => []),
+    listCandidates,
     listAssignedIssues: vi.fn(async () => []),
     getTask: vi.fn(async () => providerTask),
     createTask: vi.fn(async () => ({ id: "TASK-NEW", providerId: "TASK-NEW", url: null })),
@@ -141,8 +143,9 @@ const createExecutorContext = async (
     upsertPullRequest: vi.fn(async () => undefined),
     updateLabels: vi.fn(async () => undefined),
   };
+  const resolvePullRequest = vi.fn(async (): Promise<ResolvedPullRequest | null> => null);
   const reviewService = {
-    resolvePullRequest: vi.fn(async () => null),
+    resolvePullRequest,
   } as unknown as ReviewService;
   const repo: RepoRef = { key: "foreman", rootPath: repoRoot, defaultBranch: "master" };
   const logger = LoggerService.create({ paths, stdout: nullWritable, minLevel: "info" });
@@ -164,7 +167,23 @@ const createExecutorContext = async (
     onWorkerFinished: vi.fn(),
   });
 
-  return { workspaceRoot, db, job, claimedJob, executor, logger, applyWorkerResult, target, config, taskSystem };
+  return {
+    workspaceRoot,
+    paths,
+    db,
+    job,
+    claimedJob,
+    executor,
+    logger,
+    applyWorkerResult,
+    target,
+    config,
+    taskSystem,
+    reviewService,
+    repo,
+    listCandidates,
+    resolvePullRequest,
+  };
 };
 
 afterEach(async () => {
@@ -615,6 +634,78 @@ describe("AttemptExecutor", () => {
 
       expect(runnerMocks.invoke.mock.calls[2]![0]).toMatchObject({ nativeSessionId: "deployment-native-session" });
       expect(runnerMocks.invoke).toHaveBeenCalledTimes(3);
+    } finally {
+      db.close();
+    }
+  });
+
+  test("records deployment setup failures and suppresses immediate reselection", async () => {
+    const deployableTask = { ...task, state: "deployable", providerState: "deployable" } satisfies Task;
+    const instructionHash = "a693920f695b5bbbcf0933b6a015f6c66b48a443293437b762912ff637ab5e64";
+    const pullRequest = {
+      pullRequestUrl: "https://github.com/acme/foreman/pull/11",
+      pullRequestNumber: 11,
+      state: "merged" as const,
+      isDraft: false,
+      headBranch: "eng-5047",
+      baseBranch: "deleted-stack-base",
+    };
+    const { workspaceRoot, paths, db, claimedJob, executor, logger, target, config, taskSystem, reviewService, repo, listCandidates, resolvePullRequest } =
+      await createExecutorContext({
+        action: "deployment",
+        selectedTask: deployableTask,
+        selectionContext: {
+          deployment: { instructionHash, instructionBody: "Check production once." },
+          pullRequestReference: {
+            provider: "github",
+            url: pullRequest.pullRequestUrl,
+            number: pullRequest.pullRequestNumber,
+            state: pullRequest.state,
+            headBranch: pullRequest.headBranch,
+            baseBranch: pullRequest.baseBranch,
+          },
+        },
+      });
+    config.deployment.minRetryIntervalMinutes = 15;
+    config.deployment.maxRetryIntervalMinutes = 60;
+
+    try {
+      const before = Date.now();
+      worktreeMocks.ensureTaskWorktree.mockRejectedValueOnce(new Error("worktree setup failed"));
+
+      await executor.execute(db.workers.listWorkers()[0]!, claimedJob, new AbortController());
+      await logger.flush();
+
+      const attempt = db.attempts.latestAttemptForJob(claimedJob.id)!;
+      const record = db.deploymentTracking.getDeploymentRecord({
+        taskTargetId: target.id,
+        prUrl: pullRequest.pullRequestUrl,
+        instructionHash,
+      });
+      expect(record).toMatchObject({
+        latestStatus: "failed",
+        latestSummary: "worktree setup failed",
+        retryCount: 1,
+        prBaseBranch: "deleted-stack-base",
+        prHeadBranch: "eng-5047",
+        sourceAttemptId: attempt.id,
+      });
+      expect(Date.parse(record!.nextEligibleAt!)).toBeGreaterThanOrEqual(before + 15 * 60 * 1000 - 1000);
+      expect(runnerMocks.invoke).not.toHaveBeenCalled();
+
+      await fs.writeFile(path.join(workspaceRoot, "deployment.md"), "Check production once.", "utf8");
+      listCandidates.mockResolvedValue([deployableTask]);
+      resolvePullRequest.mockResolvedValue(pullRequest);
+      const scoutResult = await runScoutSelection({
+        config,
+        paths,
+        foremanRepos: db,
+        taskSystem,
+        reviewService,
+        repos: [repo],
+        triggerType: "worker_finished",
+      });
+      expect(scoutResult.jobs).toHaveLength(0);
     } finally {
       db.close();
     }
