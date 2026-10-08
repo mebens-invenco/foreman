@@ -12,6 +12,7 @@ import type { AttemptRecord, ForemanRepos, JobRecord, WorkerRecord } from "../re
 import { runnerForAction, runnerTuningValue, type WorkspaceConfig } from "../workspace/config.js";
 import type { WorkspacePaths } from "../workspace/workspace-paths.js";
 import { nextLeaseConflictEligibleAt } from "./lease-conflict.js";
+import { planRunnerInterruptionRetry } from "./runner-interruption-retry.js";
 
 type CronAttemptExecutorDeps = {
   config: WorkspaceConfig;
@@ -49,6 +50,14 @@ const summarizeOutput = (stdout: string, status: AttemptStatus): string => {
   return status === "completed" ? "Cron job completed without stdout." : "Cron job did not produce stdout.";
 };
 
+const runnerRetryNativeSessionId = (job: JobRecord, runnerName: string): string | undefined => {
+  const retry = job.selectionContext.runnerInterruption;
+  return typeof retry === "object" && retry !== null && "runnerName" in retry && retry.runnerName === runnerName &&
+    "nativeSessionId" in retry && typeof retry.nativeSessionId === "string"
+    ? retry.nativeSessionId
+    : undefined;
+};
+
 export class CronAttemptExecutor {
   private readonly logger: LoggerService;
 
@@ -84,7 +93,7 @@ export class CronAttemptExecutor {
       });
       if (!attempt) {
         const nextEligibleAt = nextLeaseConflictEligibleAt(this.deps.config);
-        this.deps.foremanRepos.jobs.returnLeasedJobToQueue(job.id, { nextEligibleAt });
+        this.deps.foremanRepos.jobs.returnJobToQueue(job.id, { nextEligibleAt });
         jobLogger.warn("returned leased cron job to queue because required execution leases could not be acquired", { nextEligibleAt });
         return;
       }
@@ -118,6 +127,7 @@ export class CronAttemptExecutor {
         });
 
         const runner = createAgentRunner({ config: this.deps.config, action: "cron" });
+        const nativeSessionId = runnerRetryNativeSessionId(job, runnerConfig.type);
         const runResult = await runner.invoke({
           attemptId: attempt.id,
           action: "cron",
@@ -125,6 +135,7 @@ export class CronAttemptExecutor {
           env: this.deps.env,
           prompt,
           timeoutMs: runnerConfig.timeoutMs,
+          ...(nativeSessionId ? { nativeSessionId } : {}),
           abortSignal: controller.signal,
           onStdoutLine: (line) => attemptLogger.runnerLine(line),
           onStderrLine: (line) => attemptLogger.runnerLine(line),
@@ -164,6 +175,50 @@ export class CronAttemptExecutor {
           sizeBytes: logStat.size,
           sha256: await sha256File(logAbsolutePath),
         });
+
+        if (controller.signal.aborted && runResult.retryableInterruption) {
+          throw new ForemanError("attempt_stopped", "Attempt stopped after runner invocation.");
+        }
+
+        if (runResult.retryableInterruption) {
+          const retry = planRunnerInterruptionRetry({
+            interruption: runResult.retryableInterruption,
+            attemptNumber: attempt.attemptNumber,
+            finishedAt: runResult.finishedAt,
+          });
+          this.deps.foremanRepos.attempts.addAttemptEvent(attempt.id, "runner_interrupted", retry.summary, {
+            nextEligibleAt: retry.nextEligibleAt,
+          });
+          this.deps.foremanRepos.attempts.finalizeAttempt(attempt.id, "failed", {
+            finishedAt: runResult.finishedAt,
+            exitCode: runResult.exitCode,
+            signal: runResult.signal,
+            summary: retry.summary,
+            errorMessage: retry.summary,
+            tokensUsed: runResult.tokensUsed ?? null,
+          });
+          this.deps.onAttemptChanged({ attemptId: attempt.id, status: "failed" });
+
+          if (retry.nextEligibleAt) {
+            this.deps.foremanRepos.jobs.updateJobSelectionContext(job.id, {
+              ...job.selectionContext,
+              runnerInterruption: {
+                runnerName: runnerConfig.type,
+                nativeSessionId: runResult.nativeSessionId ?? runnerRetryNativeSessionId(job, runnerConfig.type),
+              },
+            });
+            this.deps.foremanRepos.jobs.returnJobToQueue(job.id, { nextEligibleAt: retry.nextEligibleAt });
+            attemptLogger.warn("queued cron job after retryable runner interruption", { nextEligibleAt: retry.nextEligibleAt });
+            return;
+          }
+
+          this.deps.foremanRepos.jobs.updateJobStatus(job.id, "failed", {
+            finishedAt: runResult.finishedAt,
+            errorMessage: retry.summary,
+          });
+          attemptLogger.error("cron runner interruption retries exhausted", { error: retry.summary });
+          return;
+        }
 
         const attemptStatus = cronAttemptStatus({
           exitCode: runResult.exitCode,
