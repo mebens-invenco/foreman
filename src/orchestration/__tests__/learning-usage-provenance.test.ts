@@ -80,6 +80,9 @@ class FakeReviewService implements ReviewService {
   async resolvePullRequest(): Promise<ResolvedPullRequest | null> {
     return null;
   }
+  async resolvePullRequestReference(): Promise<ResolvedPullRequest | null> {
+    return null;
+  }
   async findLatestOpenPullRequestBranch(): Promise<string | null> {
     return null;
   }

@@ -248,6 +248,33 @@ describe("GitHubReviewService.getContext", () => {
     );
   });
 
+  test("resolves a historical pull request from the selected repository without task branch constraints", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi.fn().mockResolvedValueOnce(pullRequestSummaryResponse) as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    const resolved = await service.resolvePullRequestReference("https://github.com/acme/repo/pull/946", sampleRepo);
+
+    expect(resolved).toMatchObject({
+      pullRequestUrl: "https://github.com/acme/repo/pull/946",
+      headBranch: "eng-4737",
+      baseBranch: "master",
+    });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  test("rejects a historical pull request from another repository before fetching it", async () => {
+    vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+    global.fetch = vi.fn() as typeof fetch;
+
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+
+    await expect(
+      service.resolvePullRequestReference("https://github.com/acme/other-repo/pull/946", sampleRepo),
+    ).rejects.toMatchObject({ code: "invalid_pr_url" });
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
   test("classifies REST rate-limit responses without retrying", async () => {
     vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
     const resetAt = Math.ceil((Date.now() + 120_000) / 1000);
