@@ -61,6 +61,7 @@ export const renderCronPrompt = async (input: {
     },
     fragmentAliases: {
       "cron-task-creation-policy": taskCreationPolicyFragment(input.config),
+      "cron-slack-policy": input.job.allowSlackDm ? "cron-slack-enabled" : "cron-slack-disabled",
     },
     properties: {
       cron: {
