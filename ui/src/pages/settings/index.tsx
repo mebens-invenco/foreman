@@ -351,26 +351,30 @@ function runnerPatch(role: RunnerRole, patch: Partial<RunnerProvider>): Settings
   return { runner: { [role]: patch } } as SettingsPatch
 }
 
+// Switching provider always resets the model: the previous provider's model
+// id is meaningless to the new provider's CLI and fails every attempt with
+// an unrecognized-model error if carried over.
 function runnerForType(type: RunnerProvider["type"], current: RunnerProvider): RunnerProvider {
+  const keepModel = current.type === type ? current.model : ""
   switch (type) {
     case "opencode":
       return {
         type,
-        model: current.model || "openai/gpt-5.5",
+        model: keepModel || "openai/gpt-5.5",
         variant: "high",
         timeoutMs: current.timeoutMs,
       }
     case "claude":
       return {
         type,
-        model: current.model || "claude-opus-4-8",
+        model: keepModel || "claude-opus-4-8",
         effort: "high",
         timeoutMs: current.timeoutMs,
       }
     case "codex":
       return {
         type,
-        model: current.model || "gpt-5.6-sol",
+        model: keepModel || "gpt-5.6-sol",
         effort: "high",
         timeoutMs: current.timeoutMs,
       }

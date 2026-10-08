@@ -173,6 +173,103 @@ http:
     });
   });
 
+  test("defaults runner profiles to an empty record", () => {
+    const config = createDefaultWorkspaceConfig("foo", "file");
+    expect(config.runner.profiles).toEqual({});
+    expect(parseWorkspaceConfig(stringifyWorkspaceConfig(config)).runner.profiles).toEqual({});
+  });
+
+  test("parses named runner profiles with per-profile provider types", () => {
+    const parsed = parseWorkspaceConfig(`
+version: 1
+workspace:
+  name: foo
+repos:
+  explicit: []
+  roots: []
+  ignore: []
+taskSystem:
+  type: file
+  file:
+    tasksDir: tasks
+    idPrefix: TASK
+    states:
+      ready: [ready]
+      inProgress: [in_progress]
+      inReview: [in_review]
+      done: [done]
+      canceled: [canceled]
+reviewSystem:
+  type: github
+runner:
+  execution:
+    type: codex
+    model: gpt-5.6-sol
+    effort: high
+    timeoutMs: 1800000
+  reviewer:
+    type: claude
+    model: claude-opus-4-8
+    effort: max
+    timeoutMs: 600000
+  profiles:
+    claude:
+      type: claude
+      model: claude-opus-4-8
+      effort: max
+      timeoutMs: 3600000
+    codex:
+      type: codex
+      model: gpt-5.6-sol
+      effort: high
+      timeoutMs: 1800000
+http:
+  host: 127.0.0.1
+  port: 8765
+`);
+
+    expect(parsed.runner.profiles).toEqual({
+      claude: { type: "claude", model: "claude-opus-4-8", effort: "max", timeoutMs: 3_600_000 },
+      codex: { type: "codex", model: "gpt-5.6-sol", effort: "high", timeoutMs: 1_800_000 },
+    });
+    expect(parseWorkspaceConfig(stringifyWorkspaceConfig(parsed)).runner.profiles).toEqual(parsed.runner.profiles);
+  });
+
+  test("rejects runner profile names that are not lowercase kebab", () => {
+    expect(() =>
+      parseWorkspaceConfig(`
+version: 1
+workspace:
+  name: foo
+repos:
+  explicit: []
+  roots: []
+  ignore: []
+taskSystem:
+  type: file
+  file:
+    tasksDir: tasks
+    idPrefix: TASK
+    states:
+      ready: [ready]
+      inProgress: [in_progress]
+      inReview: [in_review]
+      done: [done]
+      canceled: [canceled]
+runner:
+  profiles:
+    Claude:
+      type: claude
+      model: claude-opus-4-8
+      effort: max
+      timeoutMs: 3600000
+http:
+  host: 127.0.0.1
+  port: 8765
+`),
+    ).toThrow(/lowercase/);
+  });
+
   test("coerces unknown effort values to 'high' so stale configs still boot", () => {
     const parsed = parseWorkspaceConfig(`
 version: 1

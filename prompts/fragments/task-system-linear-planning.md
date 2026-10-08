@@ -20,8 +20,10 @@ Agent:
   Base from task: <ENG-123>
   Repo dependencies: <repo-b<-repo-a>
   Branch: <task-branch-name>
+  Runner.execution.profile: <workspace-profile-name>
   Runner.execution.model: <model>
   Runner.execution.tuning: <low|medium|high|xhigh|max>
+  Runner.reviewer.profile: <workspace-profile-name>
   Runner.reviewer.model: <model>
   Runner.reviewer.tuning: <low|medium|high|xhigh|max>
 ```
@@ -32,5 +34,5 @@ Agent:
 - `Base from task` is required when there is more than one task dependency.
 - `Branch` is optional. Only use when overriding the default branch naming convention for the task system/executor is needed.
 - Cross-task dependencies still belong in `Depends on tasks` and `Base from task`.
-- `Runner.execution.*` / `Runner.reviewer.*` are optional per-task overrides on the workspace runner config. Use only when this task warrants a stronger or cheaper model than the workspace default. The shorthand `Runner.model` / `Runner.tuning` applies to the execution role. Provider type stays as configured in the workspace; only `model` and `tuning` can be overridden. `tuning` maps to the active provider's tuning knob (`effort` for Claude/Codex, `variant` for OpenCode).
+- `Runner.execution.*` / `Runner.reviewer.*` are optional per-task overrides on the workspace runner config. Use only when this task warrants a different provider, or a stronger or cheaper model, than the workspace default. The shorthand `Runner.profile` / `Runner.model` / `Runner.tuning` applies to the execution role. `profile` names one of the workspace's configured runner profiles and replaces the role's whole runner config, provider type included; use it to pin a task to a specific provider. Without a `profile`, provider type stays as configured in the workspace and only `model` and `tuning` can be overridden. `tuning` maps to the active provider's tuning knob (`effort` for Claude/Codex, `variant` for OpenCode).
 - Omit dependency keys entirely when they are not needed.
