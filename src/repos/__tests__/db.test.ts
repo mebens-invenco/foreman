@@ -705,7 +705,7 @@ describe("persistence repos", () => {
     }
   });
 
-  test("claims queued jobs for idle workers atomically", async () => {
+  test("claims queued jobs and can return running jobs to the queue", async () => {
     const tempDir = await createTempDir("foreman-db-test-");
     cleanupDirs.push(tempDir);
     const db = await createMigratedDb(path.join(tempDir, "foreman.db"), projectRoot);
@@ -734,7 +734,8 @@ describe("persistence repos", () => {
       expect(db.jobs.getJob(job.id).status).toBe("leased");
       expect(db.workers.listWorkers()[0]?.status).toBe("leased");
 
-      db.jobs.returnLeasedJobToQueue(job.id);
+      db.jobs.updateJobStatus(job.id, "running");
+      db.jobs.returnJobToQueue(job.id);
 
       expect(db.jobs.getJob(job.id).status).toBe("queued");
       expect(db.jobs.getJob(job.id).leasedAt).toBeNull();
@@ -768,7 +769,7 @@ describe("persistence repos", () => {
       });
 
       expect(db.jobs.claimQueuedJobForWorker(job.id, worker!.id)).toBe(true);
-      db.jobs.returnLeasedJobToQueue(job.id, { nextEligibleAt: "2999-01-01T00:00:00.000Z" });
+      db.jobs.returnJobToQueue(job.id, { nextEligibleAt: "2999-01-01T00:00:00.000Z" });
       db.workers.updateWorkerStatus(worker!.id, "idle", null);
 
       expect(db.jobs.claimQueuedJobForWorker(job.id, worker!.id)).toBe(false);
