@@ -152,6 +152,11 @@ export class AttemptExecutor {
       const taskTargetId = job.taskTargetId;
 
       task = await this.deps.taskSystem.getTask(job.taskId);
+      if (job.action !== "consolidation" && (task.state === "done" || task.state === "canceled")) {
+        this.deps.foremanRepos.jobs.updateJobStatus(job.id, "canceled", { finishedAt: isoNow() });
+        jobLogger.info("canceled stale job for terminal task", { taskState: task.state });
+        return;
+      }
       const mirroredTask = this.deps.foremanRepos.taskMirror.getTask(job.taskId);
       if (mirroredTask && mirroredTask.pullRequests.length > 0) {
         task = { ...task, pullRequests: mirroredTask.pullRequests };

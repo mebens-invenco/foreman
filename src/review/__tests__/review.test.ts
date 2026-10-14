@@ -499,24 +499,65 @@ describe("GitHubReviewService.getContext", () => {
     expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
-  test("classifies exhausted transient REST GET failures without including the response body", async () => {
+  test("retries an empty-body REST HTTP 500 after the existing backoff", async () => {
     vi.useFakeTimers();
     try {
       vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
-      global.fetch = vi.fn().mockResolvedValue(textResponse("<html>large outage page</html>", 503)) as typeof fetch;
+      global.fetch = vi.fn().mockResolvedValueOnce(textResponse("", 500)).mockResolvedValueOnce(jsonResponse([])) as typeof fetch;
 
       const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
       const result = service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo).catch((error: unknown) => error);
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(249);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toBeNull();
+
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test.each`
+    status | body
+    ${500} | ${""}
+    ${503} | ${"<html>large outage page</html>"}
+  `("classifies exhausted REST HTTP $status without including the response body", async ({ status, body }) => {
+    vi.useFakeTimers();
+    try {
+      vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
+      global.fetch = vi.fn().mockResolvedValue(textResponse(body, status)) as typeof fetch;
+
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      const result = service.resolvePullRequest(sampleTask({ pullRequests: [] }), sampleRepo).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(250);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
       const error = await result;
 
       expect(isProviderUnavailableError(error)).toBe(true);
-      expect(error).toMatchObject({ code: "provider_unavailable", provider: "github", statusCode: 503 });
+      expect(error).toMatchObject({ code: "provider_unavailable", provider: "github", statusCode: status });
       expect((error as Error).message).not.toContain("large outage page");
       expect(global.fetch).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("keeps REST HTTP 500 writes single-attempt and out of provider outage handling", async () => {
+    global.fetch = vi.fn().mockResolvedValue(textResponse("", 500)) as typeof fetch;
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+
+    const error = await (service as any).rest("/repos/acme/repo/issues/946/comments", {
+      method: "POST",
+      body: JSON.stringify({ body: "Comment" }),
+    }).catch((error: unknown) => error);
+
+    expect(isProviderUnavailableError(error)).toBe(false);
+    expect(error).toMatchObject({ code: "github_request_failed" });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   test("retries transient REST bad credentials failures", async () => {
@@ -1420,17 +1461,46 @@ describe("GitHubReviewService rate-limit handling", () => {
     }
   });
 
-  test("classifies exhausted transient GraphQL queries as provider unavailable", async () => {
+  test("retries an empty-body GraphQL HTTP 500 after the existing backoff", async () => {
     vi.useFakeTimers();
     try {
-      global.fetch = vi.fn().mockResolvedValue(textResponse("Service Unavailable", 503)) as typeof fetch;
+      global.fetch = vi.fn()
+        .mockResolvedValueOnce(textResponse("", 500))
+        .mockResolvedValueOnce(jsonResponse({ data: { repository: { pullRequest: null } } })) as typeof fetch;
 
       const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
       const result = service.getContext(sampleTask(), "[agent]").catch((error: unknown) => error);
-      await vi.runAllTimersAsync();
+      await vi.advanceTimersByTimeAsync(249);
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toBeNull();
+
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test.each`
+    status | body
+    ${500} | ${""}
+    ${503} | ${"Service Unavailable"}
+  `("classifies exhausted GraphQL HTTP $status queries as provider unavailable", async ({ status, body }) => {
+    vi.useFakeTimers();
+    try {
+      global.fetch = vi.fn().mockResolvedValue(textResponse(body, status)) as typeof fetch;
+
+      const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+      const result = service.getContext(sampleTask(), "[agent]").catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(250);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
       const error = await result;
 
-      expect(error).toMatchObject({ code: "provider_unavailable", provider: "github", statusCode: 503 });
+      expect(isProviderUnavailableError(error)).toBe(true);
+      expect(error).toMatchObject({ code: "provider_unavailable", provider: "github", statusCode: status });
       expect(global.fetch).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
@@ -1468,6 +1538,20 @@ describe("GitHubReviewService rate-limit handling", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("keeps GraphQL HTTP 500 mutations single-attempt and out of provider outage handling", async () => {
+    global.fetch = vi.fn().mockResolvedValue(textResponse("", 500)) as typeof fetch;
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+
+    const error = await (service as any).graphql(
+      "mutation ResolveReviewThread($threadId: ID!) { resolveReviewThread(input: {threadId: $threadId}) { thread { id } } }",
+      { threadId: "thread-1" },
+    ).catch((error: unknown) => error);
+
+    expect(isProviderUnavailableError(error)).toBe(false);
+    expect(error).toMatchObject({ code: "github_request_failed" });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
   });
 
   test("keeps exhausted GraphQL query bad credentials out of provider outage cooldown", async () => {

@@ -3,8 +3,9 @@ import { promises as fs } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
+import { DECAY_WINDOW_DAYS, USAGE_EPOCH } from "../curation/confidence-lifecycle.js";
 import type { Task } from "../domain/index.js";
 import { stringifyWorkspaceConfig, createDefaultWorkspaceConfig } from "../workspace/config.js";
 import { createMigratedDb, createWorkspacePaths, seedExecutionAttempt, testProjectRoot } from "../test-support/helpers.js";
@@ -13,8 +14,18 @@ const execFileAsync = promisify(execFile);
 const cleanupDirs: string[] = [];
 const projectRoot = testProjectRoot;
 const workspacesRoot = path.join(projectRoot, "workspaces");
+const scenarioNow = new Date(Date.parse(USAGE_EPOCH) + (DECAY_WINDOW_DAYS - 1) * 86_400_000);
+const clockImport = `data:text/javascript,${encodeURIComponent(
+  `import { mock } from "node:test"; mock.timers.enable({ apis: ["Date"], now: ${scenarioNow.getTime()} });`,
+)}`;
+const cliArgs = ["--import", clockImport, "--import", "tsx", "src/cli.ts", "learnings", "curate"];
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"], now: scenarioNow });
+});
 
 afterEach(async () => {
+  vi.useRealTimers();
   await Promise.all(cleanupDirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
 
@@ -37,7 +48,7 @@ const taskNamed = (id: string): Task => ({
   baseBranch: null,
   pullRequests: [],
   runnerOverride: null,
-  updatedAt: "2026-07-14T00:00:00Z",
+  updatedAt: scenarioNow.toISOString(),
   url: null,
 });
 
@@ -65,8 +76,7 @@ const createCliWorkspace = async (): Promise<{ workspaceName: string; workspaceR
     applyIn(db, { task: taskNamed("ENG-A"), learningId: "promote-me" });
     applyIn(db, { task: taskNamed("ENG-B"), learningId: "promote-me" });
 
-    // Aged and never used, but the usage epoch is barely a day old in real time, so
-    // the epoch grace must keep it OFF every decay proposal.
+    // Old and unused: only epoch grace protects this learning from decay.
     db.learnings.addLearning({ id: "aged-quiet", title: "Old and silent", repo: "shared", confidence: "emerging", content: "c", tags: [] });
     db.database.sqlite
       .prepare("UPDATE learning SET created_at = ? WHERE id = ?")
@@ -79,7 +89,7 @@ const createCliWorkspace = async (): Promise<{ workspaceName: string; workspaceR
 };
 
 const runCurate = async (workspace: string, extraArgs: string[]): Promise<{ applied: boolean; proposals: Array<Record<string, unknown>> }> => {
-  const { stdout } = await execFileAsync("node", ["--import", "tsx", "src/cli.ts", "learnings", "curate", workspace, "--json", ...extraArgs], {
+  const { stdout } = await execFileAsync("node", [...cliArgs, workspace, "--json", ...extraArgs], {
     cwd: projectRoot,
   });
   return JSON.parse(stdout) as { applied: boolean; proposals: Array<Record<string, unknown>> };
@@ -133,7 +143,7 @@ describe("learnings curate CLI", () => {
   test("the tab-aligned default output names the transition and its evidence", async () => {
     const { workspaceName } = await createCliWorkspace();
 
-    const { stdout } = await execFileAsync("node", ["--import", "tsx", "src/cli.ts", "learnings", "curate", workspaceName], {
+    const { stdout } = await execFileAsync("node", [...cliArgs, workspaceName], {
       cwd: projectRoot,
     });
 
@@ -141,5 +151,6 @@ describe("learnings curate CLI", () => {
     expect(stdout).toContain("promote");
     expect(stdout).toContain("promote-me");
     expect(stdout).toContain("2 distinct tasks applied it");
+    expect(stdout).not.toContain("aged-quiet");
   });
 });

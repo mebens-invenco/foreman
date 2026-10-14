@@ -7,6 +7,7 @@ import { createDefaultWorkspaceConfig } from "../../workspace/config.js";
 import type { ResolvedPullRequest, ReviewContext, Task, WorkerResult } from "../../domain/index.js";
 import { ForemanError, ProviderRateLimitError, ProviderUnavailableError } from "../../lib/errors.js";
 import { SchedulerService } from "../index.js";
+import { GitHubReviewService } from "../../review/index.js";
 import * as worktrees from "../../workspace/git-worktrees.js";
 import { FakeEmbedder } from "../../test-support/fake-embedder.js";
 import { createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
@@ -540,9 +541,9 @@ describe("SchedulerService scout timeout", () => {
     }
   });
 
-  test("increases GitHub outage cooldowns, suppresses triggers, and resets after recovery", async () => {
+  test("routes exhausted GitHub HTTP 500 reads through increasing cooldowns and resets after recovery", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-16T22:21:53Z"));
+    vi.setSystemTime(new Date("2026-07-16T22:21:51.750Z"));
     const config = createDefaultWorkspaceConfig("foo", "file");
     config.scheduler.workerConcurrency = 1;
     config.scheduler.scoutPollIntervalSeconds = 60;
@@ -550,9 +551,21 @@ describe("SchedulerService scout timeout", () => {
     config.scheduler.staleLeaseReapIntervalSeconds = 999_000;
     const completeScoutRun = vi.fn();
     const listCandidates = vi.fn(async () => [sampleTask()]);
+    const fetchMock = vi.fn(async () => ({ ok: false, status: 500, headers: new Headers(), text: async () => "" }) as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const github = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+    let resolveReadStarted!: () => void;
+    const githubReadStarted = new Promise<void>((resolve) => {
+      resolveReadStarted = resolve;
+    });
     const getContext = vi
       .fn()
-      .mockRejectedValueOnce(new ProviderUnavailableError({ provider: "github", message: "GitHub unavailable" }))
+      .mockImplementationOnce(() => {
+        resolveReadStarted();
+        return github.getContext(sampleTask({
+          pullRequests: [{ repoKey: "repo-a", url: "https://github.com/acme/repo-a/pull/1", source: "provider", title: "PR 1" }],
+        }), "[agent]");
+      })
       .mockRejectedValueOnce(new ProviderUnavailableError({ provider: "github", message: "GitHub unavailable" }))
       .mockResolvedValueOnce(null)
       .mockRejectedValueOnce(new ProviderUnavailableError({ provider: "github", message: "GitHub unavailable" }));
@@ -603,9 +616,13 @@ describe("SchedulerService scout timeout", () => {
 
     try {
       (scheduler as any).status = "running";
-      await (scheduler as any).runScout("poll");
+      const scout = (scheduler as any).runScout("poll");
+      await githubReadStarted;
+      await vi.advanceTimersByTimeAsync(1250);
+      await scout;
       await (scheduler as any).runScout("worker_finished");
 
+      expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(listCandidates).toHaveBeenCalledTimes(1);
       expect(scheduler.getStatus().nextScoutPollAt).toBe("2026-07-16T22:22:53.000Z");
 
@@ -633,6 +650,7 @@ describe("SchedulerService scout timeout", () => {
     } finally {
       (scheduler as any).clearTimers();
       vi.clearAllTimers();
+      vi.unstubAllGlobals();
       vi.useRealTimers();
     }
   });
