@@ -619,6 +619,7 @@ describe("prompt rendering", () => {
     expect(reviewPrompt).not.toContain("Can you simplify this flow?");
     expect(reviewPrompt).not.toContain("This needs another pass.");
     expect(consolidationPrompt).toContain("Discover the relevant task and PR history");
+    expect(consolidationPrompt).toContain("Foreman treats it as historical evidence and does not relink the terminal task");
     expect(consolidationPrompt).not.toContain("### Review Summaries");
     expect(consolidationPrompt).not.toContain("### Review Threads");
     expect(consolidationPrompt).not.toContain("### Actionable Now");
