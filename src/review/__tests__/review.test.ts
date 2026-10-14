@@ -477,6 +477,20 @@ describe("GitHubReviewService.getContext", () => {
     }
   });
 
+  test("keeps REST transport-failure writes single-attempt and out of provider outage handling", async () => {
+    global.fetch = vi.fn().mockRejectedValue(transportError()) as typeof fetch;
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+
+    const error = await (service as any).rest("/repos/acme/repo/issues/946/comments", {
+      method: "POST",
+      body: JSON.stringify({ body: "Comment" }),
+    }).catch((error: unknown) => error);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(error).toMatchObject({ code: "github_request_failed", statusCode: 502 });
+    expect(isProviderUnavailableError(error)).toBe(false);
+  });
+
   test("does not classify arbitrary REST exceptions as transport failures", async () => {
     vi.spyOn(processLib, "exec").mockResolvedValue({ stdout: "git@github.com:acme/repo.git\n", stderr: "", exitCode: 0 });
     const programmingError = new TypeError("Cannot read properties of undefined");
@@ -1538,6 +1552,20 @@ describe("GitHubReviewService rate-limit handling", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  test("keeps GraphQL transport-failure mutations single-attempt and out of provider outage handling", async () => {
+    global.fetch = vi.fn().mockRejectedValue(transportError()) as typeof fetch;
+    const service = new GitHubReviewService({ GH_TOKEN: "test-token" }, fakeLogger as any);
+
+    const error = await (service as any).graphql(
+      "mutation ResolveReviewThread($threadId: ID!) { resolveReviewThread(input: {threadId: $threadId}) { thread { id } } }",
+      { threadId: "thread-1" },
+    ).catch((error: unknown) => error);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(error).toMatchObject({ code: "github_request_failed", statusCode: 502 });
+    expect(isProviderUnavailableError(error)).toBe(false);
   });
 
   test("keeps GraphQL HTTP 500 mutations single-attempt and out of provider outage handling", async () => {
