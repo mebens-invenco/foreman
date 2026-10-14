@@ -53,7 +53,7 @@ class GitHubGraphqlRequestError extends ForemanError {
 
 const GITHUB_REQUEST_MAX_ATTEMPTS = 3;
 const GITHUB_REQUEST_RETRY_BACKOFF_MS = [250, 1_000];
-const GITHUB_TRANSIENT_STATUS_CODES = new Set([502, 503, 504]);
+const GITHUB_TRANSIENT_STATUS_CODES = new Set([500, 502, 503, 504]);
 type GitHubRequestKind = "REST" | "GraphQL";
 
 type GitHubRequestContext =
