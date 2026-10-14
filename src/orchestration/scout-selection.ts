@@ -1174,7 +1174,7 @@ export const runScoutSelection = async (input: {
               target,
               action: "deployment",
               repo,
-              baseBranch: pullRequest.baseBranch,
+              baseBranch: repo.defaultBranch,
               priorityRank: priorityToRank(task.priority),
               selectionReason: "merged pull request eligible for deployment tracking",
               selectionContext: deploymentSelectionContext({ instructions: deploymentInstructions, pullRequest }),
