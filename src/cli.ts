@@ -42,6 +42,7 @@ import type { LearningInjectionStats, LearningSearchEventInput, LearningUsageSta
 import { openSqliteDatabase } from "./repos/impl/sqlite-database.js";
 import { searchLearningsWithHybridFallback } from "./retrieval/hybrid-learning-search.js";
 import { createReviewService, resolveGitHubAuthEnv } from "./review/index.js";
+import { postSlackDm } from "./slack/index.js";
 import { createSelfRebootScheduler, runRebootSidecar } from "./system/reboot.js";
 import { createTaskSystem } from "./tasking/index.js";
 import { discoverGitRepos } from "./workspace/git-repo-discovery.js";
@@ -469,6 +470,15 @@ program
     await renderWorkspacePlan(workspace, repos, logger);
 
     const reviewService = createReviewService({ env: resolvedEnv, logger });
+    const isSlackConfigured = () => Boolean(resolvedEnv.SLACK_BOT_TOKEN && config.slack.targetUserId);
+    const sendSlackDm = async (text: string) => {
+      const token = resolvedEnv.SLACK_BOT_TOKEN;
+      const targetUserId = config.slack.targetUserId;
+      if (!token || !targetUserId) {
+        throw new Error("Slack bot token and target user ID must both be configured.");
+      }
+      return postSlackDm({ token, targetUserId, text });
+    };
     const scheduler = new SchedulerService({
       config,
       paths,
@@ -479,6 +489,8 @@ program
       embedder: createEmbedder(paths.projectRoot),
       env: resolvedEnv,
       logger: logger.child({ component: "scheduler" }),
+      isSlackConfigured,
+      sendSlackDm,
     });
     const versionMonitor = new ForemanVersionMonitor(paths);
 
