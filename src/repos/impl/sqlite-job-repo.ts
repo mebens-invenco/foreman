@@ -242,7 +242,7 @@ export class SqliteJobRepo implements JobRepo {
       );
   }
 
-  returnLeasedJobToQueue(jobId: string, options: { nextEligibleAt?: string | null } = {}): void {
+  returnJobToQueue(jobId: string, options: { nextEligibleAt?: string | null } = {}): void {
     this.sqlite
       .prepare(
         `UPDATE job
@@ -254,7 +254,7 @@ export class SqliteJobRepo implements JobRepo {
                 finished_at = NULL,
                 error_message = NULL
           WHERE id = ?
-            AND status = 'leased'`,
+            AND status IN ('leased', 'running')`,
       )
       .run(isoNow(), options.nextEligibleAt ?? null, jobId);
   }
