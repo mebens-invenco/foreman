@@ -55,6 +55,21 @@ describe("normalizeTaskRunnerOverride", () => {
       execution: { tuning: "high" },
     });
   });
+
+  test("normalizes profile in nested and shorthand form, lowercasing the value", () => {
+    expect(
+      normalizeTaskRunnerOverride({
+        execution: { profile: "Claude" },
+        reviewer: { profile: "codex" },
+      }),
+    ).toEqual({
+      execution: { profile: "claude" },
+      reviewer: { profile: "codex" },
+    });
+    expect(normalizeTaskRunnerOverride({ profile: "claude" })).toEqual({
+      execution: { profile: "claude" },
+    });
+  });
 });
 
 describe("parseDotPathRunnerOverride", () => {
@@ -100,6 +115,23 @@ describe("parseDotPathRunnerOverride", () => {
     });
   });
 
+  test("parses profile dot-path keys for both roles and the shorthand", () => {
+    expect(
+      parseDotPathRunnerOverride(
+        new Map([
+          ["runner.execution.profile", "claude"],
+          ["runner.reviewer.profile", "codex"],
+        ]),
+      ),
+    ).toEqual({
+      execution: { profile: "claude" },
+      reviewer: { profile: "codex" },
+    });
+    expect(parseDotPathRunnerOverride(new Map([["runner.profile", "Claude"]]))).toEqual({
+      execution: { profile: "claude" },
+    });
+  });
+
   test("ignores unknown role and field names", () => {
     const entries = new Map([
       ["runner.bogus.model", "gpt-5.5"],
@@ -120,11 +152,11 @@ describe("serializeTaskRunnerOverride", () => {
   test("serializes nested overrides into a plain object", () => {
     expect(
       serializeTaskRunnerOverride({
-        execution: { model: "gpt-5.5", tuning: "xhigh" },
+        execution: { profile: "codex", model: "gpt-5.5", tuning: "xhigh" },
         reviewer: { model: "claude-opus-4-7" },
       }),
     ).toEqual({
-      execution: { model: "gpt-5.5", tuning: "xhigh" },
+      execution: { profile: "codex", model: "gpt-5.5", tuning: "xhigh" },
       reviewer: { model: "claude-opus-4-7" },
     });
   });

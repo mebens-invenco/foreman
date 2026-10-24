@@ -1,6 +1,6 @@
 import type { TaskRunnerOverride, TaskRunnerRoleOverride } from "../domain/index.js";
 
-const RUNNER_ROLE_FIELDS = ["model", "tuning"] as const;
+const RUNNER_ROLE_FIELDS = ["profile", "model", "tuning"] as const;
 const RUNNER_TUNING_ALIASES = ["tuning", "effort", "variant"] as const;
 
 const trimOrUndefined = (value: unknown): string | undefined => {
@@ -17,6 +17,12 @@ const normalizeRoleOverride = (input: unknown): TaskRunnerRoleOverride | undefin
   }
   const record = input as Record<string, unknown>;
   const role: TaskRunnerRoleOverride = {};
+  const profile = trimOrUndefined(record.profile);
+  if (profile !== undefined) {
+    // Profile names are lowercase by schema; lowercase here so a ticket's
+    // `Runner.profile: Claude` still matches the `claude` profile.
+    role.profile = profile.toLowerCase();
+  }
   const model = trimOrUndefined(record.model);
   if (model !== undefined) {
     role.model = model;
@@ -38,9 +44,11 @@ const isRunnerRoleInputField = (value: string): boolean =>
  * Normalize a `runner` value from front matter or task metadata into a
  * `TaskRunnerOverride`. Accepts both the nested shape
  * (`runner.execution.*`, `runner.reviewer.*`) and the execution shorthand
- * (`runner.model`, `runner.tuning`) which expands to an `execution` override.
- * The parser also accepts `effort` and `variant` as input aliases for
- * `tuning`, but normalized task data serializes back to `tuning`.
+ * (`runner.profile`, `runner.model`, `runner.tuning`) which expands to an
+ * `execution` override. The parser also accepts `effort` and `variant` as
+ * input aliases for `tuning`, but normalized task data serializes back to
+ * `tuning`. `profile` values are lowercased to match schema-enforced
+ * lowercase profile names.
  */
 export const normalizeTaskRunnerOverride = (input: unknown): TaskRunnerOverride | null => {
   if (!input || typeof input !== "object") {
@@ -77,9 +85,9 @@ export const normalizeTaskRunnerOverride = (input: unknown): TaskRunnerOverride 
  * Parse dot-path runner metadata of the form used in Linear's `Agent:` block.
  * Keys are case-insensitive at the source; the surrounding metadata parser
  * already lowercases them, so this function matches lowercase forms:
- *   runner.execution.{model,tuning}
- *   runner.reviewer.{model,tuning}
- *   runner.{model,tuning} (shorthand → execution)
+ *   runner.execution.{profile,model,tuning}
+ *   runner.reviewer.{profile,model,tuning}
+ *   runner.{profile,model,tuning} (shorthand → execution)
  *
  * `effort` and `variant` are accepted as aliases for `tuning`.
  *
