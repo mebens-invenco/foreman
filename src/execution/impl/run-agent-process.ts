@@ -17,6 +17,8 @@ export const runAgentProcess = async (input: {
 }): Promise<CapturedAgentRunResult> => {
   const startedAt = isoNow();
   const env = { ...process.env, ...input.request.env };
+  delete env.SLACK_BOT_TOKEN;
+  delete env.SLACK_APP_TOKEN;
   if (process.platform !== "win32") {
     env.PWD = path.resolve(input.request.cwd);
   }

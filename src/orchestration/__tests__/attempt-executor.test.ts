@@ -10,6 +10,7 @@ import { ProviderRateLimitError } from "../../lib/errors.js";
 import { exec } from "../../lib/process.js";
 import { LoggerService } from "../../logger.js";
 import type { ReviewService } from "../../review/index.js";
+import type { ProblemNotification } from "../../slack/index.js";
 import type { TaskSystem } from "../../tasking/index.js";
 import { FakeEmbedder } from "../../test-support/fake-embedder.js";
 import { createMigratedDb, createTempDir, createWorkspacePaths, testProjectRoot } from "../../test-support/helpers.js";
@@ -97,9 +98,13 @@ const createWorkerResult = (overrides: Partial<WorkerResult> = {}): WorkerResult
   ...overrides,
 });
 
-const createExecutorContext = async (
-  options: { action?: ActionType; selectedTask?: Task; providerTask?: Task; selectionContext?: Record<string, unknown> } = {},
-) => {
+const createExecutorContext = async (options: {
+  action?: ActionType;
+  selectedTask?: Task;
+  providerTask?: Task;
+  selectionContext?: Record<string, unknown>;
+  notifyProblem?: (input: ProblemNotification) => Promise<void>;
+} = {}) => {
   const selectedTask = options.selectedTask ?? task;
   const providerTask = options.providerTask ?? selectedTask;
   const action = options.action ?? "execution";
@@ -159,6 +164,7 @@ const createExecutorContext = async (
     env: {},
     logger,
     applyWorkerResult,
+    ...(options.notifyProblem ? { notifyProblem: options.notifyProblem } : {}),
     onWorkerUpdated: vi.fn(),
     onAttemptChanged: vi.fn(),
     onWorkerFinished: vi.fn(),
@@ -235,6 +241,43 @@ describe("AttemptExecutor", () => {
       expect(runnerMocks.invoke).toHaveBeenCalledOnce();
     } finally {
       db.close();
+    }
+  });
+
+  test("preserves a failed task outcome when automatic notification rejects", async () => {
+    const notifyProblem = vi.fn(async () => {
+      throw new Error("Slack unavailable");
+    });
+    const context = await createExecutorContext({ notifyProblem });
+    const workerResult = createWorkerResult({ outcome: "failed", summary: "Implementation failed." });
+    const stdout = `<agent-result>\n${JSON.stringify(workerResult)}\n</agent-result>`;
+    runnerMocks.invoke.mockResolvedValueOnce({
+      exitCode: 0,
+      signal: null,
+      startedAt: "2026-05-06T00:00:00.000Z",
+      finishedAt: "2026-05-06T00:01:00.000Z",
+      stdoutBytes: Buffer.byteLength(stdout),
+      stderrBytes: 0,
+      stdout,
+      stderr: "",
+    });
+
+    try {
+      await context.executor.execute(context.db.workers.listWorkers()[0]!, context.claimedJob, new AbortController());
+      await context.logger.flush();
+
+      const attempt = context.db.attempts.latestAttemptForJob(context.job.id)!;
+      expect(attempt.status).toBe("failed");
+      expect(context.db.jobs.getJob(context.job.id).status).toBe("failed");
+      expect(notifyProblem).toHaveBeenCalledWith(expect.objectContaining({
+        attemptId: attempt.id,
+        subjectKey: context.target.id,
+        action: "execution",
+        status: "failed",
+        summary: "Implementation failed.",
+      }));
+    } finally {
+      context.db.close();
     }
   });
 
