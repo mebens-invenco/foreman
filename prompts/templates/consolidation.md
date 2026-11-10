@@ -43,6 +43,7 @@ Do not make repository code changes unless the provided context explicitly requi
 
 - Assume label-swapping and task-state handling are owned by Foreman.
 - Discover the relevant task and PR history when extracting durable learnings or summarizing why work landed the way it did.
+- When merged work is found, return its verified pull request in `reviewResult` even if its historical head or base differs from the nominal task branches. The pull request must belong to the selected repository; Foreman treats it as historical evidence and does not relink the terminal task.
 - For merged work, prefer learnings grounded in implementation outcomes, review adjustments, checks, and merged change history.
 - For terminal non-merged work, focus on reusable lessons from the stop-intent rationale and why the work should not proceed.
 - If consolidation yields no reusable learning delta, still return a concise completion summary rather than inventing one-off learnings.

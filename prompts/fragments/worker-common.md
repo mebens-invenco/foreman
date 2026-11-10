@@ -13,6 +13,6 @@
 - Perform permitted GitHub operations directly during the session and verify their remote outcome before reporting completion.
 - Never merge or close a pull request, or enable auto-merge. This does not prohibit merging the base branch into the task branch to resolve conflicts.
 - If you want to leave a task-local note, use `add_comment`.
-- Foreman manages pull request linkage from verified `reviewResult` references. Use schema version 2; never return `reviewMutations`, even if an earlier session used them.
+- Foreman manages active-work pull request linkage from verified `reviewResult` references. Use schema version 2; never return `reviewMutations`, even if an earlier session used them.
 - If you are blocked, return `blocked` with explicit blockers.
 - If nothing remains to do, return `no_action_needed`.
