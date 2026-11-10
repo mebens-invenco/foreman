@@ -1,5 +1,5 @@
 import type { AgentRunner, AgentRunnerInvokeRequest, CapturedAgentRunResult } from "../agent-runner.js";
-import { normalizeOpenCodeJsonOutput } from "./opencode-output.js";
+import { normalizeOpenCodeJsonOutput, redactRetryableOpenCodeErrorLine } from "./opencode-output.js";
 import { runAgentProcess } from "./run-agent-process.js";
 
 export class OpenCodeRunner implements AgentRunner {
@@ -16,8 +16,8 @@ export class OpenCodeRunner implements AgentRunner {
     return this.run(request);
   }
 
-  private run(request: AgentRunnerInvokeRequest, nativeSessionId?: string): Promise<CapturedAgentRunResult> {
-    return runAgentProcess({
+  private async run(request: AgentRunnerInvokeRequest, nativeSessionId?: string): Promise<CapturedAgentRunResult> {
+    const result = await runAgentProcess({
       command: process.env.FOREMAN_OPENCODE_BIN ?? "opencode",
       args: [
         "run",
@@ -37,8 +37,26 @@ export class OpenCodeRunner implements AgentRunner {
         "json",
         ...(nativeSessionId ? ["--session", nativeSessionId] : []),
       ],
-      request,
+      request: {
+        ...request,
+        ...(request.onStdoutLine
+          ? { onStdoutLine: (line: string) => request.onStdoutLine?.(redactRetryableOpenCodeErrorLine(line)) }
+          : {}),
+      },
       normalizeStdout: normalizeOpenCodeJsonOutput,
     });
+    if (result.exitCode === 0 || result.signal || result.timedOut || request.abortSignal?.aborted) {
+      const { retryableInterruption: _retryableInterruption, ...nonRetryableResult } = result;
+      return nonRetryableResult;
+    }
+    if (!result.retryableInterruption) {
+      return result;
+    }
+
+    return {
+      ...result,
+      stdout: result.retryableInterruption.summary,
+      stdoutBytes: Buffer.byteLength(result.retryableInterruption.summary),
+    };
   }
 }

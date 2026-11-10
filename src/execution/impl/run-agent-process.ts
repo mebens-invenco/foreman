@@ -204,5 +204,6 @@ export const runAgentProcess = async (input: {
     stderr,
     ...(normalized?.nativeSessionId ? { nativeSessionId: normalized.nativeSessionId } : {}),
     ...(normalized?.tokensUsed ? { tokensUsed: normalized.tokensUsed } : {}),
+    ...(normalized?.retryableInterruption ? { retryableInterruption: normalized.retryableInterruption } : {}),
   };
 };

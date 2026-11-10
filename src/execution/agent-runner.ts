@@ -14,7 +14,12 @@ export interface AgentRunner {
   invoke(request: AgentRunnerInvokeRequest): Promise<CapturedAgentRunResult>;
 }
 
+export type RetryableRunnerInterruption = {
+  summary: string;
+};
+
 export type CapturedAgentRunResult = AgentRunResult & {
   stdout: string;
   stderr: string;
+  retryableInterruption?: RetryableRunnerInterruption;
 };
