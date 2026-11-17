@@ -76,6 +76,17 @@ describe("FileTaskSystem runner override", () => {
     });
   });
 
+  test("parses runner.profile front matter, lowercasing the profile name", async () => {
+    const { taskSystem, taskDir } = await createFileTaskSystem();
+    const taskPath = path.join(taskDir, "TASK-0001.md");
+    await fs.writeFile(taskPath, `---\n${baseFrontmatter}\nrunner:\n  profile: Claude\n---\n\nBody\n`);
+
+    const task = await taskSystem.getTask("TASK-0001");
+    expect(task.runnerOverride).toEqual({
+      execution: { profile: "claude" },
+    });
+  });
+
   test("defaults to null when no runner front matter is present", async () => {
     const { taskSystem, taskDir } = await createFileTaskSystem();
     const taskPath = path.join(taskDir, "TASK-0001.md");

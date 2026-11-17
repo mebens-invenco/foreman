@@ -84,7 +84,10 @@ describe("HTTP query validation", () => {
           cron: { enabled: true, jobsDir: "automation" },
           agentTaskCreation: { enabled: true },
           scheduler: { workerConcurrency: 2 },
-          runner: { execution: { model: "openai/gpt-5.5" } },
+          runner: {
+            execution: { model: "openai/gpt-5.5" },
+            profiles: { claude: { type: "claude", model: "claude-opus-4-8", effort: "max", timeoutMs: 3600000 } },
+          },
         },
       });
 
@@ -93,6 +96,9 @@ describe("HTTP query validation", () => {
       expect(response.json().config.agentTaskCreation).toEqual({ enabled: true });
       expect(response.json().config.scheduler.workerConcurrency).toBe(2);
       expect(response.json().config.runner.execution.model).toBe("openai/gpt-5.5");
+      expect(response.json().config.runner.profiles).toEqual({
+        claude: { type: "claude", model: "claude-opus-4-8", effort: "max", timeoutMs: 3600000 },
+      });
       expect(response.json().config.workspace.agentPrefix).toBe("[bot] ");
       expect(response.json().deploymentInstructions).toEqual({ active: false, relativePath: "deployment.md" });
       expect(config.cron.enabled).toBe(true);
