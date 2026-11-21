@@ -82,6 +82,9 @@ export type WorkspaceConfig = {
     agentPrefix: string
   }
   cron: CronSettings
+  slack: {
+    targetUserId: string | null
+  }
   agentTaskCreation: AgentTaskCreationSettings
   deployment: {
     minRetryIntervalMinutes: number

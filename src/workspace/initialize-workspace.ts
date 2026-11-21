@@ -34,6 +34,7 @@ export const initializeWorkspace = async (
     taskSystemType === "linear" ? "LINEAR_API_KEY=" : null,
     "GH_TOKEN=",
     "GH_CONFIG_DIR=",
+    "SLACK_BOT_TOKEN=",
   ].filter(Boolean);
   await atomicWriteFile(paths.envPath, `${envLines.join("\n")}\n`);
 
