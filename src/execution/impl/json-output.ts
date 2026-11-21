@@ -8,6 +8,7 @@
  * and small JSON-walking helpers shared across runners.
  */
 import type { TokenUsage } from "../../domain/index.js";
+import type { RetryableRunnerInterruption } from "../agent-runner.js";
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -16,6 +17,7 @@ export type NormalizedJsonOutput = {
   nativeSessionId?: string;
   warning?: string;
   tokensUsed?: TokenUsage;
+  retryableInterruption?: RetryableRunnerInterruption;
 };
 
 export const isRecord = (value: unknown): value is JsonRecord =>
